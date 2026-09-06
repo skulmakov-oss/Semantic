@@ -1039,6 +1039,18 @@ fn rewrite_function_ownership_events(
     events: &[OwnershipEventSpec<'_>],
 ) -> Vec<u8> {
     let header_rev = header_rev_of(bytes);
+    // #1891 Checkpoint W2E: computed from the REAL, pre-rewrite compiled
+    // bytes (only ever needed - and only ever guaranteed to exist - when
+    // this call is about to author a synthetic Write event at rev21+); see
+    // `find_real_store_var_anchor` and the design note on
+    // `ownership_section_bytes` for why any genuine StoreVar boundary works.
+    let real_store_var_anchor = if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
+        && events.iter().any(|e| e.kind == OWNERSHIP_EVENT_KIND_WRITE)
+    {
+        Some(find_real_store_var_anchor(bytes, target))
+    } else {
+        None
+    };
     let mut out = Vec::with_capacity(bytes.len());
     out.extend_from_slice(&bytes[..8]);
 
@@ -1048,7 +1060,7 @@ fn rewrite_function_ownership_events(
         let (name, code, next) = next_function(bytes, cursor);
         let rewritten = if name == target {
             rewrote = true;
-            rewrite_function_code(code, events, header_rev)
+            rewrite_function_code(code, events, header_rev, real_store_var_anchor)
         } else {
             code.to_vec()
         };
@@ -1064,16 +1076,54 @@ fn rewrite_function_ownership_events(
     out
 }
 
+/// #1891 Checkpoint W2E support: the PC (function-relative, i.e. relative to
+/// the instruction stream start - the same domain `anchor` occupies on the
+/// wire) of the first real `STORE_VAR` instruction in `function`'s own
+/// compiled disassembly. Every `main()`/helper fixture in this file declares
+/// at least one local, and a `let` binding's initial store always compiles
+/// to a genuine StoreVar regardless of whether that local is later
+/// reassigned or tracked by any OWN0 Write event, so this is available
+/// unconditionally wherever it's called. Reuses the existing public
+/// disassembler rather than hand-rolling a second opcode decoder.
+fn find_real_store_var_anchor(bytes: &[u8], function: &str) -> u32 {
+    let disasm = sm_vm::disasm_semcode(bytes).expect("disasm real compiled bytes");
+    let mut in_function = false;
+    for line in disasm.lines() {
+        if let Some(rest) = line.strip_prefix("fn ") {
+            let name = rest.split(':').next().expect("function header has a name");
+            in_function = name == function;
+            continue;
+        }
+        if !in_function {
+            continue;
+        }
+        let Some((pc_hex, mnemonic)) = line.trim_start().split_once(": ") else {
+            continue;
+        };
+        if mnemonic.starts_with("STORE_VAR") {
+            return u32::from_str_radix(pc_hex, 16)
+                .unwrap_or_else(|e| panic!("bad disasm pc '{pc_hex}': {e}"));
+        }
+    }
+    panic!("function '{function}' has no real STORE_VAR instruction to borrow an anchor from");
+}
+
 fn rewrite_function_code(
     code: &[u8],
     events: &[OwnershipEventSpec<'_>],
     header_rev: u16,
+    real_store_var_anchor: Option<u32>,
 ) -> Vec<u8> {
     let layout = parse_function_layout(code, header_rev);
     let ownership_start = layout.ownership_start.expect("OWN0 section");
     let mut out = Vec::with_capacity(code.len());
     out.extend_from_slice(&code[..ownership_start]);
-    out.extend_from_slice(&ownership_section_bytes(&layout, events, header_rev));
+    out.extend_from_slice(&ownership_section_bytes(
+        &layout,
+        events,
+        header_rev,
+        real_store_var_anchor,
+    ));
     // #1773 (FA-09-005): preserve the real SIG0 section verbatim - only
     // OWN0 is being replaced here, not the range through `instr_start`,
     // which would silently drop SIG0 along with it.
@@ -1150,6 +1200,7 @@ fn ownership_section_bytes(
     layout: &FunctionLayout,
     events: &[OwnershipEventSpec<'_>],
     header_rev: u16,
+    real_store_var_anchor: Option<u32>,
 ) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&OWNERSHIP_SECTION_TAG);
@@ -1164,12 +1215,21 @@ fn ownership_section_bytes(
             as u32;
         // #1726 Checkpoint D2a / #1891 Checkpoint W2D: these are synthetic
         // events, not resolved from a real compile, so there is no real
-        // ActivationSiteId/WriteSiteId/anchor to encode. `FrameEntry` and
-        // `StoreVarSite(0)` are correct either way: sm-vm does not consult
-        // either wire mode tag's anchor yet (Borrow: Checkpoint D3, Write:
-        // Checkpoint W2E+), so this only needs to satisfy the rev21
-        // structural grammar, not express any particular activation/
-        // execution semantics. This prefix must land AFTER `kind` and
+        // ActivationSiteId/WriteSiteId to encode - `FrameEntry` sidesteps
+        // that for Borrow (no anchor at all). Write has no such anchor-free
+        // mode, though: every rev21+ Write is either StoreVarSite or
+        // MakeRecordSite (#1891 Checkpoint W2D), and #1891 Checkpoint W2E
+        // now structurally verifies that anchor lands on a genuine,
+        // class-matching instruction boundary in this same function - the
+        // `StoreVarSite(0)` placeholder this comment used to describe as
+        // harmless is exactly what W2E starts rejecting. W2E deliberately
+        // never checks that the anchor's instruction corresponds to
+        // `event.root`/`event.components` (see `InvalidOwnershipAnchor`'s own
+        // doc comment), so any genuine StoreVar boundary in this function
+        // satisfies it - `real_store_var_anchor` is the PC of the first real
+        // STORE_VAR in the function's own disassembly (see
+        // `find_real_store_var_anchor`), reused verbatim regardless of which
+        // local it actually stores. This prefix must land AFTER `kind` and
         // BEFORE `root` on the wire, so it is passed into
         // `append_ownership_event` rather than pushed directly onto `out`
         // here - `out`'s very next byte is still `kind`, written first by
@@ -1180,7 +1240,10 @@ fn ownership_section_bytes(
                 mode_prefix.push(ACTIVATION_MODE_FRAME_ENTRY);
             } else if event.kind == OWNERSHIP_EVENT_KIND_WRITE {
                 mode_prefix.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
-                mode_prefix.extend_from_slice(&0u32.to_le_bytes());
+                let anchor = real_store_var_anchor.expect(
+                    "a rev21+ synthetic Write event requires a genuine StoreVar anchor - see find_real_store_var_anchor",
+                );
+                mode_prefix.extend_from_slice(&anchor.to_le_bytes());
             }
         }
         append_ownership_event(&mut out, event.kind, &mode_prefix, root, event.components);

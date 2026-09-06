@@ -206,6 +206,20 @@ pub enum VerificationCode {
     /// additional provenance for that stronger claim, and D2b does not
     /// pretend otherwise. Reconstructing source provenance from bytecode
     /// alone is out of scope for this code path.
+    ///
+    /// #1891 Checkpoint W2E extends this exact same code and the exact same
+    /// trust boundary to rev21+ Write execution sites
+    /// (`DecodedWriteExecution::StoreVarSite`/`MakeRecordSite`, see
+    /// `validate_write_execution_site_anchors`): a rev21 Write event names
+    /// an exact executable instruction of the compiler-declared class
+    /// (StoreVar or MakeRecord) within the same function. It does not
+    /// reconstruct or prove source-level ownership provenance between the
+    /// AccessPath and that instruction - for example, that a MakeRecord's
+    /// declared field-override paths correspond to fields actually
+    /// overridden in source, or that a Write path's root/path matches the
+    /// original source assignment. That is the same trust boundary already
+    /// accepted for Borrow above, now shared by both domains without either
+    /// one gaining authority over the other's anchors.
     InvalidOwnershipAnchor,
 }
 
@@ -1064,6 +1078,105 @@ fn validate_storevar_site_anchors(
     Ok(())
 }
 
+/// #1891 Checkpoint W2E: same-function structural admission for every
+/// rev21+ Write execution site, mirroring `validate_storevar_site_anchors`'
+/// D2b design exactly but for the independent Write domain (never sharing
+/// its `claimed` list or any other state with the Borrow check above - a
+/// valid artifact may declare `Borrow StoreVarSite(A)` and
+/// `Write StoreVarSite(A)` for the identical numeric PC, since the two are
+/// independent semantic domains with no cross-domain anchor-uniqueness
+/// constraint; see item 8). `store_var_starts` and `make_record_starts` are
+/// each the subset of this function's own `instr_starts` whose decoded
+/// opcode matches, built in the same decode pass as `verify_function_code`'s
+/// own `instr_starts` - so a single `binary_search` proves both "genuine
+/// canonical instruction boundary" and "opcode matches the compiler-declared
+/// execution-mode class" at once, never a raw `code[anchor] == opcode` byte
+/// compare an operand byte could coincidentally satisfy. This is also why a
+/// cross-kind swap (`StoreVarSite` pointing at a real `MakeRecord`, or vice
+/// versa) is rejected the same way an out-of-range anchor is: the anchor
+/// simply never appears in the list being searched.
+///
+/// Cardinality (item 6, audited against the current W2A/W2B/W2C/W2D chain,
+/// not assumed): `validate_write_sites` (sm-ir, Checkpoint W2A) already
+/// proves, at the IR level and before this artifact could ever have been
+/// emitted, that a StoreVar `WriteSiteId` (producers A/`assign_tuple_items`
+/// and B/`Stmt::Assign`) pairs with exactly one Write event, while a
+/// MakeRecord `WriteSiteId` (producer C/`Expr::RecordUpdate`) legitimately
+/// pairs with 1..N. Two Write events in the same function declaring the
+/// identical `StoreVarSite` anchor are therefore rejected unconditionally -
+/// no frozen producer can legitimately emit that shape, mirroring Borrow's
+/// own duplicate-anchor rule exactly. Multiple Write events declaring the
+/// identical `MakeRecordSite` anchor are never rejected as duplicates -
+/// that is producer C's normal, required multi-field-RecordUpdate shape
+/// (importing Borrow's "duplicate anchor forbidden" rule here would reject
+/// ordinary, correct output).
+///
+/// Legacy (pre-rev21) Write events decode with `write_execution: None` and
+/// are never validated here at all - the header revision, not this
+/// function, is the sole grammar/semantic boundary (item 4); this function
+/// is never even reached for them in a meaningful way since `None` is
+/// skipped outright.
+///
+/// Failure-model boundary, mirroring `VerificationCode::InvalidOwnershipAnchor`'s
+/// existing Borrow-side note exactly: this proves the anchor is a genuine,
+/// in-range instruction boundary of the compiler-declared opcode class,
+/// belonging to this function - an artifact-level structural fact. It does
+/// NOT prove the AccessPath corresponds to an actual source-level
+/// overridden field, that a MakeRecord's N declared events match its true
+/// source-level override count, or any other source-level ownership
+/// provenance between the path and that instruction; the current rev21 wire
+/// format carries no additional information for that stronger claim, and
+/// this check does not pretend otherwise (item 1, item 7, item 14).
+#[cfg(feature = "std")]
+fn validate_write_execution_site_anchors(
+    name: &str,
+    write_paths: &[sm_format::semcode_decode::DecodedAccessPath],
+    store_var_starts: &[usize],
+    make_record_starts: &[usize],
+) -> Result<(), RejectReport> {
+    let mut claimed_store_var = Vec::new();
+    for path in write_paths {
+        match path.write_execution {
+            None => continue,
+            Some(sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(anchor)) => {
+                let anchor = anchor as usize;
+                if store_var_starts.binary_search(&anchor).is_err() {
+                    return Err(reject_one(
+                        name,
+                        VerificationCode::InvalidOwnershipAnchor,
+                        anchor,
+                        "write execution anchor declares StoreVarSite but does not land on a StoreVar instruction boundary in this function",
+                    ));
+                }
+                if claimed_store_var.contains(&anchor) {
+                    return Err(reject_one(
+                        name,
+                        VerificationCode::InvalidOwnershipAnchor,
+                        anchor,
+                        "two write events in the same function declare the identical StoreVarSite anchor",
+                    ));
+                }
+                claimed_store_var.push(anchor);
+            }
+            Some(sm_format::semcode_decode::DecodedWriteExecution::MakeRecordSite(anchor)) => {
+                let anchor = anchor as usize;
+                if make_record_starts.binary_search(&anchor).is_err() {
+                    return Err(reject_one(
+                        name,
+                        VerificationCode::InvalidOwnershipAnchor,
+                        anchor,
+                        "write execution anchor declares MakeRecordSite but does not land on a MakeRecord instruction boundary in this function",
+                    ));
+                }
+                // Producer C's 1..N cardinality (W1.5/W2A): multiple Write
+                // events legitimately share one MakeRecord's anchor - never
+                // rejected as a duplicate here.
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(feature = "std")]
 fn verify_function_code(
     env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
@@ -1150,6 +1263,10 @@ fn verify_function_code(
     // itself carries - never a raw `code[offset] == StoreVar` byte compare,
     // which an operand byte could coincidentally satisfy.
     let mut store_var_starts = Vec::new();
+    // #1891 Checkpoint W2E: the subset of `instr_starts` whose decoded
+    // opcode is `MakeRecord`, built in the same pass for the identical
+    // reason `store_var_starts` is - see `validate_write_execution_site_anchors`.
+    let mut make_record_starts = Vec::new();
     let mut instruction_successors = Vec::new();
     let mut jump_targets = Vec::new();
     let mut string_refs = Vec::new();
@@ -1183,6 +1300,9 @@ fn verify_function_code(
         })?;
         if opcode == Opcode::StoreVar {
             store_var_starts.push(offset);
+        }
+        if opcode == Opcode::MakeRecord {
+            make_record_starts.push(offset);
         }
         // #1756 Codex review round 21: `MetadataCollector` appends
         // directly into these outer `jump_targets`/`string_refs`/
@@ -1282,6 +1402,15 @@ fn verify_function_code(
     // rev21+ `StoreVarSite(anchor)` Borrow activation - see
     // `validate_storevar_site_anchors` for the full design note.
     validate_storevar_site_anchors(name, &env.borrowed_paths, &store_var_starts)?;
+    // #1891 Checkpoint W2E: same-function structural admission of every
+    // rev21+ Write execution site - see
+    // `validate_write_execution_site_anchors` for the full design note.
+    validate_write_execution_site_anchors(
+        name,
+        &env.write_paths,
+        &store_var_starts,
+        &make_record_starts,
+    )?;
 
     if debug_symbol_count > 0 {
         used_caps |= CAP_DEBUG_SYMBOLS;
@@ -5232,6 +5361,451 @@ mod tests {
         set_store_var_site_anchor(&mut bytes, "main", 1, first_anchor);
         let report = verify_semcode(&bytes).expect_err(
             "two Borrow events sharing one anchor in the same function must be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    // #1891 Checkpoint W2E, item 9 positive tests.
+
+    #[test]
+    fn checkpoint_w2e_store_var_site_admitted() {
+        let bytes = ownership_semcode_bytes();
+        verify_semcode(&bytes).expect("a genuine StoreVarSite Write anchor must admit");
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert!(matches!(
+            main.write_paths[0].write_execution,
+            Some(sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(_))
+        ));
+    }
+
+    #[test]
+    fn checkpoint_w2e_make_record_site_admitted() {
+        let bytes = record_field_write_semcode_bytes();
+        verify_semcode(&bytes).expect("a genuine MakeRecordSite Write anchor must admit");
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert!(matches!(
+            main.write_paths[0].write_execution,
+            Some(sm_format::semcode_decode::DecodedWriteExecution::MakeRecordSite(_))
+        ));
+    }
+
+    #[test]
+    fn checkpoint_w2e_multi_field_record_update_shared_anchor_admitted() {
+        let bytes = multi_field_record_update_write_semcode_bytes();
+        verify_semcode(&bytes)
+            .expect("two Write events sharing one MakeRecordSite anchor must admit");
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(main.write_paths.len(), 2);
+        assert_eq!(
+            main.write_paths[0].write_execution, main.write_paths[1].write_execution,
+            "both field-override Write events must share the identical MakeRecordSite anchor"
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_repeated_assignment_distinct_anchors_admitted() {
+        let bytes = repeated_assignment_write_semcode_bytes();
+        verify_semcode(&bytes)
+            .expect("two reassignments with distinct StoreVarSite anchors must admit");
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(main.write_paths.len(), 2);
+        assert_ne!(
+            main.write_paths[0].write_execution, main.write_paths[1].write_execution,
+            "distinct reassignments must never share a StoreVarSite anchor"
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_mixed_store_var_and_make_record_admitted() {
+        let bytes = mixed_store_var_and_make_record_write_semcode_bytes();
+        verify_semcode(&bytes)
+            .expect("a StoreVarSite and a MakeRecordSite Write in one function must both admit");
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(main.write_paths.len(), 2);
+        assert!(matches!(
+            main.write_paths[0].write_execution,
+            Some(sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(_))
+        ));
+        assert!(matches!(
+            main.write_paths[1].write_execution,
+            Some(sm_format::semcode_decode::DecodedWriteExecution::MakeRecordSite(_))
+        ));
+    }
+
+    // Item 8: Borrow and Write are independent semantic domains with no
+    // cross-domain anchor-uniqueness constraint - a valid artifact may
+    // declare `Borrow StoreVarSite(A)` and `Write StoreVarSite(A)` for the
+    // identical numeric PC. Constructed by retargeting a real Write event's
+    // anchor onto the same real StoreVar instruction the fixture's own
+    // Borrow event already anchors to (via `set_write_execution_site_anchor`,
+    // which itself proves only the intended field changed).
+    #[test]
+    fn checkpoint_w2e_borrow_and_write_share_same_store_var_anchor_admitted() {
+        let mut bytes = ownership_semcode_bytes();
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        let borrow_anchor = match main.borrowed_paths[0].activation {
+            Some(sm_format::semcode_decode::DecodedBorrowActivation::StoreVarSite(a)) => a,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+        set_write_execution_site_anchor(&mut bytes, "main", 0, borrow_anchor);
+        verify_semcode(&bytes).expect(
+            "a Borrow and a Write declaring the identical StoreVarSite anchor must both admit - \
+             independent domains, no cross-domain uniqueness constraint",
+        );
+    }
+
+    // Item 9.G: with today's producers, every real Write event always
+    // carries a resolved WriteSiteId (W2A), so a genuinely legacy
+    // (write_execution: None) Write event can no longer occur in real
+    // compiler output at any revision - it is reachable only via an
+    // artifact predating that grammar. `downgrade_header_stripping_signature`
+    // (already exercised for exactly this purpose elsewhere in this file)
+    // reconstructs precisely that: a real Write event's root/path, decoded
+    // then re-encoded in the legacy (pre-rev21) shape under a header below
+    // `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION`.
+    #[test]
+    fn checkpoint_w2e_legacy_pre_rev21_write_admitted_unchanged() {
+        let bytes = downgrade_to_legacy_write_preserving_code(&ownership_semcode_bytes(), MAGIC11);
+        let verified =
+            verify_semcode(&bytes).expect("legacy pre-rev21 Write artifact must still admit");
+        assert!(
+            verified.header.rev < sm_format::semcode_format::SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
+        );
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            main.write_paths[0].write_execution, None,
+            "a legacy Write path must decode with no execution-site metadata at all"
+        );
+    }
+
+    // #1891 Checkpoint W2E, item 10 fail-closed tests, mirroring D2b's
+    // pattern exactly: take a real, admitted rev21 artifact and corrupt
+    // exactly one anchor field via `set_write_execution_site_anchor`.
+
+    #[test]
+    fn checkpoint_w2e_rejects_store_var_site_out_of_range_anchor() {
+        let mut bytes = ownership_semcode_bytes();
+        set_write_execution_site_anchor(&mut bytes, "main", 0, u32::MAX);
+        let report = verify_semcode(&bytes).expect_err("out-of-range anchor must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_rejects_store_var_site_anchor_at_function_code_end() {
+        let mut bytes = ownership_semcode_bytes();
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = functions.iter().find(|f| f.name == "main").expect("main");
+        let instr_len = u32::try_from(main.code_slice.len() - main.instr_start_offset)
+            .expect("instr_len fits u32");
+        set_write_execution_site_anchor(&mut bytes, "main", 0, instr_len);
+        let report =
+            verify_semcode(&bytes).expect_err("anchor exactly at the code end must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_rejects_store_var_site_anchor_mid_instruction() {
+        let mut bytes = ownership_semcode_bytes();
+        let real_anchor = anchor_of(&bytes, "main", Opcode::StoreVar, 0);
+        set_write_execution_site_anchor(&mut bytes, "main", 0, real_anchor + 1);
+        let report = verify_semcode(&bytes)
+            .expect_err("an offset one byte into a real StoreVar instruction must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_rejects_store_var_site_at_valid_non_store_var_instruction() {
+        let mut bytes = ownership_semcode_bytes();
+        let ret_anchor = anchor_of(&bytes, "main", Opcode::Ret, 0);
+        set_write_execution_site_anchor(&mut bytes, "main", 0, ret_anchor);
+        let report = verify_semcode(&bytes)
+            .expect_err("a genuine instruction boundary of the wrong opcode must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_rejects_make_record_site_out_of_range_anchor() {
+        let mut bytes = record_field_write_semcode_bytes();
+        set_write_execution_site_anchor(&mut bytes, "main", 0, u32::MAX);
+        let report = verify_semcode(&bytes).expect_err("out-of-range anchor must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_rejects_make_record_site_anchor_at_function_code_end() {
+        let mut bytes = record_field_write_semcode_bytes();
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = functions.iter().find(|f| f.name == "main").expect("main");
+        let instr_len = u32::try_from(main.code_slice.len() - main.instr_start_offset)
+            .expect("instr_len fits u32");
+        set_write_execution_site_anchor(&mut bytes, "main", 0, instr_len);
+        let report =
+            verify_semcode(&bytes).expect_err("anchor exactly at the code end must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_rejects_make_record_site_anchor_mid_instruction() {
+        let mut bytes = record_field_write_semcode_bytes();
+        let real_anchor = anchor_of(&bytes, "main", Opcode::MakeRecord, 0);
+        set_write_execution_site_anchor(&mut bytes, "main", 0, real_anchor + 1);
+        let report = verify_semcode(&bytes)
+            .expect_err("an offset one byte into a real MakeRecord instruction must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_rejects_make_record_site_at_valid_non_make_record_instruction() {
+        let mut bytes = record_field_write_semcode_bytes();
+        let ret_anchor = anchor_of(&bytes, "main", Opcode::Ret, 0);
+        set_write_execution_site_anchor(&mut bytes, "main", 0, ret_anchor);
+        let report = verify_semcode(&bytes)
+            .expect_err("a genuine instruction boundary of the wrong opcode must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    // Item 10's cross-kind swap - especially important since W2D exists
+    // specifically to transport this discriminator: a declared StoreVarSite
+    // pointing at a real, canonical MakeRecord (and vice versa) must be
+    // rejected exactly like any other class mismatch, never accepted merely
+    // because the anchor is a genuine instruction boundary of *some* kind.
+    #[test]
+    fn checkpoint_w2e_rejects_store_var_site_pointing_to_real_make_record() {
+        let mut bytes = mixed_store_var_and_make_record_write_semcode_bytes();
+        let make_record_anchor = anchor_of(&bytes, "main", Opcode::MakeRecord, 0);
+        // write_paths[0] is this fixture's StoreVarSite event (see
+        // `checkpoint_w2e_mixed_store_var_and_make_record_admitted`).
+        set_write_execution_site_anchor(&mut bytes, "main", 0, make_record_anchor);
+        let report = verify_semcode(&bytes).expect_err(
+            "a StoreVarSite declaring a real MakeRecord's anchor must be rejected, not admitted \
+             just because it is some genuine instruction boundary",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_rejects_make_record_site_pointing_to_real_store_var() {
+        let mut bytes = mixed_store_var_and_make_record_write_semcode_bytes();
+        let store_var_anchor = anchor_of(&bytes, "main", Opcode::StoreVar, 0);
+        // write_paths[1] is this fixture's MakeRecordSite event.
+        set_write_execution_site_anchor(&mut bytes, "main", 1, store_var_anchor);
+        let report = verify_semcode(&bytes).expect_err(
+            "a MakeRecordSite declaring a real StoreVar's anchor must be rejected, not admitted \
+             just because it is some genuine instruction boundary",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    // Item 11's required mutation tests: retarget a real, working anchor
+    // from its true instruction start to an *operand* byte deliberately set
+    // to the exact numeric value of the target opcode's own opcode byte -
+    // the precise failure mode canonical-decode-boundary admission exists to
+    // rule out. No shared/global state is mutated.
+
+    #[test]
+    fn checkpoint_w2e_mutation_rejects_operand_byte_coincidentally_equal_to_store_var_opcode() {
+        let mut bytes = ownership_semcode_bytes();
+        let load_f64_pos = find_instruction(&bytes, "main", Opcode::LoadF64, 0);
+        let operand_byte_pos = load_f64_pos + 1 + 2;
+        assert_ne!(
+            bytes[operand_byte_pos],
+            Opcode::StoreVar.byte(),
+            "test setup should be introducing this collision, not observing a pre-existing one"
+        );
+        bytes[operand_byte_pos] = Opcode::StoreVar.byte();
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = functions.iter().find(|f| f.name == "main").expect("main");
+        let planted_anchor =
+            u32::try_from(operand_byte_pos - main.code_offset - main.instr_start_offset)
+                .expect("anchor fits u32");
+        set_write_execution_site_anchor(&mut bytes, "main", 0, planted_anchor);
+        let report = verify_semcode(&bytes).expect_err(
+            "a byte that numerically equals the StoreVar opcode, but is not a canonical \
+             instruction start, must still be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_w2e_mutation_rejects_operand_byte_coincidentally_equal_to_make_record_opcode() {
+        let mut bytes = record_field_write_semcode_bytes();
+        // `DecisionContext { camera: T, quality: 0.75 }`'s own MakeRecord
+        // (occurrence 0) constructs `ctx`; occurrence 1 is the RecordUpdate
+        // under test. A LoadF64 (the `0.75`/`1.0` literals) provides the
+        // same safe, never-range-checked operand byte D2b's own mutation
+        // test uses.
+        let load_f64_pos = find_instruction(&bytes, "main", Opcode::LoadF64, 0);
+        let operand_byte_pos = load_f64_pos + 1 + 2;
+        assert_ne!(
+            bytes[operand_byte_pos],
+            Opcode::MakeRecord.byte(),
+            "test setup should be introducing this collision, not observing a pre-existing one"
+        );
+        bytes[operand_byte_pos] = Opcode::MakeRecord.byte();
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = functions.iter().find(|f| f.name == "main").expect("main");
+        let planted_anchor =
+            u32::try_from(operand_byte_pos - main.code_offset - main.instr_start_offset)
+                .expect("anchor fits u32");
+        set_write_execution_site_anchor(&mut bytes, "main", 0, planted_anchor);
+        let report = verify_semcode(&bytes).expect_err(
+            "a byte that numerically equals the MakeRecord opcode, but is not a canonical \
+             instruction start, must still be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    // Item 12: cross-function isolation. `store_var_starts`/
+    // `make_record_starts` are locals freshly built per call to
+    // `verify_function_code` from that one function's own decoded
+    // instructions (mirroring D2b's own documented reasoning for Borrow
+    // exactly) - there is no shared/global table a wrong-function anchor
+    // could coincidentally hit. Demonstrated concretely: two functions where
+    // the identical relative anchor is a genuine StoreVar boundary in one
+    // but not the other; a Write event in the *other* function declaring
+    // that anchor must reject, proving validity elsewhere confers no
+    // authority here.
+    #[test]
+    fn checkpoint_w2e_cross_function_anchor_confers_no_authority() {
+        let src = r#"
+            fn helper() {
+                let mut y: i32 = 0;
+                y = 7;
+                return;
+            }
+
+            fn main() {
+                let mut x: i32 = 0;
+                x = 5;
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let helper_anchor = anchor_of(&bytes, "helper", Opcode::StoreVar, 0);
+        let main_anchor = anchor_of(&bytes, "main", Opcode::StoreVar, 0);
+        assert_eq!(
+            helper_anchor, main_anchor,
+            "test setup requires the identical relative anchor to be a genuine StoreVar \
+             boundary in both functions, so retargeting proves same-function isolation \
+             specifically, not merely an out-of-range anchor"
+        );
+        verify_semcode(&bytes).expect("the unmodified two-function artifact must admit");
+
+        // Corrupt `helper`'s own Write event to point at a position that is
+        // NOT a StoreVar boundary in `helper` (one byte into its own real
+        // StoreVar) while remaining numerically identical to `main`'s valid
+        // anchor is already guaranteed equal above - so this single
+        // retarget exercises both directions: `helper`'s own local table
+        // must reject it even though the identical relative offset is a
+        // genuine StoreVar boundary in `main`.
+        let mut bytes = bytes;
+        set_write_execution_site_anchor(&mut bytes, "helper", 0, helper_anchor + 1);
+        let report = verify_semcode(&bytes).expect_err(
+            "helper's own Write event must be judged only against helper's own instruction \
+             table, never admitted because the identical relative offset happens to be valid \
+             in main",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    fn two_store_var_writes_semcode_bytes() -> Vec<u8> {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 0;
+                let mut y: i32 = 0;
+                x = 1;
+                y = 2;
+                return;
+            }
+        "#;
+        compile_program_to_semcode(src).expect("compile")
+    }
+
+    // #1891 Checkpoint W2E, item 13: duplicate-anchor audit. `validate_write_sites`
+    // (sm-ir, W2A) already proves a StoreVar WriteSiteId pairs with exactly
+    // one Write event, so no frozen producer can legitimately emit two Write
+    // events sharing one StoreVarSite anchor - reject unconditionally,
+    // mirroring Borrow's own duplicate rule.
+    #[test]
+    fn checkpoint_w2e_rejects_duplicate_store_var_site_anchor_between_two_write_events() {
+        let bytes = two_store_var_writes_semcode_bytes();
+        verify_semcode(&bytes).expect("the un-corrupted two-anchor artifact must admit");
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            main.write_paths.len(),
+            2,
+            "fixture must carry two Write events"
+        );
+        let first_anchor = match main.write_paths[0].write_execution {
+            Some(sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(a)) => a,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+        let mut bytes = bytes;
+        set_write_execution_site_anchor(&mut bytes, "main", 1, first_anchor);
+        let report = verify_semcode(&bytes).expect_err(
+            "two Write events sharing one StoreVarSite anchor in the same function must be rejected",
         );
         assert_eq!(
             report.diagnostics[0].code,
@@ -10227,6 +10801,55 @@ mod tests {
         compile_program_to_semcode(src).expect("compile")
     }
 
+    // #1891 Checkpoint W2E fixtures.
+
+    fn multi_field_record_update_write_semcode_bytes() -> Vec<u8> {
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let patched: DecisionContext = ctx with { camera: F, quality: 1.0 };
+                let _ = patched;
+                return;
+            }
+        "#;
+        compile_program_to_semcode(src).expect("compile")
+    }
+
+    fn repeated_assignment_write_semcode_bytes() -> Vec<u8> {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 0;
+                x = 1;
+                x = 2;
+                return;
+            }
+        "#;
+        compile_program_to_semcode(src).expect("compile")
+    }
+
+    fn mixed_store_var_and_make_record_write_semcode_bytes() -> Vec<u8> {
+        let src = r#"
+            record R {
+                a: i32,
+            }
+
+            fn main() {
+                let mut x: i32 = 0;
+                x = 5;
+                let base: R = R { a: 1 };
+                let fresh: R = base with { a: 9 };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        compile_program_to_semcode(src).expect("compile")
+    }
+
     fn adt_payload_ownership_semcode_bytes() -> Vec<u8> {
         let src = r#"
             enum Maybe {
@@ -10375,6 +10998,73 @@ mod tests {
                     }
                 }
             }
+            let name_bytes = f.name.as_bytes();
+            out.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+            out.extend_from_slice(name_bytes);
+            out.extend_from_slice(&(code.len() as u32).to_le_bytes());
+            out.extend_from_slice(&code);
+        }
+        out
+    }
+
+    /// #1891 Checkpoint W2E, item 9.G support: identical to
+    /// `downgrade_header_stripping_signature` (same legacy string/DBG0/OWN0
+    /// re-encode, same unconditional omission of the rev21+ Write
+    /// mode+anchor bytes for every Write event) except it also appends each
+    /// function's real instruction bytes (`f.code_slice[f.instr_start_offset..]`)
+    /// after its re-encoded header sections. `downgrade_header_stripping_signature`
+    /// itself never copies instruction bytes at all - harmless for its own 8
+    /// call sites, which only ever assert an early `CapabilityViolation`
+    /// rejection that never reaches code execution, but fatal for a test
+    /// that needs the downgraded artifact to fully verify AND admit as a
+    /// genuine legacy Write. A prior attempt reused
+    /// `downgrade_header_stripping_signature` directly for exactly that
+    /// purpose and observed `ReachableFunctionFallthrough` on every
+    /// function - the direct symptom of an empty instruction stream -
+    /// confirming that helper was never meant for this.
+    fn downgrade_to_legacy_write_preserving_code(bytes: &[u8], target_magic: [u8; 8]) -> Vec<u8> {
+        let (_, functions) = sm_format::semcode_decode::decode_semcode_envelope(bytes)
+            .expect("decode current bytes");
+        let mut out = Vec::new();
+        out.extend_from_slice(&target_magic);
+        for f in &functions {
+            let mut code = Vec::new();
+            code.extend_from_slice(&(f.strings.len() as u16).to_le_bytes());
+            for s in &f.strings {
+                code.extend_from_slice(&(s.len() as u16).to_le_bytes());
+                code.extend_from_slice(s.as_bytes());
+            }
+            if f.has_debug_section {
+                code.extend_from_slice(b"DBG0");
+                code.extend_from_slice(&(f.debug_symbols.len() as u16).to_le_bytes());
+                for d in &f.debug_symbols {
+                    code.extend_from_slice(&(d.pc as u32).to_le_bytes());
+                    code.extend_from_slice(&d.line.to_le_bytes());
+                    code.extend_from_slice(&d.col.to_le_bytes());
+                }
+            }
+            if f.has_ownership_section {
+                code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+                let total = f.borrowed_paths.len() + f.write_paths.len();
+                code.extend_from_slice(&(total as u16).to_le_bytes());
+                for p in &f.borrowed_paths {
+                    code.push(sm_format::semcode_format::OWNERSHIP_EVENT_KIND_BORROW);
+                    code.extend_from_slice(&p.root_symbol_id.to_le_bytes());
+                    code.extend_from_slice(&(p.components.len() as u16).to_le_bytes());
+                    for c in &p.components {
+                        encode_legacy_ownership_component(&mut code, c);
+                    }
+                }
+                for p in &f.write_paths {
+                    code.push(sm_format::semcode_format::OWNERSHIP_EVENT_KIND_WRITE);
+                    code.extend_from_slice(&p.root_symbol_id.to_le_bytes());
+                    code.extend_from_slice(&(p.components.len() as u16).to_le_bytes());
+                    for c in &p.components {
+                        encode_legacy_ownership_component(&mut code, c);
+                    }
+                }
+            }
+            code.extend_from_slice(&f.code_slice[f.instr_start_offset..]);
             let name_bytes = f.name.as_bytes();
             out.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
             out.extend_from_slice(name_bytes);
@@ -10533,6 +11223,129 @@ mod tests {
                 assert_eq!(
                     after_path.activation,
                     Some(sm_format::semcode_decode::DecodedBorrowActivation::StoreVarSite(anchor)),
+                    "the intended event's anchor did not change to the intended value"
+                );
+                assert_eq!(before_path.root_symbol_id, after_path.root_symbol_id);
+                assert_eq!(before_path.components, after_path.components);
+            } else {
+                assert_eq!(
+                    before_path, after_path,
+                    "an unrelated event's fields changed - wrong offset computed"
+                );
+            }
+        }
+    }
+
+    /// Analogous to `store_var_site_anchor_field_offsets`, but records the
+    /// 4-byte anchor field offset for every rev21+ Write event, whichever
+    /// mode it declares - both `WRITE_EXECUTION_MODE_STORE_VAR_SITE` and
+    /// `_MAKE_RECORD_SITE` carry an anchor immediately after their mode
+    /// byte, unlike Borrow's `FrameEntry` mode, which carries none.
+    fn write_execution_anchor_field_offsets(code: &[u8]) -> Vec<usize> {
+        use sm_format::semcode_format::{
+            ACTIVATION_MODE_STORE_VAR_SITE, OWNERSHIP_EVENT_KIND_BORROW,
+            OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+            OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+            OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
+        };
+        let section_offset = ownership_section_offset(code);
+        let mut cursor = section_offset + OWNERSHIP_SECTION_TAG.len();
+        let count = u16::from_le_bytes([code[cursor], code[cursor + 1]]) as usize;
+        cursor += 2;
+        let mut offsets = Vec::new();
+        for _ in 0..count {
+            let kind = code[cursor];
+            cursor += 1;
+            let is_write_with_anchor = if kind == OWNERSHIP_EVENT_KIND_BORROW {
+                let mode = code[cursor];
+                cursor += 1;
+                if mode == ACTIVATION_MODE_STORE_VAR_SITE {
+                    cursor += 4;
+                }
+                false
+            } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
+                cursor += 1; // write execution mode - either value carries an anchor
+                true
+            } else {
+                false
+            };
+            if is_write_with_anchor {
+                offsets.push(cursor);
+                cursor += 4;
+            }
+            cursor += 4; // root_symbol_id
+            let component_count = u16::from_le_bytes([code[cursor], code[cursor + 1]]) as usize;
+            cursor += 2;
+            for _ in 0..component_count {
+                let tag = code[cursor];
+                cursor += 1;
+                cursor += match tag {
+                    t if t == OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX => 2,
+                    t if t == OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => 4,
+                    t if t == OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD => 6,
+                    t if t == OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX => 4,
+                    other => panic!("unknown ownership path component tag {other}"),
+                };
+            }
+        }
+        offsets
+    }
+
+    /// Overwrites the `occurrence`-th (0-indexed) Write event's execution
+    /// anchor field in `function_name`'s OWN0 section with `anchor`, keeping
+    /// its declared mode (StoreVarSite/MakeRecordSite) unchanged, then
+    /// re-decodes and asserts the new decoded anchor is exactly `anchor` and
+    /// every other event is byte-for-byte unchanged - mirrors
+    /// `set_store_var_site_anchor`'s exact discipline for the Write domain.
+    fn set_write_execution_site_anchor(
+        bytes: &mut [u8],
+        function_name: &str,
+        occurrence: usize,
+        anchor: u32,
+    ) {
+        let before = {
+            let (_, decoded) =
+                sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode before");
+            decoded
+                .iter()
+                .find(|f| f.name == function_name)
+                .expect("function")
+                .write_paths
+                .clone()
+        };
+        let (_, code_start, code_end) = function_code_span(bytes, function_name);
+        let code = &mut bytes[code_start..code_end];
+        let offsets = write_execution_anchor_field_offsets(code);
+        let field_offset = *offsets.get(occurrence).unwrap_or_else(|| {
+            panic!(
+                "expected occurrence {occurrence}, found only {} Write execution-site event(s)",
+                offsets.len()
+            )
+        });
+        code[field_offset..field_offset + 4].copy_from_slice(&anchor.to_le_bytes());
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode after");
+        let after = &decoded
+            .iter()
+            .find(|f| f.name == function_name)
+            .expect("function")
+            .write_paths;
+        for (index, (before_path, after_path)) in before.iter().zip(after.iter()).enumerate() {
+            if index == occurrence {
+                let expected = match before_path.write_execution {
+                    Some(sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(_)) => {
+                        sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(anchor)
+                    }
+                    Some(sm_format::semcode_decode::DecodedWriteExecution::MakeRecordSite(_)) => {
+                        sm_format::semcode_decode::DecodedWriteExecution::MakeRecordSite(anchor)
+                    }
+                    None => panic!(
+                        "occurrence {occurrence} has no write_execution to mutate (legacy revision?)"
+                    ),
+                };
+                assert_eq!(
+                    after_path.write_execution,
+                    Some(expected),
                     "the intended event's anchor did not change to the intended value"
                 );
                 assert_eq!(before_path.root_symbol_id, after_path.root_symbol_id);
