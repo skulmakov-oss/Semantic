@@ -94,10 +94,12 @@ Current supported header family:
 - `SEMCOD14`
 - `SEMCOD18`
 - `SEMCOD19`
+- `SEMCOD21`
 
-`SEMCOD15`, `SEMCOD16`, and `SEMCOD17` are also currently emitted/admitted
-by the toolchain but are not yet documented in this section; that is a
-pre-existing documentation gap, not part of the #1732 repair.
+`SEMCOD15`, `SEMCOD16`, `SEMCOD17`, and `SEMCOD20` are also currently
+emitted/admitted by the toolchain but are not yet documented in this
+section; that is a pre-existing documentation gap, not part of the #1732 or
+#1718 repairs.
 
 Observed runtime support in the current toolchain:
 
@@ -118,6 +120,7 @@ Observed runtime support in the current toolchain:
 - `SEMCOD14`: epoch `0`, revision `15`
 - `SEMCOD18`: epoch `0`, revision `19`
 - `SEMCOD19`: epoch `0`, revision `20`
+- `SEMCOD21`: epoch `0`, revision `22`
 
 Header responsibilities:
 
@@ -346,6 +349,40 @@ survives unchanged through IR and SemCode emission - see
 [`vm.md`](vm.md#callable-runtime-family-enforcement) for how it is enforced
 at a callee before execution.
 
+`SEMCOD21`
+
+- promoted contract used when emitted program usage requires ownership path
+  transport for the `SequenceIndexStatic` component (`Borrow` and `Write`
+  both) or the `AdtPayload` component in a `Borrow` event (#1718 /
+  FA-04-012; see
+  `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`)
+- keeps `SEMCODE0..20` fixed for older artifacts that do not use these
+  ownership path families: an artifact under any older header that carries a
+  `SequenceIndexStatic` component, or an `AdtPayload` component in a
+  `Borrow` event, is rejected at decode/verify - the header never had
+  authority over these families, and no older header's meaning changes
+  retroactively
+- uses the fixed-width 8-byte header magic form `SEMCOD21`
+- adds two new capability bits, `CAP_OWNERSHIP_SEQUENCE_PATHS` and
+  `CAP_OWNERSHIP_ADT_BORROW_PATHS` (see `## Capability Contract` below);
+  neither widens `CAP_OWNERSHIP_PATHS`'s or `CAP_OWNERSHIP_FIELD_PATHS`'s
+  own scope, which remain exactly tuple-only and tuple+record as `SEMCOD11`
+  and `SEMCOD12` already defined them
+- does **not** change the `OWN0` section's wire layout, the `SIG0` floor, or
+  the Borrow-activation/Write-execution-mode grammar `SEMCOD11`
+  (`CAP_OWNERSHIP_PATHS`) and the rev21 anchor grammar
+  (`SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION`) already established - this
+  revision answers only "which path components may this header's `OWN0`
+  section carry," not "how are events/anchors encoded"; those two questions
+  are deliberately kept orthogonal
+- does **not** admit `Write(AdtPayload)` under any circumstance: an
+  `AdtPayload` component inside a `Write` event is rejected unconditionally,
+  at every header revision including `SEMCOD21` itself, regardless of
+  capability - this is not a missing-capability gap a future header could
+  close by inheritance; promoting `Write(AdtPayload)` requires a new,
+  separately authorized contract change, never an incidental relaxation of
+  this revision's own grammar
+
 ## Opcode Vocabulary And Header Identity
 
 SemCode header identity constrains the executable opcode vocabulary. Every
@@ -403,6 +440,8 @@ Current canonical capability families:
 - `CAP_CLOSURE_VALUES`
 - `CAP_OWNERSHIP_PATHS`
 - `CAP_OWNERSHIP_FIELD_PATHS`
+- `CAP_OWNERSHIP_SEQUENCE_PATHS`
+- `CAP_OWNERSHIP_ADT_BORROW_PATHS`
 - `CAP_MAP_VALUES`
 - `CAP_DEBUG_SYMBOLS`
 
@@ -447,6 +486,27 @@ Current `SEMCOD12` format extension in this slice:
 - verifier admits direct record-field ownership payload structurally
 - VM consumes admitted direct record-field ownership payload for frame-local
   borrow tracking and overlap enforcement
+- ownership execution semantics remain specified separately in
+  `runtime_ownership.md`
+
+Current `SEMCOD21` format extension in this slice (#1718):
+
+- producer transport may encode `SequenceIndexStatic` paths (`Borrow` and
+  `Write` both) and `AdtPayload` paths in `Borrow` events only, in `OWN0`
+- requires `CAP_OWNERSHIP_SEQUENCE_PATHS` for any `SequenceIndexStatic`
+  component and `CAP_OWNERSHIP_ADT_BORROW_PATHS` for any `AdtPayload`
+  component in a `Borrow` event; an artifact under a header lacking the
+  relevant bit is rejected at decode, independent of the verifier's own
+  separate capability-consistency check
+- an `AdtPayload` component in a `Write` event is rejected unconditionally,
+  under `SEMCOD21` and every other header, regardless of capability
+- verifier admits `SequenceIndexStatic` and `Borrow`-side `AdtPayload`
+  ownership payload structurally, on the same terms as `SEMCOD11`/`SEMCOD12`
+  path kinds, and independently re-derives the same capability requirement
+  from decoded content rather than trusting decode alone
+- VM consumes admitted `SequenceIndexStatic`/`AdtPayload` ownership payload
+  for frame-local borrow tracking and overlap enforcement, using the same
+  `AccessPath`/overlap machinery already used for tuple/record paths
 - ownership execution semantics remain specified separately in
   `runtime_ownership.md`
 

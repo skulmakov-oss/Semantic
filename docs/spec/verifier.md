@@ -80,7 +80,7 @@ without turning this document into a stable bytecode ISA promise.
 | Ordinary source-derived families: control flow, data movement, literal loading, arithmetic, comparison, calls, and returns | Admitted when produced by supported SemCode and consistent with the emitted contract | No extra capability beyond the artifact contract | Baseline verifier-admitted surface; this document intentionally does not stabilize binary opcode numbers. |
 | `SEQUENCE_LEN` | Admitted only when the emitted contract carries `CAP_SEQUENCE_ITERATION` and the header family supports the sequence-iteration contract | Capability-gated | Built-in sequence lowering opcode for the admitted `Sequence(T)` iteration slice. |
 | Effect-oriented host-boundary families such as `GateRead`, `GateWrite`, and `PulseEmit` | Admitted only when the emitted contract matches the required capability envelope | Capability-gated / host-boundary | These opcodes do not define capability policy semantics by themselves. |
-| Ownership transport payloads admitted through `OWN0` | Admitted structurally only when the ownership transport slice is present and well formed | Header and capability consistency required | This covers the currently documented tuple-only and direct record-field ownership transport slices. |
+| Ownership transport payloads admitted through `OWN0` | Admitted structurally only when the ownership transport slice is present and well formed | Header and capability consistency required | Covers tuple-only (`SEMCOD11`), direct record-field (`SEMCOD12`), `SequenceIndexStatic` `Borrow`/`Write` (`SEMCOD21`, `CAP_OWNERSHIP_SEQUENCE_PATHS`), and `AdtPayload` `Borrow`-only (`SEMCOD21`, `CAP_OWNERSHIP_ADT_BORROW_PATHS`) ownership transport. `Write(AdtPayload)` is rejected unconditionally under every header, including `SEMCOD21` - not a capability gap. |
 | Unknown, unsupported, or malformed opcode encodings | Rejected | N/A | Rejection must happen before a successful VM execution path. |
 | Opcode streams that fail operand, jump-target, reachable-control-flow, call-target, closure-function-target, register-budget, string-reference, or section-integrity checks | Rejected | N/A | Direct calls may resolve to declared functions or admitted builtins; closure targets must resolve to declared functions. These are verifier admission failures, not successful runtime executions. |
 
@@ -91,6 +91,14 @@ Current ownership-specific structural checks for ownership transport include:
 - tuple `AccessPath` payload validity under `SEMCOD11`
 - direct record-field `AccessPath` payload validity under `SEMCOD12`
 - structural admission for valid `Borrow(Field)` and `Write(Field)` payloads
+- `SequenceIndexStatic` `AccessPath` payload validity (`Borrow`/`Write`) under
+  `SEMCOD21`, independently re-derived from decoded content (not delegated
+  to `sm-format`'s own decode-time gate) via `CAP_OWNERSHIP_SEQUENCE_PATHS`
+  capability-consistency accounting (#1718)
+- `AdtPayload` `AccessPath` payload validity in `Borrow` events only under
+  `SEMCOD21`, via `CAP_OWNERSHIP_ADT_BORROW_PATHS` capability-consistency
+  accounting; an `AdtPayload` component in a `Write` event is rejected
+  unconditionally, before and independent of capability accounting (#1718)
 - header/capability consistency for ownership transport
 
 ## Canonical Operand Value Domains
