@@ -172,6 +172,19 @@ Current VM non-goals:
 - no inter-frame borrow persistence
 - no advanced alias inference
 
+Legacy artifact execution (#1891 Checkpoint W2F):
+
+- decoding and verifier admission of a legacy (pre-`SEMCOD20`/rev21) Write
+  ownership event remain unchanged - such an event carries a path but no
+  executable anchor, and the verifier still structurally admits it
+- this decode/verifier compatibility does **not** imply runtime execution
+  support: a Write-bearing artifact below the anchor-bearing revision has no
+  exact execution authority for the VM to enforce against, and is
+  deterministically rejected at runtime construction
+  (`crates/sm-vm/src/semcode_vm.rs`, `build_vm_program_view_from_decoded`)
+  rather than executed via any residual cursor, root-matching, or scan-ahead
+  fallback
+
 ## Explicitly Unsupported
 
 The current implemented runtime ownership contract does not claim support for:

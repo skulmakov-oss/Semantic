@@ -18,6 +18,105 @@ fn run_source(source: &str) -> Result<(), RuntimeError> {
     sm_vm::run_verified_entry_semcode(&entry)
 }
 
+/// #1891 pre-integration audit (2026-09-06), item 1: no existing test
+/// exercised the Checkpoint W2F runtime-level legacy-rejection path
+/// (`build_vm_program_view_from_decoded`'s `BadFormat` check in
+/// crates/sm-vm/src/semcode_vm.rs) - `checkpoint_w2e_legacy_pre_rev21_write_admitted_unchanged`
+/// (crates/sm-verify/src/lib.rs) only proves the VERIFIER still structurally
+/// admits a legacy Write-bearing artifact; it never runs it. This downgrades
+/// a real, rev21+ compiled artifact (a genuine `StoreVarSite` Write event)
+/// down to a legacy header while preserving its real instruction bytes
+/// verbatim, mirroring `downgrade_to_legacy_write_preserving_code`
+/// (crates/sm-verify/src/lib.rs, own test module) exactly - duplicated here
+/// rather than shared, since it is test-only code private to each crate's
+/// own test module and no production API surface exists to share it through.
+fn downgrade_to_legacy_write_preserving_code(bytes: &[u8], target_magic: [u8; 8]) -> Vec<u8> {
+    use sm_format::semcode_format::{
+        OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_SECTION_TAG,
+    };
+    let (_, functions) =
+        sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode current bytes");
+    let mut out = Vec::new();
+    out.extend_from_slice(&target_magic);
+    for f in &functions {
+        let mut code = Vec::new();
+        code.extend_from_slice(&(f.strings.len() as u16).to_le_bytes());
+        for s in &f.strings {
+            code.extend_from_slice(&(s.len() as u16).to_le_bytes());
+            code.extend_from_slice(s.as_bytes());
+        }
+        if f.has_debug_section {
+            code.extend_from_slice(b"DBG0");
+            code.extend_from_slice(&(f.debug_symbols.len() as u16).to_le_bytes());
+            for d in &f.debug_symbols {
+                code.extend_from_slice(&(d.pc as u32).to_le_bytes());
+                code.extend_from_slice(&d.line.to_le_bytes());
+                code.extend_from_slice(&d.col.to_le_bytes());
+            }
+        }
+        if f.has_ownership_section {
+            code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+            let total = f.borrowed_paths.len() + f.write_paths.len();
+            code.extend_from_slice(&(total as u16).to_le_bytes());
+            for p in f.borrowed_paths.iter().chain(f.write_paths.iter()) {
+                assert!(
+                    p.components.is_empty(),
+                    "this fixture-only helper supports bare-root paths only"
+                );
+            }
+            for p in &f.borrowed_paths {
+                code.push(OWNERSHIP_EVENT_KIND_BORROW);
+                code.extend_from_slice(&p.root_symbol_id.to_le_bytes());
+                code.extend_from_slice(&0u16.to_le_bytes());
+            }
+            for p in &f.write_paths {
+                code.push(OWNERSHIP_EVENT_KIND_WRITE);
+                code.extend_from_slice(&p.root_symbol_id.to_le_bytes());
+                code.extend_from_slice(&0u16.to_le_bytes());
+            }
+        }
+        code.extend_from_slice(&f.code_slice[f.instr_start_offset..]);
+        let name_bytes = f.name.as_bytes();
+        out.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        out.extend_from_slice(name_bytes);
+        out.extend_from_slice(&(code.len() as u32).to_le_bytes());
+        out.extend_from_slice(&code);
+    }
+    out
+}
+
+#[test]
+fn legacy_pre_rev21_write_bearing_artifact_rejected_at_runtime() {
+    let src = r#"
+        fn main() {
+            let mut x: i32 = 1;
+            x = 2;
+            return;
+        }
+    "#;
+    let bytes = sm_ir::compile_program_to_semcode(src).expect("compile");
+    let bytes =
+        downgrade_to_legacy_write_preserving_code(&bytes, sm_format::semcode_format::MAGIC11);
+
+    // Legacy decode/verifier compatibility is preserved (Checkpoint W2E):
+    // the verifier still structurally admits this artifact. Only RUNTIME
+    // EXECUTION support for legacy Write-bearing artifacts is withdrawn
+    // (Checkpoint W2F) - the two are deliberately different guarantees.
+    let token = sm_verify::verify_semcode_token(&bytes)
+        .expect("legacy Write-bearing artifact must still be structurally admitted");
+    let entry = token.require_entry("main").expect("entry");
+    let err = sm_vm::run_verified_entry_semcode(&entry).expect_err(
+        "a legacy (pre-rev21) Write-bearing artifact has no executable anchor and must be \
+         deterministically rejected at runtime construction - not executed via any residual \
+         cursor/matching authority, not silently ignored, and not accepted with missing \
+         enforcement",
+    );
+    assert!(
+        matches!(err, RuntimeError::BadFormat(_)),
+        "expected a deterministic BadFormat rejection, got {err:?}"
+    );
+}
+
 fn assert_conflicts(result: Result<(), RuntimeError>, ctx: &str) {
     assert!(
         matches!(
