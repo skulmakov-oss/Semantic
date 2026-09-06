@@ -1178,6 +1178,141 @@ fn validate_write_execution_site_anchors(
     Ok(())
 }
 
+/// #1718 (I4.1): the verifier's independent ownership path-family capability
+/// contract, extracted into its own function so it is directly testable at
+/// the Rust level - given a header and the already-decoded `borrowed_paths`/
+/// `write_paths`, with no byte-level decode involved at all.
+///
+/// This extraction exists because of a real gap mutation M4b found during
+/// the #1718 implementation checkpoint: `sm-format`'s decode-time gate
+/// already rejects a `Write(AdtPayload)` artifact (or a `Sequence`/
+/// `AdtPayload`-Borrow artifact under too old a header) before
+/// `verify_function_code`'s body is ever reached through the public,
+/// byte-oriented API (`verify_semcode`/`verify_semcode_token` both decode
+/// first) - so removing *this* function's own rejection, while leaving
+/// `sm-format`'s decode-time gate intact, changed nothing any end-to-end
+/// test could observe. The frozen contract requires the verifier to
+/// independently enforce this policy, not merely inherit decode's
+/// enforcement by accident of call order; this function is the seam that
+/// makes that independent enforcement exercisable on its own terms (see
+/// `verifier_rejects_adt_payload_write_independently_of_decoder` below,
+/// and its own mutation-M4b proof).
+///
+/// Owns exactly: `Field`/`Sequence`/ADT-Borrow capability accounting, and
+/// the unconditional ADT-Write rejection. Does **not** own
+/// `CAP_OWNERSHIP_PATHS`/`has_ownership_section` accounting, which predates
+/// #1718 and is unaffected by it - that stays in `verify_function_code`
+/// alongside debug-symbol and opcode-driven capability accounting, all of
+/// which feed one shared, combined `missing_caps` diagnostic there.
+///
+/// Returns the ownership-family capability bits this function's content
+/// actually requires (to be folded into the caller's own `used_caps`) on
+/// success, or a `RejectReport` if `Write(AdtPayload)` is present (always,
+/// regardless of header) or if the header lacks a capability this content
+/// requires.
+#[cfg(feature = "std")]
+fn verify_ownership_path_family_contract(
+    name: &str,
+    header: &SemcodeHeaderSpec,
+    borrowed_paths: &[sm_format::semcode_decode::DecodedAccessPath],
+    write_paths: &[sm_format::semcode_decode::DecodedAccessPath],
+) -> Result<u32, RejectReport> {
+    let mut has_record_field_ownership = false;
+    // #1718: `has_sequence_ownership` and `has_adt_borrow_ownership` feed the
+    // same capability-consistency mechanism `has_record_field_ownership`
+    // already uses below - this is the verifier's OWN independent authority
+    // over the frozen path-family contract, not a check that trusts
+    // `sm-format`'s decode-time gate to have already done this work.
+    // `has_adt_write_ownership` is tracked separately from `borrowed_paths`/
+    // `write_paths` (not chained together) specifically so a `Write` event's
+    // `AdtPayload` component can never be silently folded into
+    // `has_adt_borrow_ownership` - the two are independently-decided
+    // admission domains (see
+    // `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`)
+    // and must never share one accounting flag.
+    let mut has_sequence_ownership = false;
+    let mut has_adt_borrow_ownership = false;
+    let mut has_adt_write_ownership = false;
+    for p in borrowed_paths {
+        for c in &p.components {
+            match c {
+                sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_) => {
+                    has_record_field_ownership = true;
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
+                    has_adt_borrow_ownership = true;
+                    // Variant is a global SymbolId; it cannot be bounds-checked
+                    // against the local string table. Structural acceptance only.
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(_) => {
+                    has_sequence_ownership = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    for p in write_paths {
+        for c in &p.components {
+            match c {
+                sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_) => {
+                    has_record_field_ownership = true;
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
+                    has_adt_write_ownership = true;
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(_) => {
+                    has_sequence_ownership = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // #1718: unconditional rejection, independent of capability. No header
+    // revision or capability bit - present, future, or hypothetically
+    // reinterpreted - authorizes `Write(AdtPayload)`; this is not a missing-
+    // capability situation (`CapabilityViolation`) that a wider header could
+    // ever cure, so it is checked and rejected before, and separately from,
+    // the capability-consistency check below.
+    if has_adt_write_ownership {
+        return Err(reject_one(
+            name,
+            VerificationCode::InvalidOwnershipSection,
+            0,
+            "Write(AdtPayload) is not an admitted SemCode ownership path under any header \
+             revision (#1718)",
+        ));
+    }
+
+    let mut used_caps = 0u32;
+    if has_record_field_ownership {
+        used_caps |= CAP_OWNERSHIP_FIELD_PATHS;
+    }
+    if has_sequence_ownership {
+        used_caps |= CAP_OWNERSHIP_SEQUENCE_PATHS;
+    }
+    if has_adt_borrow_ownership {
+        used_caps |= CAP_OWNERSHIP_ADT_BORROW_PATHS;
+    }
+
+    let missing_caps = used_caps & !header.capabilities;
+    if missing_caps != 0 {
+        return Err(reject_one(
+            name,
+            VerificationCode::CapabilityViolation,
+            0,
+            format!(
+                "function requires capability bits 0x{missing_caps:08x}, but header '{}' \
+                 provides only 0x{:08x}",
+                String::from_utf8_lossy(&header.magic),
+                header.capabilities
+            ),
+        ));
+    }
+
+    Ok(used_caps)
+}
+
 #[cfg(feature = "std")]
 fn verify_function_code(
     env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
@@ -1234,73 +1369,12 @@ fn verify_function_code(
     }
 
     let has_ownership_section = env.has_ownership_section;
-    let mut has_record_field_ownership = false;
-    // #1718: `has_sequence_ownership` and `has_adt_borrow_ownership` feed the
-    // same `used_caps`/`missing_caps` capability-consistency mechanism
-    // `has_record_field_ownership` already uses below - this is the
-    // verifier's OWN independent authority over the frozen path-family
-    // contract, not a check that trusts `sm-format`'s decode-time gate to
-    // have already done this work. `has_adt_write_ownership` is tracked
-    // separately from `borrowed_paths`/`write_paths` (not chained together,
-    // unlike the loop this replaces) specifically so a `Write` event's
-    // `AdtPayload` component can never be silently folded into
-    // `has_adt_borrow_ownership` - the two are independently-decided
-    // admission domains (see
-    // `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`)
-    // and must never share one accounting flag.
-    let mut has_sequence_ownership = false;
-    let mut has_adt_borrow_ownership = false;
-    let mut has_adt_write_ownership = false;
-    for p in env.borrowed_paths.iter() {
-        for c in &p.components {
-            match c {
-                sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_) => {
-                    has_record_field_ownership = true;
-                }
-                sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
-                    has_adt_borrow_ownership = true;
-                    // Variant is a global SymbolId; it cannot be bounds-checked
-                    // against the local string table. Structural acceptance only.
-                }
-                sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(_) => {
-                    has_sequence_ownership = true;
-                }
-                _ => {}
-            }
-        }
-    }
-    for p in env.write_paths.iter() {
-        for c in &p.components {
-            match c {
-                sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_) => {
-                    has_record_field_ownership = true;
-                }
-                sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
-                    has_adt_write_ownership = true;
-                }
-                sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(_) => {
-                    has_sequence_ownership = true;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    // #1718: unconditional rejection, independent of capability. No header
-    // revision or capability bit - present, future, or hypothetically
-    // reinterpreted - authorizes `Write(AdtPayload)`; this is not a missing-
-    // capability situation (`CapabilityViolation`) that a wider header could
-    // ever cure, so it is checked and rejected before, and separately from,
-    // the capability-consistency check below.
-    if has_adt_write_ownership {
-        return Err(reject_one(
-            name,
-            VerificationCode::InvalidOwnershipSection,
-            0,
-            "Write(AdtPayload) is not an admitted SemCode ownership path under any header \
-             revision (#1718)",
-        ));
-    }
+    // #1718 (I4.1): extracted into its own function so it is directly,
+    // independently testable at the Rust level - see
+    // `verify_ownership_path_family_contract`'s own doc comment for why
+    // this extraction exists (mutation M4b's finding).
+    let ownership_family_caps =
+        verify_ownership_path_family_contract(name, header, &env.borrowed_paths, &env.write_paths)?;
 
     let code = env.code_slice;
     let mut cursor = env.instr_start_offset;
@@ -1468,22 +1542,15 @@ fn verify_function_code(
     if has_ownership_section {
         used_caps |= CAP_OWNERSHIP_PATHS;
     }
-    if has_record_field_ownership {
-        used_caps |= CAP_OWNERSHIP_FIELD_PATHS;
-    }
-    // #1718: reuses the exact same capability-consistency mechanism as
-    // `CAP_OWNERSHIP_FIELD_PATHS` above - a header below
-    // `SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION`/
-    // `SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION` lacks these bits entirely,
-    // so `missing_caps` below naturally rejects it without any new rejection
-    // path. `has_adt_write_ownership` never reaches here - it already
-    // returned `Err` above, unconditionally, before this point.
-    if has_sequence_ownership {
-        used_caps |= CAP_OWNERSHIP_SEQUENCE_PATHS;
-    }
-    if has_adt_borrow_ownership {
-        used_caps |= CAP_OWNERSHIP_ADT_BORROW_PATHS;
-    }
+    // #1718 (I4.1): Field/Sequence/ADT-Borrow capability accounting now
+    // lives in `verify_ownership_path_family_contract`, which already
+    // independently checked these bits against `header.capabilities` on its
+    // own terms (see that function). Folding its result into this function's
+    // own `used_caps`/`missing_caps` pass keeps a single combined diagnostic
+    // for callers that also care about opcode-driven/debug-symbol
+    // capabilities, without re-deriving or duplicating the ownership-family
+    // policy itself.
+    used_caps |= ownership_family_caps;
 
     let missing_caps = used_caps & !header.capabilities;
     if missing_caps != 0 {
@@ -5311,6 +5378,110 @@ mod tests {
             "the ADT producer's Borrow event must stay FrameEntry - promotion here is driven \
              by the #1718 ADT-Borrow capability requirement, not by the anchor mechanism"
         );
+    }
+
+    // #1718 (I4.1): direct, Rust-level tests of
+    // `verify_ownership_path_family_contract`, with no byte-level decode
+    // involved at all - constructing `DecodedAccessPath` values directly and
+    // calling the verifier's own policy function. These exist because
+    // mutation M4b found that removing this function's `Write(AdtPayload)`
+    // rejection, while leaving `sm-format`'s decode-time gate intact, broke
+    // no existing test: `verify_semcode`/`verify_semcode_token` both decode
+    // first, so a `Write(AdtPayload)` artifact never reaches this function's
+    // body through the public API. `verifier_rejects_adt_payload_write_independently_of_decoder`
+    // below is the one that closes that gap - it must not obtain its input
+    // by decoding bytes, or it would prove the same thing the decoder-level
+    // tests already prove, not this function's own independent authority.
+    mod ownership_path_family_contract_tests {
+        use super::*;
+        use sm_format::semcode_decode::{
+            DecodedAccessPath, DecodedAccessPathComponent, DecodedBorrowActivation,
+        };
+        use sm_format::semcode_format::{HEADER_V20, HEADER_V21};
+
+        fn path(components: Vec<DecodedAccessPathComponent>) -> DecodedAccessPath {
+            DecodedAccessPath {
+                root_symbol_id: 0,
+                components,
+                activation: Some(DecodedBorrowActivation::FrameEntry),
+                write_execution: None,
+            }
+        }
+
+        #[test]
+        fn v21_sequence_borrow_admitted() {
+            let borrowed = vec![path(vec![DecodedAccessPathComponent::SequenceIndexStatic(
+                0,
+            )])];
+            verify_ownership_path_family_contract("f", &HEADER_V21, &borrowed, &[])
+                .expect("V21 must admit Sequence Borrow");
+        }
+
+        #[test]
+        fn v21_sequence_write_admitted() {
+            let write = vec![path(vec![DecodedAccessPathComponent::SequenceIndexStatic(
+                0,
+            )])];
+            verify_ownership_path_family_contract("f", &HEADER_V21, &[], &write)
+                .expect("V21 must admit Sequence Write");
+        }
+
+        #[test]
+        fn v21_adt_borrow_admitted() {
+            let borrowed = vec![path(vec![DecodedAccessPathComponent::AdtPayload {
+                variant: 9,
+                index: 0,
+            }])];
+            verify_ownership_path_family_contract("f", &HEADER_V21, &borrowed, &[])
+                .expect("V21 must admit ADT Borrow");
+        }
+
+        // The critical test (I4.1's acceptance criterion): proves the
+        // verifier's OWN rejection, independent of sm-format's decode-time
+        // gate - the input here was never decoded from bytes at all, so
+        // decoder cannot have "already caught this" the way it does for
+        // every other test in this file that goes through
+        // decode_semcode_envelope/verify_semcode/verify_semcode_token.
+        #[test]
+        fn verifier_rejects_adt_payload_write_independently_of_decoder() {
+            let write = vec![path(vec![DecodedAccessPathComponent::AdtPayload {
+                variant: 9,
+                index: 0,
+            }])];
+            let report = verify_ownership_path_family_contract("f", &HEADER_V21, &[], &write)
+                .expect_err("verifier must independently reject Write(AdtPayload)");
+            assert_eq!(
+                report.diagnostics[0].code,
+                VerificationCode::InvalidOwnershipSection
+            );
+        }
+
+        #[test]
+        fn v20_sequence_rejected_for_missing_capability() {
+            let borrowed = vec![path(vec![DecodedAccessPathComponent::SequenceIndexStatic(
+                0,
+            )])];
+            let report = verify_ownership_path_family_contract("f", &HEADER_V20, &borrowed, &[])
+                .expect_err("V20 lacks CAP_OWNERSHIP_SEQUENCE_PATHS");
+            assert_eq!(
+                report.diagnostics[0].code,
+                VerificationCode::CapabilityViolation
+            );
+        }
+
+        #[test]
+        fn v20_adt_borrow_rejected_for_missing_capability() {
+            let borrowed = vec![path(vec![DecodedAccessPathComponent::AdtPayload {
+                variant: 9,
+                index: 0,
+            }])];
+            let report = verify_ownership_path_family_contract("f", &HEADER_V20, &borrowed, &[])
+                .expect_err("V20 lacks CAP_OWNERSHIP_ADT_BORROW_PATHS");
+            assert_eq!(
+                report.diagnostics[0].code,
+                VerificationCode::CapabilityViolation
+            );
+        }
     }
 
     // #1726 Checkpoint D2b, item 8 fail-closed / adversarial tests, all
