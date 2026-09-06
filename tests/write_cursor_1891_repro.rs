@@ -1,28 +1,28 @@
-// #1891 forensic/repro checkpoint (2026-09-06). Reproduces, on the current
-// tree (post-#1726 Checkpoints A-D3), the live `next_write_path` false-
-// negative: `sm-vm`'s write-conflict check
-// (`crates/sm-vm/src/semcode_vm.rs`, `Opcode::StoreVar` handler) walks
+// #1891 forensic/repro checkpoint (2026-09-06), updated at Checkpoint W2F
+// (2026-09-06) once the fix landed. Originally reproduced the live
+// `next_write_path` false-negative: `sm-vm`'s write-conflict check
+// (`crates/sm-vm/src/semcode_vm.rs`, `Opcode::StoreVar` handler) walked
 // `FunctionBytecode.write_paths` with a single sequential cursor
 // (`Frame.next_write_path`), advancing it only when the *current* StoreVar's
-// own target symbol equals `write_paths[cursor].root`. This assumes every
-// statically-emitted Write event corresponds, in order, to a StoreVar that
-// actually targets that event's own root symbol at runtime. Both scenarios
-// below break that assumption and produce a live false negative: a write
-// that genuinely overlaps an active Borrow is silently let through because
-// the cursor never reaches (or is stuck before) the entry that would have
-// caught it. This file does not fix anything - #1726's own runtime
-// (Checkpoint D3, PC-exact Borrow activation) is proven correct and
-// unrelated; the defect is entirely in this separate, older write-cursor
-// mechanism. Each "poisoned" test's `expect_err`/`Ok` assertion documents
-// the CURRENT (defective) behavior on purpose, so that fixing #1891 will
-// require flipping these assertions - their failure post-fix is the signal
-// the fix worked, not a regression to chase down confused.
+// own target symbol equalled `write_paths[cursor].root`. That assumed every
+// statically-emitted Write event corresponded, in order, to a StoreVar that
+// actually targeted that event's own root symbol at runtime. Both scenarios
+// below broke that assumption and produced a live false negative: a write
+// that genuinely overlapped an active Borrow was silently let through
+// because the cursor never reached (or was stuck before) the entry that
+// would have caught it.
 //
-// This file asserts today's actual (defective) behavior, not the desired
-// one, so it stays green under `cargo test --workspace` alongside the
-// #1726 qualification suite without being part of that suite's own
-// checklist. It exists solely to ground #1891 in fresh, evidenced
-// reproductions on the current tree before any fix is designed.
+// Checkpoint W2F replaced the cursor entirely with an exact-PC lookup
+// (`FunctionBytecode.write_execution_sites`, grouped by the same
+// verifier-authenticated anchor Checkpoints W2D/W2E establish and check on
+// every instruction dispatch, not just the "next expected" one) - so both
+// scenarios below now correctly reject. The two `defect_*` tests have been
+// renamed to `fixed_*` and their assertions flipped from `Ok(())` to
+// `Err(BorrowWriteConflict)`; the two `control_*` tests are unchanged - they
+// already conflicted correctly before W2F and still do. This file keeps its
+// original name and source counterexamples so it remains the canonical
+// #1891 regression suite: 4/4 green, all four now encoding the correct
+// runtime semantics rather than three correct + one documented-defective.
 
 use sm_runtime_core::RuntimeTrap;
 use sm_vm::RuntimeError;
@@ -34,7 +34,7 @@ fn run_source(source: &str) -> Result<(), RuntimeError> {
     sm_vm::run_verified_entry_semcode(&entry)
 }
 
-// --- Scenario 1: record-update Write poisons next_write_path -------------
+// --- Scenario 1: record-update Write, formerly poisoned next_write_path --
 //
 // `base with { a: .., b: .. }` (a record-update expression) is lowered by
 // `append_record_update_write_events_from_expr`
@@ -42,15 +42,17 @@ fn run_source(source: &str) -> Result<(), RuntimeError> {
 // FIELD, rooted at the update's *base* expression (`base`) - not at
 // whatever new binding receives the update's result (`patched`). No
 // StoreVar anywhere ever targets `base` as part of evaluating this
-// expression (`base` is only read; `patched` is a fresh introduction, so
-// `frame.locals.contains_key(&symbol)` is false for its own StoreVar and
-// the write-check never even looks at it). The write-check's own gating
-// condition - "the *current* StoreVar's target symbol equals the pending
-// write path's root" - can therefore only ever fire for these entries if
-// `base` happens to be reassigned again later, for an entirely unrelated
-// reason. Confirmed by direct decode inspection (not assumed): both
-// `write_paths` entries below genuinely exist, rooted at the exact same
-// symbol and field the Borrow is active on.
+// expression (`base` is only read; `patched` is a fresh introduction). The
+// old cursor's gating condition - "the *current* StoreVar's target symbol
+// equals the pending write path's root" - could therefore only ever fire
+// for these entries if `base` happened to be reassigned again later, for an
+// entirely unrelated reason; it never was here, so the check never ran at
+// all for this Write pair. Checkpoint W2F's exact-PC lookup has no such
+// gate: each field-override Write event's real `MakeRecordSite` PC is
+// checked the moment that MakeRecord instruction executes, regardless of
+// whether `base` itself is ever reassigned. Confirmed by direct decode
+// inspection (not assumed): both `write_paths` entries below genuinely
+// exist, rooted at the exact same symbol and field the Borrow is active on.
 
 #[test]
 fn control_plain_record_field_write_after_borrow_conflicts() {
@@ -78,14 +80,14 @@ fn control_plain_record_field_write_after_borrow_conflicts() {
 }
 
 #[test]
-fn defect_record_update_after_borrow_is_silently_accepted() {
+fn fixed_record_update_after_borrow_now_rejects() {
     // `base.a` is borrowed via `ref x`, then a record-update reads `base`
     // to build `patched`, declaring (via its own emitted Write events) a
     // conceptual write to `base.a` and `base.b` - the same field the
     // borrow is active on. This must conflict under the same rule the
-    // control above proves. It currently does not: `base` is never itself
-    // reassigned, so `next_write_path`'s cursor never advances past
-    // position 0, and the check never runs at all for this Write pair.
+    // control above proves, and now does: Checkpoint W2F's exact-PC lookup
+    // checks this MakeRecord's real anchor regardless of whether `base` is
+    // ever itself reassigned.
     let src = r#"
         record R { a: i32, b: i32 }
         fn main() {
@@ -123,24 +125,28 @@ fn defect_record_update_after_borrow_is_silently_accepted() {
 
     let result = run_source(src);
     assert!(
-        result.is_ok(),
-        "DEFECT (#1891) NOT REPRODUCED - a fix may already be in place, or this \
-         program no longer exercises the write-cursor desync; investigate before \
-         reusing this test as a fix-verification regression: {result:?}"
+        matches!(
+            result,
+            Err(RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict))
+        ),
+        "#1891 regression: this record-update Write must reject exactly like the \
+         control does - {result:?}"
     );
 }
 
-// --- Scenario 2: untaken-branch static Write poisons next_write_path -----
+// --- Scenario 2: untaken-branch static Write, formerly poisoned next_write_path --
 //
 // Two `write_paths` entries exist in this program - one per source-level
 // reassignment, in program order - regardless of whether either branch is
-// ever taken at runtime. If the FIRST one (by static/emission order) sits
-// inside a branch that is never taken, `next_write_path`'s cursor never
-// advances past it (nothing ever executes a StoreVar targeting that
+// ever taken at runtime. If the FIRST one (by static/emission order) sat
+// inside a branch that was never taken, the old `next_write_path` cursor
+// never advanced past it (nothing ever executed a StoreVar targeting that
 // entry's own root), permanently blocking every later, genuinely-executed
-// write whose own root differs from that stuck entry's root: the filter
-// `write_paths[cursor].root == symbol` fails for the real write too, so its
-// check is skipped entirely - not merely deferred.
+// write whose own root differed from that stuck entry's root. Checkpoint
+// W2F's exact-PC lookup has no cursor to get stuck: each Write event's own
+// real StoreVar anchor is checked independently, keyed by PC, so an untaken
+// branch's site is simply never visited and never consumes anything - it
+// cannot block the later, genuinely-executed write's own independent check.
 
 #[test]
 fn control_taken_branch_write_before_conflicting_write_still_conflicts() {
@@ -173,13 +179,13 @@ fn control_taken_branch_write_before_conflicting_write_still_conflicts() {
 }
 
 #[test]
-fn defect_untaken_branch_write_poisons_a_later_unrelated_conflicting_write() {
+fn fixed_untaken_branch_write_no_longer_poisons_later_conflicting_write() {
     // Identical to the control above except `if true` -> `if false`: the
     // `other = (7, 7)` write never executes. The later `pair = (3, 4)`
     // write genuinely overlaps `left`'s active borrow of `pair.0` and must
-    // reject under the same rule the control proves - it currently does
-    // not, because the cursor is stuck on the untaken write's own
-    // (different-rooted) entry.
+    // reject under the same rule the control proves, and now does:
+    // Checkpoint W2F never visits the untaken branch's own StoreVar PC, so
+    // its Write site is simply never checked - it cannot poison anything.
     let src = r#"
         fn main() {
             let mut pair: (i32, i32) = (1, 2);
@@ -215,9 +221,11 @@ fn defect_untaken_branch_write_poisons_a_later_unrelated_conflicting_write() {
 
     let result = run_source(src);
     assert!(
-        result.is_ok(),
-        "DEFECT (#1891) NOT REPRODUCED - a fix may already be in place, or this \
-         program no longer exercises the write-cursor desync; investigate before \
-         reusing this test as a fix-verification regression: {result:?}"
+        matches!(
+            result,
+            Err(RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict))
+        ),
+        "#1891 regression: this later, genuinely-executed Write must reject exactly \
+         like the control does - {result:?}"
     );
 }
