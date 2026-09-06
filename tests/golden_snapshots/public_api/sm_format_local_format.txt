@@ -20,6 +20,7 @@ pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
 pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
 pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
 pub const MAGIC20: [u8; 8] = *b"SEMCOD20";
+pub const MAGIC21: [u8; 8] = *b"SEMCOD21";
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
 pub const CAP_GATE_SURFACE: u32 = 1 << 2;
@@ -46,6 +47,8 @@ pub const CAP_PATH_INSPECT: u32 = 1 << 22;
 pub const CAP_FS_READ: u32 = 1 << 23;
 pub const CAP_FS_WRITE: u32 = 1 << 24;
 pub const CAP_TIME_DURATION: u32 = 1 << 25;
+pub const CAP_OWNERSHIP_SEQUENCE_PATHS: u32 = 1 << 26;
+pub const CAP_OWNERSHIP_ADT_BORROW_PATHS: u32 = 1 << 27;
 pub const SIGNATURE_SECTION_TAG: [u8; 4] = *b"SIG0";
 pub const OWNERSHIP_SECTION_TAG: [u8; 4] = *b"OWN0";
 pub const OWNERSHIP_EVENT_KIND_BORROW: u8 = 0;
@@ -87,6 +90,9 @@ pub const ACTIVATION_MODE_STORE_VAR_SITE: u8 = 1;
 pub const WRITE_EXECUTION_MODE_STORE_VAR_SITE: u8 = 0;
 pub const WRITE_EXECUTION_MODE_MAKE_RECORD_SITE: u8 = 1;
 pub const HEADER_V20: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC20, epoch: 0, rev: 21, capabilities: HEADER_V19.capabilities, };
+pub const HEADER_V21: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC21, epoch: 0, rev: 22, capabilities: HEADER_V20.capabilities | CAP_OWNERSHIP_SEQUENCE_PATHS | CAP_OWNERSHIP_ADT_BORROW_PATHS, };
+pub const SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
+pub const SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
 pub fn header_spec_from_magic(magic: &[u8; 8]) -> Option<SemcodeHeaderSpec> {
 #[repr(u8)]
