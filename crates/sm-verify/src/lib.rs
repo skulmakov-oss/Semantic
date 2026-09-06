@@ -182,6 +182,31 @@ pub enum VerificationCode {
     /// narrowing register domain - see the round-13 finding). Never
     /// inferred from wall-clock time, allocator behavior, or CPU cycles.
     AnalysisWorkLimitExceeded,
+    /// #1726 Checkpoint D2b: a `StoreVarSite(anchor)` Borrow activation
+    /// (SEMCOD20/rev21+) failed structural admission against this same
+    /// function's own decoded instruction stream. Exactly one of: the
+    /// anchor is not one of this function's own canonical instruction-start
+    /// offsets (this same verification walk's `instr_starts`, the identical
+    /// authority `InvalidDebugSection`'s own `sym.pc` check already reuses -
+    /// never a raw `code[offset] == StoreVar` byte compare, which an operand
+    /// byte could coincidentally satisfy); the canonical instruction at that
+    /// offset is not `Opcode::StoreVar`; or two distinct Borrow events in
+    /// the same function declare the identical anchor (the frozen
+    /// producers' own emission contract, including dynamic-root dedup,
+    /// never legitimately produces this - see the design note on
+    /// `validate_storevar_site_anchors` for the audited proof).
+    ///
+    /// Failure-model boundary, stated explicitly so it is never read as
+    /// stronger than it is: this proves the anchor is a genuine, in-range,
+    /// correctly-typed executable instruction boundary in the declaring
+    /// function - an artifact-level structural fact. It does NOT prove that
+    /// instruction is the compiler's original source-level introduction
+    /// site rather than some other admissible StoreVar a hostile producer
+    /// chose to point at instead; the current rev21 wire format carries no
+    /// additional provenance for that stronger claim, and D2b does not
+    /// pretend otherwise. Reconstructing source provenance from bytecode
+    /// alone is out of scope for this code path.
+    InvalidOwnershipAnchor,
 }
 
 #[cfg(feature = "std")]
@@ -968,6 +993,77 @@ fn instruction_stream_parses_fully(name: &str, code: &[u8], start: usize) -> boo
     cursor == code.len()
 }
 
+/// #1726 Checkpoint D2b: same-function structural admission for every
+/// rev21+ `StoreVarSite(anchor)` Borrow activation. Mirrors the `#1746`
+/// `DebugSymbol.pc` check in `verify_function_code`: `store_var_starts` is
+/// exactly the subset of this function's own `instr_starts` whose decoded
+/// opcode is `StoreVar` (built in the same decode pass, see
+/// `verify_function_code`), so a single `binary_search` against it proves
+/// both "genuine canonical instruction boundary" and "opcode is StoreVar"
+/// at once - never a raw `code[anchor] == StoreVar` byte compare, which an
+/// operand byte could coincidentally satisfy. Anchors are function-relative
+/// by construction: `store_var_starts` was built only from this function's
+/// own `code`/`instr_start` slice, so a cross-function or absolute-artifact
+/// offset is rejected simply by never matching an entry in it.
+///
+/// Duplicate anchors across two distinct Borrow events in the same function
+/// are rejected unconditionally. This is not a heuristic:
+/// `emit_semcode_function` resolves every Borrow event's anchor from
+/// `activation_anchors`, a `HashMap<ActivationSiteId, ExecutableAnchor>`
+/// populated under `crate::passes::validate_activation_sites`'s proven
+/// bijection (exactly one `ActivationSiteId` per Borrow event, exactly one
+/// per StoreVar instruction) plus the emission loop's own insert-once check
+/// — and instruction start offsets are strictly increasing byte positions in
+/// one instruction stream, so two distinct StoreVar instructions can never
+/// share a start offset. No frozen producer, including dynamic-root dedup,
+/// can legitimately emit two Borrow events sharing one anchor; this check
+/// exists to fail closed on a hostile or corrupted artifact that declares
+/// one anyway, not to guard against a real compiler output shape.
+///
+/// Failure-model boundary, restated from
+/// `VerificationCode::InvalidOwnershipAnchor`: this proves the anchor is a
+/// genuine, in-range StoreVar instruction boundary belonging to this
+/// function - an artifact-level structural fact. It does NOT prove that
+/// instruction is the compiler's original source-level introduction site
+/// rather than some other admissible StoreVar a hostile producer chose to
+/// point at instead; the current rev21 wire format carries no additional
+/// provenance for that stronger claim, and this check does not pretend
+/// otherwise.
+#[cfg(feature = "std")]
+fn validate_storevar_site_anchors(
+    name: &str,
+    borrowed_paths: &[sm_format::semcode_decode::DecodedAccessPath],
+    store_var_starts: &[usize],
+) -> Result<(), RejectReport> {
+    let mut claimed = Vec::new();
+    for path in borrowed_paths {
+        let Some(sm_format::semcode_decode::DecodedBorrowActivation::StoreVarSite(anchor)) =
+            path.activation
+        else {
+            continue;
+        };
+        let anchor = anchor as usize;
+        if store_var_starts.binary_search(&anchor).is_err() {
+            return Err(reject_one(
+                name,
+                VerificationCode::InvalidOwnershipAnchor,
+                anchor,
+                "borrow activation anchor does not land on a StoreVar instruction boundary in this function",
+            ));
+        }
+        if claimed.contains(&anchor) {
+            return Err(reject_one(
+                name,
+                VerificationCode::InvalidOwnershipAnchor,
+                anchor,
+                "two borrow events in the same function declare the identical activation anchor",
+            ));
+        }
+        claimed.push(anchor);
+    }
+    Ok(())
+}
+
 #[cfg(feature = "std")]
 fn verify_function_code(
     env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
@@ -1048,6 +1144,12 @@ fn verify_function_code(
     let instr_start = cursor;
     let instr_len = code.len().saturating_sub(instr_start);
     let mut instr_starts = Vec::new();
+    // #1726 Checkpoint D2b: the subset of `instr_starts` whose decoded
+    // opcode is `StoreVar`, built in the same pass and therefore inheriting
+    // the same "genuine canonical instruction boundary" proof `instr_starts`
+    // itself carries - never a raw `code[offset] == StoreVar` byte compare,
+    // which an operand byte could coincidentally satisfy.
+    let mut store_var_starts = Vec::new();
     let mut instruction_successors = Vec::new();
     let mut jump_targets = Vec::new();
     let mut string_refs = Vec::new();
@@ -1079,6 +1181,9 @@ fn verify_function_code(
                 err.to_string(),
             ),
         })?;
+        if opcode == Opcode::StoreVar {
+            store_var_starts.push(offset);
+        }
         // #1756 Codex review round 21: `MetadataCollector` appends
         // directly into these outer `jump_targets`/`string_refs`/
         // `call_argcs` accumulators - no per-instruction `Vec` is built
@@ -1172,6 +1277,11 @@ fn verify_function_code(
             ));
         }
     }
+
+    // #1726 Checkpoint D2b: same-function structural admission of every
+    // rev21+ `StoreVarSite(anchor)` Borrow activation - see
+    // `validate_storevar_site_anchors` for the full design note.
+    validate_storevar_site_anchors(name, &env.borrowed_paths, &store_var_starts)?;
 
     if debug_symbol_count > 0 {
         used_caps |= CAP_DEBUG_SYMBOLS;
@@ -3980,7 +4090,7 @@ mod tests {
     use super::*;
     use sm_format::semcode_format::{
         read_u16_le, read_u32_le, CallableValueFamily, MAGIC0, MAGIC10, MAGIC11, MAGIC18, MAGIC19,
-        MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG, SIGNATURE_SECTION_TAG,
+        MAGIC20, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG,
     };
     use sm_ir::{
         compile_program_to_semcode, compile_program_to_semcode_with_options_debug,
@@ -4876,17 +4986,257 @@ mod tests {
     fn verifier_accepts_ownership_semcode() {
         let bytes = ownership_semcode_bytes();
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        // #1726 Checkpoint D2a: this program's Borrow event now always
+        // carries a resolved ActivationSiteId, promoting it to SEMCOD20/rev21
+        // (was rev20/SIG0's floor before D2a).
+        assert_eq!(verified.header.rev, 21);
         assert_eq!(verified.functions.len(), 2);
     }
 
     #[test]
     fn verifier_accepts_record_field_borrow_ownership_semcode() {
         let bytes = record_field_borrow_semcode_bytes();
-        assert_eq!(&bytes[..MAGIC19.len()], &MAGIC19);
+        assert_eq!(&bytes[..MAGIC20.len()], &MAGIC20);
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 21);
         assert_eq!(verified.functions.len(), 1);
+    }
+
+    // #1726 Checkpoint D2b, item 11 positive tests. Items 1/2 (plain Tuple
+    // and Record Borrow StoreVarSite) are already exercised by
+    // `verifier_accepts_ownership_semcode` /
+    // `verifier_accepts_record_field_borrow_ownership_semcode` above; items
+    // "let-else tuple", "let-else record", and "introduction+reassignment
+    // (anchor still at introduction)" are already exercised end-to-end
+    // (compile -> `verify_semcode_token` -> `sm_vm::run_verified_entry_semcode`)
+    // by `tests/borrow_target_identity_proof.rs`'s
+    // `frozen_borrow_targets_do_not_uniquely_identify_store_sites` - not
+    // duplicated here. The remaining items (mixed StoreVarSite+FrameEntry,
+    // shadowed distinct anchors, rev20 legacy unchanged) are new below.
+
+    #[test]
+    fn checkpoint_d2b_mixed_store_var_site_and_frame_entry_admitted() {
+        let src = r#"
+            fn main() {
+                let opt: Option(i32) = Option::Some(1);
+                let result: i32 = match opt {
+                    Option::Some(ref value) => { value }
+                    Option::None => { 0 }
+                };
+                let pair: (i32, i32) = (1, 2);
+                let (ref left, _): (i32, i32) = pair;
+                let _ = result;
+                let _ = left;
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        assert_eq!(&bytes[..MAGIC20.len()], &MAGIC20);
+        let verified = verify_semcode(&bytes)
+            .expect("D2b must admit a mixed FrameEntry+StoreVarSite artifact");
+        assert_eq!(verified.header.rev, 21);
+    }
+
+    #[test]
+    fn checkpoint_d2b_shadowed_bindings_distinct_anchors_admitted() {
+        let src = r#"
+            fn main() {
+                let p1: (i32, i32) = (1, 2);
+                let p2: (i32, i32) = (3, 4);
+                if true {
+                    let (ref x, _): (i32, i32) = p1;
+                    let _ = x;
+                }
+                if true {
+                    let (ref x, _): (i32, i32) = p2;
+                    let _ = x;
+                }
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        verify_semcode(&bytes)
+            .expect("D2b must admit distinct anchors for shadowed same-spelling bindings");
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(main.borrowed_paths.len(), 2);
+        let anchors: Vec<u32> = main
+            .borrowed_paths
+            .iter()
+            .map(|p| match p.activation {
+                Some(sm_format::semcode_decode::DecodedBorrowActivation::StoreVarSite(a)) => a,
+                other => panic!("expected StoreVarSite, got {other:?}"),
+            })
+            .collect();
+        assert_ne!(
+            anchors[0], anchors[1],
+            "the verifier's own decoded view must show two distinct anchors, not a shared one"
+        );
+    }
+
+    #[test]
+    fn checkpoint_d2b_legacy_rev20_borrow_admitted_unchanged() {
+        // ADT/Option/Result Borrow events stay FrameEntry-only (D1 never
+        // touches this producer); with no StoreVarSite anchor anywhere in
+        // the artifact, `has_v20_ownership_execution_anchor` never fires and
+        // the header never reaches rev21, so this program's Borrow event
+        // takes the pre-D2b legacy grammar path through admission.
+        let bytes = adt_payload_ownership_semcode_bytes();
+        let verified =
+            verify_semcode(&bytes).expect("legacy FrameEntry-only artifact must still admit");
+        assert!(
+            verified.header.rev < sm_format::semcode_format::SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION,
+            "a FrameEntry-only program must never be promoted to the rev21 anchor grammar"
+        );
+    }
+
+    // #1726 Checkpoint D2b, item 8 fail-closed / adversarial tests, all
+    // built by taking a real, compiled, admitted rev21 artifact
+    // (`ownership_semcode_bytes()`) and corrupting exactly one anchor field
+    // via `set_store_var_site_anchor` - which itself re-decodes and asserts
+    // the intended field (and only that field) changed, so a wrong offset
+    // fails the test setup loudly rather than silently testing nothing.
+    // "Cross-function anchor" (item 8) is not a separate byte-level test:
+    // `store_var_starts` is a local built fresh per call to
+    // `verify_function_code` from that one function's own decoded
+    // instructions, with no shared/global table a wrong-function anchor
+    // could coincidentally hit - proven by construction (the variable's
+    // scope), not by a runtime probe.
+
+    #[test]
+    fn checkpoint_d2b_rejects_out_of_range_anchor() {
+        let mut bytes = ownership_semcode_bytes();
+        set_store_var_site_anchor(&mut bytes, "main", 0, u32::MAX);
+        let report = verify_semcode(&bytes).expect_err("out-of-range anchor must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_d2b_rejects_anchor_at_function_code_end() {
+        let mut bytes = ownership_semcode_bytes();
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = functions.iter().find(|f| f.name == "main").expect("main");
+        let instr_len = u32::try_from(main.code_slice.len() - main.instr_start_offset)
+            .expect("instr_len fits u32");
+        set_store_var_site_anchor(&mut bytes, "main", 0, instr_len);
+        let report =
+            verify_semcode(&bytes).expect_err("anchor exactly at the code end must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_d2b_rejects_anchor_mid_instruction() {
+        let mut bytes = ownership_semcode_bytes();
+        let real_anchor = anchor_of(&bytes, "main", Opcode::StoreVar, 0);
+        set_store_var_site_anchor(&mut bytes, "main", 0, real_anchor + 1);
+        let report = verify_semcode(&bytes)
+            .expect_err("an offset one byte into a real StoreVar instruction must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    #[test]
+    fn checkpoint_d2b_rejects_anchor_at_valid_non_store_var_instruction() {
+        let mut bytes = ownership_semcode_bytes();
+        let ret_anchor = anchor_of(&bytes, "main", Opcode::Ret, 0);
+        set_store_var_site_anchor(&mut bytes, "main", 0, ret_anchor);
+        let report = verify_semcode(&bytes)
+            .expect_err("a genuine instruction boundary of the wrong opcode must be rejected");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    // Item 12's required mutation test: retarget a real, working anchor from
+    // its true StoreVar instruction start to an *operand* byte deliberately
+    // set to the exact numeric value of `Opcode::StoreVar`'s own opcode
+    // byte. This is precisely the failure mode the D2b design exists to
+    // rule out: `code[offset] == StoreVar` is not sufficient, `offset` must
+    // also be a genuine canonical instruction boundary. No shared/global
+    // state is mutated (everything here is a local `Vec<u8>` freshly built
+    // by `ownership_semcode_bytes()` at the top of the test), so there is
+    // nothing to restore afterward.
+    #[test]
+    fn checkpoint_d2b_mutation_rejects_operand_byte_coincidentally_equal_to_store_var_opcode() {
+        let mut bytes = ownership_semcode_bytes();
+        let load_f64_pos = find_instruction(&bytes, "main", Opcode::LoadF64, 0);
+        // LoadF64 layout: opcode(1) + dst register (u16) + f64 literal (8
+        // raw bytes, never range- or value-checked by the verifier) - the
+        // first literal byte is a safe place to plant an arbitrary value
+        // without tripping an unrelated structural check first.
+        let operand_byte_pos = load_f64_pos + 1 + 2;
+        assert_ne!(
+            bytes[operand_byte_pos],
+            Opcode::StoreVar.byte(),
+            "test setup should be introducing this collision, not observing a pre-existing one"
+        );
+        bytes[operand_byte_pos] = Opcode::StoreVar.byte();
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = functions.iter().find(|f| f.name == "main").expect("main");
+        let planted_anchor =
+            u32::try_from(operand_byte_pos - main.code_offset - main.instr_start_offset)
+                .expect("anchor fits u32");
+        set_store_var_site_anchor(&mut bytes, "main", 0, planted_anchor);
+        let report = verify_semcode(&bytes).expect_err(
+            "a byte that numerically equals the StoreVar opcode, but is not a canonical \
+             instruction start, must still be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
+    }
+
+    fn two_tuple_borrows_semcode_bytes() -> Vec<u8> {
+        let src = r#"
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                let (ref a, ref b): (i32, i32) = pair;
+                let _ = a;
+                let _ = b;
+                return;
+            }
+        "#;
+        compile_program_to_semcode(src).expect("compile")
+    }
+
+    #[test]
+    fn checkpoint_d2b_rejects_duplicate_anchor_between_two_borrow_events() {
+        let bytes = two_tuple_borrows_semcode_bytes();
+        verify_semcode(&bytes).expect("the un-corrupted two-anchor artifact must admit");
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            main.borrowed_paths.len(),
+            2,
+            "fixture must carry two Borrow events"
+        );
+        let first_anchor = match main.borrowed_paths[0].activation {
+            Some(sm_format::semcode_decode::DecodedBorrowActivation::StoreVarSite(a)) => a,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+        let mut bytes = bytes;
+        set_store_var_site_anchor(&mut bytes, "main", 1, first_anchor);
+        let report = verify_semcode(&bytes).expect_err(
+            "two Borrow events sharing one anchor in the same function must be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipAnchor
+        );
     }
 
     #[test]
@@ -9508,7 +9858,12 @@ mod tests {
         let (_, code_start, code_end) = function_code_span(&bytes, "main");
         let code = &mut bytes[code_start..code_end];
         let section_offset = ownership_section_offset(code);
-        let component_kind_offset = section_offset + 4 + 2 + 1 + 4 + 2;
+        // #1726 Checkpoint D2a: `ownership_semcode_bytes()`'s Borrow event
+        // now always carries a resolved ActivationSiteId (SEMCOD20/rev21),
+        // so its layout is tag(4)+count(2)+kind(1)+activation_mode(1)+
+        // anchor(4)+root(4)+component_count(2) before the component kind
+        // byte -- 5 bytes past the legacy (pre-D2a) offset.
+        let component_kind_offset = section_offset + 4 + 2 + 1 + 1 + 4 + 4 + 2;
         code[component_kind_offset] = 0xff;
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
@@ -9523,7 +9878,10 @@ mod tests {
         let (code_len_pos, code_start, code_end) = function_code_span(&bytes, "main");
         let code = &bytes[code_start..code_end];
         let section_offset = ownership_section_offset(code);
-        let truncated_code_len = section_offset + 4 + 2 + 1 + 4 + 2 + 1 + 1;
+        // See `verifier_rejects_unsupported_ownership_component_kind` for why
+        // this Borrow entry's component-kind byte sits at `+18` under
+        // SEMCOD20/rev21, not `+13` under the legacy layout.
+        let truncated_code_len = section_offset + 4 + 2 + 1 + 1 + 4 + 4 + 2 + 1 + 1;
         bytes[code_len_pos..code_len_pos + 4]
             .copy_from_slice(&(truncated_code_len as u32).to_le_bytes());
         bytes.truncate(code_start + truncated_code_len);
@@ -9540,7 +9898,10 @@ mod tests {
         let (_, code_start, code_end) = function_code_span(&bytes, "main");
         let code = &mut bytes[code_start..code_end];
         let section_offset = ownership_section_offset(code);
-        let component_kind_offset = section_offset + 4 + 2 + 1 + 4 + 2;
+        // See `verifier_rejects_unsupported_ownership_component_kind` for why
+        // this Borrow entry's component-kind byte sits at `+18` under
+        // SEMCOD20/rev21, not `+13` under the legacy layout.
+        let component_kind_offset = section_offset + 4 + 2 + 1 + 1 + 4 + 4 + 2;
         code[component_kind_offset] = 0xff;
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
@@ -9555,7 +9916,10 @@ mod tests {
         let (code_len_pos, code_start, code_end) = function_code_span(&bytes, "main");
         let code = &bytes[code_start..code_end];
         let section_offset = ownership_section_offset(code);
-        let truncated_code_len = section_offset + 4 + 2 + 1 + 4 + 2 + 1 + 3;
+        // See `verifier_rejects_unsupported_ownership_component_kind` for why
+        // this Borrow entry's component-kind byte sits at `+18` under
+        // SEMCOD20/rev21, not `+13` under the legacy layout.
+        let truncated_code_len = section_offset + 4 + 2 + 1 + 1 + 4 + 4 + 2 + 1 + 3;
         bytes[code_len_pos..code_len_pos + 4]
             .copy_from_slice(&(truncated_code_len as u32).to_le_bytes());
         bytes.truncate(code_start + truncated_code_len);
@@ -9821,7 +10185,18 @@ mod tests {
         let (_, code_start, code_end) = function_code_span(&bytes, "main");
         let code = &mut bytes[code_start..code_end];
         let section_offset = ownership_section_offset(code);
-        let component_kind_offset = section_offset + 4 + 2 + 1 + 4 + 2;
+        // #1726 Checkpoint D2a: `record_field_borrow_semcode_bytes()` now
+        // always promotes to SEMCOD20/rev21 (a frozen-producer Borrow event
+        // always carries a resolved ActivationSiteId), so its Borrow entry's
+        // layout is tag(4) + count(2) + kind(1) + activation_mode(1) +
+        // anchor(4) + root(4) + component_count(2) before the first
+        // component's own kind byte - 5 bytes further than the legacy
+        // (pre-D2a) layout this offset used to assume. Verified by direct
+        // decode inspection, not by re-deriving it a second time here: get
+        // this wrong and the patch silently corrupts a different field
+        // (root_symbol_id, in the pre-fix version of this helper) while the
+        // test still passes for the wrong reason.
+        let component_kind_offset = section_offset + 4 + 2 + 1 + 1 + 4 + 4 + 2;
         code[component_kind_offset] =
             sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX;
         bytes
@@ -9909,21 +10284,89 @@ mod tests {
     /// cannot carry `SIG0`, over a body that still does. This reconstructs
     /// what the body would genuinely have looked like had it been compiled
     /// under an older header, matching real pre-#1773 artifact shape.
+    fn encode_legacy_ownership_component(
+        code: &mut Vec<u8>,
+        component: &sm_format::semcode_decode::DecodedAccessPathComponent,
+    ) {
+        use sm_format::semcode_decode::DecodedAccessPathComponent;
+        match component {
+            DecodedAccessPathComponent::TupleIndex(index) => {
+                code.push(sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX);
+                code.extend_from_slice(&index.to_le_bytes());
+            }
+            DecodedAccessPathComponent::FieldSymbol(symbol) => {
+                code.push(sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL);
+                code.extend_from_slice(&symbol.to_le_bytes());
+            }
+            DecodedAccessPathComponent::AdtPayload { variant, index } => {
+                code.push(sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD);
+                code.extend_from_slice(&variant.to_le_bytes());
+                code.extend_from_slice(&index.to_le_bytes());
+            }
+            DecodedAccessPathComponent::SequenceIndexStatic(index) => {
+                code.push(sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX);
+                code.extend_from_slice(&index.to_le_bytes());
+            }
+        }
+    }
+
+    /// #1726 Checkpoint D2a: every one of this helper's 8 call sites
+    /// downgrades to a revision below `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION`
+    /// (the highest, MAGIC11, is rev12; the threshold is rev21) - so any
+    /// OWN0 section is always rebuilt in the *legacy* grammar (no activation
+    /// prefix on Borrow events), from the already-decoded structured paths,
+    /// rather than copied as raw bytes. Copying raw bytes silently broke this
+    /// helper the moment a source artifact's OWN0 became rev21-shaped
+    /// (SEMCOD20): the downgraded header's own revision correctly says
+    /// "legacy grammar", but the copied bytes were still rev21-shaped,
+    /// producing a decode-shape mismatch (`InvalidOwnershipSection`) before
+    /// the capability check these tests exist to exercise ever ran. Content
+    /// (root/components) is preserved exactly; only the wire shape and the
+    /// cross-kind interleaving order are not (this helper does not need to
+    /// preserve Borrow/Write order - that is #1726/#1891's own concern,
+    /// orthogonal to what these capability-downgrade tests check).
     fn downgrade_header_stripping_signature(bytes: &[u8], target_magic: [u8; 8]) -> Vec<u8> {
         let (_, functions) = sm_format::semcode_decode::decode_semcode_envelope(bytes)
             .expect("decode current bytes");
         let mut out = Vec::new();
         out.extend_from_slice(&target_magic);
         for f in &functions {
-            let sig0_len = f
-                .signature
-                .as_ref()
-                .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
-                .unwrap_or(0);
-            let sig0_start = f.instr_start_offset - sig0_len;
             let mut code = Vec::new();
-            code.extend_from_slice(&f.code_slice[..sig0_start]);
-            code.extend_from_slice(&f.code_slice[f.instr_start_offset..]);
+            code.extend_from_slice(&(f.strings.len() as u16).to_le_bytes());
+            for s in &f.strings {
+                code.extend_from_slice(&(s.len() as u16).to_le_bytes());
+                code.extend_from_slice(s.as_bytes());
+            }
+            if f.has_debug_section {
+                code.extend_from_slice(b"DBG0");
+                code.extend_from_slice(&(f.debug_symbols.len() as u16).to_le_bytes());
+                for d in &f.debug_symbols {
+                    code.extend_from_slice(&(d.pc as u32).to_le_bytes());
+                    code.extend_from_slice(&d.line.to_le_bytes());
+                    code.extend_from_slice(&d.col.to_le_bytes());
+                }
+            }
+            if f.has_ownership_section {
+                code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+                let total = f.borrowed_paths.len() + f.write_paths.len();
+                code.extend_from_slice(&(total as u16).to_le_bytes());
+                for p in &f.borrowed_paths {
+                    code.push(sm_format::semcode_format::OWNERSHIP_EVENT_KIND_BORROW);
+                    code.extend_from_slice(&p.root_symbol_id.to_le_bytes());
+                    code.extend_from_slice(&(p.components.len() as u16).to_le_bytes());
+                    for c in &p.components {
+                        encode_legacy_ownership_component(&mut code, c);
+                    }
+                }
+                for p in &f.write_paths {
+                    code.push(sm_format::semcode_format::OWNERSHIP_EVENT_KIND_WRITE);
+                    code.extend_from_slice(&p.root_symbol_id.to_le_bytes());
+                    code.extend_from_slice(&(p.components.len() as u16).to_le_bytes());
+                    for c in &p.components {
+                        encode_legacy_ownership_component(&mut code, c);
+                    }
+                }
+            }
             let name_bytes = f.name.as_bytes();
             out.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
             out.extend_from_slice(name_bytes);
@@ -9963,6 +10406,142 @@ mod tests {
             OWNERSHIP_SECTION_TAG
         );
         cursor
+    }
+
+    /// #1726 Checkpoint D2b test support: walks a rev21+ OWN0 section
+    /// exactly like `sm_format::semcode_decode` does (tag, count, then each
+    /// event's kind/mode/[anchor]/root/component_count/components) and
+    /// returns the byte offset (within `code`) of the 4-byte anchor field
+    /// for every Borrow/StoreVarSite event, in encounter order. Deliberately
+    /// re-derives the layout by walking it, the same discipline
+    /// `sequence_index_static_borrow_semcode_bytes` now documents after its
+    /// own hand-counted offset once silently drifted onto
+    /// `root_symbol_id`'s byte instead of the field it claimed to target
+    /// (the pre-D2a corruption `find_instruction`'s doc comment on this same
+    /// class of mistake also warns about) - every offset this returns is
+    /// re-verified against the real decoder's own view by every call site
+    /// below before it is trusted.
+    fn store_var_site_anchor_field_offsets(code: &[u8]) -> Vec<usize> {
+        use sm_format::semcode_format::{
+            ACTIVATION_MODE_STORE_VAR_SITE, OWNERSHIP_EVENT_KIND_BORROW,
+            OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+            OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
+        };
+        let section_offset = ownership_section_offset(code);
+        let mut cursor = section_offset + OWNERSHIP_SECTION_TAG.len();
+        let count = u16::from_le_bytes([code[cursor], code[cursor + 1]]) as usize;
+        cursor += 2;
+        let mut offsets = Vec::new();
+        for _ in 0..count {
+            let kind = code[cursor];
+            cursor += 1;
+            // Mirrors `sm_format::semcode_decode`'s own gate exactly: the
+            // activation-mode byte exists ONLY for Borrow-kind events. A
+            // Write event has no mode byte at all, at any revision - reading
+            // one unconditionally here (as an earlier version of this
+            // helper did) silently misparses the very next event's own
+            // `root_symbol_id` byte as a "mode", corrupting every offset
+            // after it.
+            let is_store_var_site = if kind == OWNERSHIP_EVENT_KIND_BORROW {
+                let mode = code[cursor];
+                cursor += 1;
+                mode == ACTIVATION_MODE_STORE_VAR_SITE
+            } else {
+                false
+            };
+            if is_store_var_site {
+                offsets.push(cursor);
+                cursor += 4;
+            }
+            cursor += 4; // root_symbol_id
+            let component_count = u16::from_le_bytes([code[cursor], code[cursor + 1]]) as usize;
+            cursor += 2;
+            for _ in 0..component_count {
+                let tag = code[cursor];
+                cursor += 1;
+                cursor += match tag {
+                    t if t == OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX => 2,
+                    t if t == OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => 4,
+                    t if t == OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD => 6,
+                    t if t == OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX => 4,
+                    other => panic!("unknown ownership path component tag {other}"),
+                };
+            }
+        }
+        offsets
+    }
+
+    /// Overwrites the `occurrence`-th (0-indexed) Borrow/StoreVarSite
+    /// event's anchor field in `function_name`'s OWN0 section with `anchor`,
+    /// then re-decodes the whole artifact and asserts the new decoded
+    /// anchor value is exactly `anchor` and every other event's activation
+    /// is byte-for-byte unchanged - so a wrong offset fails loudly here
+    /// (wrong field mutated, or an unrelated event disturbed) rather than
+    /// silently producing a test that passes for the wrong reason.
+    fn set_store_var_site_anchor(
+        bytes: &mut [u8],
+        function_name: &str,
+        occurrence: usize,
+        anchor: u32,
+    ) {
+        let before = {
+            let (_, decoded) =
+                sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode before");
+            decoded
+                .iter()
+                .find(|f| f.name == function_name)
+                .expect("function")
+                .borrowed_paths
+                .clone()
+        };
+        let (_, code_start, code_end) = function_code_span(bytes, function_name);
+        let code = &mut bytes[code_start..code_end];
+        let offsets = store_var_site_anchor_field_offsets(code);
+        let field_offset = *offsets.get(occurrence).unwrap_or_else(|| {
+            panic!(
+                "expected occurrence {occurrence}, found only {} StoreVarSite event(s)",
+                offsets.len()
+            )
+        });
+        code[field_offset..field_offset + 4].copy_from_slice(&anchor.to_le_bytes());
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode after");
+        let after = &decoded
+            .iter()
+            .find(|f| f.name == function_name)
+            .expect("function")
+            .borrowed_paths;
+        for (index, (before_path, after_path)) in before.iter().zip(after.iter()).enumerate() {
+            if index == occurrence {
+                assert_eq!(
+                    after_path.activation,
+                    Some(sm_format::semcode_decode::DecodedBorrowActivation::StoreVarSite(anchor)),
+                    "the intended event's anchor did not change to the intended value"
+                );
+                assert_eq!(before_path.root_symbol_id, after_path.root_symbol_id);
+                assert_eq!(before_path.components, after_path.components);
+            } else {
+                assert_eq!(
+                    before_path, after_path,
+                    "an unrelated event's fields changed - wrong offset computed"
+                );
+            }
+        }
+    }
+
+    /// Converts a real, decoded instruction offset (via `find_instruction`,
+    /// which returns a position absolute within the whole artifact) into the
+    /// function-relative `ExecutableAnchor` domain (`sm-vm`'s `Frame.pc`
+    /// domain: a byte offset relative to the function's own `instr_start`).
+    fn anchor_of(bytes: &[u8], function_name: &str, opcode: Opcode, occurrence: usize) -> u32 {
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode");
+        let env = functions
+            .iter()
+            .find(|f| f.name == function_name)
+            .expect("function");
+        let absolute = find_instruction(bytes, function_name, opcode, occurrence);
+        u32::try_from(absolute - env.code_offset - env.instr_start_offset).expect("anchor fits u32")
     }
 
     /// Locates the absolute byte offset of the `occurrence`-th (0-indexed)

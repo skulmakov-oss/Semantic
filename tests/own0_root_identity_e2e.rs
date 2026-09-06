@@ -12,7 +12,8 @@
 
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
-    read_u16_le, read_u32_le, read_u8, read_utf8, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+    read_u16_le, read_u32_le, read_u8, read_utf8, ACTIVATION_MODE_STORE_VAR_SITE,
+    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
@@ -132,7 +133,19 @@ fn shadowed_binding_borrow_and_write_decode_to_distinct_string_table_roots() {
 
     let mut roots = Vec::with_capacity(2);
     for _ in 0..event_count {
-        let _kind = read_u8(code, &mut cursor).expect("event kind");
+        let kind = read_u8(code, &mut cursor).expect("event kind");
+        if kind == OWNERSHIP_EVENT_KIND_BORROW {
+            // #1726 Checkpoint D2a: this program's field Borrow now always
+            // carries a resolved ActivationSiteId, promoting the artifact to
+            // SEMCOD20/rev21, so every Borrow event carries an activation
+            // tag (+ a 4-byte executable anchor for StoreVarSite) before its
+            // own root - the Write event (the shadowed reassignment) is
+            // unaffected and carries no such prefix, at any revision.
+            let mode = read_u8(code, &mut cursor).expect("activation mode");
+            if mode == ACTIVATION_MODE_STORE_VAR_SITE {
+                let _anchor = read_u32_le(code, &mut cursor).expect("executable anchor");
+            }
+        }
         let root = read_u32_le(code, &mut cursor).expect("root") as usize;
         let component_count = read_u16_le(code, &mut cursor).expect("component count");
         for _ in 0..component_count {
@@ -236,8 +249,11 @@ fn corrupted_own0_root_index_rejects_deterministically_on_load() {
     let code_start = find_function_code_start(&bytes, "main");
     let own0_offset = ownership_section_offset_within_code(&bytes[code_start..]);
 
-    // OWN0 layout: TAG(4) + event_count:u16(2) + kind:u8(1) + root:u32(4) + ...
-    let root_offset = code_start + own0_offset + 4 + 2 + 1;
+    // #1726 Checkpoint D2a: this program's field Borrow now always carries a
+    // resolved ActivationSiteId, promoting the artifact to SEMCOD20/rev21.
+    // OWN0 layout: TAG(4) + event_count:u16(2) + kind:u8(1) +
+    // activation_mode:u8(1) + executable_anchor:u32(4) + root:u32(4) + ...
+    let root_offset = code_start + own0_offset + 4 + 2 + 1 + 1 + 4;
     let corrupted_root: u32 = 0xFFFF_FFFF;
     bytes[root_offset..root_offset + 4].copy_from_slice(&corrupted_root.to_le_bytes());
 

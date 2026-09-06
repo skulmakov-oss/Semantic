@@ -1,11 +1,41 @@
 #![allow(clippy::op_ref, clippy::needless_lifetimes)]
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
-    read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC19, OWNERSHIP_EVENT_KIND_BORROW,
-    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+    header_spec_from_magic, read_u16_le, read_u32_le, read_u8, read_utf8,
+    ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE, MAGIC19, MAGIC20,
+    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
+    SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION,
 };
+
+// #1726 Checkpoint D2a: a Tuple/Record Borrow event now always carries a
+// resolved ActivationSiteId, promoting the artifact to SEMCOD20/rev21 (a
+// Borrow event gains an activation-mode byte, +4 anchor bytes for
+// StoreVarSite, before its own root). Programs with no such Borrow event
+// (plain-local, ADT-only) stay below that revision and keep the legacy
+// layout. Every hand-rolled OWN0 reader/writer in this file must therefore
+// know the artifact's actual header revision - it is never safe to assume
+// either shape.
+fn header_rev_of(bytes: &[u8]) -> u16 {
+    let mut magic = [0u8; 8];
+    magic.copy_from_slice(&bytes[0..8]);
+    header_spec_from_magic(&magic)
+        .expect("known header magic")
+        .rev
+}
+
+/// Reads a Borrow event's activation-mode prefix if the header revision
+/// requires one, positioning `cursor` at the start of the event's `root`
+/// field either way. Write events never carry this prefix, at any revision.
+fn skip_borrow_activation_prefix(code: &[u8], cursor: &mut usize, kind: u8, header_rev: u16) {
+    if kind == OWNERSHIP_EVENT_KIND_BORROW && header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+        let mode = read_u8(code, cursor).expect("activation mode");
+        if mode == ACTIVATION_MODE_STORE_VAR_SITE {
+            let _ = read_u32_le(code, cursor).expect("executable anchor");
+        }
+    }
+}
 use sm_runtime_core::RuntimeTrap;
 use sm_vm::RuntimeError;
 
@@ -323,7 +353,7 @@ fn runtime_ownership_sequence_parent_borrow_conflicts_with_dynamic_write() {
 #[test]
 fn runtime_ownership_inner_frame_borrow_does_not_leak_after_exit() {
     let bytes = compile_program_to_semcode(multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC19);
+    assert_eq!(&bytes[..8], &MAGIC20);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -343,7 +373,7 @@ fn runtime_ownership_inner_frame_borrow_does_not_leak_after_exit() {
 #[test]
 fn runtime_ownership_record_sibling_field_write_passes_on_verified_path() {
     let bytes = compile_program_to_semcode(record_assignment_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC19);
+    assert_eq!(&bytes[..8], &MAGIC20);
     assert!(function_has_ownership_section(&bytes, "main"));
     let (camera_field, quality_field) = record_field_component_ids(&bytes, "main");
 
@@ -559,7 +589,7 @@ fn runtime_ownership_conflict_surface_is_stable_across_tuple_and_record_cases() 
 #[test]
 fn runtime_ownership_record_inner_frame_borrow_does_not_leak_after_exit() {
     let bytes = compile_program_to_semcode(record_multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC19);
+    assert_eq!(&bytes[..8], &MAGIC20);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -692,7 +722,7 @@ fn runtime_ownership_multi_frame_cleanup_is_stable_across_runs() {
 #[test]
 fn runtime_ownership_record_sibling_write_is_stable_across_runs() {
     let bytes = compile_program_to_semcode(record_assignment_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC19);
+    assert_eq!(&bytes[..8], &MAGIC20);
     let (camera_field, quality_field) = record_field_component_ids(&bytes, "main");
     let rewritten = rewrite_function_ownership_events(
         &bytes,
@@ -789,7 +819,7 @@ fn runtime_ownership_record_child_parent_rejects_identically_across_runs() {
 #[test]
 fn runtime_ownership_record_multi_frame_cleanup_is_stable_across_runs() {
     let bytes = compile_program_to_semcode(record_multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC19);
+    assert_eq!(&bytes[..8], &MAGIC20);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -964,11 +994,12 @@ fn assert_repeated_write_overlap_rejects(bytes: &[u8], _symbol_name: &str, runs:
 // still matters: does the (always-present) section actually record any
 // borrow/write events, or is it structurally empty.
 fn any_function_has_nonempty_ownership_section(bytes: &[u8]) -> bool {
+    let header_rev = header_rev_of(bytes);
     let mut cursor = 8usize;
     while cursor < bytes.len() {
         let (name, code, next) = next_function(bytes, cursor);
         let _ = name;
-        let layout = parse_function_layout(code);
+        let layout = parse_function_layout(code, header_rev);
         if let Some(ownership_start) = layout.ownership_start {
             let mut event_cursor = ownership_start + OWNERSHIP_SECTION_TAG.len();
             let count = read_u16_le(code, &mut event_cursor).expect("ownership count");
@@ -982,8 +1013,11 @@ fn any_function_has_nonempty_ownership_section(bytes: &[u8]) -> bool {
 }
 
 fn function_has_ownership_section(bytes: &[u8], target: &str) -> bool {
+    let header_rev = header_rev_of(bytes);
     let (_, code, _) = find_function(bytes, target);
-    parse_function_layout(code).ownership_start.is_some()
+    parse_function_layout(code, header_rev)
+        .ownership_start
+        .is_some()
 }
 
 fn rewrite_function_ownership_events(
@@ -991,6 +1025,7 @@ fn rewrite_function_ownership_events(
     target: &str,
     events: &[OwnershipEventSpec<'_>],
 ) -> Vec<u8> {
+    let header_rev = header_rev_of(bytes);
     let mut out = Vec::with_capacity(bytes.len());
     out.extend_from_slice(&bytes[..8]);
 
@@ -1000,7 +1035,7 @@ fn rewrite_function_ownership_events(
         let (name, code, next) = next_function(bytes, cursor);
         let rewritten = if name == target {
             rewrote = true;
-            rewrite_function_code(code, events)
+            rewrite_function_code(code, events, header_rev)
         } else {
             code.to_vec()
         };
@@ -1016,12 +1051,16 @@ fn rewrite_function_ownership_events(
     out
 }
 
-fn rewrite_function_code(code: &[u8], events: &[OwnershipEventSpec<'_>]) -> Vec<u8> {
-    let layout = parse_function_layout(code);
+fn rewrite_function_code(
+    code: &[u8],
+    events: &[OwnershipEventSpec<'_>],
+    header_rev: u16,
+) -> Vec<u8> {
+    let layout = parse_function_layout(code, header_rev);
     let ownership_start = layout.ownership_start.expect("OWN0 section");
     let mut out = Vec::with_capacity(code.len());
     out.extend_from_slice(&code[..ownership_start]);
-    out.extend_from_slice(&ownership_section_bytes(&layout, events));
+    out.extend_from_slice(&ownership_section_bytes(&layout, events, header_rev));
     // #1773 (FA-09-005): preserve the real SIG0 section verbatim - only
     // OWN0 is being replaced here, not the range through `instr_start`,
     // which would silently drop SIG0 along with it.
@@ -1094,7 +1133,11 @@ fn is_lowered_local_key_for(candidate: &str, source_name: &str) -> bool {
     spelling == source_name
 }
 
-fn ownership_section_bytes(layout: &FunctionLayout, events: &[OwnershipEventSpec<'_>]) -> Vec<u8> {
+fn ownership_section_bytes(
+    layout: &FunctionLayout,
+    events: &[OwnershipEventSpec<'_>],
+    header_rev: u16,
+) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&OWNERSHIP_SECTION_TAG);
     out.extend_from_slice(&(events.len() as u16).to_le_bytes());
@@ -1106,6 +1149,17 @@ fn ownership_section_bytes(layout: &FunctionLayout, events: &[OwnershipEventSpec
             .position(|name| *name == lowered_key)
             .expect("resolved lowered key must be present in the string table it was resolved from")
             as u32;
+        // #1726 Checkpoint D2a: these are synthetic events, not resolved
+        // from a real compile, so there is no real ActivationSiteId/anchor
+        // to encode. `FrameEntry` is correct either way: sm-vm does not
+        // consult the wire activation tag at all yet (Checkpoint D3), so
+        // this only needs to satisfy the rev21 structural grammar, not
+        // express any particular activation semantics.
+        if event.kind == OWNERSHIP_EVENT_KIND_BORROW
+            && header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
+        {
+            out.push(ACTIVATION_MODE_FRAME_ENTRY);
+        }
         append_ownership_event(&mut out, event.kind, root, event.components);
     }
     out
@@ -1135,7 +1189,7 @@ fn resolve_unique_lowered_local_key_fails_closed_on_shadowed_spelling() {
     "#;
     let semcode = compile_program_to_semcode(src).expect("compile");
     let (_, code, _) = find_function(&semcode, "main");
-    let layout = parse_function_layout(code);
+    let layout = parse_function_layout(code, header_rev_of(&semcode));
     let _ = resolve_unique_lowered_local_key(&layout, "x");
 }
 
@@ -1150,7 +1204,7 @@ fn resolve_unique_lowered_local_key_resolves_single_binding() {
     "#;
     let semcode = compile_program_to_semcode(src).expect("compile");
     let (_, code, _) = find_function(&semcode, "main");
-    let layout = parse_function_layout(code);
+    let layout = parse_function_layout(code, header_rev_of(&semcode));
     let key = resolve_unique_lowered_local_key(&layout, "total");
     assert!(is_lowered_local_key_for(&key, "total"));
     assert!(layout.strings.contains(&key));
@@ -1189,8 +1243,9 @@ fn append_ownership_event(
 }
 
 fn record_field_component_ids(bytes: &[u8], target: &str) -> (u32, u32) {
+    let header_rev = header_rev_of(bytes);
     let (_, code, _) = find_function(bytes, target);
-    let layout = parse_function_layout(code);
+    let layout = parse_function_layout(code, header_rev);
     let mut cursor = layout.ownership_start.expect("OWN0 section");
     cursor += OWNERSHIP_SECTION_TAG.len();
     let count = read_u16_le(code, &mut cursor).expect("ownership count") as usize;
@@ -1199,6 +1254,7 @@ fn record_field_component_ids(bytes: &[u8], target: &str) -> (u32, u32) {
     let mut write_field = None;
     for _ in 0..count {
         let kind = read_u8(code, &mut cursor).expect("ownership kind");
+        skip_borrow_activation_prefix(code, &mut cursor, kind, header_rev);
         let _ = read_u32_le(code, &mut cursor).expect("ownership root");
         let component_count = read_u16_le(code, &mut cursor).expect("ownership component count");
         let mut only_field = None;
@@ -1230,7 +1286,7 @@ fn record_field_component_ids(bytes: &[u8], target: &str) -> (u32, u32) {
     )
 }
 
-fn parse_function_layout(code: &[u8]) -> FunctionLayout {
+fn parse_function_layout(code: &[u8], header_rev: u16) -> FunctionLayout {
     let mut cursor = 0usize;
     let string_count = read_u16_le(code, &mut cursor).expect("string count") as usize;
     let mut strings = Vec::with_capacity(string_count);
@@ -1264,7 +1320,8 @@ fn parse_function_layout(code: &[u8]) -> FunctionLayout {
         cursor += OWNERSHIP_SECTION_TAG.len();
         let count = read_u16_le(code, &mut cursor).expect("ownership count") as usize;
         for _ in 0..count {
-            let _ = read_u8(code, &mut cursor).expect("ownership kind");
+            let kind = read_u8(code, &mut cursor).expect("ownership kind");
+            skip_borrow_activation_prefix(code, &mut cursor, kind, header_rev);
             let _ = read_u32_le(code, &mut cursor).expect("ownership root");
             let component_count =
                 read_u16_le(code, &mut cursor).expect("ownership component count") as usize;

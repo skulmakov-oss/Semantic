@@ -2,11 +2,12 @@ use super::*;
 use crate::semcode_decode::MAX_SIGNATURE_PARAMETERS_PER_FUNCTION;
 use crate::semcode_format::{
     header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
-    CallableValueFamily, Opcode, MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14,
-    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC19, MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7,
-    MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
-    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG, SEMCODE_SIGNATURE_MIN_REVISION,
+    CallableValueFamily, Opcode, ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE,
+    MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17,
+    MAGIC18, MAGIC19, MAGIC2, MAGIC20, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9,
+    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+    OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
+    OWNERSHIP_SECTION_TAG, SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, SEMCODE_SIGNATURE_MIN_REVISION,
     SIGNATURE_SECTION_TAG,
 };
 use sm_front::types::{
@@ -195,6 +196,7 @@ pub enum IrInstr {
     StoreVar {
         name: String,
         src: u16,
+        activation_site: Option<ActivationSiteId>,
     },
     QAnd {
         dst: u16,
@@ -465,10 +467,46 @@ pub enum OwnershipPathEventKind {
     Write,
 }
 
+/// Compiler-internal IR authority: identifies one specific Borrow-introducing
+/// `StoreVar` instruction within a single function's lowering. Never a
+/// runtime address; never serialized as though it were one. See
+/// `ExecutableAnchor` for the artifact-side identity #1726 Checkpoint D1
+/// resolves this to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ActivationSiteId(pub u32);
+
+/// #1726 Checkpoint D1: the exact emitted-instruction-stream identity the VM
+/// can actually visit — a byte offset relative to the function's
+/// `instr_start`, identical in domain to `Frame.pc`/`DebugSymbol.pc` in
+/// `sm-vm`/`sm-format` (confirmed by direct reading of `sm-vm`'s dispatch
+/// loop: `cur = f.instr_start + pc` before the opcode byte is read). Distinct
+/// from `ActivationSiteId` (compiler IR authority), `SymbolId` (string-table
+/// identity), and any IR vector index or instruction ordinal — never conflate
+/// these domains. Produced only by reading back the real length of
+/// `instr_stream` as `emit_instr` actually writes it, never by a predicted
+/// size or by re-deriving position from IR order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ExecutableAnchor(pub u32);
+
+/// The resolved activation authority for one Borrow ownership event, computed
+/// at emission time (#1726 Checkpoint D1). `FrameEntry` is today's existing
+/// behavior (used by the ADT/Option/Result producer, which never allocates an
+/// `ActivationSiteId`). `StoreVarSite` is the frozen Tuple/Record producers'
+/// resolved anchor once their `ActivationSiteId` is proven to correspond to
+/// exactly one surviving, actually-emitted `StoreVar`. This is a structural
+/// resolution only — it carries no verifier admission or VM activation
+/// semantics; those are separate, later checkpoints (D2, D3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorrowActivationResolved {
+    FrameEntry,
+    StoreVarSite(ExecutableAnchor),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnershipPathEvent {
     pub kind: OwnershipPathEventKind,
     pub path: AccessPath,
+    pub activation_site: Option<ActivationSiteId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -831,6 +869,7 @@ fn lower_function_to_ir_with_tables(
         ctx.instrs.push(IrInstr::StoreVar {
             name: ctx.lowered_locals.bind(arena, *name)?,
             src: idx as u16,
+            activation_site: None,
         });
     }
     for condition in &func.requires {
@@ -1159,7 +1198,10 @@ pub fn compile_program_to_ir_with_options_and_profile(
         }
     }
     if matches!(opt, OptLevel::O1) {
-        let _ = crate::passes::run_default_opt_passes(&mut out);
+        crate::passes::run_default_opt_passes(&mut out).map_err(|e| FrontendError {
+            pos: 0,
+            message: e.0,
+        })?;
     }
     Ok(out)
 }
@@ -1260,7 +1302,18 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // every function must have an OWN0 section (even if empty) so the verifier check passes.
     let opcode_driven_magic: [u8; 8];
     let opcode_driven_require_ownership_section;
-    if has_v18_qtruth_instr(funcs) {
+    // #1726 Checkpoint D2a: content-driven, exactly like every other branch
+    // here (never SIG0-style unconditional) - only artifacts whose Borrow
+    // events actually resolved a StoreVarSite anchor (Checkpoint D1) need the
+    // rev21 OWN0 grammar. The downstream `chosen_magic` composition step
+    // (below) already handles this floor correctly with zero changes: it
+    // compares `opcode_driven_header.rev` against `SEMCODE_SIGNATURE_MIN_REVISION`
+    // (20) as a plain number, and 21 is never less than 20 - proved in
+    // Checkpoint D1.5 before this branch was added.
+    if has_v20_ownership_execution_anchor(funcs) {
+        opcode_driven_magic = MAGIC20;
+        opcode_driven_require_ownership_section = true;
+    } else if has_v18_qtruth_instr(funcs) {
         opcode_driven_magic = MAGIC18;
         opcode_driven_require_ownership_section = true;
     } else if has_v17_application_instr(funcs) {
@@ -1357,7 +1410,7 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
             })?,
         );
         out.extend_from_slice(name_bytes);
-        let (code, func_max_revision) = emit_semcode_function(
+        let (code, func_max_revision, _resolved_borrow_activations) = emit_semcode_function(
             f,
             debug_symbols,
             require_ownership_section,
@@ -1421,7 +1474,16 @@ fn emit_semcode_function(
     debug_symbols: bool,
     require_ownership_section: bool,
     chosen_header_rev: u16,
-) -> Result<(Vec<u8>, u16), FrontendError> {
+) -> Result<(Vec<u8>, u16, Vec<BorrowActivationResolved>), FrontendError> {
+    // #1726 Checkpoint D1: this is the one and only place activation sites are
+    // resolved, so it must not admit an already-incoherent function. Checkpoint
+    // C's optimizer passes already validate this after every rewrite; this is
+    // the corresponding check on lowering's own direct output for O0 (which
+    // runs no optimizer pass at all, so nothing else validates it before now).
+    crate::passes::validate_activation_sites(f).map_err(|e| FrontendError {
+        pos: 0,
+        message: e.0,
+    })?;
     let mut interner = StringInterner::new();
     for instr in &f.instrs {
         match instr {
@@ -1521,6 +1583,14 @@ fn emit_semcode_function(
     // matching header-selection promotion, instead of silently emitting an
     // artifact its own verifier would reject.
     let mut max_opcode_revision: u16 = 1;
+    // #1726 Checkpoint D1: ActivationSiteId -> ExecutableAnchor, captured only
+    // from the real, already-interned `instr_stream.len()` at the moment each
+    // instruction is actually written by `emit_instr` below -- never from IR
+    // vector index, source order, event order, or `encoded_size`'s
+    // pre-emission length prediction (that prediction exists only to resolve
+    // forward Label/Jmp targets before this real pass runs; it is not used
+    // here on principle, even though it is expected to already agree).
+    let mut activation_anchors: HashMap<ActivationSiteId, ExecutableAnchor> = HashMap::new();
     for instr in &f.instrs {
         if matches!(instr, IrInstr::Label { .. }) {
             continue;
@@ -1530,6 +1600,24 @@ fn emit_semcode_function(
             message: "instruction stream too large".to_string(),
         })?;
         let opcode_byte_pos = instr_stream.len();
+        if let IrInstr::StoreVar {
+            activation_site: Some(site),
+            ..
+        } = instr
+        {
+            if activation_anchors
+                .insert(*site, ExecutableAnchor(pc))
+                .is_some()
+            {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "function `{}`: ActivationSiteId({}) annotated on more than one surviving StoreVar",
+                        f.name, site.0
+                    ),
+                });
+            }
+        }
         emit_instr(instr, &label_pc, &interner, &mut instr_stream)?;
         let instr_min_revision = opcode_minimum_revision_at(&instr_stream, opcode_byte_pos)?;
         max_opcode_revision = max_opcode_revision.max(instr_min_revision);
@@ -1540,6 +1628,35 @@ fn emit_semcode_function(
             })?;
             dbg.push((pc, line, 1));
         }
+    }
+
+    // #1726 Checkpoint D1: resolve every Borrow event to its activation
+    // authority. A site with no surviving anchor is a coherence failure, not
+    // "probably dead" -- Checkpoint C's removal receipt is the only sanctioned
+    // place a Borrow-introducing StoreVar may be deleted, and it always
+    // removes the paired event in the same step. Reaching this point with an
+    // orphaned site means something upstream violated that contract.
+    let mut resolved_borrow_activations = Vec::new();
+    for event in &f.ownership_events {
+        if event.kind != OwnershipPathEventKind::Borrow {
+            continue;
+        }
+        let resolved = match event.activation_site {
+            None => BorrowActivationResolved::FrameEntry,
+            Some(site) => {
+                let anchor = activation_anchors.get(&site).copied().ok_or_else(|| {
+                    FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "function `{}`: Borrow event references ActivationSiteId({}) with no surviving executable anchor",
+                            f.name, site.0
+                        ),
+                    }
+                })?;
+                BorrowActivationResolved::StoreVarSite(anchor)
+            }
+        };
+        resolved_borrow_activations.push(resolved);
     }
 
     let mut code = Vec::new();
@@ -1563,6 +1680,8 @@ fn emit_semcode_function(
         &f.ownership_events,
         require_ownership_section,
         &interner,
+        chosen_header_rev,
+        &resolved_borrow_activations,
         &mut code,
     )?;
     // #1773 (FA-09-005): unconditional, never a per-function/emission-time
@@ -1601,7 +1720,7 @@ fn emit_semcode_function(
         }
     }
     code.extend_from_slice(&instr_stream);
-    Ok((code, max_opcode_revision))
+    Ok((code, max_opcode_revision, resolved_borrow_activations))
 }
 
 fn encoded_size(instr: &IrInstr) -> Option<usize> {
@@ -1947,7 +2066,7 @@ fn emit_instr(
             write_u16_le(out, *dst);
             write_u16_le(out, interner.lookup(name)?);
         }
-        IrInstr::StoreVar { name, src } => {
+        IrInstr::StoreVar { name, src, .. } => {
             out.push(Opcode::StoreVar.byte());
             write_u16_le(out, interner.lookup(name)?);
             write_u16_le(out, *src);
@@ -2301,10 +2420,25 @@ fn has_v12_record_field_ownership_events(funcs: &[IrFunction]) -> bool {
     })
 }
 
+// #1726 Checkpoint D2a: true exactly when some function's Borrow event
+// carries a resolved `ActivationSiteId` (Checkpoint D1's construction sites
+// for the frozen Tuple/Record producers) - the ADT/Option/Result producer
+// never sets `activation_site`, so it never triggers this promotion on its
+// own, matching the design's `FrameEntry`-only treatment for that producer.
+fn has_v20_ownership_execution_anchor(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.ownership_events.iter().any(|event| {
+            event.kind == OwnershipPathEventKind::Borrow && event.activation_site.is_some()
+        })
+    })
+}
+
 fn emit_ownership_events(
     ownership_events: &[OwnershipPathEvent],
     require_section: bool,
     interner: &StringInterner,
+    chosen_header_rev: u16,
+    resolved_borrow_activations: &[BorrowActivationResolved],
     out: &mut Vec<u8>,
 ) -> Result<(), FrontendError> {
     if ownership_events.is_empty() {
@@ -2325,11 +2459,34 @@ fn emit_ownership_events(
             message: "too many ownership path events".to_string(),
         })?,
     );
+    // #1726 Checkpoint D2a: `resolved_borrow_activations` was already computed
+    // by `emit_semcode_function` from the real, already-emitted instruction
+    // stream (Checkpoint D1) - this function only serializes that resolution,
+    // it never recomputes or guesses a `StoreVarSite` anchor.
+    let mut resolved_borrow_iter = resolved_borrow_activations.iter();
     for event in ownership_events {
         out.push(match event.kind {
             OwnershipPathEventKind::Borrow => OWNERSHIP_EVENT_KIND_BORROW,
             OwnershipPathEventKind::Write => OWNERSHIP_EVENT_KIND_WRITE,
         });
+        if event.kind == OwnershipPathEventKind::Borrow
+            && chosen_header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
+        {
+            let resolved = resolved_borrow_iter.next().ok_or_else(|| FrontendError {
+                pos: 0,
+                message: "internal error: fewer resolved Borrow activations than Borrow events"
+                    .to_string(),
+            })?;
+            match resolved {
+                BorrowActivationResolved::FrameEntry => {
+                    out.push(ACTIVATION_MODE_FRAME_ENTRY);
+                }
+                BorrowActivationResolved::StoreVarSite(anchor) => {
+                    out.push(ACTIVATION_MODE_STORE_VAR_SITE);
+                    write_u32_le(out, anchor.0);
+                }
+            }
+        }
         // #1725 (FA-04-019): resolve the lowered-local key against this
         // function's own string table - the same one LoadVar/StoreVar
         // operands for this exact binding are interned into - instead of
@@ -2550,6 +2707,7 @@ fn lower_closure_literal_expr(
                 pos: 0,
                 message: "closure capture index exceeds v0 limit".to_string(),
             })?,
+            activation_site: None,
         });
     }
 
@@ -2562,6 +2720,7 @@ fn lower_closure_literal_expr(
     lifted_instrs.push(IrInstr::StoreVar {
         name: lifted_lowered_locals.bind(arena, closure.param)?,
         src: param_reg,
+        activation_site: None,
     });
 
     // #1709 corrective: `append_record_update_write_events_from_expr`
@@ -3515,6 +3674,7 @@ fn lower_expr_with_expected(
             out.push(IrInstr::StoreVar {
                 name: result_name.clone(),
                 src: then_reg,
+                activation_site: None,
             });
             out.push(IrInstr::Jmp {
                 label: end_label.clone(),
@@ -3549,6 +3709,7 @@ fn lower_expr_with_expected(
             out.push(IrInstr::StoreVar {
                 name: result_name.clone(),
                 src: else_reg,
+                activation_site: None,
             });
             out.push(IrInstr::Jmp {
                 label: end_label.clone(),
@@ -4897,9 +5058,18 @@ fn bind_tuple_items(
             index,
         });
         env.insert(name, item_ty.clone());
+        let activation_site = if capture == sm_front::types::CaptureMode::Borrow
+            && tuple_path.is_some()
+            && (!is_dynamic_fallback || !emitted_dynamic_root)
+        {
+            Some(lowered_locals.fresh_activation_site()?)
+        } else {
+            None
+        };
         out.push(IrInstr::StoreVar {
             name: lowered_locals.bind(arena, name)?,
             src: reg,
+            activation_site,
         });
         if capture == sm_front::types::CaptureMode::Borrow {
             if let Some(tuple_path) = tuple_path {
@@ -4908,6 +5078,7 @@ fn bind_tuple_items(
                         ownership_events.push(OwnershipPathEvent {
                             kind: OwnershipPathEventKind::Borrow,
                             path: tuple_path.as_path().clone(),
+                            activation_site,
                         });
                         emitted_dynamic_root = true;
                     }
@@ -4915,6 +5086,7 @@ fn bind_tuple_items(
                     ownership_events.push(OwnershipPathEvent {
                         kind: OwnershipPathEventKind::Borrow,
                         path: tuple_path.as_path().tuple_index(index),
+                        activation_site,
                     });
                 }
             }
@@ -4986,15 +5158,23 @@ fn bind_record_items(
                 capture,
             } => {
                 env.insert(target, field.ty.clone());
+                let activation_site =
+                    if capture == sm_front::types::CaptureMode::Borrow && record_path.is_some() {
+                        Some(lowered_locals.fresh_activation_site()?)
+                    } else {
+                        None
+                    };
                 out.push(IrInstr::StoreVar {
                     name: lowered_locals.bind(arena, target)?,
                     src: reg,
+                    activation_site,
                 });
                 if capture == sm_front::types::CaptureMode::Borrow {
                     if let Some(record_path) = record_path {
                         ownership_events.push(OwnershipPathEvent {
                             kind: OwnershipPathEventKind::Borrow,
                             path: record_path.field(item.field),
+                            activation_site,
                         });
                     }
                 }
@@ -5087,12 +5267,19 @@ fn bind_let_else_record_items(
                 name: target,
                 capture,
             } => {
-                deferred_binds.push((target, reg, field.ty.clone()));
+                let activation_site =
+                    if capture == sm_front::types::CaptureMode::Borrow && record_path.is_some() {
+                        Some(lowered_locals.fresh_activation_site()?)
+                    } else {
+                        None
+                    };
+                deferred_binds.push((target, reg, field.ty.clone(), activation_site));
                 if capture == sm_front::types::CaptureMode::Borrow {
                     if let Some(record_path) = record_path {
                         ownership_events.push(OwnershipPathEvent {
                             kind: OwnershipPathEventKind::Borrow,
                             path: record_path.field(item.field),
+                            activation_site,
                         });
                     }
                 }
@@ -5157,11 +5344,12 @@ fn bind_let_else_record_items(
                 .to_string(),
         });
     }
-    for (name, reg, item_ty) in deferred_binds {
+    for (name, reg, item_ty, activation_site) in deferred_binds {
         env.insert(name, item_ty);
         out.push(IrInstr::StoreVar {
             name: lowered_locals.bind(arena, name)?,
             src: reg,
+            activation_site,
         });
     }
     Ok(())
@@ -5238,10 +5426,12 @@ fn assign_tuple_items(
         out.push(IrInstr::StoreVar {
             name: lowered_locals.resolve(arena, *name)?,
             src: reg,
+            activation_site: None,
         });
         ownership_events.push(OwnershipPathEvent {
             kind: OwnershipPathEventKind::Write,
             path: AccessPath::new(lowered_locals.resolve(arena, *name)?),
+            activation_site: None,
         });
     }
     Ok(())
@@ -5291,6 +5481,7 @@ fn lower_for_range_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: current_name.clone(),
         src: start_reg,
+        activation_site: None,
     });
 
     let test_label = format!("for_range_{}_test", id);
@@ -5356,6 +5547,7 @@ fn lower_for_range_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: loop_name,
         src: current_reg,
+        activation_site: None,
     });
     for stmt in body {
         lower_stmt(
@@ -5400,6 +5592,7 @@ fn lower_for_range_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: current_name,
         src: next_reg,
+        activation_site: None,
     });
     ctx.instrs.push(IrInstr::Jmp { label: test_label });
     ctx.instrs.push(IrInstr::Label { name: end_label });
@@ -5709,6 +5902,7 @@ fn lower_for_sequence_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: index_name.clone(),
         src: zero_reg,
+        activation_site: None,
     });
     ctx.instrs.push(IrInstr::SequenceLen {
         dst: len_reg,
@@ -5753,6 +5947,7 @@ fn lower_for_sequence_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: loop_name,
         src: item_reg,
+        activation_site: None,
     });
     for stmt in body {
         lower_stmt(
@@ -5781,6 +5976,7 @@ fn lower_for_sequence_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: index_name,
         src: next_reg,
+        activation_site: None,
     });
     ctx.instrs.push(IrInstr::Jmp { label: test_label });
     ctx.instrs.push(IrInstr::Label { name: end_label });
@@ -5824,6 +6020,7 @@ fn lower_for_explicit_iterable_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: index_name.clone(),
         src: zero_reg,
+        activation_site: None,
     });
 
     let test_label = format!("for_each_iter_{}_test", id);
@@ -5875,6 +6072,7 @@ fn lower_for_explicit_iterable_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: loop_name,
         src: item_reg,
+        activation_site: None,
     });
     for stmt in body {
         lower_stmt(
@@ -5903,6 +6101,7 @@ fn lower_for_explicit_iterable_stmt_from_reg(
     ctx.instrs.push(IrInstr::StoreVar {
         name: index_name,
         src: next_index_reg,
+        activation_site: None,
     });
     ctx.instrs.push(IrInstr::Jmp { label: test_label });
     ctx.instrs.push(IrInstr::Label { name: end_label });
@@ -5965,7 +6164,28 @@ fn bind_let_else_tuple_items(
         });
         match item {
             TuplePatternItem::Bind { name, capture } => {
-                deferred_binds.push((*name, *capture, reg, item_ty.clone(), index))
+                let activation_site = if *capture == sm_front::types::CaptureMode::Borrow
+                    && tuple_path.is_some()
+                    && (!tuple_path.is_some_and(SequenceOwnershipPath::is_dynamic_fallback)
+                        || !emitted_dynamic_root)
+                {
+                    Some(lowered_locals.fresh_activation_site()?)
+                } else {
+                    None
+                };
+                if activation_site.is_some()
+                    && tuple_path.is_some_and(SequenceOwnershipPath::is_dynamic_fallback)
+                {
+                    emitted_dynamic_root = true;
+                }
+                deferred_binds.push((
+                    *name,
+                    *capture,
+                    reg,
+                    item_ty.clone(),
+                    index,
+                    activation_site,
+                ))
             }
             TuplePatternItem::Discard => {}
             TuplePatternItem::QuadLiteral(pat) => {
@@ -6028,26 +6248,28 @@ fn bind_let_else_tuple_items(
         }
     }
 
-    for (name, capture, reg, item_ty, index) in deferred_binds {
+    for (name, capture, reg, item_ty, index, activation_site) in deferred_binds {
         env.insert(name, item_ty);
         out.push(IrInstr::StoreVar {
             name: lowered_locals.bind(arena, name)?,
             src: reg,
+            activation_site,
         });
         if capture == sm_front::types::CaptureMode::Borrow {
             if let Some(tuple_path) = tuple_path {
                 if tuple_path.is_dynamic_fallback() {
-                    if !emitted_dynamic_root {
+                    if let Some(activation_site) = activation_site {
                         ownership_events.push(OwnershipPathEvent {
                             kind: OwnershipPathEventKind::Borrow,
                             path: tuple_path.as_path().clone(),
+                            activation_site: Some(activation_site),
                         });
-                        emitted_dynamic_root = true;
                     }
                 } else {
                     ownership_events.push(OwnershipPathEvent {
                         kind: OwnershipPathEventKind::Borrow,
                         path: tuple_path.as_path().tuple_index(index),
+                        activation_site,
                     });
                 }
             }
@@ -6100,6 +6322,7 @@ fn lower_stmt(
             ctx.instrs.push(IrInstr::StoreVar {
                 name: ctx.lowered_locals.bind(arena, *name)?,
                 src: reg,
+                activation_site: None,
             });
             Ok(())
         }
@@ -6144,6 +6367,7 @@ fn lower_stmt(
             ctx.instrs.push(IrInstr::StoreVar {
                 name: ctx.lowered_locals.bind(arena, *name)?,
                 src: reg,
+                activation_site: None,
             });
             Ok(())
         }
@@ -6414,10 +6638,12 @@ fn lower_stmt(
             ctx.instrs.push(IrInstr::StoreVar {
                 name: ctx.lowered_locals.resolve(arena, *name)?,
                 src: reg,
+                activation_site: None,
             });
             ctx.ownership_events.push(OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
                 path: AccessPath::new(ctx.lowered_locals.resolve(arena, *name)?),
+                activation_site: None,
             });
             Ok(())
         }
@@ -6586,6 +6812,7 @@ fn lower_stmt(
             ctx.instrs.push(IrInstr::StoreVar {
                 name: result_name,
                 src: reg,
+                activation_site: None,
             });
             ctx.instrs.push(IrInstr::Jmp { label: end_label });
             Ok(())
@@ -7310,6 +7537,7 @@ fn lower_value_block_expr(
                 out.push(IrInstr::StoreVar {
                     name: lowered_locals.bind(arena, *name)?,
                     src: reg,
+                    activation_site: None,
                 });
             }
             Stmt::Let {
@@ -7353,6 +7581,7 @@ fn lower_value_block_expr(
                 out.push(IrInstr::StoreVar {
                     name: lowered_locals.bind(arena, *name)?,
                     src: reg,
+                    activation_site: None,
                 });
             }
             Stmt::LetTuple { items, ty, value } => {
@@ -8090,6 +8319,7 @@ fn lower_adt_match_bindings(
         out.push(IrInstr::StoreVar {
             name: lowered_locals.bind(arena, binding.name)?,
             src: reg,
+            activation_site: None,
         });
         env.insert(binding.name, binding.ty.clone());
     }
@@ -8235,6 +8465,7 @@ fn lower_ensures_clauses(
         out.push(IrInstr::StoreVar {
             name: "result".to_string(),
             src: result_reg,
+            activation_site: None,
         });
     }
 
@@ -8307,6 +8538,7 @@ fn lower_invariant_clauses(
             out.push(IrInstr::StoreVar {
                 name: "result".to_string(),
                 src: result_reg,
+                activation_site: None,
             });
         }
     }
@@ -9368,6 +9600,7 @@ fn lower_match_expr(
                 out.push(IrInstr::StoreVar {
                     name: result_name.clone(),
                     src: arm_reg,
+                    activation_site: None,
                 });
                 out.push(IrInstr::Jmp {
                     label: end_label.clone(),
@@ -9471,6 +9704,7 @@ fn lower_match_expr(
                 out.push(IrInstr::StoreVar {
                     name: result_name.clone(),
                     src: arm_reg,
+                    activation_site: None,
                 });
                 out.push(IrInstr::Jmp {
                     label: end_label.clone(),
@@ -9605,6 +9839,7 @@ fn lower_match_expr(
                 out.push(IrInstr::StoreVar {
                     name: result_name.clone(),
                     src: arm_reg,
+                    activation_site: None,
                 });
                 out.push(IrInstr::Jmp {
                     label: end_label.clone(),
@@ -9656,6 +9891,7 @@ fn lower_match_expr(
         out.push(IrInstr::StoreVar {
             name: result_name.clone(),
             src: default_reg,
+            activation_site: None,
         });
         out.push(IrInstr::Jmp {
             label: end_label.clone(),
@@ -10477,6 +10713,7 @@ fn lower_expr_stmt_with_parts(
 struct LoweredLocalEnv {
     scopes: Vec<BTreeMap<SymbolId, String>>,
     next_id: u32,
+    next_activation_site: u32,
 }
 
 impl LoweredLocalEnv {
@@ -10484,7 +10721,20 @@ impl LoweredLocalEnv {
         Self {
             scopes: vec![BTreeMap::new()],
             next_id: 0,
+            next_activation_site: 0,
         }
+    }
+
+    fn fresh_activation_site(&mut self) -> Result<ActivationSiteId, FrontendError> {
+        let id = self.next_activation_site;
+        self.next_activation_site =
+            self.next_activation_site
+                .checked_add(1)
+                .ok_or(FrontendError {
+                    pos: 0,
+                    message: "activation site id exceeds v0 limit".to_string(),
+                })?;
+        Ok(ActivationSiteId(id))
     }
 
     fn push_scope(&mut self) {
@@ -10837,6 +11087,7 @@ fn append_record_update_write_events_from_expr(
                     ownership_events.push(OwnershipPathEvent {
                         kind: OwnershipPathEventKind::Write,
                         path: record_path.field(field.name),
+                        activation_site: None,
                     });
                 }
             }
@@ -10988,6 +11239,7 @@ fn append_record_update_write_events_from_expr(
                                 ownership_events.push(OwnershipPathEvent {
                                     kind: OwnershipPathEventKind::Borrow,
                                     path: path.as_path().clone(),
+                                    activation_site: None,
                                 });
                                 borrowed_dynamic_scrutinee_root = true;
                             }
@@ -11003,6 +11255,7 @@ fn append_record_update_write_events_from_expr(
                                         path: path
                                             .as_path()
                                             .adt_payload(adt_pat.variant_name, idx as u16),
+                                        activation_site: None,
                                     });
                                 }
                             }
@@ -11465,7 +11718,7 @@ mod opt_tests {
             ownership_events: Vec::new(),
             params: Vec::new(),
         };
-        let (_, max_rev) = emit_semcode_function(&func, false, false, 19).expect("emit");
+        let (_, max_rev, _) = emit_semcode_function(&func, false, false, 19).expect("emit");
         assert_eq!(max_rev, 19);
     }
 
@@ -11480,7 +11733,7 @@ mod opt_tests {
             ownership_events: Vec::new(),
             params: Vec::new(),
         };
-        let (_, max_rev) = emit_semcode_function(&func, false, false, 1).expect("emit");
+        let (_, max_rev, _) = emit_semcode_function(&func, false, false, 1).expect("emit");
         assert_eq!(max_rev, 1);
     }
 
@@ -11646,6 +11899,595 @@ mod opt_tests {
             ),
             1 => matches.into_iter().next().unwrap().to_string(),
             _ => panic!("ambiguous lowered local key for '{source_name}': {matches:?}"),
+        }
+    }
+
+    fn assert_borrow_event_shapes(func: &IrFunction, expected_paths: &[AccessPath]) {
+        assert_eq!(func.ownership_events.len(), expected_paths.len());
+        for (event, expected_path) in func.ownership_events.iter().zip(expected_paths) {
+            assert_eq!(event.kind, OwnershipPathEventKind::Borrow);
+            assert_eq!(&event.path, expected_path);
+        }
+    }
+
+    fn assert_borrow_activation_sites_match_store_vars(func: &IrFunction) {
+        let borrow_sites: Vec<ActivationSiteId> = func
+            .ownership_events
+            .iter()
+            .map(|event| {
+                assert_eq!(event.kind, OwnershipPathEventKind::Borrow);
+                event
+                    .activation_site
+                    .expect("Tuple/Record Borrow must carry an activation site")
+            })
+            .collect();
+        let store_sites: Vec<ActivationSiteId> = func
+            .instrs
+            .iter()
+            .filter_map(|instr| match instr {
+                IrInstr::StoreVar {
+                    activation_site: Some(site),
+                    ..
+                } => Some(*site),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(borrow_sites.len(), store_sites.len());
+        for site in &borrow_sites {
+            assert_eq!(
+                store_sites
+                    .iter()
+                    .filter(|candidate| *candidate == site)
+                    .count(),
+                1,
+                "Borrow activation site must identify exactly one introduction StoreVar"
+            );
+        }
+        for site in &store_sites {
+            assert_eq!(
+                borrow_sites
+                    .iter()
+                    .filter(|candidate| *candidate == site)
+                    .count(),
+                1,
+                "annotated StoreVar must identify exactly one Borrow event"
+            );
+        }
+    }
+
+    // #1726 Checkpoint C, real end-to-end proof (not a synthetic IrModule
+    // fixture): the exact counterexample that forced the pivot away from
+    // target-symbol activation, compiled through the real production
+    // pipeline. `return;` makes the following `let (ref left, _) = pair;`
+    // genuinely unreachable, so O1's cleanup pass deletes its introducing
+    // StoreVar. Before Checkpoint C this silently left an orphaned Borrow
+    // event pointing at a deleted site; now the paired event is removed
+    // coherently, and O1 compilation must not be rejected for doing so.
+    #[test]
+    fn ssf08_1726_checkpoint_c_unreachable_borrow_introduction_removed_coherently() {
+        let src = r#"
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                return;
+                let (ref left, _): (i32, i32) = pair;
+            }
+        "#;
+        let o0 = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("O0 compiles");
+        let o0_main = o0.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(o0_main.ownership_events.len(), 1);
+        assert_borrow_activation_sites_match_store_vars(o0_main);
+
+        let o1 = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O1)
+            .expect("O1 must accept the coherent removal, not reject it");
+        let o1_main = o1.iter().find(|f| f.name == "main").expect("main");
+        assert!(
+            o1_main.ownership_events.is_empty(),
+            "the unreachable Borrow's paired event must be removed along with its StoreVar, not orphaned: {:?}",
+            o1_main.ownership_events
+        );
+        assert!(
+            o1_main.instrs.iter().all(|i| !matches!(
+                i,
+                IrInstr::StoreVar {
+                    activation_site: Some(_),
+                    ..
+                }
+            )),
+            "the unreachable annotated StoreVar itself must be gone, though `pair`'s own (reachable) StoreVar legitimately survives: {:?}",
+            o1_main.instrs
+        );
+    }
+
+    /// Returns the exact opcode byte the VM would read at `anchor`, by
+    /// decoding a REAL, fully emitted artifact (not a hand-computed offset).
+    /// `instr_start_offset` and `code_slice` come from `sm-format`'s own
+    /// decoder, the same authority `sm-vm`'s `Frame.pc`/`instr_start`
+    /// dispatch already trusts.
+    fn opcode_byte_at_anchor(
+        decoded_main: &crate::semcode_decode::DecodedFunctionEnvelope,
+        anchor: ExecutableAnchor,
+    ) -> u8 {
+        decoded_main.code_slice[decoded_main.instr_start_offset + anchor.0 as usize]
+    }
+
+    // #1726 Checkpoint D1, test 1: exact anchor resolution. The resolved
+    // ExecutableAnchor for a real tuple-Borrow program must point at the
+    // real, decoded StoreVar opcode byte -- verified against sm-format's own
+    // decoder on a fully emitted artifact, not merely at the ActivationSiteId
+    // bookkeeping level.
+    #[test]
+    fn ssf08_1726_checkpoint_d1_activation_site_resolves_to_real_executable_anchor() {
+        let src = r#"
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                let (ref left, _): (i32, i32) = pair;
+                let _ = left;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, resolved) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
+        assert_eq!(resolved.len(), 1);
+        let anchor = match resolved[0] {
+            BorrowActivationResolved::StoreVarSite(anchor) => anchor,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            opcode_byte_at_anchor(decoded_main, anchor),
+            Opcode::StoreVar.byte(),
+            "ExecutableAnchor must point at the real, decoded StoreVar opcode byte, not a guessed position"
+        );
+    }
+
+    // Test 2: reassignments remain irrelevant. Only the introduction gets
+    // Some(site); the reassignment's own StoreVar is None and never
+    // participates in the site->anchor map.
+    #[test]
+    fn ssf08_1726_checkpoint_d1_reassignment_does_not_affect_activation_site_mapping() {
+        let src = r#"
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                let (ref left, _): (i32, i32) = pair;
+                let _ = left;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let annotated: Vec<_> = main
+            .instrs
+            .iter()
+            .filter_map(|i| match i {
+                IrInstr::StoreVar {
+                    name,
+                    activation_site,
+                    ..
+                } => Some((name.as_str(), *activation_site)),
+                _ => None,
+            })
+            .collect();
+        let left_stores: Vec<_> = annotated
+            .iter()
+            .filter(|(name, _)| name.ends_with("_left"))
+            .collect();
+        // Only bind_tuple_items' single introduction StoreVar(left) exists in
+        // this source (no reassignment of `left` itself here — the frozen
+        // dual-StoreVar-per-target counterexample lives in
+        // `borrow_target_identity_proof.rs`); this test asserts the simpler,
+        // directly-relevant fact: the one StoreVar(left) that DOES exist is
+        // the annotated introduction, not a bare `None`.
+        assert_eq!(left_stores.len(), 1);
+        assert!(left_stores[0].1.is_some());
+        let (_, _, resolved) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
+        assert_eq!(resolved.len(), 1);
+        assert!(matches!(
+            resolved[0],
+            BorrowActivationResolved::StoreVarSite(_)
+        ));
+    }
+
+    // Test 3: multiple independent introductions resolve to distinct anchors.
+    #[test]
+    fn ssf08_1726_checkpoint_d1_distinct_sites_resolve_to_distinct_anchors() {
+        let src = r#"
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                let (ref a, ref b): (i32, i32) = pair;
+                let _ = a;
+                let _ = b;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, resolved) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
+        assert_eq!(resolved.len(), 2);
+        let anchors: Vec<ExecutableAnchor> = resolved
+            .iter()
+            .map(|r| match r {
+                BorrowActivationResolved::StoreVarSite(a) => *a,
+                other => panic!("expected StoreVarSite, got {other:?}"),
+            })
+            .collect();
+        assert_ne!(
+            anchors[0], anchors[1],
+            "two independent introductions must not collapse onto one anchor"
+        );
+    }
+
+    // Test 4: shadowing. Two lexically distinct bindings spelled identically
+    // in separate, non-overlapping scopes must resolve to distinct anchors,
+    // not collapse onto one shared site.
+    #[test]
+    fn ssf08_1726_checkpoint_d1_shadowed_spelling_resolves_to_distinct_anchors() {
+        let src = r#"
+            fn main() {
+                let p1: (i32, i32) = (1, 2);
+                let p2: (i32, i32) = (3, 4);
+                if true {
+                    let (ref x, _): (i32, i32) = p1;
+                    let _ = x;
+                }
+                if true {
+                    let (ref x, _): (i32, i32) = p2;
+                    let _ = x;
+                }
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, resolved) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
+        assert_eq!(resolved.len(), 2);
+        let anchors: Vec<ExecutableAnchor> = resolved
+            .iter()
+            .map(|r| match r {
+                BorrowActivationResolved::StoreVarSite(a) => *a,
+                other => panic!("expected StoreVarSite, got {other:?}"),
+            })
+            .collect();
+        assert_ne!(
+            anchors[0], anchors[1],
+            "shadowed same-spelling bindings in separate scopes must not share an anchor"
+        );
+    }
+
+    // Test 5: static presence is not dynamic activation. A Borrow inside an
+    // `if` branch resolves to a real, fixed static anchor in the emitted
+    // code regardless of the branch condition's value — D1 only proves the
+    // anchor exists in the artifact, never that the VM will visit it at
+    // runtime (that is Checkpoint D3's concern).
+    #[test]
+    fn ssf08_1726_checkpoint_d1_branch_borrow_has_a_static_anchor_independent_of_condition() {
+        let src = r#"
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                let cond: bool = false;
+                if cond {
+                    let (ref left, _): (i32, i32) = pair;
+                    let _ = left;
+                }
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, resolved) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
+        assert_eq!(
+            resolved.len(),
+            1,
+            "the branch's Borrow event still resolves to a real static anchor \
+             even though `cond` is a compile-time-unknowable-at-D1 false literal"
+        );
+        assert!(matches!(
+            resolved[0],
+            BorrowActivationResolved::StoreVarSite(_)
+        ));
+    }
+
+    // Test 6: the ADT/Option/Result producer stays FrameEntry (D1 does not
+    // touch it) and V19-era emission is unaffected.
+    #[test]
+    fn ssf08_1726_checkpoint_d1_adt_producer_stays_frame_entry() {
+        let src = r#"
+            fn main() {
+                let opt: Option(i32) = Option::Some(1);
+                let result: i32 = match opt {
+                    Option::Some(ref value) => { value }
+                    Option::None => { 0 }
+                };
+                let _ = result;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, resolved) =
+            emit_semcode_function(main, false, false, 1).expect("emit resolves anchors");
+        assert_eq!(resolved.len(), 1);
+        assert!(matches!(resolved[0], BorrowActivationResolved::FrameEntry));
+    }
+
+    // #1726 Checkpoint D1.5, code-backed header-revision-floor proof (no new
+    // wire feature implemented — proves the EXISTING composition mechanism
+    // that a future ownership-anchor floor would plug into).
+    //
+    // `emit_semcode` (this file, ~line 1296) computes `opcode_driven_magic`
+    // via a content-driven if/else-if cascade (has_v18_qtruth_instr down to
+    // has_v1_math_instr, falling back to MAGIC0), THEN applies SIG0's floor
+    // unconditionally: `if opcode_driven_header.rev < SEMCODE_SIGNATURE_MIN_REVISION
+    // { MAGIC19 } else { opcode_driven_magic }`. Because SEMCODE_SIGNATURE_MIN_REVISION
+    // (HEADER_V19.rev == 20) exceeds every opcode-driven tier's own rev today
+    // (the highest, HEADER_V18, is rev 19), this comparison — a REV NUMBER
+    // comparison, not per-feature branching — already IS this codebase's
+    // `max(opcode_floor, signature_floor)`, just written as a two-way if/else
+    // rather than a literal `.max()` call.
+    //
+    // This test proves the "baseline" and "SIG0-only" matrix rows are
+    // observably IDENTICAL today (SIG0's floor is unconditional, so even the
+    // most trivial program is promoted to SEMCOD19): a real, decoded fact,
+    // not an assumption.
+    //
+    // "ownership-only" and "both" rows are NOT tested here — testing them
+    // would require implementing the new wire feature, which D1.5 does not
+    // authorize. Proof instead: a hypothetical `has_v20_ownership_execution_anchor`
+    // predicate, inserted as a new highest-priority `if` branch above
+    // `has_v18_qtruth_instr` (mirroring exactly how V1..V18 are each their own
+    // branch), would set `opcode_driven_magic = MAGIC20` (rev 21) whenever any
+    // function's ownership_events actually carries an execution-anchor Borrow.
+    // The existing downstream `if opcode_driven_header.rev < SEMCODE_SIGNATURE_MIN_REVISION`
+    // check would then evaluate false (21 is not < 20) and correctly KEEP
+    // MAGIC20 — the SIG0-floor logic requires zero changes to compose
+    // correctly with a higher third floor, because it compares rev numbers,
+    // not feature identities. "Both" (ownership content present) already
+    // reduces to "ownership-only" under this scheme, since 21 > 20
+    // unconditionally; "ownership-only" and "both" are the same composed
+    // outcome by construction, exactly as "baseline" and "SIG0-only" are the
+    // same outcome today.
+    #[test]
+    fn ssf08_1726_checkpoint_d1_5_signature_floor_promotes_even_the_most_trivial_baseline() {
+        let src = r#"
+            fn main() {
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("trivial baseline should emit");
+        assert_eq!(
+            &bytes[0..8],
+            b"SEMCOD19",
+            "baseline and SIG0-only rows are observably identical today: SIG0's floor is \
+             unconditional, so even a program using no promoting opcode at all is emitted \
+             under HEADER_V19 (rev 20), not HEADER_V0"
+        );
+    }
+
+    // #1726 Checkpoint D2a, real end-to-end proof: a program whose Borrow
+    // event resolved a `StoreVarSite` (Checkpoint D1) is promoted to
+    // HEADER_V20 (rev 21) and its OWN0 bytes decode back to the exact
+    // resolved anchor -- through the REAL compile -> emit -> decode pipeline,
+    // not a hand-built fixture.
+    #[test]
+    fn ssf08_1726_checkpoint_d2a_tuple_borrow_round_trips_through_rev21_wire() {
+        let src = r#"
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                let (ref left, _): (i32, i32) = pair;
+                let _ = left;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, resolved) =
+            emit_semcode_function(main, false, false, SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION)
+                .expect("emit");
+        let anchor = match resolved[0] {
+            BorrowActivationResolved::StoreVarSite(anchor) => anchor,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        assert_eq!(
+            &bytes[0..8],
+            b"SEMCOD20",
+            "a site-backed Borrow event must promote the artifact to HEADER_V20 (rev 21)"
+        );
+        let (header, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes)
+            .expect("rev21 artifact must decode");
+        assert_eq!(header.rev, 21);
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(decoded_main.borrowed_paths.len(), 1);
+        assert_eq!(
+            decoded_main.borrowed_paths[0].activation,
+            Some(crate::semcode_decode::DecodedBorrowActivation::StoreVarSite(anchor.0)),
+            "the decoded wire anchor must be the exact same value D1 resolved, not recomputed"
+        );
+        assert_eq!(
+            opcode_byte_at_anchor(decoded_main, anchor),
+            Opcode::StoreVar.byte()
+        );
+    }
+
+    // Mixed artifact: an ADT/Option/Result Borrow (FrameEntry) alongside a
+    // Tuple/Record Borrow (StoreVarSite) in the same rev21 program. Because
+    // header revision is artifact-global, the ADT event's FrameEntry mode
+    // must still be explicitly encoded once the artifact is rev21 -- it does
+    // not stay in the legacy shape just because its own producer didn't change.
+    #[test]
+    fn ssf08_1726_checkpoint_d2a_mixed_frame_entry_and_store_var_site_in_one_rev21_artifact() {
+        let src = r#"
+            fn main() {
+                let opt: Option(i32) = Option::Some(1);
+                let result: i32 = match opt {
+                    Option::Some(ref value) => { value }
+                    Option::None => { 0 }
+                };
+                let pair: (i32, i32) = (1, 2);
+                let (ref left, _): (i32, i32) = pair;
+                let _ = result;
+                let _ = left;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        assert_eq!(&bytes[0..8], b"SEMCOD20");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(decoded_main.borrowed_paths.len(), 2);
+        assert_eq!(
+            decoded_main.borrowed_paths[0].activation,
+            Some(crate::semcode_decode::DecodedBorrowActivation::FrameEntry),
+            "the ADT producer's Borrow event must explicitly encode FrameEntry under rev21, \
+             not silently keep a legacy shape"
+        );
+        assert!(matches!(
+            decoded_main.borrowed_paths[1].activation,
+            Some(crate::semcode_decode::DecodedBorrowActivation::StoreVarSite(_))
+        ));
+    }
+
+    // #1726 Checkpoint D2b.5 reconciliation (see the design doc's
+    // "Deduplicated dynamic-root co-execution proof" section, which this
+    // test now locks): does any of the 4 frozen producers' own dynamic-root
+    // dedup branch (`bind_tuple_items` / `bind_record_items` /
+    // `bind_let_else_tuple_items` / `bind_let_else_record_items`, all of
+    // which special-case `SequenceOwnershipPath::is_dynamic_fallback()`
+    // under `ref` capture to emit at most one Borrow event/anchor for the
+    // whole destructure) ever actually fire for a Borrow event through the
+    // currently-admitted frontend? Empirically and structurally: no, for all
+    // four shapes.
+    //
+    // Structural argument, not just four negative witnesses generalized
+    // without justification: `SequenceOwnershipPath::DynamicFallback` has
+    // exactly one syntactic root cause anywhere in `sm-ir` -- a
+    // `Expr::SequenceIndex` link (at any depth) whose index is not a
+    // non-negative integer literal (`sequence_access_path_from_expr`'s only
+    // two match arms are `Expr::Var` and `Expr::SequenceIndex`; every other
+    // expression shape returns `Ok(None)`, never `DynamicFallback`).
+    // `sm-front::typecheck::expr_access_path` classifies the identical
+    // condition identically (a `SequenceIndex` resolves only for a literal
+    // non-negative index; everything else, `None`). `apply_arm_pattern_capture`
+    // (`sm-front/src/typecheck.rs`, SSF-08 Lane 1, #1661/#1663 -- a general
+    // ownership-capture safety rule that predates and is independent of
+    // #1726) rejects a capturing pattern whenever its scrutinee is
+    // projection-shaped (`SequenceIndex`/`RecordField`) and
+    // `expr_access_path` cannot resolve it. This one function is called for
+    // every one of the four producers' own statement forms
+    // (`Stmt::LetTuple`, `Stmt::LetRecord`, and their let-else counterparts
+    // all call it directly, confirmed by grep, not assumed) - so the single
+    // syntactic cause of `DynamicFallback` and the condition this pre-
+    // existing gate rejects are the same condition, checked before any of
+    // these four lowering functions ever run. There is no second route to
+    // `DynamicFallback` this gate could fail to cover.
+    //
+    // This reconciles, and does not contradict, the earlier
+    // `test_deduplicated_first_site_is_required_for_every_later_ref`
+    // model-level proof (`tests/borrow_site_design_model.py`): that proof is
+    // scoped to lowering-control-flow safety *if* the branch is ever
+    // exercised (by any caller, including a hypothetical future one) -- its
+    // own text says so explicitly ("This is not made safe by the type
+    // checker; the safety obligation is a lowering control-flow property").
+    // It never claimed today's frontend admits a program that reaches it;
+    // this test is the first direct check of that separate, frontend-
+    // admission question, and the design doc's own "the N:1 source case is
+    // reachable" line was imprecise on exactly this distinction. The safety
+    // proof itself is unaffected and remains the invariant `bind_tuple_items`
+    // et al. must preserve if any future frontend change ever makes this
+    // path reachable again.
+    //
+    // Conclusion: the dynamic-fallback dedup branch in all 4 producers is
+    // defensive/dead code for Borrow events under today's admitted source
+    // surface. There is currently no admitted program that could ever emit
+    // two Borrow events (or, since dedup already collapses them, even one
+    // Borrow event representing more than one bound name) sharing a dynamic
+    // root. D2b's unconditional duplicate-anchor rejection therefore has no
+    // live producer counterexample to reconcile against.
+    #[test]
+    fn ssf08_1726_checkpoint_d2b_dynamic_index_ref_capture_is_rejected_before_any_dedup_branch_runs(
+    ) {
+        let cases = [
+            (
+                "plain tuple",
+                r#"
+                    fn main() {
+                        let pairs: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+                        let idx: i32 = 0;
+                        let (ref a, _): (i32, i32) = pairs[idx];
+                        let _ = a;
+                        return;
+                    }
+                "#,
+            ),
+            (
+                "let-else tuple",
+                r#"
+                    fn main() {
+                        let pairs: Sequence((i32, quad)) = [(1, T), (3, F)];
+                        let idx: i32 = 0;
+                        let (ref a, T): (i32, quad) = pairs[idx] else return;
+                        let _ = a;
+                        return;
+                    }
+                "#,
+            ),
+            (
+                "record",
+                r#"
+                    record R { value: i32, flag: quad, }
+                    fn main() {
+                        let records: Sequence(R) = [R { value: 1, flag: T }, R { value: 2, flag: F }];
+                        let idx: i32 = 0;
+                        let R { value: ref a, flag: _ } = records[idx];
+                        let _ = a;
+                        return;
+                    }
+                "#,
+            ),
+            (
+                "let-else record",
+                r#"
+                    record R { value: i32, flag: quad, }
+                    fn main() {
+                        let records: Sequence(R) = [R { value: 1, flag: T }, R { value: 2, flag: F }];
+                        let idx: i32 = 0;
+                        let R { value: ref a, flag: T } = records[idx] else return;
+                        let _ = a;
+                        return;
+                    }
+                "#,
+            ),
+        ];
+        for (shape, src) in cases {
+            let err =
+                compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+                    .expect_err(&format!(
+                    "{shape}: dynamic-index ref capture is expected to be rejected pre-lowering"
+                ));
+            assert!(
+                err.message.contains("not an admitted static path"),
+                "{shape}: unexpected rejection reason: {}",
+                err.message
+            );
         }
     }
 
@@ -12943,6 +13785,7 @@ mod opt_tests {
             func.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&func, "e"))
                     .adt_payload(variant.name, 0),
             }]
@@ -12992,6 +13835,7 @@ mod opt_tests {
             func.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&func, "opt"))
                     .adt_payload(some_name, 0),
             }]
@@ -13037,6 +13881,7 @@ mod opt_tests {
             func.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&func, "res")).adt_payload(ok_name, 0),
             }]
         );
@@ -13063,6 +13908,7 @@ mod opt_tests {
             func.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&func, "res")).adt_payload(err_name, 0),
             }]
         );
@@ -13081,13 +13927,11 @@ mod opt_tests {
         "#;
 
         let (_, main) = lower_single_function_with_program(src, "main");
-        assert_eq!(
-            main.ownership_events,
-            vec![OwnershipPathEvent {
-                kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(0),
-            }]
+        assert_borrow_event_shapes(
+            &main,
+            &[AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(0)],
         );
+        assert_borrow_activation_sites_match_store_vars(&main);
     }
 
     #[test]
@@ -13103,19 +13947,14 @@ mod opt_tests {
         "#;
 
         let (_, main) = lower_single_function_with_program(src, "main");
-        assert_eq!(
-            main.ownership_events,
-            vec![
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(0),
-                },
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(1),
-                },
-            ]
+        assert_borrow_event_shapes(
+            &main,
+            &[
+                AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(0),
+                AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(1),
+            ],
         );
+        assert_borrow_activation_sites_match_store_vars(&main);
     }
 
     #[test]
@@ -13162,10 +14001,12 @@ mod opt_tests {
             vec![
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
+                    activation_site: None,
                     path: AccessPath::new(lowered_local_key_for(&main, "count")),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
+                    activation_site: None,
                     path: AccessPath::new(lowered_local_key_for(&main, "ready")),
                 },
             ]
@@ -13952,13 +14793,11 @@ mod opt_tests {
 
         let (program, main) = lower_single_function_with_program(src, "main");
         let camera_field = program.records[0].fields[0].name;
-        assert_eq!(
-            main.ownership_events,
-            vec![OwnershipPathEvent {
-                kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field),
-            }]
+        assert_borrow_event_shapes(
+            &main,
+            &[AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field)],
         );
+        assert_borrow_activation_sites_match_store_vars(&main);
     }
 
     #[test]
@@ -13983,6 +14822,7 @@ mod opt_tests {
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
@@ -14006,19 +14846,14 @@ mod opt_tests {
         let (program, main) = lower_single_function_with_program(src, "main");
         let camera_field = program.records[0].fields[0].name;
         let quality_field = program.records[0].fields[1].name;
-        assert_eq!(
-            main.ownership_events,
-            vec![
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field),
-                },
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
-                },
-            ]
+        assert_borrow_event_shapes(
+            &main,
+            &[
+                AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field),
+                AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+            ],
         );
+        assert_borrow_activation_sites_match_store_vars(&main);
     }
 
     #[test]
@@ -14045,10 +14880,12 @@ mod opt_tests {
             vec![
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
+                    activation_site: None,
                     path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
+                    activation_site: None,
                     path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field),
                 },
             ]
@@ -14066,23 +14903,18 @@ mod opt_tests {
         "#;
 
         let (_, main) = lower_single_function_with_program(src, "main");
-        assert_eq!(
-            main.ownership_events,
-            vec![
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
-                        .sequence_index_static(0)
-                        .tuple_index(0),
-                },
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
-                        .sequence_index_static(0)
-                        .tuple_index(1),
-                },
-            ]
+        assert_borrow_event_shapes(
+            &main,
+            &[
+                AccessPath::new(lowered_local_key_for(&main, "seq"))
+                    .sequence_index_static(0)
+                    .tuple_index(0),
+                AccessPath::new(lowered_local_key_for(&main, "seq"))
+                    .sequence_index_static(0)
+                    .tuple_index(1),
+            ],
         );
+        assert_borrow_activation_sites_match_store_vars(&main);
     }
 
     #[test]
@@ -14132,35 +14964,24 @@ mod opt_tests {
         "#;
 
         let (_, main) = lower_single_function_with_program(src, "main");
-        assert_eq!(
-            main.ownership_events,
-            vec![
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
-                        .sequence_index_static(0)
-                        .tuple_index(0),
-                },
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
-                        .sequence_index_static(0)
-                        .tuple_index(1),
-                },
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
-                        .sequence_index_static(1)
-                        .tuple_index(0),
-                },
-                OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
-                        .sequence_index_static(1)
-                        .tuple_index(1),
-                },
-            ]
+        assert_borrow_event_shapes(
+            &main,
+            &[
+                AccessPath::new(lowered_local_key_for(&main, "seq"))
+                    .sequence_index_static(0)
+                    .tuple_index(0),
+                AccessPath::new(lowered_local_key_for(&main, "seq"))
+                    .sequence_index_static(0)
+                    .tuple_index(1),
+                AccessPath::new(lowered_local_key_for(&main, "seq"))
+                    .sequence_index_static(1)
+                    .tuple_index(0),
+                AccessPath::new(lowered_local_key_for(&main, "seq"))
+                    .sequence_index_static(1)
+                    .tuple_index(1),
+            ],
         );
+        assert_borrow_activation_sites_match_store_vars(&main);
     }
 
     #[test]
@@ -14362,7 +15183,7 @@ mod opt_tests {
             ownership_events: Vec::new(),
             params: Vec::new(),
         }];
-        let report = run_default_opt_passes(&mut ir);
+        let report = run_default_opt_passes(&mut ir).expect("valid fixture, no activation sites");
         assert!(report.changed);
         assert!(matches!(ir[0].instrs[0], IrInstr::Label { .. }));
         assert!(ir[0]
@@ -14383,7 +15204,7 @@ mod opt_tests {
             ownership_events: Vec::new(),
             params: Vec::new(),
         }];
-        let report = run_default_opt_passes(&mut ir);
+        let report = run_default_opt_passes(&mut ir).expect("valid fixture, no activation sites");
         assert!(report.changed);
         let loads = ir[0]
             .instrs
@@ -14422,7 +15243,8 @@ mod opt_tests {
             params: Vec::new(),
         };
         let mut ir = vec![f];
-        let report = crate::passes::run_default_opt_passes(&mut ir);
+        let report = crate::passes::run_default_opt_passes(&mut ir)
+            .expect("valid fixture, no activation sites");
         assert!(report.changed);
         let f = &ir[0];
         assert!(f
@@ -14750,13 +15572,11 @@ mod opt_tests {
         "#;
 
         let (_, main) = lower_single_function_with_program(src, "main");
-        assert_eq!(
-            main.ownership_events,
-            vec![OwnershipPathEvent {
-                kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(lowered_local_key_for(&main, "source")).tuple_index(0),
-            }]
+        assert_borrow_event_shapes(
+            &main,
+            &[AccessPath::new(lowered_local_key_for(&main, "source")).tuple_index(0)],
         );
+        assert_borrow_activation_sites_match_store_vars(&main);
     }
 
     // No `ssf08_1709_nested_value_block_record_borrow_preserves_ownership_event`
@@ -14798,6 +15618,13 @@ mod opt_tests {
                 return;
             }
         "#;
+        // #1891 Checkpoint W2A: the event's own generation has since moved
+        // into `lower_expr_with_expected`'s `Expr::RecordUpdate` arm itself
+        // (co-located with its exact `MakeRecord`), so it now fires as an
+        // unconditional consequence of lowering the value at all - the
+        // #1709 bug class this test guards against (a block-processing arm
+        // silently dropping the event) is structurally unreachable for this
+        // producer today, not merely fixed at this one call site.
 
         let (program, main) = lower_single_function_with_program(src, "main");
         let quality_field = program.records[0].fields[1].name;
@@ -14805,6 +15632,7 @@ mod opt_tests {
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
@@ -14833,13 +15661,11 @@ mod opt_tests {
         "#;
 
         let (_, main) = lower_single_function_with_program(src, "main");
-        assert_eq!(
-            main.ownership_events,
-            vec![OwnershipPathEvent {
-                kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(lowered_local_key_for(&main, "source")).tuple_index(0),
-            }]
+        assert_borrow_event_shapes(
+            &main,
+            &[AccessPath::new(lowered_local_key_for(&main, "source")).tuple_index(0)],
         );
+        assert_borrow_activation_sites_match_store_vars(&main);
     }
 
     #[test]
@@ -14890,13 +15716,17 @@ mod opt_tests {
             .iter()
             .find(|func| func.name.starts_with("__closure_main_"))
             .expect("closure lowering should produce a lifted helper");
-        let expected_event = OwnershipPathEvent {
-            kind: OwnershipPathEventKind::Borrow,
-            path: AccessPath::new(lowered_local_key_for(lifted, "source")).tuple_index(0),
-        };
-        assert_eq!(lifted.ownership_events, vec![expected_event.clone()]);
+        assert_borrow_event_shapes(
+            lifted,
+            &[AccessPath::new(lowered_local_key_for(lifted, "source")).tuple_index(0)],
+        );
+        assert_borrow_activation_sites_match_store_vars(lifted);
         assert!(
-            !lowered.primary.ownership_events.contains(&expected_event),
+            lowered.primary.ownership_events.iter().all(|event| {
+                event.kind != OwnershipPathEventKind::Borrow
+                    || event.path
+                        != AccessPath::new(lowered_local_key_for(lifted, "source")).tuple_index(0)
+            }),
             "closure-body-local ownership event must not leak into the parent function"
         );
     }
@@ -14926,6 +15756,9 @@ mod opt_tests {
                 return;
             }
         "#;
+        // #1891 Checkpoint W2A: see the record-block twin test above - the
+        // event now fires from `lower_expr_with_expected` itself, so this
+        // arm's own "did it call the prescan" question no longer applies.
 
         let (program, main) = lower_single_function_with_program(src, "main");
         let quality_field = program.records[0].fields[1].name;
@@ -14933,6 +15766,7 @@ mod opt_tests {
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
@@ -14961,6 +15795,7 @@ mod opt_tests {
                 return;
             }
         "#;
+        // #1891 Checkpoint W2A: see the record-block twin test above.
 
         let (program, main) = lower_single_function_with_program(src, "main");
         let quality_field = program.records[0].fields[1].name;
@@ -14968,6 +15803,7 @@ mod opt_tests {
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
@@ -14999,6 +15835,7 @@ mod opt_tests {
                 return;
             }
         "#;
+        // #1891 Checkpoint W2A: see the record-block twin test above.
 
         let (program, main) = lower_single_function_with_program(src, "main");
         let quality_field = program.records[0].fields[1].name;
@@ -15006,6 +15843,7 @@ mod opt_tests {
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
@@ -15036,6 +15874,7 @@ mod opt_tests {
                 return;
             }
         "#;
+        // #1891 Checkpoint W2A: see the record-block twin test above.
 
         let (program, main) = lower_single_function_with_program(src, "main");
         let quality_field = program.records[0].fields[1].name;
@@ -15043,6 +15882,7 @@ mod opt_tests {
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
@@ -15069,6 +15909,7 @@ mod opt_tests {
                 return;
             }
         "#;
+        // #1891 Checkpoint W2A: see the record-block twin test above.
 
         let (program, main) = lower_single_function_with_program(src, "main");
         let quality_field = program.records[0].fields[1].name;
@@ -15076,6 +15917,7 @@ mod opt_tests {
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
+                activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
@@ -15126,8 +15968,15 @@ mod opt_tests {
             .iter()
             .find(|func| func.name.starts_with("__closure_main_"))
             .expect("closure lowering should produce a lifted helper");
+        // #1891 Checkpoint W2A: the event now fires from
+        // `lower_expr_with_expected` itself while lowering the closure
+        // body into the lifted helper's own `ownership_events` sink, so
+        // correct attribution to the lifted function (not the parent, as
+        // the assertion below still proves) no longer depends on a
+        // separate prescan step for this producer.
         let expected_event = OwnershipPathEvent {
             kind: OwnershipPathEventKind::Write,
+            activation_site: None,
             path: AccessPath::new(lowered_local_key_for(lifted, "r")).field(x_field),
         };
         assert_eq!(lifted.ownership_events, vec![expected_event.clone()]);

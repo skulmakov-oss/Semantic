@@ -26,11 +26,19 @@ Tuple(Vec<Value>),
 Record(RecordCarrier<Value>),
 Adt(AdtCarrier<Value>),
 Unit,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorrowActivation {
+FrameEntry,
+StoreVarSite(usize),
+#[derive(Debug, Clone)]
+pub struct BorrowedPath {
+pub path: AccessPath,
+pub activation: BorrowActivation,
 #[derive(Debug, Clone)]
 pub struct Frame {
 pub pc: usize,
 pub locals: HashMap<SymbolId, Value>,
-pub borrowed_paths: Vec<AccessPath>,
+pub active_borrowed_paths: Vec<AccessPath>,
 pub func: String,
 pub return_dst: Option<u16>,
 #[derive(Debug, Clone)]
@@ -39,7 +47,7 @@ pub name: String,
 pub strings: Vec<String>,
 pub symbol_ids: Vec<SymbolId>,
 pub debug_symbols: Vec<DebugSymbol>,
-pub borrowed_paths: Vec<AccessPath>,
+pub borrowed_paths: Vec<BorrowedPath>,
 pub code: Vec<u8>,
 pub instr_start: usize,
 pub signature: Option<CallableSignature>,

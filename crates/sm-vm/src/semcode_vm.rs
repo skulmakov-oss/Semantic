@@ -73,12 +73,55 @@ enum RegisterSlot {
     Value(Value),
 }
 
+/// #1726 Checkpoint D3: a Borrow event's runtime activation authority,
+/// mirroring `sm_format::semcode_decode::DecodedBorrowActivation` in the VM's
+/// own domain. `StoreVarSite`'s `usize` is frame-relative - the same
+/// `Frame.pc` domain (byte offset relative to `instr_start`, the
+/// opcode-byte position of the instruction being executed) D1 established
+/// and D2b verified the anchor against; it is never a string-table index,
+/// lowered-local symbol, or IR/event ordinal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorrowActivation {
+    FrameEntry,
+    StoreVarSite(usize),
+}
+
+/// A decoded Borrow path paired with its runtime activation authority. Legacy
+/// (pre-rev21) artifacts and explicit rev21 `FrameEntry` events both map to
+/// `BorrowActivation::FrameEntry` here - the wire distinction between "no
+/// activation field at all" and "explicit FrameEntry" is a D2a decode-layer
+/// concern; by the time a path reaches the VM, both mean the same runtime
+/// thing: active immediately at frame creation.
+#[derive(Debug, Clone)]
+pub struct BorrowedPath {
+    pub path: AccessPath,
+    pub activation: BorrowActivation,
+}
+
+/// A `StoreVarSite` Borrow not yet activated: it becomes active only after
+/// the real StoreVar instruction at `anchor` (this frame's own PC domain)
+/// successfully commits its write. Frame-local, non-static - never a
+/// global/shared cursor (per Checkpoint D3 item 3).
+#[derive(Debug, Clone)]
+struct PendingSiteBorrow {
+    anchor: usize,
+    path: AccessPath,
+}
+
 #[derive(Debug, Clone)]
 pub struct Frame {
     pub pc: usize,
     regs: Vec<RegisterSlot>,
     pub locals: HashMap<SymbolId, Value>,
-    pub borrowed_paths: Vec<AccessPath>,
+    /// Borrow paths already active in this frame: `FrameEntry` paths from the
+    /// moment the frame was pushed, plus any `StoreVarSite` paths whose
+    /// anchor has since been visited and successfully committed.
+    pub active_borrowed_paths: Vec<AccessPath>,
+    /// `StoreVarSite` Borrow paths not yet activated in this frame. Checked
+    /// (and, on a match, drained into `active_borrowed_paths`) only from
+    /// inside the `StoreVar` opcode handler, after that instruction's own
+    /// write has already committed.
+    pending_site_borrows: Vec<PendingSiteBorrow>,
     next_write_path: usize,
     pub func: String,
     pub return_dst: Option<u16>,
@@ -90,7 +133,7 @@ pub struct FunctionBytecode {
     pub strings: Vec<String>,
     pub symbol_ids: Vec<SymbolId>,
     pub debug_symbols: Vec<DebugSymbol>,
-    pub borrowed_paths: Vec<AccessPath>,
+    pub borrowed_paths: Vec<BorrowedPath>,
     write_paths: Vec<AccessPath>,
     pub code: Vec<u8>,
     pub instr_start: usize,
@@ -1153,7 +1196,26 @@ fn build_vm_program_view_from_decoded(
                 .collect::<Result<Vec<_>, RuntimeError>>()
         };
 
-        let borrowed_paths = remap_paths(&env.borrowed_paths)?;
+        // #1726 Checkpoint D3: reuses `remap_paths` (unchanged) for the
+        // `AccessPath` half, then zips back onto `env.borrowed_paths`'s own
+        // `.activation` in the same order to attach each path's runtime
+        // activation authority - never a second, independently-maintained
+        // root/component resolver for the Borrow case.
+        let borrowed_paths = remap_paths(&env.borrowed_paths)?
+            .into_iter()
+            .zip(env.borrowed_paths.iter())
+            .map(|(path, decoded)| BorrowedPath {
+                path,
+                activation: match decoded.activation {
+                    None | Some(sm_format::semcode_decode::DecodedBorrowActivation::FrameEntry) => {
+                        BorrowActivation::FrameEntry
+                    }
+                    Some(sm_format::semcode_decode::DecodedBorrowActivation::StoreVarSite(
+                        anchor,
+                    )) => BorrowActivation::StoreVarSite(anchor as usize),
+                },
+            })
+            .collect::<Vec<_>>();
         let write_paths = remap_paths(&env.write_paths)?;
 
         let f = FunctionBytecode {
@@ -2389,10 +2451,42 @@ where
                 if let Some(write_path) = next_write_path {
                     let symbol_name = lookup_str(&f, sid).unwrap_or("<unknown>");
                     let frame = &vm.callstack[frame_idx];
-                    ensure_write_path_allowed(symbol_name, &write_path, &frame.borrowed_paths)?;
+                    ensure_write_path_allowed(
+                        symbol_name,
+                        &write_path,
+                        &frame.active_borrowed_paths,
+                    )?;
                     vm.callstack[frame_idx].next_write_path += 1;
                 }
                 vm.callstack[frame_idx].locals.insert(symbol, val);
+                // #1726 Checkpoint D3: activation happens strictly after the
+                // write above has committed, never before - this instruction
+                // (`pc`, captured at the top of the dispatch loop before any
+                // operand was read, the same frame-relative "opcode-byte
+                // position" domain `ExecutableAnchor` and D2b's admission
+                // check already use) is only now eligible to satisfy a
+                // pending site. `next_write_path`'s own cursor above is
+                // untouched by this and only ever gates a *different*
+                // symbol's reassignment check (#1891 remains orthogonal:
+                // this never reads or advances `next_write_path`, and
+                // `next_write_path`'s own logic never reads
+                // `pending_site_borrows`/`active_borrowed_paths` beyond the
+                // existing write-conflict check above). Uses `position` +
+                // `remove` (not `retain`) so a loop's second visit to the
+                // same anchor - already consumed on the first - finds no
+                // match and is a harmless no-op, never re-activating or
+                // erroring; nothing is ever removed just because control
+                // passed elsewhere without this exact PC executing.
+                if let Some(index) = vm.callstack[frame_idx]
+                    .pending_site_borrows
+                    .iter()
+                    .position(|pending| pending.anchor == pc)
+                {
+                    let activated = vm.callstack[frame_idx].pending_site_borrows.remove(index);
+                    vm.callstack[frame_idx]
+                        .active_borrowed_paths
+                        .push(activated.path);
+                }
                 next_pc = cur - f.instr_start;
             }
             Opcode::QAnd
@@ -2880,11 +2974,33 @@ fn push_frame(
     for (i, v) in args.into_iter().enumerate() {
         regs[i] = RegisterSlot::Value(v);
     }
+    // #1726 Checkpoint D3: `FrameEntry` Borrow paths are active from the
+    // moment this frame exists (unchanged legacy/eager behavior, including
+    // every rev20 artifact and every explicit rev21 `FrameEntry` event).
+    // `StoreVarSite` paths start pending; they only move into
+    // `active_borrowed_paths` when the `StoreVar` opcode handler observes
+    // its own instruction's frame-relative PC match the anchor, after that
+    // instruction's write has already committed - see the `StoreVar` arm
+    // below.
+    let mut active_borrowed_paths = Vec::new();
+    let mut pending_site_borrows = Vec::new();
+    for borrowed in &f.borrowed_paths {
+        match borrowed.activation {
+            BorrowActivation::FrameEntry => active_borrowed_paths.push(borrowed.path.clone()),
+            BorrowActivation::StoreVarSite(anchor) => {
+                pending_site_borrows.push(PendingSiteBorrow {
+                    anchor,
+                    path: borrowed.path.clone(),
+                })
+            }
+        }
+    }
     let frame = Frame {
         pc: 0,
         regs,
         locals: HashMap::new(),
-        borrowed_paths: f.borrowed_paths.clone(),
+        active_borrowed_paths,
+        pending_site_borrows,
         next_write_path: 0,
         func: f.name.clone(),
         return_dst,
@@ -4954,11 +5070,20 @@ mod tests {
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
 
+        // #1726 Checkpoint D3: `ownership_tracking_bytes()` compiles a real
+        // tuple `ref` destructure, which is a `StoreVarSite` (not
+        // `FrameEntry`) Borrow since D2a - so at push time, before its
+        // annotated `StoreVar` has executed, this path is pending, not
+        // active. This test proves the decoded path/anchor data flows
+        // correctly into pending state; `tests/borrow_activation_v20.rs`
+        // proves the later activation step itself end to end (a real
+        // conflicting write only rejects once the introduction has run).
         assert_eq!(vm.callstack.len(), 1);
         let frame = &vm.callstack[0];
-        assert_eq!(frame.borrowed_paths.len(), 1);
+        assert!(frame.active_borrowed_paths.is_empty());
+        assert_eq!(frame.pending_site_borrows.len(), 1);
         assert_eq!(
-            frame.borrowed_paths[0].components,
+            frame.pending_site_borrows[0].path.components,
             vec![PathComponent::TupleIndex(0)]
         );
         // #1725 (FA-04-019): before this fix, `root_symbol_id` was a raw
@@ -4970,7 +5095,7 @@ mod tests {
         // artifact). The correct identity is the local binding's own
         // lowered key, not that unrelated string.
         assert_eq!(
-            vm.symbols.resolve(frame.borrowed_paths[0].root),
+            vm.symbols.resolve(frame.pending_site_borrows[0].path.root),
             Some("__sm_local_0_pair")
         );
     }
@@ -4997,13 +5122,20 @@ mod tests {
         )
         .expect("push helper");
 
+        // #1726 Checkpoint D3: `helper`'s tuple `ref` destructure is a
+        // `StoreVarSite` Borrow, pending (not active) before its `StoreVar`
+        // executes - this test never runs an instruction, so it stays
+        // pending throughout, and frame exit must clear it exactly like it
+        // used to clear the (pre-D3) eager active set.
         assert_eq!(vm.callstack.len(), 2);
-        assert_eq!(vm.callstack[1].borrowed_paths.len(), 1);
+        assert_eq!(vm.callstack[1].pending_site_borrows.len(), 1);
+        assert!(vm.callstack[1].active_borrowed_paths.is_empty());
 
         let finished = vm.callstack.pop().expect("helper frame");
-        assert_eq!(finished.borrowed_paths.len(), 1);
+        assert_eq!(finished.pending_site_borrows.len(), 1);
         assert_eq!(vm.callstack.len(), 1);
-        assert!(vm.callstack[0].borrowed_paths.is_empty());
+        assert!(vm.callstack[0].pending_site_borrows.is_empty());
+        assert!(vm.callstack[0].active_borrowed_paths.is_empty());
     }
 
     #[test]
@@ -5021,11 +5153,15 @@ mod tests {
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
 
+        // #1726 Checkpoint D3: same reasoning as
+        // `vm_tracks_borrowed_paths_on_frame_push` above, for the record
+        // field producer.
         assert_eq!(vm.callstack.len(), 1);
         let frame = &vm.callstack[0];
-        assert_eq!(frame.borrowed_paths.len(), 1);
+        assert!(frame.active_borrowed_paths.is_empty());
+        assert_eq!(frame.pending_site_borrows.len(), 1);
         assert!(matches!(
-            frame.borrowed_paths[0].components.as_slice(),
+            frame.pending_site_borrows[0].path.components.as_slice(),
             [PathComponent::Field(_)]
         ));
     }
@@ -5056,16 +5192,20 @@ mod tests {
         .expect("push helper");
 
         assert_eq!(vm.callstack.len(), 2);
-        assert_eq!(vm.callstack[1].borrowed_paths.len(), 1);
+        assert_eq!(vm.callstack[1].pending_site_borrows.len(), 1);
         assert!(matches!(
-            vm.callstack[1].borrowed_paths[0].components.as_slice(),
+            vm.callstack[1].pending_site_borrows[0]
+                .path
+                .components
+                .as_slice(),
             [PathComponent::Field(_)]
         ));
 
         let finished = vm.callstack.pop().expect("helper frame");
-        assert_eq!(finished.borrowed_paths.len(), 1);
+        assert_eq!(finished.pending_site_borrows.len(), 1);
         assert_eq!(vm.callstack.len(), 1);
-        assert!(vm.callstack[0].borrowed_paths.is_empty());
+        assert!(vm.callstack[0].pending_site_borrows.is_empty());
+        assert!(vm.callstack[0].active_borrowed_paths.is_empty());
     }
 
     #[test]

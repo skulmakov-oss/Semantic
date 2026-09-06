@@ -1,12 +1,30 @@
-use super::{IrModule, OptPass, OptReport};
+use super::{validate_activation_sites, IrModule, OptError, OptPass, OptReport};
 use crate::frontend::QuadVal;
-use crate::legacy_lowering::IrInstr;
+use crate::legacy_lowering::{ActivationSiteId, IrInstr};
 use std::collections::HashMap;
 
 const FX_SCALE: i32 = 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CrystalFoldPass;
+
+/// The (name, activation_site) sequence of every StoreVar, in order. CrystalFold
+/// has no authority to delete, reorder, or retarget a StoreVar or move its
+/// activation-site marker to a different instruction (#1726 Checkpoint C) — it
+/// must reproduce this sequence exactly, or fail closed.
+fn store_var_fingerprint(instrs: &[IrInstr]) -> Vec<(String, Option<ActivationSiteId>)> {
+    instrs
+        .iter()
+        .filter_map(|instr| match instr {
+            IrInstr::StoreVar {
+                name,
+                activation_site,
+                ..
+            } => Some((name.clone(), *activation_site)),
+            _ => None,
+        })
+        .collect()
+}
 
 impl OptPass for CrystalFoldPass {
     fn name(&self) -> &'static str {
@@ -17,15 +35,25 @@ impl OptPass for CrystalFoldPass {
         1
     }
 
-    fn run(&self, ir: &mut IrModule) -> OptReport {
+    fn run(&self, ir: &mut IrModule) -> Result<OptReport, OptError> {
         let mut rewrites = 0u32;
         for func in &mut ir.functions {
+            validate_activation_sites(func)?;
+            let before = store_var_fingerprint(&func.instrs);
             rewrites = rewrites.saturating_add(fold_constants_and_identities(&mut func.instrs));
+            let after = store_var_fingerprint(&func.instrs);
+            if before != after {
+                return Err(OptError(format!(
+                    "function `{}`: CrystalFold must pass every StoreVar's name and activation site through unchanged and in order; before={:?}, after={:?}",
+                    func.name, before, after
+                )));
+            }
+            validate_activation_sites(func)?;
         }
-        OptReport {
+        Ok(OptReport {
             changed: rewrites > 0,
             num_rewrites: rewrites,
-        }
+        })
     }
 }
 
@@ -286,8 +314,16 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                 cst.remove(&dst);
                 out.push(IrInstr::LoadVar { dst, name });
             }
-            IrInstr::StoreVar { name, src } => {
-                out.push(IrInstr::StoreVar { name, src });
+            IrInstr::StoreVar {
+                name,
+                src,
+                activation_site,
+            } => {
+                out.push(IrInstr::StoreVar {
+                    name,
+                    src,
+                    activation_site,
+                });
             }
             IrInstr::BoolNot { dst, src } => {
                 if let Some(ConstVal::Bool(b)) = cst.get(&src).copied() {
@@ -927,11 +963,15 @@ mod tests {
         let mut m1 = IrModule {
             functions: vec![base.clone()],
         };
-        let r1 = pass.run(&mut m1);
+        let r1 = pass
+            .run(&mut m1)
+            .expect("valid fixture, no activation sites");
         assert!(r1.changed);
 
         let mut m2 = m1.clone();
-        let r2 = pass.run(&mut m2);
+        let r2 = pass
+            .run(&mut m2)
+            .expect("valid fixture, no activation sites");
         assert!(!r2.changed);
         assert_eq!(m1, m2);
     }
@@ -963,7 +1003,9 @@ mod tests {
         let mut module = IrModule {
             functions: vec![base.clone()],
         };
-        let report = pass.run(&mut module);
+        let report = pass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
 
         assert!(
             !report.changed,
@@ -1010,7 +1052,9 @@ mod tests {
             }],
         };
 
-        let report = pass.run(&mut module);
+        let report = pass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
         assert_eq!(
             report,
             OptReport {
@@ -1037,7 +1081,9 @@ mod tests {
             ]
         );
 
-        let report_again = pass.run(&mut module);
+        let report_again = pass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
         assert_eq!(
             report_again,
             OptReport {
@@ -1082,7 +1128,9 @@ mod tests {
             }],
         };
 
-        CrystalFoldPass.run(&mut module);
+        CrystalFoldPass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
 
         assert_eq!(
             module.functions[0].instrs[2],
@@ -1162,7 +1210,9 @@ mod tests {
             }],
         };
 
-        CrystalFoldPass.run(&mut module);
+        CrystalFoldPass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
 
         assert_eq!(
             module.functions[0].instrs[2],
@@ -1215,7 +1265,9 @@ mod tests {
             }],
         };
 
-        CrystalFoldPass.run(&mut module);
+        CrystalFoldPass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
 
         assert!(
             module.functions[0].instrs.iter().any(|i| matches!(
@@ -1251,7 +1303,9 @@ mod tests {
             }],
         };
 
-        CrystalFoldPass.run(&mut module);
+        CrystalFoldPass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
 
         assert!(
             module.functions[0].instrs.iter().any(|i| matches!(
@@ -1288,7 +1342,9 @@ mod tests {
             }],
         };
 
-        CrystalFoldPass.run(&mut module);
+        CrystalFoldPass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
 
         assert!(
             !module.functions[0]
@@ -1320,7 +1376,9 @@ mod tests {
             }],
         };
 
-        CrystalFoldPass.run(&mut module);
+        CrystalFoldPass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
 
         assert!(
             module.functions[0].instrs.iter().any(|i| matches!(
@@ -1355,7 +1413,9 @@ mod tests {
             }],
         };
 
-        CrystalFoldPass.run(&mut module);
+        CrystalFoldPass
+            .run(&mut module)
+            .expect("valid fixture, no activation sites");
 
         assert!(
             !module.functions[0]

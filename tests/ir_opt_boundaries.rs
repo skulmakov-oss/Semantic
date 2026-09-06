@@ -60,7 +60,9 @@ fn run_under_o0_and_o1(
     let mut o1_module = IrModule {
         functions: vec![function],
     };
-    CrystalFoldPass.run(&mut o1_module);
+    CrystalFoldPass
+        .run(&mut o1_module)
+        .expect("CrystalFold must not reject a well-formed O0 module");
     let o1_bytes = emit_ir_to_semcode(&o1_module.functions, false).expect("emit O1");
     sm_verify::verify_semcode_token(&o1_bytes).expect("O1 must pass verifier admission");
     let o1_result = run_verified_semcode(&o1_bytes);
