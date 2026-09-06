@@ -31,23 +31,38 @@ initially concluded and why it changed. No production Rust changed by this
 reconciliation either - see `tests/fa_04_025_reconciliation.rs`'s own header
 comment for the full mechanism proof.
 
-**2026-09-06 addendum #2 — #1718 contract decision frozen, implementation
-still outstanding.** A dedicated contract-decision-and-falsification
-checkpoint (baseline `ef2d8524ddc597f7064edf052dad70fd03575fdf`) resolved the
-promote-vs-restrict ambiguity §5 originally left open, independently for each
-family: **Sequence (`SequenceIndexStatic`) = PROMOTE; ADT payload
-(`AdtPayload`) = PROMOTE, with an explicit required companion decision about
-its compiler-unreachable Write side deferred to implementation.** Full
-evidence matrix, capability/version authority analysis, No Silent Mutation
-analysis, and falsification attempts against both PROMOTE and RESTRICT/DEFER
-for each family: `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`.
+**2026-09-06 addendum #2 — #1718 contract decision frozen, fully directional,
+implementation still outstanding.** A dedicated contract-decision-and-
+falsification checkpoint (baseline `ef2d8524ddc597f7064edf052dad70fd03575fdf`,
+corrected pre-merge on the same PR #1895 to close a remaining ambiguity)
+resolved the promote-vs-restrict question §5 originally left open,
+independently per family AND, for ADT, independently per event kind:
+
+```
+SequenceIndexStatic  Borrow -> PROMOTE
+SequenceIndexStatic  Write  -> PROMOTE
+AdtPayload           Borrow -> PROMOTE
+AdtPayload           Write  -> RESTRICT / FAIL-CLOSED (compiler-unreachable
+                                today; promoting it later requires a new,
+                                separately authorized contract change)
+```
+
+The first pass of this addendum left the ADT Write question deferred to the
+implementation checkpoint; that was itself a scope violation for a
+contract-decision checkpoint (the admissibility of `Write(AdtPayload)` is
+part of the public admission contract, not implementation encoding), and has
+been corrected in place. Full evidence matrix, capability/version authority
+analysis, No Silent Mutation analysis, and the falsification attempts against
+both PROMOTE and RESTRICT/DEFER (now split per event kind for ADT) live in
+`docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`.
 **This is a contract decision only — no capability bit, header revision, or
 decoder/verifier/VM change has been implemented.** #1718 remains OPEN; AC1,
-AC2, and AC5 remain NOT SATISFIED for these two families until the chosen
+AC2, and AC5 remain NOT SATISFIED for these families until the chosen
 contract is actually enforced end-to-end and qualified. §5's original
 deep-audit text below is left intact (not struck through) because its
 conclusion - REQUIRED, remedy-agnostic - is still accurate; only its "which
-remedy" open question is now resolved by the linked decision document.
+remedy" open question is now resolved, fully, by the linked decision
+document.
 
 ## 1. Position A — frozen claim (authoritative)
 
@@ -268,7 +283,7 @@ this audit — there is no partial-credit reading available.
 |---|---|---|---|---|
 | #1656–#1664 | Lane 1 ScopeEnv cluster | CLOSED | ALREADY SATISFIED | Fresh GraphQL: all `COMPLETED`. |
 | #1709, #1724, #1725, #1726, #1891 | Lane 2 chain | CLOSED | ALREADY SATISFIED | Fresh GraphQL: all `COMPLETED`; final SHA is this audit's own baseline. |
-| #1718 | ADT/Sequence capability contour | OPEN | **REQUIRED** | Directly blocks AC1/AC2/AC5; contract decision now frozen (Sequence=PROMOTE, ADT=PROMOTE with a Write-side companion decision deferred - see `ssf08_1718_path_family_contract_decision.md`), implementation not yet started. |
+| #1718 | ADT/Sequence capability contour | OPEN | **REQUIRED** | Directly blocks AC1/AC2/AC5; contract decision now frozen and fully directional (Sequence Borrow+Write=PROMOTE; ADT Borrow=PROMOTE, ADT Write=RESTRICT/FAIL-CLOSED - see `ssf08_1718_path_family_contract_decision.md`), implementation not yet started. |
 | #1759, #1760, #1761, #1762, #1763 | Quota/failure taxonomy | OPEN (5/5) | **REQUIRED** | Directly and explicitly named by AC4; zero progress. |
 | #1888 | Lowering can skip Write-event emission for 3 statement roots | OPEN (GitHub state unchanged; recommend `CLOSE AS COMPLETED` — see reconciliation note) | **ALREADY SATISFIED BY LATER WORK** *(revised 2026-09-06, was REQUIRED)* | Checkpoint W2A relocated RecordUpdate Write-event generation into the universal `lower_expr_with_expected` entry point, structurally eliminating the prescan-omission root cause for all three named roots — confirmed by direct code reading and 8/8 new empirical tests (`tests/fa_04_025_reconciliation.rs`), including real downstream `BorrowWriteConflict` enforcement. |
 | #1778 | `AbiValue::Quad(u8)` unchecked at ABI boundary | OPEN | **INDEPENDENT** | Value-domain canonicality, not ownership; #1579's own decision record already so classifies it; practical consequence already mitigated by #1775. |

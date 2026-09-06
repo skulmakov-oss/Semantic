@@ -10,7 +10,19 @@ path components, and if so, under what capability/version authority?** It does
 not implement a wire format, a capability bit, a header revision, or any
 decoder/verifier/VM change. #1718 remains OPEN after this document. Per the
 repository's own "contract decided != implementation repaired" discipline,
-closing #1718 requires a follow-up implementation checkpoint (see §10).
+closing #1718 requires a follow-up implementation checkpoint (see §14).
+
+**Revision note (pre-merge correction, same PR #1895, same baseline).** The
+first draft of this document left one question unresolved — whether
+`Write(AdtPayload)` is admitted or rejected — and deferred it to the
+implementation checkpoint. That is not an implementation-encoding detail: it
+is part of the public semantic/admission contract (does `Write(AdtPayload)`
+have the right to exist in a Stable Foundation artifact at all), and #1718 is
+precisely the checkpoint meant to settle exactly that kind of ambiguity, not
+carry it forward. §5, §10, §11, §13, and §14 below have been corrected to
+freeze a fully directional decision, split by event kind where the evidence
+requires it. No other section changed; the underlying evidence (§2-§4, §6-§9)
+was already correct and is unaffected by this correction.
 
 ## 1. Historical mechanism (2026-08 finding)
 
@@ -161,11 +173,14 @@ checkpoint:
   situation from Sequence, where `write_paths` are genuinely populated by
   real compiled indexed writes.
 
-**Verdict: PARTIAL.** Borrow-side: IMPLEMENTED AND QUALIFIED (real source,
-real negative-conflict proof via runtime-patched Write against a real Borrow).
+**Verdict: PARTIAL, resolved directionally per event kind (see §11).**
+Borrow-side: IMPLEMENTED AND QUALIFIED (real source, real negative-conflict
+proof via runtime-patched Write against a real Borrow) — **admitted**.
 Write-side: IMPLEMENTED BUT NOT COMPILER-REACHABLE — proven only by
 constructing synthetic bytes, not by any program a user could actually write
-today.
+today — **not qualified for Stable Foundation admission; must fail closed**
+until a dedicated, later, separately-authorized track proves a
+compiler-reachable source Write path and a real-source negative E2E test.
 
 ## 6. Legacy admission audit (item 10)
 
@@ -317,10 +332,26 @@ depends on the current admission behavior), which also independently rules
 out DEFER's "no stable examples depend on it" condition (item 11) — that
 condition fails for both families, not just one.
 
-**Conclusion: RESTRICT/DEFER is falsified for both families as a whole.**
-(This does not mean every sub-case is equally strong — see the Write-side
-caveat for ADT below — but a family-level RESTRICT/DEFER cannot be adopted
-without regressing real, current, passing behavior.)
+**Conclusion, corrected to the precision the evidence actually supports** (the
+first draft's "falsified for both families as a whole" was too coarse for
+ADT — this is a load-bearing distinction, not a wording nit):
+
+- **RESTRICT/DEFER of Sequence is falsified**, as a whole family (Borrow and
+  Write both) — both sides are real, compiler-reachable, and already relied
+  upon by passing tests (§10 above).
+- **RESTRICT/DEFER of `AdtPayload` as an entire family is falsified** —
+  real-source Borrow (`vm_runs_adt_payload_ownership_positive_e2e_path`)
+  depends on it, so rejecting the family outright would regress that
+  already-passing test.
+- **RESTRICT of `AdtPayload` Write specifically is NOT falsified.** There is
+  no compiler-reachable current program that depends on `Write(AdtPayload)`
+  admission — every test exercising it is hand-patched, synthetic bytes, not
+  a real program. The falsification attempt in §10 above ("real E2E evidence
+  already makes removal/narrowing dishonest") has no real E2E to point to on
+  the Write side, so it does not apply there. Restricting `Write(AdtPayload)`
+  changes admission only for an artifact state that was never produced by the
+  real compiler and was never formally authorized by any contract — it
+  regresses nothing a real Semantic program does today.
 
 ## 11. Falsification of PROMOTE, and final decisions
 
@@ -336,48 +367,69 @@ Negative conflict behavior unproven? No — 8 real scenarios, including
 dynamic/static interaction, all passing. **This falsification attempt does
 not survive.**
 
-**Attempted case against PROMOTE (ADT):** implementation too incomplete? **Yes,
-partially** — the Write side has no compiler-reachable path at all (§5), so
-promoting the capability would authorize wire content (`AdtPayload` in
-`write_paths`) that the current toolchain can only ever produce by hand-patching
-bytes, not by compiling real source. Verifier cannot safely admit it? A real,
-open, named weakness exists (unbounded variant `SymbolId`) — architecturally
-identical to `Field`'s already-accepted treatment, but explicitly and
-repeatedly flagged by the decision record as a still-open concern for this
-family. **This falsification attempt partially survives** — it does not
-defeat promotion of the concept (the Borrow side is fully qualified, real,
-and — per §10 — already relied upon by a real passing test), but it does mean
-ADT's promotion carries materially more required companion work than
-Sequence's before AC1/AC2/AC5 can be marked satisfied.
+**Attempted case against PROMOTE (ADT Borrow):** implementation too
+incomplete? No — real source, real positive E2E, real runtime conflict
+machinery demonstrated (via the Borrow side of the three patched-Write
+conflict tests). Verifier cannot safely admit the Borrow event itself? No new
+weakness beyond the general variant-`SymbolId` note below, which is not
+Borrow-specific. **This falsification attempt does not survive** for Borrow.
 
-**Decisions:**
+**Attempted case for PROMOTE (ADT Write):** is there real evidence to justify
+admitting it? No — zero compiler-reachable production path (§5); every test
+exercising `Write(AdtPayload)` is hand-patched, synthetic bytes, never
+produced by the real compiler, because no source syntax exists that would
+trigger it. Per the governing invariant applied throughout this whole
+checkpoint — **cannot prove → deterministic rejection** — promoting
+admission authority for content the real pipeline cannot produce and cannot
+test negatively would qualify the surface more strongly than the evidence
+supports. This is the same standard already applied to Sequence and ADT
+Borrow in the *positive* direction (promote only what real E2E proves); here
+it cuts the other way. **This is the correct application of the standard,
+not an exception to it.**
 
-- **Sequence (`SequenceIndexStatic`): PROMOTE.** Allocate explicit
-  version/capability authority; the compiler's emitter should require it
-  whenever a `SequenceIndexStatic` component is present (mirroring
-  `has_v12_record_field_ownership_events`'s pattern); decoder/verifier must
-  gate on the new capability, not the bare `CAP_OWNERSHIP_PATHS` bit; VM
-  consumption is unchanged, since correctness is already proven; artifacts
-  below the new capability/revision carrying this component kind must fail
-  closed at admission (mirroring the #1891/W2F legacy-rejection precedent).
-- **ADT payload (`AdtPayload`): PROMOTE**, on the same mechanism as Sequence,
-  **with an explicit required companion condition**: the next implementation
-  checkpoint must make an explicit, documented decision about the Write side
-  specifically — either (a) accept it on the same architectural-trust basis
-  already extended to `Field`'s unresolved `SymbolId` (per #1725's finding
-  that this is sound because the value is used only as an opaque, root-gated
-  equality key, never resolved), and promote Borrow+Write together, tracking
-  the real-source negative E2E test as a still-open, frontend-blocked item
-  (not a #1718 blocker, since it was never a #1718 blocker for tuple/record's
-  own inclusion either); or (b) restrict Write-side `AdtPayload` admission
-  specifically until a real-source negative test exists, promoting Borrow
-  only. This document does not pick between (a) and (b) — that is
-  implementation-encoding detail explicitly out of scope here (item 12) —
-  but it must not be silently defaulted; the next checkpoint must decide it
-  and record the reasoning.
+**Decisions (frozen, directional, split by event kind where the evidence
+requires it):**
 
-Both decisions require genuinely new version/capability machinery per §8 —
-neither can be satisfied by documentation alone.
+- **Sequence (`SequenceIndexStatic`): Borrow → PROMOTE, Write → PROMOTE.**
+  Allocate explicit version/capability authority; the compiler's emitter
+  should require it whenever a `SequenceIndexStatic` component is present
+  (mirroring `has_v12_record_field_ownership_events`'s pattern);
+  decoder/verifier must gate on the new capability, not the bare
+  `CAP_OWNERSHIP_PATHS` bit; VM consumption is unchanged, since correctness
+  is already proven for both event kinds; artifacts below the new
+  capability/revision carrying this component kind must fail closed at
+  admission (mirroring the #1891/W2F legacy-rejection precedent).
+- **ADT payload (`AdtPayload`): Borrow → PROMOTE, Write → RESTRICT /
+  FAIL-CLOSED.** Borrow is promoted on the same mechanism as Sequence — real
+  source, real E2E, real conflict enforcement. **`Write(AdtPayload)` is
+  explicitly NOT part of the current Stable Foundation ownership promise.**
+  Under the new promoted contract, verifier admission must fail closed for
+  any ownership event that is both `Write` and carries an `AdtPayload`
+  component, regardless of header/capability, until a separate, later,
+  explicitly-authorized track proves (a) a compiler-reachable source path
+  that produces such a `Write` event, and (b) a real-source negative E2E test
+  for it — mirroring the exact bar Sequence and ADT Borrow already cleared.
+  The runtime's internal `PathComponent::AdtPayload` vocabulary may continue
+  to exist (removing it would be scope creep this checkpoint does not
+  authorize), but it must not be reachable via an *admitted* `Write` event
+  under the new contract. **Promoting `Write(AdtPayload)` later is a new,
+  separately authorized contract change — not an incidental relaxation of
+  whatever mechanism #1718's implementation checkpoint builds.**
+
+All three admitted cases (Sequence Borrow, Sequence Write, ADT Borrow)
+require genuinely new version/capability machinery per §8 — none can be
+satisfied by documentation alone. The ADT Write rejection likewise requires a
+version-reviewed decoder/verifier change (per the Backward Compatibility Rule
+in `semcode.md`: "verifier interpretation change that alters what previously
+valid artifacts mean" needs a version review) — it is not a same-version,
+no-review patch either, even though it narrows rather than widens admission.
+
+**How the implementation checkpoint may represent this directional split is
+explicitly not decided here** (see §12): one path-family capability plus a
+verifier event-kind rule, two separate capabilities (Borrow-scoped vs.
+Write-scoped), or another additive versioned mechanism are all still open.
+This document only fixes *what* must be admitted and *what* must be
+rejected, never *how* the wire encodes that distinction.
 
 ## 12. Explicit non-goals of this document
 
@@ -389,7 +441,12 @@ or select:
 - any wire byte layout for a new component-kind/capability pairing;
 - any downgrade/compatibility behavior for artifacts between the old and new
   contract;
-- any mutation of `HEADER_V20`'s existing semantics.
+- any mutation of `HEADER_V20`'s existing semantics;
+- **how** the ADT Borrow-admitted/ADT Write-rejected split (§11) is
+  represented at the wire/verifier level — one path-family capability plus a
+  verifier event-kind rule, separate Borrow/Write capabilities, or another
+  additive versioned mechanism are all still open. This document freezes
+  only *what* is admitted and *what* is rejected, never the encoding.
 
 All of the above are implementation-encoding decisions reserved for the next
 checkpoint, once this contract decision is approved.
@@ -411,35 +468,61 @@ checkpoint, once this contract decision is approved.
   and enforce these paths identically) — the disagreement is between
   implementation and the *written* capability contract, which is exactly
   what #1718 tracks. Still NOT SATISFIED until the new capability/version
-  gate is implemented and legacy (pre-promotion) headers are proven to fail
-  closed for these component kinds (mirroring the #1891/W2F precedent).
+  gate is implemented, `Write(AdtPayload)` is proven to fail closed under
+  the new contract, and legacy (pre-promotion) headers are proven to fail
+  closed for every promoted component kind (mirroring the #1891/W2F
+  precedent).
 
-**#1718 ready to close: NO.** A contract decision was reached; no enforcement
-of it exists yet.
+**Final target this decision records** (implementation not yet started):
+
+```
+Sequence Borrow  -> formally authorized (PROMOTE)
+Sequence Write   -> formally authorized (PROMOTE)
+ADT Borrow       -> formally authorized (PROMOTE)
+ADT Write        -> deterministic admission rejection (RESTRICT / FAIL-CLOSED)
+```
+
+**#1718 ready to close: NO.** A full, directional contract decision was
+reached; no enforcement of it exists yet.
 
 ## 14. Required next implementation checkpoint(s)
 
 A single, bounded implementation checkpoint, scoped to:
 
-1. Allocate a new capability bit and a new header revision (naming/numbering
-   deferred to that checkpoint) gating `SequenceIndexStatic`/`AdtPayload`
-   admission, following the `has_v12_record_field_ownership_events` pattern.
+1. Allocate a new capability bit (or bits) and a new header revision
+   (naming/numbering deferred to that checkpoint) gating
+   `SequenceIndexStatic` admission (both event kinds) and `AdtPayload`
+   Borrow admission, following the `has_v12_record_field_ownership_events`
+   pattern. Decide there, not here, whether the ADT Borrow/Write split (§11)
+   is represented via one path-family capability plus a verifier event-kind
+   rule, separate capabilities, or another additive mechanism.
 2. Update the emitter's header-promotion predicates to require the new
-   capability whenever either component kind is present.
-3. Update `sm-format`/`sm-verify` to require the new capability specifically
-   for these component kinds (not just the generic `CAP_OWNERSHIP_PATHS` bit).
-4. Add legacy-rejection tests: an artifact carrying these component kinds
-   under any header below the new revision must fail closed at verification
-   (mirroring `tests/write_execution_site_e2e.rs`'s
+   capability whenever `SequenceIndexStatic` (either event kind) or
+   `AdtPayload` Borrow is present. The emitter must never emit a `Write`
+   event carrying an `AdtPayload` component under the new contract, since no
+   source syntax exists to legitimately produce one — the promotion
+   predicate should therefore never see one in practice, but the decoder and
+   verifier (below) are the actual enforcement boundary, not this predicate.
+3. Update `sm-format`/`sm-verify` to (a) require the new capability
+   specifically for `SequenceIndexStatic` and `AdtPayload`-Borrow admission
+   (not just the generic `CAP_OWNERSHIP_PATHS` bit), and (b) reject, under
+   the new contract, any decoded ownership event that is both `Write` and
+   carries an `AdtPayload` component, regardless of which capabilities the
+   header carries.
+4. Add legacy-rejection tests: an artifact carrying `SequenceIndexStatic` or
+   `AdtPayload`-Borrow under any header below the new revision must fail
+   closed at verification (mirroring
+   `tests/write_execution_site_e2e.rs`'s
    `legacy_pre_rev21_write_bearing_artifact_rejected_at_runtime` precedent
-   from #1891/W2F).
-5. Decide and implement the ADT Write-side companion question from §11
-   (accept on architectural-trust grounds, or restrict Write-side admission
-   until a real-source negative test exists).
-6. Update `docs/spec/semcode.md`, `docs/spec/verifier.md`,
+   from #1891/W2F). Add a dedicated rejection test proving a hand-built
+   `Write(AdtPayload)` artifact fails closed under the new contract at any
+   header revision, present or future, until a separate track promotes it.
+5. Update `docs/spec/semcode.md`, `docs/spec/verifier.md`,
    `docs/spec/runtime_ownership.md`'s "Current supported slice", and correct
-   the stale `docs/architecture/adt_payload_ownership_paths.md`.
-7. Update golden/compatibility fixtures and `ssf08_closure_audit.md`'s AC1/
+   the stale `docs/architecture/adt_payload_ownership_paths.md` — all must
+   state the Borrow/Write asymmetry explicitly, not just "ADT payload
+   supported."
+6. Update golden/compatibility fixtures and `ssf08_closure_audit.md`'s AC1/
    AC2/AC5 rows only once this lands and is qualified.
 
 **Wait for explicit GO before implementing the selected contract.**
