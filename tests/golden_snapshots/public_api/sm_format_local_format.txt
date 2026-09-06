@@ -84,6 +84,8 @@ pub const SEMCODE_SIGNATURE_MIN_REVISION: u16 = HEADER_V19.rev;
 pub const SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION: u16 = HEADER_V20.rev;
 pub const ACTIVATION_MODE_FRAME_ENTRY: u8 = 0;
 pub const ACTIVATION_MODE_STORE_VAR_SITE: u8 = 1;
+pub const WRITE_EXECUTION_MODE_STORE_VAR_SITE: u8 = 0;
+pub const WRITE_EXECUTION_MODE_MAKE_RECORD_SITE: u8 = 1;
 pub const HEADER_V20: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC20, epoch: 0, rev: 21, capabilities: HEADER_V19.capabilities, };
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
 pub fn header_spec_from_magic(magic: &[u8; 8]) -> Option<SemcodeHeaderSpec> {
