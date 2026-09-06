@@ -7613,47 +7613,117 @@ mod tests {
         }
     }
 
+    // #1718 reconciliation: before this checkpoint, the five tests below
+    // proved the VM's borrow-conflict machinery correctly evaluated
+    // `Write(AdtPayload)` overlap (same-payload conflicts, different
+    // index/variant don't, parent/child overlaps either direction conflict)
+    // via a synthetic, hand-patched artifact (`adt_payload_write_overlap_bytes`,
+    // `rewrite_adt_main_ownership_section`). That artifact-level surface is
+    // now, correctly, not admitted at all: `Write(AdtPayload)` fails closed
+    // at decode/verify regardless of header, before the VM's overlap logic
+    // is ever reached (see `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`).
+    // The five scenarios below are consolidated into one test proving this
+    // rejection is unconditional - it does not matter what the synthetic
+    // events' *would-be* overlap relationship was, every one of them is
+    // refused identically and for the identical reason. This is exactly the
+    // "artifact-level Write(AdtPayload) must now fail before execution"
+    // requirement, using an even more adversarial construction than a
+    // hand-built decode fixture: a *rewritten* real artifact, proving the
+    // rejection survives this specific downgrade/re-encode path too.
+    //
+    // The overlap-detection logic itself (`access_paths_overlap`) is still
+    // real production code other path families depend on - its correctness
+    // for `AdtPayload`'s specific shape is now proven directly, at the Rust
+    // level, by `access_paths_overlap_adt_payload_mechanism_tests` below,
+    // entirely independent of whether `AdtPayload` is an admitted artifact
+    // surface for any particular event kind.
     #[test]
-    fn vm_rejects_adt_payload_write_when_borrowed_same_payload() {
-        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((42, 0)));
-        let err = run_semcode(&bytes).expect_err("same ADT payload overlap must fail");
-        assert!(matches!(
-            err,
-            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
-        ));
-        assert_eq!(format!("{err}"), "write path overlaps active borrow");
+    fn vm_rejects_synthetic_adt_payload_write_artifact_regardless_of_overlap_shape() {
+        type AdtPayloadSpec = Option<(u32, u16)>;
+        let scenarios: [(AdtPayloadSpec, AdtPayloadSpec); 5] = [
+            (Some((42, 0)), Some((42, 0))), // same payload
+            (Some((42, 0)), Some((42, 1))), // different index
+            (Some((42, 0)), Some((43, 0))), // different variant
+            (None, Some((42, 0))),          // parent borrow, child write
+            (Some((42, 0)), None),          // child borrow, parent write
+        ];
+        for (borrowed_adt, write_adt) in scenarios {
+            let bytes = adt_payload_write_overlap_bytes(borrowed_adt, write_adt);
+            let err = run_semcode(&bytes).expect_err(
+                "a Write(AdtPayload) event must be rejected before execution regardless of \
+                 its overlap relationship with any Borrow event",
+            );
+            assert!(
+                matches!(err, RuntimeError::BadFormat(_)),
+                "expected artifact-level rejection (BadFormat), got {err:?} for \
+                 borrowed={borrowed_adt:?} write={write_adt:?}"
+            );
+        }
     }
 
-    #[test]
-    fn vm_allows_adt_payload_write_when_borrowed_different_index() {
-        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((42, 1)));
-        run_semcode(&bytes).expect("different index does not overlap");
-    }
+    // #1718: internal overlap-mechanism tests only - these call
+    // `access_paths_overlap`/`ensure_write_path_allowed` directly, at the
+    // Rust level, with no SemCode encoding/decoding/verification involved
+    // at all. They prove the overlap math itself still correctly handles
+    // `PathComponent::AdtPayload`'s equality-based shape (same reasoning
+    // `#1725` already established for `Field`'s opaque `SymbolId` treatment)
+    // - they are NOT evidence that `Write(AdtPayload)` is an admitted
+    // artifact surface, which the test above proves it is not.
+    mod access_paths_overlap_adt_payload_mechanism_tests {
+        use super::*;
 
-    #[test]
-    fn vm_allows_adt_payload_write_when_borrowed_different_variant() {
-        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((43, 0)));
-        run_semcode(&bytes).expect("different variant does not overlap");
-    }
+        fn adt_payload_path(root: u32, variant: u32, index: u16) -> AccessPath {
+            AccessPath::new(SymbolId(root)).adt_payload(SymbolId(variant), index)
+        }
 
-    #[test]
-    fn vm_rejects_adt_payload_write_when_borrowed_parent_overlaps_child() {
-        let bytes = adt_payload_write_overlap_bytes(None, Some((42, 0)));
-        let err = run_semcode(&bytes).expect_err("adt parent-child overlap must fail");
-        assert!(matches!(
-            err,
-            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
-        ));
-    }
+        #[test]
+        fn same_payload_overlaps() {
+            let borrow = adt_payload_path(1, 42, 0);
+            let write = adt_payload_path(1, 42, 0);
+            assert!(access_paths_overlap(&write, &borrow));
+            assert!(matches!(
+                ensure_write_path_allowed(&write, &[borrow]),
+                Err(RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict))
+            ));
+        }
 
-    #[test]
-    fn vm_rejects_adt_payload_write_when_borrowed_child_overlaps_parent() {
-        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), None);
-        let err = run_semcode(&bytes).expect_err("adt child-parent overlap must fail");
-        assert!(matches!(
-            err,
-            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
-        ));
+        #[test]
+        fn different_index_does_not_overlap() {
+            let borrow = adt_payload_path(1, 42, 0);
+            let write = adt_payload_path(1, 42, 1);
+            assert!(!access_paths_overlap(&write, &borrow));
+            assert_eq!(ensure_write_path_allowed(&write, &[borrow]), Ok(()));
+        }
+
+        #[test]
+        fn different_variant_does_not_overlap() {
+            let borrow = adt_payload_path(1, 42, 0);
+            let write = adt_payload_path(1, 43, 0);
+            assert!(!access_paths_overlap(&write, &borrow));
+            assert_eq!(ensure_write_path_allowed(&write, &[borrow]), Ok(()));
+        }
+
+        #[test]
+        fn parent_borrow_overlaps_child_write() {
+            let borrow = AccessPath::new(SymbolId(1)); // parent: root only
+            let write = adt_payload_path(1, 42, 0); // child: root.AdtPayload
+            assert!(access_paths_overlap(&write, &borrow));
+            assert!(matches!(
+                ensure_write_path_allowed(&write, &[borrow]),
+                Err(RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict))
+            ));
+        }
+
+        #[test]
+        fn child_borrow_overlaps_parent_write() {
+            let borrow = adt_payload_path(1, 42, 0); // child: root.AdtPayload
+            let write = AccessPath::new(SymbolId(1)); // parent: root only
+            assert!(access_paths_overlap(&write, &borrow));
+            assert!(matches!(
+                ensure_write_path_allowed(&write, &[borrow]),
+                Err(RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict))
+            ));
+        }
     }
 
     fn record_field_write_overlap_bytes(

@@ -2,7 +2,7 @@
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
     header_spec_from_magic, read_u16_le, read_u32_le, read_u8, read_utf8,
-    ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE, MAGIC20,
+    ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE, MAGIC20, MAGIC21,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
@@ -1033,18 +1033,63 @@ fn function_has_ownership_section(bytes: &[u8], target: &str) -> bool {
         .is_some()
 }
 
+// #1718: a real emitter faced with a `SequenceIndexStatic` (either event
+// kind) or `AdtPayload` Borrow component would promote the header to
+// `HEADER_V21`/`MAGIC21` (see `has_v21_sequence_ownership_events` /
+// `has_v21_adt_borrow_ownership_events` in `sm-ir`). This rewrite harness
+// injects such components into an artifact whose real header only reflects
+// its *original*, pre-rewrite content, so it must independently compute and
+// write the header a real compiler would have chosen for the *rewritten*
+// content - otherwise the rewritten artifact understates its own capability
+// requirement and is rejected for a reason unrelated to whatever the test
+// actually wants to exercise (exactly the class of bug this comment is
+// warning against elsewhere in this file for `header_rev`-dependent byte
+// offsets). `Write(AdtPayload)` is deliberately excluded here: it is
+// unconditionally rejected under the frozen #1718 contract regardless of
+// header, so no header choice makes it admitted - callers injecting it are
+// testing that rejection itself, not overlap behavior.
+fn required_header_magic(original_bytes: &[u8], events: &[OwnershipEventSpec<'_>]) -> [u8; 8] {
+    let needs_v21 = events.iter().any(|event| {
+        event.components.iter().any(|component| {
+            matches!(
+                component,
+                OwnershipPathComponentSpec::SequenceIndexStatic(_)
+            ) || (event.kind == OWNERSHIP_EVENT_KIND_BORROW
+                && matches!(component, OwnershipPathComponentSpec::AdtPayload(_, _)))
+        })
+    });
+    if needs_v21 {
+        MAGIC21
+    } else {
+        let mut magic = [0u8; 8];
+        magic.copy_from_slice(&original_bytes[..8]);
+        magic
+    }
+}
+
 fn rewrite_function_ownership_events(
     bytes: &[u8],
     target: &str,
     events: &[OwnershipEventSpec<'_>],
 ) -> Vec<u8> {
-    let header_rev = header_rev_of(bytes);
+    // #1718: `parse_rev` interprets the EXISTING, pre-rewrite OWN0 bytes
+    // (genuinely encoded under the original header - must never change).
+    // `encode_rev` is the grammar the NEW, synthetic `events` are written
+    // in, which must match `final_magic` below, not necessarily the
+    // original header. These are two different questions that happened to
+    // share one `header_rev` value before #1718, because no rewrite ever
+    // needed to promote past what the base compile already produced.
+    let parse_rev = header_rev_of(bytes);
+    let final_magic = required_header_magic(bytes, events);
+    let encode_rev = header_spec_from_magic(&final_magic)
+        .expect("required_header_magic returns a known header")
+        .rev;
     // #1891 Checkpoint W2E: computed from the REAL, pre-rewrite compiled
     // bytes (only ever needed - and only ever guaranteed to exist - when
     // this call is about to author a synthetic Write event at rev21+); see
     // `find_real_store_var_anchor` and the design note on
     // `ownership_section_bytes` for why any genuine StoreVar boundary works.
-    let real_store_var_anchor = if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
+    let real_store_var_anchor = if encode_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
         && events.iter().any(|e| e.kind == OWNERSHIP_EVENT_KIND_WRITE)
     {
         Some(find_real_store_var_anchor(bytes, target))
@@ -1052,7 +1097,7 @@ fn rewrite_function_ownership_events(
         None
     };
     let mut out = Vec::with_capacity(bytes.len());
-    out.extend_from_slice(&bytes[..8]);
+    out.extend_from_slice(&final_magic);
 
     let mut cursor = 8usize;
     let mut rewrote = false;
@@ -1060,7 +1105,7 @@ fn rewrite_function_ownership_events(
         let (name, code, next) = next_function(bytes, cursor);
         let rewritten = if name == target {
             rewrote = true;
-            rewrite_function_code(code, events, header_rev, real_store_var_anchor)
+            rewrite_function_code(code, events, parse_rev, encode_rev, real_store_var_anchor)
         } else {
             code.to_vec()
         };
@@ -1111,17 +1156,18 @@ fn find_real_store_var_anchor(bytes: &[u8], function: &str) -> u32 {
 fn rewrite_function_code(
     code: &[u8],
     events: &[OwnershipEventSpec<'_>],
-    header_rev: u16,
+    parse_rev: u16,
+    encode_rev: u16,
     real_store_var_anchor: Option<u32>,
 ) -> Vec<u8> {
-    let layout = parse_function_layout(code, header_rev);
+    let layout = parse_function_layout(code, parse_rev);
     let ownership_start = layout.ownership_start.expect("OWN0 section");
     let mut out = Vec::with_capacity(code.len());
     out.extend_from_slice(&code[..ownership_start]);
     out.extend_from_slice(&ownership_section_bytes(
         &layout,
         events,
-        header_rev,
+        encode_rev,
         real_store_var_anchor,
     ));
     // #1773 (FA-09-005): preserve the real SIG0 section verbatim - only
@@ -1475,48 +1521,57 @@ fn main() {
 "#
 }
 
+// #1718 reconciliation: both scenarios below - same-payload conflict and
+// sibling (different-payload) non-conflict - used to distinguish at the
+// runtime overlap layer (`BorrowWriteConflict` vs. success), the same way
+// the tuple/record/sequence sibling-write tests elsewhere in this file
+// still do. `Write(AdtPayload)` is now, correctly, rejected at admission
+// under the frozen #1718 contract regardless of header or overlap shape (no
+// compiler-reachable source syntax produces it - see
+// `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`),
+// so both scenarios now hit the identical admission failure before the VM's
+// overlap logic is ever reached. Consolidated into one test proving that
+// rejection is unconditional, mirroring `sm-vm`'s own reconciliation
+// (`vm_rejects_synthetic_adt_payload_write_artifact_regardless_of_overlap_shape`).
 #[test]
-fn runtime_ownership_option_rejects_same_path_write_deterministically() {
-    let bytes = compile_program_to_semcode(option_assignment_source()).expect("compile");
-    let rewritten = rewrite_function_ownership_events(
-        &bytes,
-        "main",
-        &[
-            OwnershipEventSpec {
-                kind: OWNERSHIP_EVENT_KIND_BORROW,
-                root: "opt",
-                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
-            },
-            OwnershipEventSpec {
-                kind: OWNERSHIP_EVENT_KIND_WRITE,
-                root: "opt",
-                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
-            },
-        ],
-    );
+fn runtime_ownership_option_write_rejected_at_admission_regardless_of_overlap_shape() {
+    let scenarios: [(u32, u16, u32, u16); 2] = [
+        (42, 0, 42, 0), // same payload
+        (42, 0, 43, 0), // sibling (different variant)
+    ];
+    for (borrow_variant, borrow_index, write_variant, write_index) in scenarios {
+        let bytes = compile_program_to_semcode(option_assignment_source()).expect("compile");
+        let rewritten = rewrite_function_ownership_events(
+            &bytes,
+            "main",
+            &[
+                OwnershipEventSpec {
+                    kind: OWNERSHIP_EVENT_KIND_BORROW,
+                    root: "opt",
+                    components: &[OwnershipPathComponentSpec::AdtPayload(
+                        borrow_variant,
+                        borrow_index,
+                    )],
+                },
+                OwnershipEventSpec {
+                    kind: OWNERSHIP_EVENT_KIND_WRITE,
+                    root: "opt",
+                    components: &[OwnershipPathComponentSpec::AdtPayload(
+                        write_variant,
+                        write_index,
+                    )],
+                },
+            ],
+        );
 
-    assert_write_overlap_rejects_deterministically(&rewritten, "opt");
-}
-
-#[test]
-fn runtime_ownership_option_sibling_write_passes_on_verified_path() {
-    let bytes = compile_program_to_semcode(option_assignment_source()).expect("compile");
-    let rewritten = rewrite_function_ownership_events(
-        &bytes,
-        "main",
-        &[
-            OwnershipEventSpec {
-                kind: OWNERSHIP_EVENT_KIND_BORROW,
-                root: "opt",
-                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
-            },
-            OwnershipEventSpec {
-                kind: OWNERSHIP_EVENT_KIND_WRITE,
-                root: "opt",
-                components: &[OwnershipPathComponentSpec::AdtPayload(43, 0)],
-            },
-        ],
-    );
-
-    run_token_first_main(&rewritten).expect("sibling adt payload write should pass");
+        let report = sm_verify::verify_semcode_token(&rewritten)
+            .expect_err("Write(AdtPayload) must be rejected at token admission");
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.code == sm_verify::VerificationCode::InvalidOwnershipSection),
+            "expected InvalidOwnershipSection, got {report:?}"
+        );
+    }
 }
