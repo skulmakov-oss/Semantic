@@ -4,12 +4,12 @@ use crate::semcode_format::{
     header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
     CallableValueFamily, Opcode, ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE,
     MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17,
-    MAGIC18, MAGIC19, MAGIC2, MAGIC20, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9,
-    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
-    OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG, SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, SEMCODE_SIGNATURE_MIN_REVISION,
-    SIGNATURE_SECTION_TAG, WRITE_EXECUTION_MODE_MAKE_RECORD_SITE,
-    WRITE_EXECUTION_MODE_STORE_VAR_SITE,
+    MAGIC18, MAGIC19, MAGIC2, MAGIC20, MAGIC21, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8,
+    MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
+    SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, SEMCODE_SIGNATURE_MIN_REVISION, SIGNATURE_SECTION_TAG,
+    WRITE_EXECUTION_MODE_MAKE_RECORD_SITE, WRITE_EXECUTION_MODE_STORE_VAR_SITE,
 };
 use sm_front::types::{
     AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
@@ -1360,20 +1360,41 @@ pub fn emit_ir_to_semcode(
 }
 
 fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, FrontendError> {
+    // #1718: fail closed at the single producer boundary every public
+    // emission entrypoint converges on (`compile_program_to_semcode_*` and
+    // `emit_ir_to_semcode` both call this function) - before any header is
+    // chosen, before any bytes are written. `Write(AdtPayload)` is not
+    // "unreachable today so it's fine to skip checking" - the frozen
+    // contract (PR #1895) requires deterministic rejection of this exact
+    // internal state regardless of how it was constructed, including
+    // hand-built `IrFunction` values that never went through source lowering
+    // at all. No silent drop, no downgrade to a parent/Tuple/Field path, no
+    // "emit it and let the verifier catch it" - refuse emission outright.
+    if has_adt_write_ownership_event(funcs) {
+        return Err(FrontendError {
+            pos: 0,
+            message: "internal error: a Write ownership event carries an AdtPayload path \
+                      component, which is not an admitted SemCode ownership path under the \
+                      current Stable Foundation contour (#1718) - emission refused"
+                .to_string(),
+        });
+    }
+
     let mut out = Vec::new();
     // require_ownership_section: whenever the chosen header includes CAP_OWNERSHIP_PATHS,
     // every function must have an OWN0 section (even if empty) so the verifier check passes.
     let opcode_driven_magic: [u8; 8];
     let opcode_driven_require_ownership_section;
-    // #1726 Checkpoint D2a: content-driven, exactly like every other branch
-    // here (never SIG0-style unconditional) - only artifacts whose Borrow
-    // events actually resolved a StoreVarSite anchor (Checkpoint D1) need the
-    // rev21 OWN0 grammar. The downstream `chosen_magic` composition step
-    // (below) already handles this floor correctly with zero changes: it
-    // compares `opcode_driven_header.rev` against `SEMCODE_SIGNATURE_MIN_REVISION`
-    // (20) as a plain number, and 21 is never less than 20 - proved in
-    // Checkpoint D1.5 before this branch was added.
-    if has_v20_ownership_execution_anchor(funcs) {
+    // #1718: checked first (highest revision requirement in this chain) so a
+    // program needing BOTH V20's exact-site OWN0 grammar AND V21's
+    // Sequence/ADT-Borrow admission authority correctly promotes to V21,
+    // which is purely additive over V20 (same OWN0 layout, same execution-site
+    // grammar - see `HEADER_V21`'s doc comment) and therefore satisfies both
+    // requirements at once.
+    if has_v21_sequence_ownership_events(funcs) || has_v21_adt_borrow_ownership_events(funcs) {
+        opcode_driven_magic = MAGIC21;
+        opcode_driven_require_ownership_section = true;
+    } else if has_v20_ownership_execution_anchor(funcs) {
         opcode_driven_magic = MAGIC20;
         opcode_driven_require_ownership_section = true;
     } else if has_v18_qtruth_instr(funcs) {
@@ -2596,6 +2617,67 @@ fn has_v20_ownership_execution_anchor(funcs: &[IrFunction]) -> bool {
         f.ownership_events.iter().any(|event| {
             (event.kind == OwnershipPathEventKind::Borrow && event.activation_site.is_some())
                 || (event.kind == OwnershipPathEventKind::Write && event.write_site.is_some())
+        })
+    })
+}
+
+/// #1718: true when any function's ownership events contain a
+/// `SequenceIndexStatic` path component, in either `Borrow` or `Write`
+/// events - the frozen contract (PR #1895) admits both event kinds for this
+/// family, so unlike `has_v12_record_field_ownership_events` this predicate
+/// does not need to distinguish event kind at all.
+fn has_v21_sequence_ownership_events(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.ownership_events.iter().any(|event| {
+            event
+                .path
+                .components
+                .iter()
+                .any(|component| matches!(component, PathComponent::SequenceIndexStatic(_)))
+        })
+    })
+}
+
+/// #1718: true when any function's `Borrow` ownership events contain an
+/// `AdtPayload` path component. Deliberately Borrow-only - the frozen
+/// contract admits ADT payload ownership in `Borrow` events only; a `Write`
+/// event carrying `AdtPayload` is not "not yet promoted," it is
+/// unconditionally rejected (see `has_adt_write_ownership_event` and
+/// `CAP_OWNERSHIP_ADT_BORROW_PATHS`'s doc comment), so this predicate must
+/// never be widened to also match `Write` without a separate, explicitly
+/// authorized contract change.
+fn has_v21_adt_borrow_ownership_events(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.ownership_events.iter().any(|event| {
+            event.kind == OwnershipPathEventKind::Borrow
+                && event
+                    .path
+                    .components
+                    .iter()
+                    .any(|component| matches!(component, PathComponent::AdtPayload { .. }))
+        })
+    })
+}
+
+/// #1718: true when any function's `Write` ownership events contain an
+/// `AdtPayload` path component. No source syntax reaches this today (the
+/// language has no mutable ADT-payload reassignment), so this should only
+/// ever fire for hand-constructed/synthetic `IrFunction` values passed
+/// directly to `emit_ir_to_semcode` - but the producer boundary must fail
+/// closed regardless of how such a state was constructed, per the frozen
+/// contract's explicit "cannot prove -> deterministic rejection" invariant.
+/// `emit_semcode` checks this unconditionally, before any header selection,
+/// and refuses emission entirely rather than silently dropping, downgrading,
+/// or rewriting the event.
+fn has_adt_write_ownership_event(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.ownership_events.iter().any(|event| {
+            event.kind == OwnershipPathEventKind::Write
+                && event
+                    .path
+                    .components
+                    .iter()
+                    .any(|component| matches!(component, PathComponent::AdtPayload { .. }))
         })
     })
 }
@@ -12631,10 +12713,22 @@ mod opt_tests {
     }
 
     // Mixed artifact: an ADT/Option/Result Borrow (FrameEntry) alongside a
-    // Tuple/Record Borrow (StoreVarSite) in the same rev21 program. Because
-    // header revision is artifact-global, the ADT event's FrameEntry mode
-    // must still be explicitly encoded once the artifact is rev21 -- it does
-    // not stay in the legacy shape just because its own producer didn't change.
+    // Tuple/Record Borrow (StoreVarSite) in the same program. Because header
+    // revision is artifact-global, the ADT event's FrameEntry mode must
+    // still be explicitly encoded once the artifact carries the rev21 OWN0
+    // grammar -- it does not stay in the legacy shape just because its own
+    // producer didn't change.
+    //
+    // #1718 update: this program's `Option::Some(ref value)` arm produces a
+    // real `Borrow(AdtPayload)` event (`Option` is represented via the ADT
+    // runtime family), so this artifact now also carries
+    // `CAP_OWNERSHIP_ADT_BORROW_PATHS` and promotes one revision further, to
+    // `HEADER_V21`/`SEMCOD21` (rev22) - purely additive over `HEADER_V20`
+    // (same FrameEntry/StoreVarSite OWN0 grammar this test's own name and
+    // assertions are about, unchanged). Before #1718, ADT Borrow had no
+    // dedicated capability at all, so this same source only ever reached
+    // `SEMCOD20`; the magic/rev assertions below were updated for that
+    // reason, not because this test's own D2a subject matter changed.
     #[test]
     fn ssf08_1726_checkpoint_d2a_mixed_frame_entry_and_store_var_site_in_one_rev21_artifact() {
         let src = r#"
@@ -12654,7 +12748,7 @@ mod opt_tests {
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
         let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
-        assert_eq!(&bytes[0..8], b"SEMCOD20");
+        assert_eq!(&bytes[0..8], b"SEMCOD21");
         let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
         assert_eq!(decoded_main.borrowed_paths.len(), 2);
