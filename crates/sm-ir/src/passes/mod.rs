@@ -54,6 +54,26 @@ pub struct IrModule {
 /// here. Any such future pass must define and implement its own explicit
 /// provenance/removal-receipt mechanism before this checkpoint's coherence
 /// claim can be extended to cover it.
+///
+/// #1891 Checkpoint W2B extends this same boundary to `WriteSiteId`, as a
+/// separate invariant - never by reusing the Borrow receipt mechanism above.
+/// `StructuralCleanupPass`'s unreachable-code deletion is the only place
+/// with authority to delete a write-capable instruction (`StoreVar` or
+/// `MakeRecord`); it returns an explicit `WriteSiteId` removal receipt, and
+/// every Write event carrying a removed site is removed by that receipt
+/// only - respecting the deliberately different Write cardinality (a
+/// `StoreVar` site pairs with exactly one Write event; a `MakeRecord` site
+/// pairs with 1..N, all of which are removed together when its site is
+/// removed). `CrystalFold` proves byte-for-byte `WriteSiteId` passthrough
+/// the same way it already proves `ActivationSiteId` passthrough.
+/// `validate_write_sites` is this boundary's fail-closed check, called at
+/// the same points as `validate_activation_sites`.
+///
+/// This proof is valid only for optimizers that keep, drop (via receipt), or
+/// rewrite a write-capable instruction in place. A future pass that clones,
+/// merges, substitutes, moves, or re-materializes a `StoreVar` or
+/// `MakeRecord` carrying a `WriteSiteId` invalidates this proof and requires
+/// its own explicit provenance design, exactly as for `ActivationSiteId`.
 pub trait OptPass {
     fn name(&self) -> &'static str;
     fn version(&self) -> u32;
@@ -219,4 +239,136 @@ pub fn run_default_opt_passes(functions: &mut Vec<IrFunction>) -> Result<OptRepo
     report.merge(fold.run(&mut module)?);
     *functions = module.functions;
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::legacy_lowering::{AccessPath, OwnershipPathEvent};
+
+    fn store_var_with_write_site(name: &str, site: WriteSiteId) -> IrInstr {
+        IrInstr::StoreVar {
+            name: name.to_string(),
+            src: 0,
+            activation_site: None,
+            write_site: Some(site),
+        }
+    }
+
+    fn make_record_with_write_site(site: WriteSiteId) -> IrInstr {
+        IrInstr::MakeRecord {
+            dst: 0,
+            name: "R".to_string(),
+            items: vec![],
+            write_site: Some(site),
+        }
+    }
+
+    fn write_event(root: &str, site: WriteSiteId) -> OwnershipPathEvent {
+        OwnershipPathEvent {
+            kind: OwnershipPathEventKind::Write,
+            path: AccessPath::new(root.to_string()),
+            activation_site: None,
+            write_site: Some(site),
+        }
+    }
+
+    // #1891 Checkpoint W2B (item 9): a Write event survives but its
+    // annotated instruction does not - an orphan on the event side. Must
+    // fail closed, never be silently tolerated as "instruction pruned
+    // elsewhere, event still meaningful".
+    #[test]
+    fn validate_write_sites_fails_closed_when_event_survives_without_its_instruction() {
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![],
+            ownership_events: vec![write_event("__sm_local_1_x", WriteSiteId(0))],
+            params: Vec::new(),
+        };
+        assert!(validate_write_sites(&func).is_err());
+    }
+
+    // Item 9: the annotated instruction survives (a StoreVar site here) but
+    // every Write event that should carry its site is gone - an orphan on
+    // the instruction side.
+    #[test]
+    fn validate_write_sites_fails_closed_when_store_var_site_has_no_events() {
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![store_var_with_write_site("__sm_local_1_x", WriteSiteId(0))],
+            ownership_events: vec![],
+            params: Vec::new(),
+        };
+        assert!(validate_write_sites(&func).is_err());
+    }
+
+    // Item 9 (the MakeRecord-specific instance of the same orphan-instruction
+    // shape, listed separately since MakeRecord's own cardinality (1..N) is
+    // otherwise easy to conflate with "zero is just the low end of the
+    // range" - zero is never valid, only the *lower bound of the valid
+    // nonzero range* is 1.
+    #[test]
+    fn validate_write_sites_fails_closed_when_make_record_site_has_zero_events() {
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![make_record_with_write_site(WriteSiteId(0))],
+            ownership_events: vec![],
+            params: Vec::new(),
+        };
+        assert!(validate_write_sites(&func).is_err());
+    }
+
+    // Item 9: the same WriteSiteId annotated on two distinct write-capable
+    // instructions is a malformed lowering bug, never a valid input -
+    // mirrors `validate_activation_sites`'s duplicate-site check for Borrow.
+    #[test]
+    fn validate_write_sites_fails_closed_on_duplicate_instruction_annotation() {
+        let site = WriteSiteId(0);
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![
+                store_var_with_write_site("__sm_local_1_x", site),
+                store_var_with_write_site("__sm_local_2_y", site),
+            ],
+            ownership_events: vec![write_event("__sm_local_1_x", site)],
+            params: Vec::new(),
+        };
+        assert!(validate_write_sites(&func).is_err());
+    }
+
+    // Item 9: a StoreVar site (producer A/B) must pair with exactly one
+    // Write event - unlike MakeRecord's legitimate 1..N, a second event
+    // sharing a StoreVar's site is never valid.
+    #[test]
+    fn validate_write_sites_fails_closed_when_store_var_site_has_more_than_one_event() {
+        let site = WriteSiteId(0);
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![store_var_with_write_site("__sm_local_1_x", site)],
+            ownership_events: vec![
+                write_event("__sm_local_1_x", site),
+                write_event("__sm_local_1_x", site),
+            ],
+            params: Vec::new(),
+        };
+        assert!(validate_write_sites(&func).is_err());
+    }
+
+    // Positive control: a MakeRecord site legitimately claimed by N (here 2)
+    // Write events must be accepted - the deliberately different cardinality
+    // from StoreVar's exactly-1 (item 4), proven passing, not just documented.
+    #[test]
+    fn validate_write_sites_accepts_make_record_site_with_multiple_events() {
+        let site = WriteSiteId(0);
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![make_record_with_write_site(site)],
+            ownership_events: vec![
+                write_event("__sm_local_0_base", site),
+                write_event("__sm_local_0_base", site),
+            ],
+            params: Vec::new(),
+        };
+        assert!(validate_write_sites(&func).is_ok());
+    }
 }
