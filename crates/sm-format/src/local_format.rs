@@ -19,6 +19,7 @@ pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
 pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
 pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
 pub const MAGIC20: [u8; 8] = *b"SEMCOD20";
+pub const MAGIC21: [u8; 8] = *b"SEMCOD21";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -46,6 +47,25 @@ pub const CAP_PATH_INSPECT: u32 = 1 << 22;
 pub const CAP_FS_READ: u32 = 1 << 23;
 pub const CAP_FS_WRITE: u32 = 1 << 24;
 pub const CAP_TIME_DURATION: u32 = 1 << 25;
+/// #1718: explicit admission authority for `SequenceIndexStatic` ownership
+/// path components (both `Borrow` and `Write` events) - see
+/// `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`.
+/// Deliberately a *separate* bit from `CAP_OWNERSHIP_ADT_BORROW_PATHS` even
+/// though both are new in the same header revision: Sequence and ADT are two
+/// independently-decided admission domains (the frozen contract gave them
+/// different final dispositions - Sequence is fully admitted, ADT is
+/// Borrow-only), and folding them into one generic "extended ownership" bit
+/// would erase that distinction and make a future, separately-authorized
+/// change to just one of them impossible without repurposing this bit.
+pub const CAP_OWNERSHIP_SEQUENCE_PATHS: u32 = 1 << 26;
+/// #1718: explicit admission authority for `AdtPayload` ownership path
+/// components in `Borrow` events only. `Write(AdtPayload)` has no
+/// compiler-reachable production path and is unconditionally rejected at
+/// decode/verify regardless of header or capability - see this bit's sibling
+/// doc comment above and the frozen contract decision. A future, separately
+/// authorized promotion of `Write(AdtPayload)` must allocate its own
+/// capability, never reinterpret this one.
+pub const CAP_OWNERSHIP_ADT_BORROW_PATHS: u32 = 1 << 27;
 
 pub const SIGNATURE_SECTION_TAG: [u8; 4] = *b"SIG0";
 
@@ -428,11 +448,52 @@ pub const HEADER_V20: SemcodeHeaderSpec = SemcodeHeaderSpec {
     capabilities: HEADER_V19.capabilities,
 };
 
+/// #1718: the first header revision carrying explicit admission authority for
+/// `SequenceIndexStatic` (`Borrow`+`Write`) and `AdtPayload` (`Borrow` only)
+/// ownership path components - see
+/// `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`.
+/// Purely additive: `HEADER_V20`'s own capabilities, wire layout, and OWN0
+/// execution-site grammar (`SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION`) are
+/// unchanged and fully inherited - this revision answers only "which path
+/// components may this header's OWN0 section carry," an orthogonal question
+/// to "how are Borrow activation / Write execution sites encoded," which
+/// `HEADER_V20` already settled and this revision does not reopen.
+/// `Write(AdtPayload)` is deliberately NOT authorized by any capability here
+/// or added by any later header without a separate, dedicated decision - see
+/// `CAP_OWNERSHIP_ADT_BORROW_PATHS`'s doc comment.
+pub const HEADER_V21: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC21,
+    epoch: 0,
+    rev: 22,
+    capabilities: HEADER_V20.capabilities
+        | CAP_OWNERSHIP_SEQUENCE_PATHS
+        | CAP_OWNERSHIP_ADT_BORROW_PATHS,
+};
+
+/// #1718: the minimum SemCode header revision whose capability contract
+/// authorizes `SequenceIndexStatic` ownership path components (`Borrow` and
+/// `Write` both). Named by numeric revision, not header index, to avoid the
+/// exact confusion `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION`'s doc comment
+/// already warns about: this constant's value is `HEADER_V21.rev == 22`, not
+/// `21` (`HEADER_V20`'s revision) and not `20` (`HEADER_V19`'s).
+pub const SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
+
+/// #1718: the minimum SemCode header revision whose capability contract
+/// authorizes `AdtPayload` ownership path components in `Borrow` events.
+/// Deliberately has no `Write`-side counterpart - `Write(AdtPayload)` is not
+/// admitted under any header revision, current or future, without a
+/// separate, explicitly authorized contract change (see
+/// `CAP_OWNERSHIP_ADT_BORROW_PATHS`). Same numeric value as
+/// `SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION` (`HEADER_V21.rev == 22`) today,
+/// kept as a distinct named constant because the two families' admission
+/// authority is independently decided and may diverge in a future revision.
+pub const SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
-        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20,
+        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20, HEADER_V21,
     ]
 }
 
