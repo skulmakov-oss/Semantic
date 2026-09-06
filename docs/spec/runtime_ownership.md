@@ -1,6 +1,6 @@
 # Runtime Ownership Specification
 
-Status: frozen tuple+record v0
+Status: frozen tuple+record+sequence+(ADT Borrow-only) v1 (#1718)
 Source ownership owner: `sm-front`
 IR ownership owner: `sm-ir`
 SemCode transport owner: `sm-ir`
@@ -10,20 +10,30 @@ Shared runtime vocabulary owner: `sm-runtime-core`
 
 ## Purpose
 
-This document freezes the current runtime ownership contract for tuple paths
-and direct record field paths.
+This document freezes the current runtime ownership contract for tuple
+paths, direct record field paths, `Sequence` static-index paths, and ADT
+payload paths in `Borrow` events only.
 
 Current supported slice:
 
 - tuple `AccessPath`
 - direct record field `AccessPath`
-- `Borrow` and `Write` ownership events for both supported path families
+- `Sequence` static-index `AccessPath` (`SequenceIndexStatic`), both `Borrow`
+  and `Write` (#1718)
+- ADT payload `AccessPath` (`AdtPayload`), `Borrow` events only - `Write`
+  events carrying an `AdtPayload` component are not part of this contract
+  and are rejected unconditionally at admission, under every header,
+  regardless of capability (#1718)
+- `Borrow` and `Write` ownership events for tuple, direct record field, and
+  `Sequence` static-index paths; `Borrow`-only for ADT payload paths
 - frame-local borrow lifetime
 - structural `OWN0` admission before execution
-- runtime write rejection for overlapping borrowed tuple and direct record
-  field paths
+- runtime write rejection for overlapping borrowed tuple, direct record
+  field, `Sequence` static-index, and ADT payload paths
 
-This document does not claim a general runtime borrow checker.
+This document does not claim a general runtime borrow checker, general ADT
+mutation, alias analysis, lifetimes/regions, or Rust-equivalent borrow
+checking.
 
 ## Public Position
 
@@ -34,9 +44,10 @@ value paths and runtime invariants inside this bounded, frame-local model.
 Semantic does not claim Rust-equivalent lifetime inference, region
 inference, general borrow checking, unrestricted alias analysis, or
 systems-language memory-safety equivalence. The decision record also names
-known implementation gaps inside this frozen tuple/record slice (OWN0 root
-identity and event-timing correctness) that remain open repair work, not
-positioning questions.
+known implementation gaps inside this frozen ownership slice (OWN0 root
+identity and event-timing correctness, since closed - see Lane 2, #1709/
+#1724/#1725/#1726/#1891) that were open repair work, not positioning
+questions.
 
 ## Layer Separation
 
@@ -46,8 +57,9 @@ The current ownership pipeline is intentionally split:
 - IR/lowering preserves only the canonical execution-path contract
 - SemCode transports that lowered ownership metadata in `OWN0`
 - verifier admits or rejects the `OWN0` payload structurally
-- VM enforces the runtime write-path guard over admitted tuple and direct
-  record field paths
+- VM enforces the runtime write-path guard over admitted tuple, direct
+  record field, `Sequence` static-index, and ADT payload (`Borrow`-only)
+  paths
 
 Important rule:
 
@@ -64,6 +76,11 @@ Current supported component kinds:
 
 - `TupleIndex(u16)`
 - `Field(SymbolId)` for direct named record field projection only
+- `SequenceIndexStatic(u32)`, admitted in both `Borrow` and `Write` events
+  (#1718)
+- `AdtPayload { variant: SymbolId, index: u16 }`, admitted in `Borrow` events
+  only - a `Write` event carrying this component is rejected
+  unconditionally, not merely deferred (#1718)
 
 Current ordering rule:
 
@@ -78,13 +95,14 @@ Important boundary:
 
 ## Supported Behavior
 
-Current supported runtime ownership behavior covers tuple paths and direct
-record field paths.
+Current supported runtime ownership behavior covers tuple paths, direct
+record field paths, `Sequence` static-index paths (`Borrow` and `Write`),
+and ADT payload paths (`Borrow` only).
 
 Borrow lifetime v0:
 
-- a borrowed tuple or direct record field path becomes active for the current
-  frame
+- a borrowed tuple, direct record field, `Sequence` static-index, or ADT
+  payload path becomes active for the current frame
 - the active borrowed-path set is cleared when that frame exits
 
 Current runtime write rule:
@@ -101,18 +119,26 @@ Current allowed case:
 
 - sibling tuple paths
 - sibling direct record fields
+- sibling `Sequence` static indices
+- sibling ADT payload variants/indices (evaluated only against a real
+  `Borrow`; no genuine `Write(AdtPayload)` artifact is admissible to
+  exercise this case in practice - see `## Explicitly Unsupported`)
 
 ## Frontend And Lowering Contract
 
 Current source/frontend contract:
 
-- tuple and direct record field borrow/write intent must not be erased before
-  lowering
+- tuple, direct record field, and `Sequence` static-index borrow/write
+  intent, and ADT payload borrow intent, must not be erased before lowering
 - lowering must preserve enough ownership metadata to recover:
   - borrow event kind
   - write event kind
   - canonical `AccessPath`
   - direct record field projection as `Field(SymbolId)` when present
+  - `Sequence` static-index projection as `SequenceIndexStatic(u32)` when
+    present
+  - ADT payload projection as `AdtPayload { variant, index }` when present
+    (`Borrow` events only)
 
 Current lowering contract:
 
@@ -125,6 +151,8 @@ Current binary contract:
 
 - tuple-only ownership metadata is transported through `SEMCOD11`
 - direct record-field `Borrow`/`Write` transport is emitted through `SEMCOD12`
+- `Sequence` static-index `Borrow`/`Write` transport, and ADT payload
+  `Borrow`-only transport, are emitted through `SEMCOD21` (#1718)
 - the ownership section tag is `OWN0`
 - each event carries:
   - event kind (`Borrow` or `Write`)
@@ -136,9 +164,19 @@ Current transport scope:
 - tuple-only path components admitted end-to-end through `SEMCOD11`
 - direct record-field `Borrow`/`Write` transport, encoded as `Field(SymbolId)`,
   admitted end-to-end through `SEMCOD12`
+- `Sequence` static-index `Borrow`/`Write` transport, encoded as
+  `SequenceIndexStatic(u32)`, admitted end-to-end through `SEMCOD21`
+- ADT payload `Borrow`-only transport, encoded as
+  `AdtPayload { variant, index }`, admitted end-to-end through `SEMCOD21`;
+  the identical component in a `Write` event is rejected unconditionally,
+  under every header
 - deterministic event order
 - `CAP_OWNERSHIP_PATHS` remains the tuple ownership capability family
 - `CAP_OWNERSHIP_FIELD_PATHS` marks direct record-field ownership path transport
+- `CAP_OWNERSHIP_SEQUENCE_PATHS` marks `Sequence` static-index ownership path
+  transport (#1718)
+- `CAP_OWNERSHIP_ADT_BORROW_PATHS` marks ADT payload `Borrow`-only ownership
+  path transport (#1718)
 
 ## Verifier Admission Contract
 
@@ -146,10 +184,16 @@ Current verifier responsibility:
 
 - validate `OWN0` section structure
 - validate admitted ownership event kinds
-- validate tuple and direct record-field path payload shape
-- validate header/capability consistency for ownership transport
-- admit valid `Borrow(Field)` and `Write(Field)` payloads structurally
-- reject malformed or unsupported record ownership payload before execution
+- validate tuple, direct record-field, `Sequence` static-index, and ADT
+  payload path payload shape
+- validate header/capability consistency for ownership transport,
+  independently re-derived from decoded content for each path family
+  (#1718) - not delegated to `sm-format`'s own decode-time gate
+- admit valid `Borrow(Field)`, `Write(Field)`, `Borrow(SequenceIndexStatic)`,
+  `Write(SequenceIndexStatic)`, and `Borrow(AdtPayload)` payloads structurally
+- reject `Write(AdtPayload)` unconditionally, before and independent of
+  capability accounting, under every header (#1718)
+- reject malformed or unsupported ownership payload before execution
 
 Current verifier non-goal:
 
@@ -160,10 +204,12 @@ Current verifier non-goal:
 
 Current VM responsibility:
 
-- keep a frame-local set of active borrowed tuple and direct record field paths
+- keep a frame-local set of active borrowed tuple, direct record field,
+  `Sequence` static-index, and ADT payload paths
 - consume admitted ownership metadata only
-- reject overlapping writes at runtime for the supported tuple and direct
-  record field slice
+- reject overlapping writes at runtime for the supported tuple, direct
+  record field, `Sequence` static-index, and ADT payload (`Borrow`-only)
+  slice
 - surface ownership conflicts through `BorrowWriteConflict`
 
 Current VM non-goals:
@@ -189,12 +235,21 @@ Legacy artifact execution (#1891 Checkpoint W2F):
 
 The current implemented runtime ownership contract does not claim support for:
 
-- ADT payload paths
-- schema paths
+- `Write(AdtPayload)` - ADT payload paths are supported in `Borrow` events
+  only; a `Write` event carrying an `AdtPayload` component is rejected
+  unconditionally at admission, under every header, regardless of
+  capability. No source syntax reaches this today (the language has no
+  mutable ADT-payload reassignment), and promoting it later requires a new,
+  separately authorized contract change - not an incidental relaxation of
+  this document or of #1718's own mechanism (see
+  `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`)
+- `Map`/schema paths
 - partial borrow release before frame exit
 - advanced aliasing or region reasoning
 - inter-frame borrow persistence
 - indirect field selection or broader smart path normalization
+- general ADT mutation beyond `Borrow`-only payload access, general alias
+  analysis, lifetimes/regions, or Rust-equivalent borrow checking
 
 ## Honesty Rule
 
