@@ -8,10 +8,11 @@ use sm_format::semcode_format::{
     read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
     SemcodeHeaderSpec, CAP_ARGS_READ, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS,
     CAP_EVENT_POST, CAP_F64_MATH, CAP_FS_READ, CAP_FS_WRITE, CAP_FX_MATH, CAP_FX_VALUES,
-    CAP_GATE_SURFACE, CAP_MAP_VALUES, CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS,
-    CAP_PATH_INSPECT, CAP_PRNG, CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY,
-    CAP_STATE_UPDATE, CAP_STDERR_WRITE, CAP_STDIN_READ_TEXT, CAP_STDOUT, CAP_STDOUT_WRITE,
-    CAP_TEXT_VALUES, CAP_TIME_DURATION,
+    CAP_GATE_SURFACE, CAP_MAP_VALUES, CAP_OWNERSHIP_ADT_BORROW_PATHS, CAP_OWNERSHIP_FIELD_PATHS,
+    CAP_OWNERSHIP_PATHS, CAP_OWNERSHIP_SEQUENCE_PATHS, CAP_PATH_INSPECT, CAP_PRNG,
+    CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE,
+    CAP_STDERR_WRITE, CAP_STDIN_READ_TEXT, CAP_STDOUT, CAP_STDOUT_WRITE, CAP_TEXT_VALUES,
+    CAP_TIME_DURATION,
 };
 use sm_runtime_core::RuntimeQuotas;
 use std::collections::HashSet;
@@ -1234,22 +1235,71 @@ fn verify_function_code(
 
     let has_ownership_section = env.has_ownership_section;
     let mut has_record_field_ownership = false;
-    for p in env.borrowed_paths.iter().chain(env.write_paths.iter()) {
+    // #1718: `has_sequence_ownership` and `has_adt_borrow_ownership` feed the
+    // same `used_caps`/`missing_caps` capability-consistency mechanism
+    // `has_record_field_ownership` already uses below - this is the
+    // verifier's OWN independent authority over the frozen path-family
+    // contract, not a check that trusts `sm-format`'s decode-time gate to
+    // have already done this work. `has_adt_write_ownership` is tracked
+    // separately from `borrowed_paths`/`write_paths` (not chained together,
+    // unlike the loop this replaces) specifically so a `Write` event's
+    // `AdtPayload` component can never be silently folded into
+    // `has_adt_borrow_ownership` - the two are independently-decided
+    // admission domains (see
+    // `docs/roadmap/stable_foundation/ssf08_1718_path_family_contract_decision.md`)
+    // and must never share one accounting flag.
+    let mut has_sequence_ownership = false;
+    let mut has_adt_borrow_ownership = false;
+    let mut has_adt_write_ownership = false;
+    for p in env.borrowed_paths.iter() {
         for c in &p.components {
             match c {
                 sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_) => {
                     has_record_field_ownership = true;
                 }
                 sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
+                    has_adt_borrow_ownership = true;
                     // Variant is a global SymbolId; it cannot be bounds-checked
                     // against the local string table. Structural acceptance only.
                 }
                 sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(_) => {
-                    // Static sequence index ownership is structurally accepted.
+                    has_sequence_ownership = true;
                 }
                 _ => {}
             }
         }
+    }
+    for p in env.write_paths.iter() {
+        for c in &p.components {
+            match c {
+                sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_) => {
+                    has_record_field_ownership = true;
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
+                    has_adt_write_ownership = true;
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(_) => {
+                    has_sequence_ownership = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // #1718: unconditional rejection, independent of capability. No header
+    // revision or capability bit - present, future, or hypothetically
+    // reinterpreted - authorizes `Write(AdtPayload)`; this is not a missing-
+    // capability situation (`CapabilityViolation`) that a wider header could
+    // ever cure, so it is checked and rejected before, and separately from,
+    // the capability-consistency check below.
+    if has_adt_write_ownership {
+        return Err(reject_one(
+            name,
+            VerificationCode::InvalidOwnershipSection,
+            0,
+            "Write(AdtPayload) is not an admitted SemCode ownership path under any header \
+             revision (#1718)",
+        ));
     }
 
     let code = env.code_slice;
@@ -1420,6 +1470,19 @@ fn verify_function_code(
     }
     if has_record_field_ownership {
         used_caps |= CAP_OWNERSHIP_FIELD_PATHS;
+    }
+    // #1718: reuses the exact same capability-consistency mechanism as
+    // `CAP_OWNERSHIP_FIELD_PATHS` above - a header below
+    // `SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION`/
+    // `SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION` lacks these bits entirely,
+    // so `missing_caps` below naturally rejects it without any new rejection
+    // path. `has_adt_write_ownership` never reaches here - it already
+    // returned `Err` above, unconditionally, before this point.
+    if has_sequence_ownership {
+        used_caps |= CAP_OWNERSHIP_SEQUENCE_PATHS;
+    }
+    if has_adt_borrow_ownership {
+        used_caps |= CAP_OWNERSHIP_ADT_BORROW_PATHS;
     }
 
     let missing_caps = used_caps & !header.capabilities;
@@ -4219,7 +4282,7 @@ mod tests {
     use super::*;
     use sm_format::semcode_format::{
         read_u16_le, read_u32_le, CallableValueFamily, MAGIC0, MAGIC10, MAGIC11, MAGIC18, MAGIC20,
-        MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG,
+        MAGIC21, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG,
     };
     use sm_ir::{
         compile_program_to_semcode, compile_program_to_semcode_with_options_debug,
@@ -5160,10 +5223,17 @@ mod tests {
             }
         "#;
         let bytes = compile_program_to_semcode(src).expect("compile");
-        assert_eq!(&bytes[..MAGIC20.len()], &MAGIC20);
+        // #1718: this program's `Option::Some(ref value)` arm is a real
+        // `Borrow(AdtPayload)` event (`Option` is ADT-represented), which
+        // now requires `CAP_OWNERSHIP_ADT_BORROW_PATHS` and promotes one
+        // revision past `HEADER_V20`/rev21 (this test's original D2b
+        // subject), to `HEADER_V21`/rev22 - purely additive, same OWN0
+        // grammar. Before #1718, ADT Borrow had no dedicated capability, so
+        // this program only ever reached `MAGIC20`/rev21.
+        assert_eq!(&bytes[..MAGIC21.len()], &MAGIC21);
         let verified = verify_semcode(&bytes)
             .expect("D2b must admit a mixed FrameEntry+StoreVarSite artifact");
-        assert_eq!(verified.header.rev, 21);
+        assert_eq!(verified.header.rev, 22);
     }
 
     #[test]
@@ -5204,19 +5274,42 @@ mod tests {
         );
     }
 
+    // #1718 update: this test's original claim - a FrameEntry-only ADT
+    // Borrow (no StoreVarSite anchor anywhere) never gets promoted to the
+    // rev21 anchor grammar - is no longer true in general, and cannot be:
+    // #1718 requires `CAP_OWNERSHIP_ADT_BORROW_PATHS` for ANY `AdtPayload`
+    // Borrow event regardless of activation mode, and that capability first
+    // exists at `HEADER_V21`/rev22, which is unconditionally >=
+    // `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION` (21). What the original D2b
+    // checkpoint actually cared about - that the anchor *mechanism itself*
+    // (`has_v20_ownership_execution_anchor`) is not what's driving
+    // promotion here, since there is no StoreVarSite anywhere - remains true
+    // and is what this renamed test now asserts directly: the artifact is
+    // admitted, promoted by the *ADT-Borrow* capability requirement, and its
+    // Borrow event still faithfully encodes `FrameEntry`, not a spuriously
+    // invented anchor.
     #[test]
-    fn checkpoint_d2b_legacy_rev20_borrow_admitted_unchanged() {
-        // ADT/Option/Result Borrow events stay FrameEntry-only (D1 never
-        // touches this producer); with no StoreVarSite anchor anywhere in
-        // the artifact, `has_v20_ownership_execution_anchor` never fires and
-        // the header never reaches rev21, so this program's Borrow event
-        // takes the pre-D2b legacy grammar path through admission.
+    fn checkpoint_1718_frame_entry_only_adt_borrow_admitted_via_adt_capability_not_anchor() {
         let bytes = adt_payload_ownership_semcode_bytes();
         let verified =
-            verify_semcode(&bytes).expect("legacy FrameEntry-only artifact must still admit");
-        assert!(
-            verified.header.rev < sm_format::semcode_format::SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION,
-            "a FrameEntry-only program must never be promoted to the rev21 anchor grammar"
+            verify_semcode(&bytes).expect("FrameEntry-only ADT Borrow artifact must admit");
+        assert_eq!(
+            verified.header.rev,
+            sm_format::semcode_format::SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION,
+            "promotion here must land exactly on the ADT-Borrow capability floor, not higher"
+        );
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let read_payload = decoded
+            .iter()
+            .find(|f| f.name == "read_payload")
+            .expect("read_payload");
+        assert_eq!(read_payload.borrowed_paths.len(), 1);
+        assert_eq!(
+            read_payload.borrowed_paths[0].activation,
+            Some(sm_format::semcode_decode::DecodedBorrowActivation::FrameEntry),
+            "the ADT producer's Borrow event must stay FrameEntry - promotion here is driven \
+             by the #1718 ADT-Borrow capability requirement, not by the anchor mechanism"
         );
     }
 
@@ -10781,6 +10874,16 @@ mod tests {
         let component_kind_offset = section_offset + 4 + 2 + 1 + 1 + 4 + 4 + 2;
         code[component_kind_offset] =
             sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX;
+        // #1718: a real emitter faced with a `SequenceIndexStatic` component
+        // would promote the header to `HEADER_V21`/`MAGIC21` (see
+        // `has_v21_sequence_ownership_events` in `sm-ir`) - this helper
+        // patches the component-kind byte in isolation (the base fixture's
+        // real header only reflects a Field Borrow), so it must patch the
+        // header magic to match what a real compiler would have chosen for
+        // this content, or the resulting artifact would understate its own
+        // capability requirement and get rejected for a reason unrelated to
+        // whatever the calling test actually wants to exercise.
+        bytes[0..8].copy_from_slice(&sm_format::semcode_format::MAGIC21);
         bytes
     }
 
