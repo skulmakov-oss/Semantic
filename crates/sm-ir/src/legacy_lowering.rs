@@ -538,6 +538,23 @@ pub enum BorrowActivationResolved {
     StoreVarSite(ExecutableAnchor),
 }
 
+/// The resolved execution authority for one Write ownership event, computed
+/// at emission time (#1891 Checkpoint W2C), mirroring `BorrowActivationResolved`'s
+/// D1 pattern for Borrow but keyed from `WriteSiteId` and never conflated
+/// with it. Preserves which of the two valid Write producer instruction
+/// kinds (W1.5/W2A: `StoreVar` for producers A/B, `MakeRecord` for producer
+/// C) resolved this site, rather than collapsing to a bare `ExecutableAnchor`
+/// — this structural distinction is retained as evidence for W2D/W2E's
+/// eventual wire-encoding decision, which this checkpoint does not make.
+/// This is a structural resolution only, computed purely in-memory — it is
+/// never serialized, and today's rev21 Write wire bytes are unchanged by its
+/// existence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteExecutionResolved {
+    StoreVarSite(ExecutableAnchor),
+    MakeRecordSite(ExecutableAnchor),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnershipPathEvent {
     pub kind: OwnershipPathEventKind,
@@ -1455,12 +1472,13 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
             })?,
         );
         out.extend_from_slice(name_bytes);
-        let (code, func_max_revision, _resolved_borrow_activations) = emit_semcode_function(
-            f,
-            debug_symbols,
-            require_ownership_section,
-            chosen_header.rev,
-        )?;
+        let (code, func_max_revision, _resolved_borrow_activations, _resolved_write_execution) =
+            emit_semcode_function(
+                f,
+                debug_symbols,
+                require_ownership_section,
+                chosen_header.rev,
+            )?;
         max_opcode_revision_used = max_opcode_revision_used.max(func_max_revision);
         write_u32_le(
             &mut out,
@@ -1519,7 +1537,15 @@ fn emit_semcode_function(
     debug_symbols: bool,
     require_ownership_section: bool,
     chosen_header_rev: u16,
-) -> Result<(Vec<u8>, u16, Vec<BorrowActivationResolved>), FrontendError> {
+) -> Result<
+    (
+        Vec<u8>,
+        u16,
+        Vec<BorrowActivationResolved>,
+        Vec<WriteExecutionResolved>,
+    ),
+    FrontendError,
+> {
     // #1726 Checkpoint D1: this is the one and only place activation sites are
     // resolved, so it must not admit an already-incoherent function. Checkpoint
     // C's optimizer passes already validate this after every rewrite; this is
@@ -1641,6 +1667,15 @@ fn emit_semcode_function(
     // forward Label/Jmp targets before this real pass runs; it is not used
     // here on principle, even though it is expected to already agree).
     let mut activation_anchors: HashMap<ActivationSiteId, ExecutableAnchor> = HashMap::new();
+    // #1891 Checkpoint W2C: WriteSiteId -> WriteExecutionResolved, captured
+    // from the exact same real, already-interned `instr_stream.len()` used
+    // for `activation_anchors` above - the identical opcode-start byte
+    // offset authority D1 established, never a second/independent PC
+    // computation. Kept in its own HashMap keyed by `WriteSiteId`, so a
+    // future synthetic instruction carrying both an `ActivationSiteId` and a
+    // `WriteSiteId` resolves both, at the identical PC, without either
+    // domain constraining or conflicting with the other.
+    let mut write_anchors: HashMap<WriteSiteId, WriteExecutionResolved> = HashMap::new();
     for instr in &f.instrs {
         if matches!(instr, IrInstr::Label { .. }) {
             continue;
@@ -1663,6 +1698,34 @@ fn emit_semcode_function(
                     pos: 0,
                     message: format!(
                         "function `{}`: ActivationSiteId({}) annotated on more than one surviving StoreVar",
+                        f.name, site.0
+                    ),
+                });
+            }
+        }
+        let write_resolution = match instr {
+            IrInstr::StoreVar {
+                write_site: Some(site),
+                ..
+            } => Some((
+                *site,
+                WriteExecutionResolved::StoreVarSite(ExecutableAnchor(pc)),
+            )),
+            IrInstr::MakeRecord {
+                write_site: Some(site),
+                ..
+            } => Some((
+                *site,
+                WriteExecutionResolved::MakeRecordSite(ExecutableAnchor(pc)),
+            )),
+            _ => None,
+        };
+        if let Some((site, resolved)) = write_resolution {
+            if write_anchors.insert(site, resolved).is_some() {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "function `{}`: WriteSiteId({}) annotated on more than one surviving write-capable instruction",
                         f.name, site.0
                     ),
                 });
@@ -1707,6 +1770,39 @@ fn emit_semcode_function(
             }
         };
         resolved_borrow_activations.push(resolved);
+    }
+
+    // #1891 Checkpoint W2C: resolve every Write event to its exact emitted
+    // execution site, mirroring the Borrow resolution above. `write_anchors`
+    // holds one resolved anchor per WriteSiteId - a MakeRecord site's 1..N
+    // Write events all look up the identical map entry, so they resolve to
+    // the same exact anchor without minting or copying a new one per event
+    // (item 4). `validate_write_sites` (called at the top of this function)
+    // already proves every Write event carries a site and every annotated
+    // site is claimed by at least one event; reaching this point with a site
+    // absent from `write_anchors` means the annotated instruction failed to
+    // survive to emission without going through Checkpoint W2B's removal
+    // receipt - a coherence failure, not "probably dead".
+    let mut resolved_write_execution = Vec::new();
+    for event in &f.ownership_events {
+        if event.kind != OwnershipPathEventKind::Write {
+            continue;
+        }
+        let site = event.write_site.ok_or_else(|| FrontendError {
+            pos: 0,
+            message: format!(
+                "function `{}`: Write event has no WriteSiteId at emission time",
+                f.name
+            ),
+        })?;
+        let resolved = write_anchors.get(&site).copied().ok_or_else(|| FrontendError {
+            pos: 0,
+            message: format!(
+                "function `{}`: Write event references WriteSiteId({}) with no surviving executable anchor",
+                f.name, site.0
+            ),
+        })?;
+        resolved_write_execution.push(resolved);
     }
 
     let mut code = Vec::new();
@@ -1770,7 +1866,12 @@ fn emit_semcode_function(
         }
     }
     code.extend_from_slice(&instr_stream);
-    Ok((code, max_opcode_revision, resolved_borrow_activations))
+    Ok((
+        code,
+        max_opcode_revision,
+        resolved_borrow_activations,
+        resolved_write_execution,
+    ))
 }
 
 fn encoded_size(instr: &IrInstr) -> Option<usize> {
@@ -11881,7 +11982,7 @@ mod opt_tests {
             ownership_events: Vec::new(),
             params: Vec::new(),
         };
-        let (_, max_rev, _) = emit_semcode_function(&func, false, false, 19).expect("emit");
+        let (_, max_rev, _, _) = emit_semcode_function(&func, false, false, 19).expect("emit");
         assert_eq!(max_rev, 19);
     }
 
@@ -11896,7 +11997,7 @@ mod opt_tests {
             ownership_events: Vec::new(),
             params: Vec::new(),
         };
-        let (_, max_rev, _) = emit_semcode_function(&func, false, false, 1).expect("emit");
+        let (_, max_rev, _, _) = emit_semcode_function(&func, false, false, 1).expect("emit");
         assert_eq!(max_rev, 1);
     }
 
@@ -12192,7 +12293,7 @@ mod opt_tests {
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
         let main = ir.iter().find(|f| f.name == "main").expect("main");
-        let (_, _, resolved) =
+        let (_, _, resolved, _) =
             emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
         assert_eq!(resolved.len(), 1);
         let anchor = match resolved[0] {
@@ -12250,7 +12351,7 @@ mod opt_tests {
         // the annotated introduction, not a bare `None`.
         assert_eq!(left_stores.len(), 1);
         assert!(left_stores[0].1.is_some());
-        let (_, _, resolved) =
+        let (_, _, resolved, _) =
             emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
         assert_eq!(resolved.len(), 1);
         assert!(matches!(
@@ -12274,7 +12375,7 @@ mod opt_tests {
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
         let main = ir.iter().find(|f| f.name == "main").expect("main");
-        let (_, _, resolved) =
+        let (_, _, resolved, _) =
             emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
         assert_eq!(resolved.len(), 2);
         let anchors: Vec<ExecutableAnchor> = resolved
@@ -12313,7 +12414,7 @@ mod opt_tests {
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
         let main = ir.iter().find(|f| f.name == "main").expect("main");
-        let (_, _, resolved) =
+        let (_, _, resolved, _) =
             emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
         assert_eq!(resolved.len(), 2);
         let anchors: Vec<ExecutableAnchor> = resolved
@@ -12350,7 +12451,7 @@ mod opt_tests {
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
         let main = ir.iter().find(|f| f.name == "main").expect("main");
-        let (_, _, resolved) =
+        let (_, _, resolved, _) =
             emit_semcode_function(main, false, false, 19).expect("emit resolves anchors");
         assert_eq!(
             resolved.len(),
@@ -12382,7 +12483,7 @@ mod opt_tests {
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
         let main = ir.iter().find(|f| f.name == "main").expect("main");
-        let (_, _, resolved) =
+        let (_, _, resolved, _) =
             emit_semcode_function(main, false, false, 1).expect("emit resolves anchors");
         assert_eq!(resolved.len(), 1);
         assert!(matches!(resolved[0], BorrowActivationResolved::FrameEntry));
@@ -12459,7 +12560,7 @@ mod opt_tests {
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
         let main = ir.iter().find(|f| f.name == "main").expect("main");
-        let (_, _, resolved) =
+        let (_, _, resolved, _) =
             emit_semcode_function(main, false, false, SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION)
                 .expect("emit");
         let anchor = match resolved[0] {
@@ -15480,6 +15581,493 @@ mod opt_tests {
             "the reassignment's own StoreVar site and the RecordUpdate's own \
              MakeRecord site must remain two distinct WriteSiteIds, never merged \
              into one just because they occur in the same statement"
+        );
+    }
+
+    // #1891 Checkpoint W2C: WriteSiteId -> real emitted ExecutableAnchor.
+    // Every test below decodes a REAL, fully emitted artifact (never the IR
+    // vector index or a predicted size) via `opcode_byte_at_anchor`, mirroring
+    // the #1726 Checkpoint D1 proof technique exactly for the Write side.
+
+    // Item 8.A: plain assignment resolves to the real StoreVar opcode byte.
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_plain_assign_write_site_resolves_to_real_store_var_opcode() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 0;
+                x = 5;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(resolved_write.len(), 1);
+        let anchor = match resolved_write[0] {
+            WriteExecutionResolved::StoreVarSite(anchor) => anchor,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            opcode_byte_at_anchor(decoded_main, anchor),
+            Opcode::StoreVar.byte(),
+            "WriteSiteId's ExecutableAnchor must point at the real, decoded StoreVar opcode byte"
+        );
+    }
+
+    // Item 8.B: three reassignments to the same root resolve to three
+    // distinct, real StoreVar opcode-byte positions.
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_repeated_assignment_resolves_to_distinct_real_anchors() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 0;
+                x = 1;
+                x = 2;
+                x = 3;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(resolved_write.len(), 3);
+        let anchors: Vec<ExecutableAnchor> = resolved_write
+            .iter()
+            .map(|r| match r {
+                WriteExecutionResolved::StoreVarSite(anchor) => *anchor,
+                other => panic!("expected StoreVarSite, got {other:?}"),
+            })
+            .collect();
+        let unique: BTreeSet<_> = anchors.iter().collect();
+        assert_eq!(
+            unique.len(),
+            3,
+            "three distinct reassignments must resolve to three distinct byte-PCs: {anchors:?}"
+        );
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        for anchor in &anchors {
+            assert_eq!(
+                opcode_byte_at_anchor(decoded_main, *anchor),
+                Opcode::StoreVar.byte()
+            );
+        }
+    }
+
+    // Item 8.C: tuple-destructuring assignment's two write sites resolve to
+    // the two corresponding real StoreVar opcode-byte positions.
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_tuple_assignment_resolves_to_real_store_var_anchors() {
+        let src = r#"
+            fn pair() -> (i32, bool) = (1, true);
+
+            fn main() {
+                let mut count: i32 = 0;
+                let mut ready: bool = false;
+                (count, ready) = pair();
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(resolved_write.len(), 2);
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        let anchors: Vec<ExecutableAnchor> = resolved_write
+            .iter()
+            .map(|r| match r {
+                WriteExecutionResolved::StoreVarSite(anchor) => *anchor,
+                other => panic!("expected StoreVarSite, got {other:?}"),
+            })
+            .collect();
+        assert_ne!(anchors[0], anchors[1]);
+        for anchor in &anchors {
+            assert_eq!(
+                opcode_byte_at_anchor(decoded_main, *anchor),
+                Opcode::StoreVar.byte()
+            );
+        }
+    }
+
+    // Item 8.D: a single-field RecordUpdate's site resolves to the real
+    // MakeRecord opcode byte, not the destination binding's StoreVar.
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_single_field_record_update_resolves_to_real_make_record_opcode() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let fresh: R = base with { a: 9 };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(resolved_write.len(), 1);
+        let anchor = match resolved_write[0] {
+            WriteExecutionResolved::MakeRecordSite(anchor) => anchor,
+            other => panic!("expected MakeRecordSite, got {other:?}"),
+        };
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            opcode_byte_at_anchor(decoded_main, anchor),
+            Opcode::MakeRecord.byte(),
+            "the RecordUpdate's WriteSiteId must point at the real MakeRecord opcode byte, \
+             never at `fresh`'s own destination StoreVar"
+        );
+    }
+
+    // Item 8.E: a multi-field RecordUpdate's N=2 Write events share exactly
+    // one WriteSiteId, which resolves to exactly one real MakeRecord opcode
+    // byte - never one anchor minted per event.
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_multi_field_record_update_events_share_one_real_anchor() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let fresh: R = base with { a: 9, b: 8 };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(
+            resolved_write.len(),
+            2,
+            "two overridden fields, two Write events"
+        );
+        assert_eq!(
+            resolved_write[0], resolved_write[1],
+            "both events sharing the RecordUpdate's site must resolve to the identical anchor"
+        );
+        let anchor = match resolved_write[0] {
+            WriteExecutionResolved::MakeRecordSite(anchor) => anchor,
+            other => panic!("expected MakeRecordSite, got {other:?}"),
+        };
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            opcode_byte_at_anchor(decoded_main, anchor),
+            Opcode::MakeRecord.byte()
+        );
+    }
+
+    // Item 8.F: nested RecordUpdates (outer and inner) resolve to two
+    // distinct real MakeRecord opcode-byte positions - one per actual
+    // MakeRecord instruction, never conflated because both are "a
+    // RecordUpdate".
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_nested_record_updates_resolve_to_distinct_real_anchors() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let inner: R = R { a: 5, b: 6 };
+                let fresh: R = base with { a: (inner with { b: 9 }).a };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(
+            resolved_write.len(),
+            2,
+            "one Write event per RecordUpdate occurrence"
+        );
+        let anchors: Vec<ExecutableAnchor> = resolved_write
+            .iter()
+            .map(|r| match r {
+                WriteExecutionResolved::MakeRecordSite(anchor) => *anchor,
+                other => panic!("expected MakeRecordSite, got {other:?}"),
+            })
+            .collect();
+        assert_ne!(
+            anchors[0], anchors[1],
+            "the outer and nested inner RecordUpdate must resolve to distinct real MakeRecord anchors: {anchors:?}"
+        );
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        for anchor in &anchors {
+            assert_eq!(
+                opcode_byte_at_anchor(decoded_main, *anchor),
+                Opcode::MakeRecord.byte()
+            );
+        }
+    }
+
+    // Item 8.G: `fresh = base with { a: 9 };` carries two semantically
+    // distinct write sites in one statement - the RecordUpdate's MakeRecord
+    // and the reassignment's own StoreVar - which must resolve to two
+    // distinct real anchors, never collapsed just because they share a
+    // statement.
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_record_update_reassignment_resolves_distinct_real_anchors() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let mut fresh: R = base;
+                fresh = base with { a: 9 };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(
+            resolved_write.len(),
+            2,
+            "one Write(base.a) from the RecordUpdate, one Write(fresh) from the reassignment"
+        );
+        let make_record_anchor = resolved_write
+            .iter()
+            .find_map(|r| match r {
+                WriteExecutionResolved::MakeRecordSite(a) => Some(*a),
+                _ => None,
+            })
+            .expect("one MakeRecordSite resolution");
+        let store_var_anchor = resolved_write
+            .iter()
+            .find_map(|r| match r {
+                WriteExecutionResolved::StoreVarSite(a) => Some(*a),
+                _ => None,
+            })
+            .expect("one StoreVarSite resolution");
+        assert_ne!(
+            make_record_anchor, store_var_anchor,
+            "the RecordUpdate's MakeRecord anchor and the reassignment's own StoreVar anchor must remain distinct"
+        );
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            opcode_byte_at_anchor(decoded_main, make_record_anchor),
+            Opcode::MakeRecord.byte()
+        );
+        assert_eq!(
+            opcode_byte_at_anchor(decoded_main, store_var_anchor),
+            Opcode::StoreVar.byte()
+        );
+    }
+
+    // Item 8.H: two branch arms each assigning the same root resolve to two
+    // independent, real, distinct static anchors - even though only one arm
+    // ever executes at runtime, both are real emitted instructions at
+    // resolution time.
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_branch_arms_resolve_to_independent_real_anchors() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 0;
+                let cond: bool = false;
+                if cond {
+                    x = 1;
+                } else {
+                    x = 2;
+                }
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(resolved_write.len(), 2);
+        let anchors: Vec<ExecutableAnchor> = resolved_write
+            .iter()
+            .map(|r| match r {
+                WriteExecutionResolved::StoreVarSite(anchor) => *anchor,
+                other => panic!("expected StoreVarSite, got {other:?}"),
+            })
+            .collect();
+        assert_ne!(
+            anchors[0], anchors[1],
+            "each branch's own static write site must remain a distinct real anchor: {anchors:?}"
+        );
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        for anchor in &anchors {
+            assert_eq!(
+                opcode_byte_at_anchor(decoded_main, *anchor),
+                Opcode::StoreVar.byte()
+            );
+        }
+    }
+
+    // Item 8.I: a loop body's single static write site resolves to exactly
+    // one real byte-PC anchor - runtime repetition is irrelevant, since
+    // resolution happens once, statically, over the emitted instruction
+    // stream, never per dynamic visit.
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_loop_body_write_site_resolves_to_one_real_anchor() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 0;
+                loop {
+                    x = 1;
+                    break;
+                }
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(resolved_write.len(), 1);
+        let anchor = match resolved_write[0] {
+            WriteExecutionResolved::StoreVarSite(anchor) => anchor,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        assert_eq!(
+            opcode_byte_at_anchor(decoded_main, anchor),
+            Opcode::StoreVar.byte()
+        );
+    }
+
+    // Item 8.J: a synthetic StoreVar carrying BOTH an ActivationSiteId and a
+    // WriteSiteId resolves both identities to the identical real PC, without
+    // either domain conflating or constraining the other (item 6).
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_dual_role_store_var_resolves_both_ids_to_the_same_real_anchor() {
+        let mut main = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![
+                IrInstr::LoadI32 { dst: 0, val: 7 },
+                IrInstr::StoreVar {
+                    name: "__sm_local_1_x".to_string(),
+                    src: 0,
+                    activation_site: Some(ActivationSiteId(0)),
+                    write_site: Some(WriteSiteId(0)),
+                },
+                IrInstr::Ret { src: None },
+            ],
+            ownership_events: vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new("__sm_local_1_x".to_string()),
+                    activation_site: Some(ActivationSiteId(0)),
+                    write_site: None,
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Write,
+                    path: AccessPath::new("__sm_local_1_x".to_string()),
+                    activation_site: None,
+                    write_site: Some(WriteSiteId(0)),
+                },
+            ],
+            params: Vec::new(),
+        };
+        crate::passes::validate_activation_sites(&main).expect("valid fixture");
+        crate::passes::validate_write_sites(&main).expect("valid fixture");
+        let (_, _, resolved_borrow, resolved_write) =
+            emit_semcode_function(&main, false, false, 19).expect("emit resolves both anchors");
+        let borrow_anchor = match resolved_borrow[0] {
+            BorrowActivationResolved::StoreVarSite(a) => a,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+        let write_anchor = match resolved_write[0] {
+            WriteExecutionResolved::StoreVarSite(a) => a,
+            other => panic!("expected StoreVarSite, got {other:?}"),
+        };
+        assert_eq!(
+            borrow_anchor, write_anchor,
+            "the same physical StoreVar must resolve both IDs to the identical PC"
+        );
+        // Silence the otherwise-unused `mut` now that this fixture is read-only.
+        let _ = &mut main;
+    }
+
+    // Item 10: confirms this checkpoint's resolution work is purely internal
+    // - the existing rev21 Write layout (kind tag, then straight to the
+    // path, no anchor bytes, regardless of header revision) is byte-for-byte
+    // unchanged. A RecordUpdate program is used because it is the shape most
+    // at risk of an accidental wire change (its MakeRecord site now has a
+    // real internal resolution computed, unlike before W2C).
+    #[test]
+    fn ssf08_1891_checkpoint_w2c_write_event_wire_bytes_remain_byte_for_byte_unchanged() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let fresh: R = base with { a: 9 };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
+            .expect("compiles");
+        let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
+        let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
+        // `write_paths` is populated purely positionally from the OWN0 bytes
+        // (kind tag, root u32, component count u16, components...) with no
+        // activation-mode/anchor byte ever read for a Write kind (see
+        // sm-format's decoder, unchanged by this checkpoint). If W2C had
+        // accidentally emitted an extra byte for the Write event, every
+        // subsequent field here would misdecode or the whole section would
+        // fail to parse - this succeeding, with the exact expected shape, is
+        // itself the byte-for-byte-unchanged proof.
+        assert_eq!(
+            decoded_main.write_paths.len(),
+            1,
+            "exactly one Write path (the RecordUpdate's field override), as before W2C"
+        );
+        assert_eq!(
+            decoded_main.write_paths[0].components.len(),
+            1,
+            "the RecordUpdate's Write path still carries exactly one Field component"
+        );
+        assert!(
+            matches!(
+                decoded_main.write_paths[0].components[0],
+                crate::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_)
+            ),
+            "the sole component must still decode as a FieldSymbol, unchanged: {:?}",
+            decoded_main.write_paths[0]
+        );
+        assert_eq!(
+            decoded_main.write_paths[0].activation, None,
+            "a Write path must never carry a decoded activation - the rev21 legacy Write layout \
+             reserves that field for Borrow only, and W2C's resolution is purely internal"
         );
     }
 
