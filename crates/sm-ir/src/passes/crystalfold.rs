@@ -1,6 +1,8 @@
-use super::{validate_activation_sites, IrModule, OptError, OptPass, OptReport};
+use super::{
+    validate_activation_sites, validate_write_sites, IrModule, OptError, OptPass, OptReport,
+};
 use crate::frontend::QuadVal;
-use crate::legacy_lowering::{ActivationSiteId, IrInstr};
+use crate::legacy_lowering::{ActivationSiteId, IrInstr, WriteSiteId};
 use std::collections::HashMap;
 
 const FX_SCALE: i32 = 1_000;
@@ -26,6 +28,22 @@ fn store_var_fingerprint(instrs: &[IrInstr]) -> Vec<(String, Option<ActivationSi
         .collect()
 }
 
+/// The `write_site` sequence of every StoreVar and MakeRecord, in order.
+/// Mirrors `store_var_fingerprint` for the Write side (#1891 Checkpoint W2B)
+/// — CrystalFold has no authority to delete, reorder, retarget, or move a
+/// WriteSiteId to a different instruction; it must reproduce this sequence
+/// exactly, or fail closed.
+fn write_site_fingerprint(instrs: &[IrInstr]) -> Vec<Option<WriteSiteId>> {
+    instrs
+        .iter()
+        .filter_map(|instr| match instr {
+            IrInstr::StoreVar { write_site, .. } => Some(*write_site),
+            IrInstr::MakeRecord { write_site, .. } => Some(*write_site),
+            _ => None,
+        })
+        .collect()
+}
+
 impl OptPass for CrystalFoldPass {
     fn name(&self) -> &'static str {
         "CrystalFold"
@@ -39,7 +57,9 @@ impl OptPass for CrystalFoldPass {
         let mut rewrites = 0u32;
         for func in &mut ir.functions {
             validate_activation_sites(func)?;
+            validate_write_sites(func)?;
             let before = store_var_fingerprint(&func.instrs);
+            let before_write = write_site_fingerprint(&func.instrs);
             rewrites = rewrites.saturating_add(fold_constants_and_identities(&mut func.instrs));
             let after = store_var_fingerprint(&func.instrs);
             if before != after {
@@ -48,7 +68,15 @@ impl OptPass for CrystalFoldPass {
                     func.name, before, after
                 )));
             }
+            let after_write = write_site_fingerprint(&func.instrs);
+            if before_write != after_write {
+                return Err(OptError(format!(
+                    "function `{}`: CrystalFold must pass every StoreVar/MakeRecord's WriteSiteId through unchanged and in order; before={:?}, after={:?}",
+                    func.name, before_write, after_write
+                )));
+            }
             validate_activation_sites(func)?;
+            validate_write_sites(func)?;
         }
         Ok(OptReport {
             changed: rewrites > 0,
