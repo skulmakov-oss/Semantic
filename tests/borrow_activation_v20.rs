@@ -297,10 +297,13 @@ fn mixed_frame_entry_and_store_var_site_activation_in_one_function() {
     );
 }
 
-// #1726 Checkpoint D3, item 9 / item 12.H: a Borrow event decoded under a
-// pre-rev21 header (no ADT/Option content able to trigger the anchor
-// promotion at all) keeps exactly its pre-D3 eager/frame-entry runtime
-// behavior - conflicting regardless of which match arm actually ran.
+// #1726 Checkpoint D3, item 9 / item 12.H: a Borrow event whose own producer
+// (ADT/Option) never allocates an ActivationSiteId and so never needs rev21
+// for its own sake keeps exactly its pre-D3 eager/frame-entry runtime
+// behavior - conflicting regardless of which match arm actually ran. (As of
+// #1891 Checkpoint W2D, this specific program's own reassignment separately
+// promotes it to rev21 anyway, on the Write side - orthogonal to, and
+// without affecting, the Borrow-side claim this test proves.)
 #[test]
 fn rev20_legacy_borrow_stays_eager_regardless_of_which_arm_ran() {
     let bytes = compile_program_to_semcode(
@@ -318,10 +321,15 @@ fn rev20_legacy_borrow_stays_eager_regardless_of_which_arm_ran() {
     "#,
     )
     .expect("compile");
-    assert!(
-        &bytes[..8] != b"SEMCOD20",
-        "an ADT-only program must never be promoted to the rev21 anchor grammar"
-    );
+    // #1891 Checkpoint W2D: `opt = Option::Some(9);` is a plain reassignment
+    // (producer B), which now always carries a resolved WriteSiteId
+    // (Checkpoint W2C) - promoting this artifact to SEMCOD20/rev21 on its
+    // own merits, independent of this test's actual subject (the ADT/Option
+    // Borrow producer, which still never allocates an ActivationSiteId and
+    // still never needs rev21 for its own sake). The behavioral claim below
+    // - legacy FrameEntry Borrow stays eager regardless of which match arm
+    // ran - is what this test exists to prove, and is unaffected by the
+    // Write-side promotion.
     let token = sm_verify::verify_semcode_token(&bytes).expect("admit");
     let entry = token.require_entry("main").expect("entry");
     let result = sm_vm::run_verified_entry_semcode(&entry);

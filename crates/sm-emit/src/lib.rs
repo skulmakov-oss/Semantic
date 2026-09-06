@@ -66,14 +66,31 @@ mod tests {
         (strings, cursor)
     }
 
-    fn skip_optional_ownership_section(code: &[u8], mut cursor: usize) -> usize {
+    fn skip_optional_ownership_section(code: &[u8], mut cursor: usize, header_rev: u16) -> usize {
         if !code[cursor..].starts_with(&OWNERSHIP_SECTION_TAG) {
             return cursor;
         }
         cursor += OWNERSHIP_SECTION_TAG.len();
         let event_count = read_u16_le(code, &mut cursor).expect("event count") as usize;
         for _ in 0..event_count {
-            let _kind = read_u8(code, &mut cursor).expect("event kind");
+            let kind = read_u8(code, &mut cursor).expect("event kind");
+            // #1726 Checkpoint D2a / #1891 Checkpoint W2D: at/above the
+            // anchor revision, Borrow carries an activation-mode prefix and
+            // Write carries an execution-mode prefix, both immediately after
+            // `kind` and before `root` - this generic skip-only helper does
+            // not care which mode value it is, only how many bytes to
+            // consume to reach `root` correctly.
+            if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+                if kind == OWNERSHIP_EVENT_KIND_BORROW {
+                    let mode = read_u8(code, &mut cursor).expect("activation mode");
+                    if mode == ACTIVATION_MODE_STORE_VAR_SITE {
+                        let _ = read_u32_le(code, &mut cursor).expect("executable anchor");
+                    }
+                } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
+                    let _mode = read_u8(code, &mut cursor).expect("write execution mode");
+                    let _ = read_u32_le(code, &mut cursor).expect("write executable anchor");
+                }
+            }
             let _root = read_u32_le(code, &mut cursor).expect("root");
             let component_count = read_u16_le(code, &mut cursor).expect("component count") as usize;
             for _ in 0..component_count {
@@ -123,8 +140,11 @@ mod tests {
         // program's own artifact is promoted to SEMCOD20/rev21 -- was
         // SEMCOD19/rev20 before D2a (itself promoted from SEMCOD11/rev12 by
         // #1773). Verified semantically unchanged: same event count, same
-        // roots, same Write-event shape, same trailing Ret -- only the
-        // Borrow event's own bytes gained the new activation prefix.
+        // roots, same path/component shape, same trailing Ret -- only the
+        // Borrow event's own bytes gained the new activation prefix (and,
+        // as of #1891 Checkpoint W2D, the Write event's own bytes gained the
+        // analogous execution-mode prefix - this program's reassignment
+        // would independently promote to rev21 on its own merits by then).
         assert_eq!(&bytes[0..8], &MAGIC20);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
@@ -159,6 +179,14 @@ mod tests {
             read_u8(code, &mut cursor).expect("event kind"),
             OWNERSHIP_EVENT_KIND_WRITE
         );
+        // #1891 Checkpoint W2D: `total += 1.0;` is a plain reassignment
+        // (producer B) - its resolved WriteSiteId is a StoreVarSite, never a
+        // MakeRecordSite.
+        assert_eq!(
+            read_u8(code, &mut cursor).expect("write execution mode"),
+            WRITE_EXECUTION_MODE_STORE_VAR_SITE
+        );
+        let _write_anchor = read_u32_le(code, &mut cursor).expect("write executable anchor");
         let write_root = read_u32_le(code, &mut cursor).expect("root");
         assert_eq!(read_u16_le(code, &mut cursor).expect("component count"), 0);
         assert_ne!(borrow_root, write_root);
@@ -258,11 +286,17 @@ mod tests {
         let bytes_again = compile_program_to_semcode(src).expect("emit");
 
         assert_eq!(bytes, bytes_again);
-        assert_eq!(&bytes[0..8], &MAGIC19);
+        // #1891 Checkpoint W2D: this RecordUpdate's Write event now always
+        // carries a resolved WriteSiteId (Checkpoint W2C), promoting this
+        // artifact to SEMCOD20/rev21 - was SEMCOD19/rev20 before this
+        // checkpoint (the SIG0 floor). Capability bits are unaffected by
+        // this revision promotion; they remain a separate axis (item 10 of
+        // the W2D brief).
+        assert_eq!(&bytes[0..8], &MAGIC20);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 20);
+        assert_eq!(spec.rev, 21);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_FIELD_PATHS, 0);
 
@@ -275,6 +309,13 @@ mod tests {
             read_u8(code, &mut cursor).expect("event kind"),
             OWNERSHIP_EVENT_KIND_WRITE
         );
+        // This RecordUpdate's Write event resolves to producer C's
+        // MakeRecordSite, never a StoreVarSite.
+        assert_eq!(
+            read_u8(code, &mut cursor).expect("write execution mode"),
+            WRITE_EXECUTION_MODE_MAKE_RECORD_SITE
+        );
+        let _write_anchor = read_u32_le(code, &mut cursor).expect("write executable anchor");
         let _root = read_u32_le(code, &mut cursor).expect("root");
         assert_eq!(read_u16_le(code, &mut cursor).expect("component count"), 1);
         assert_eq!(
@@ -303,16 +344,22 @@ mod tests {
         let bytes_again = compile_program_to_semcode(src).expect("emit");
 
         assert_eq!(bytes, bytes_again);
-        assert_eq!(&bytes[0..8], &MAGIC19);
+        // #1891 Checkpoint W2D: `seen ||= true;` is a plain reassignment
+        // (producer B), which now always carries a resolved WriteSiteId
+        // (Checkpoint W2C) - promoting this artifact to SEMCOD20/rev21, same
+        // as a resolved Borrow ActivationSiteId already did for other
+        // programs (Checkpoint D2a). Was SEMCOD19/rev20 (the SIG0 floor)
+        // before this checkpoint.
+        assert_eq!(&bytes[0..8], &MAGIC20);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 20);
+        assert_eq!(spec.rev, 21);
         assert_ne!(spec.capabilities & CAP_SEQUENCE_VALUES, 0);
         assert_ne!(spec.capabilities & CAP_SEQUENCE_ITERATION, 0);
 
         let code = function_code(&bytes, "main");
-        let cursor = skip_optional_ownership_section(code, skip_string_table(code));
+        let cursor = skip_optional_ownership_section(code, skip_string_table(code), spec.rev);
         assert!(code[cursor..].contains(&Opcode::SequenceLen.byte()));
         assert!(code[cursor..].contains(&Opcode::SequenceGet.byte()));
     }

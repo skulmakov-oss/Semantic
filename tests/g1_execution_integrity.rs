@@ -130,11 +130,20 @@ fn g1_execution_integrity_stage_summaries_match_current_baseline() {
     // for all five programs below, regardless of which lesser features
     // each one uses (was SEMCOD13/rev14, SEMCODE0/rev1, SEMCOD12/rev13
     // respectively).
+    //
+    // #1891 Checkpoint W2D: `cli_batch_core` and `data_audit_record_iterable`
+    // each contain a plain reassignment (`saw_error ||= true;` /
+    // `saw_retry ||= true;`), which now always carries a resolved
+    // WriteSiteId (Checkpoint W2C) - promoting those two artifacts to
+    // SEMCOD20/rev21 on their own merits. The other three programs contain
+    // no write-site-carrying event and stay at the SEMCOD19/rev20 SIG0
+    // floor. Every other stage (sema, ir names, verify, disasm, run) is
+    // unaffected - only the OWN0 grammar/header revision changed.
     let expected = "\
 program=cli_batch_core
 sema:warnings=0 laws=0
 ir:names=classify_exit,main
-semcode:magic=SEMCOD19 rev=20
+semcode:magic=SEMCOD20 rev=21
 verify:names=classify_exit,main
 disasm:names=classify_exit,main
 run=ok
@@ -150,7 +159,7 @@ run=ok
 program=data_audit_record_iterable
 sema:warnings=0 laws=0
 ir:names=__impl::Iterable::Samples::next,main,summarize
-semcode:magic=SEMCOD19 rev=20
+semcode:magic=SEMCOD20 rev=21
 verify:names=__impl::Iterable::Samples::next,main,summarize
 disasm:names=__impl::Iterable::Samples::next,main,summarize
 run=ok
