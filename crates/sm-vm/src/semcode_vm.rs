@@ -20,7 +20,7 @@ use sm_verify::{
     verify_semcode_token, verify_semcode_token_with_quotas, EntryResolutionError,
     VerifiedEntrySemCode,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Scalar key type for Map values.
 ///
@@ -108,6 +108,24 @@ struct PendingSiteBorrow {
     path: AccessPath,
 }
 
+/// #1891 Checkpoint W2F: every rev21+ Write ownership path attached to one
+/// exact, verifier-authenticated (`StoreVarSite`/`MakeRecordSite`, Checkpoint
+/// W2E) executable PC, grouped once when `FunctionBytecode` is built and
+/// never mutated afterward. `pc` is the same frame-relative opcode-start
+/// byte offset domain as `Frame.pc`/`BorrowActivation::StoreVarSite`/
+/// `PendingSiteBorrow::anchor`. `paths` may hold more than one entry - W2A/W2E
+/// already established that a single MakeRecord site legitimately carries
+/// 1..N Write paths (multi-field `RecordUpdate`) - in the artifact's own
+/// declared event order, never reordered. The runtime never needs to know
+/// whether `pc` is a StoreVar or a MakeRecord instruction: W2E already
+/// proved the anchor matches its declared opcode class, and re-deriving that
+/// here would be a second verifier inside the VM.
+#[derive(Debug, Clone)]
+struct WriteExecutionSite {
+    pc: usize,
+    paths: Vec<AccessPath>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Frame {
     pub pc: usize,
@@ -122,7 +140,6 @@ pub struct Frame {
     /// inside the `StoreVar` opcode handler, after that instruction's own
     /// write has already committed.
     pending_site_borrows: Vec<PendingSiteBorrow>,
-    next_write_path: usize,
     pub func: String,
     pub return_dst: Option<u16>,
 }
@@ -134,7 +151,11 @@ pub struct FunctionBytecode {
     pub symbol_ids: Vec<SymbolId>,
     pub debug_symbols: Vec<DebugSymbol>,
     pub borrowed_paths: Vec<BorrowedPath>,
-    write_paths: Vec<AccessPath>,
+    /// #1891 Checkpoint W2F: sorted ascending by `pc` (built once via a
+    /// `BTreeMap`, never mutated), so the dispatch loop's per-instruction
+    /// lookup is `binary_search_by_key` - no allocation, no rebuilding, no
+    /// HashMap-order nondeterminism.
+    write_execution_sites: Vec<WriteExecutionSite>,
     pub code: Vec<u8>,
     pub instr_start: usize,
     /// The decoded canonical callable-signature record (#1773 / FA-09-005),
@@ -1057,6 +1078,11 @@ pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {
 }
 
 struct VmProgramView {
+    // Only read by `disasm_semcode` (`#[cfg(feature = "disasm")]`) - a
+    // default-feature build has no reader for it at all, which is a
+    // genuine, pre-existing (not #1891-related) `dead_code` false positive
+    // under that configuration rather than actually-unused data.
+    #[cfg_attr(not(feature = "disasm"), allow(dead_code))]
     header: SemcodeHeaderSpec,
     runtime_symbols: RuntimeSymbolTable,
     functions: HashMap<String, FunctionBytecode>,
@@ -1216,7 +1242,63 @@ fn build_vm_program_view_from_decoded(
                 },
             })
             .collect::<Vec<_>>();
-        let write_paths = remap_paths(&env.write_paths)?;
+        // #1891 Checkpoint W2F: a pre-rev21 Write ownership event carries a
+        // path but no executable anchor at all - the wire grammar has no
+        // field for one below `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION` (see
+        // `WRITE_EXECUTION_MODE_STORE_VAR_SITE`'s own doc comment). The
+        // sequential cursor this checkpoint removes was the only mechanism
+        // such an event was ever runtime-checked by, and it was never a
+        // sound "exact execution site" authority even historically - a
+        // static-order guess, exactly what SSF-08's own governing charter
+        // (`docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md`,
+        // "Fail closed: cannot prove ownership state -> deterministic
+        // rejection. Never: cannot find binding/path/state -> assume
+        // Available.") forbids approximating. No producer in the current
+        // compiler can emit such an artifact any more (#1891 Checkpoint W2A
+        // made every Write event mint a resolved `WriteSiteId`
+        // unconditionally, and Checkpoint W2D's floor extension promotes any
+        // artifact carrying one to this revision), and no existing
+        // compatibility/release contract (`tests/bytecode_compat.rs` and its
+        // siblings) exercises a legacy Write-bearing artifact through real
+        // execution - so this rejects deterministically rather than
+        // inventing an authority that was never exact.
+        if !env.write_paths.is_empty()
+            && header.rev < sm_format::semcode_format::SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
+        {
+            return Err(RuntimeError::BadFormat(format!(
+                "function '{}' declares {} legacy (pre-rev21) Write ownership event(s) with no executable anchor; runtime execution of legacy Write-bearing artifacts is not supported - recompile with a current compiler",
+                name,
+                env.write_paths.len()
+            )));
+        }
+
+        // #1891 Checkpoint W2F: group by the exact verifier-authenticated PC
+        // (Checkpoint W2E) rather than keep one flat, order-matched list -
+        // `BTreeMap` gives deterministic ascending-`pc` iteration for free,
+        // matching the artifact's own per-PC event order within each group
+        // since paths are appended in decode order.
+        let write_execution_sites = {
+            let mut by_pc: BTreeMap<usize, Vec<AccessPath>> = BTreeMap::new();
+            for (path, decoded) in remap_paths(&env.write_paths)?
+                .into_iter()
+                .zip(env.write_paths.iter())
+            {
+                let anchor = match decoded.write_execution {
+                    None => unreachable!("legacy Write events are rejected above"),
+                    Some(sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(a)) => {
+                        a as usize
+                    }
+                    Some(sm_format::semcode_decode::DecodedWriteExecution::MakeRecordSite(a)) => {
+                        a as usize
+                    }
+                };
+                by_pc.entry(anchor).or_default().push(path);
+            }
+            by_pc
+                .into_iter()
+                .map(|(pc, paths)| WriteExecutionSite { pc, paths })
+                .collect::<Vec<_>>()
+        };
 
         let f = FunctionBytecode {
             name: name.clone(),
@@ -1224,7 +1306,7 @@ fn build_vm_program_view_from_decoded(
             symbol_ids,
             debug_symbols,
             borrowed_paths,
-            write_paths,
+            write_execution_sites,
             code: env.code_slice.to_vec(),
             instr_start: env.instr_start_offset,
             signature: env.signature.clone(),
@@ -1911,6 +1993,17 @@ where
         let opcode = Opcode::from_byte(read_u8(&f.code, &mut cur).map_err(map_format_err)?)
             .map_err(map_format_err)?;
         profile.record_opcode(opcode);
+        // #1891 Checkpoint W2F: check every Write path attached to this
+        // exact PC against the frame's currently active borrows BEFORE the
+        // instruction below commits any effect - covers both StoreVar and
+        // MakeRecord uniformly (see `WriteExecutionSite`'s own doc comment
+        // for why the VM never needs to know which opcode class `pc`
+        // belongs to). Reads `active_borrowed_paths` as it stood before this
+        // instruction, so a Borrow this same StoreVar is about to activate
+        // (`pending_site_borrows`, checked further below only after the
+        // write commits) cannot retroactively conflict with the write that
+        // introduced it.
+        check_write_execution_site(&f, pc, &vm.callstack[frame_idx].active_borrowed_paths)?;
         let next_pc: usize;
 
         match opcode {
@@ -2437,27 +2530,11 @@ where
                 let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let symbol = lookup_symbol(&f, sid)?;
                 let val = get_reg(vm, frame_idx, src)?;
-                let next_write_path = {
-                    let frame = &vm.callstack[frame_idx];
-                    if frame.locals.contains_key(&symbol) {
-                        f.write_paths
-                            .get(frame.next_write_path)
-                            .filter(|path| path.root == symbol)
-                            .cloned()
-                    } else {
-                        None
-                    }
-                };
-                if let Some(write_path) = next_write_path {
-                    let symbol_name = lookup_str(&f, sid).unwrap_or("<unknown>");
-                    let frame = &vm.callstack[frame_idx];
-                    ensure_write_path_allowed(
-                        symbol_name,
-                        &write_path,
-                        &frame.active_borrowed_paths,
-                    )?;
-                    vm.callstack[frame_idx].next_write_path += 1;
-                }
+                // #1891 Checkpoint W2F: the exact-PC write check above
+                // (`check_write_execution_site`) already ran before this
+                // match started, using `pc` and `active_borrowed_paths` as
+                // they stood before this instruction's own write - commit
+                // unconditionally here.
                 vm.callstack[frame_idx].locals.insert(symbol, val);
                 // #1726 Checkpoint D3: activation happens strictly after the
                 // write above has committed, never before - this instruction
@@ -2465,18 +2542,12 @@ where
                 // operand was read, the same frame-relative "opcode-byte
                 // position" domain `ExecutableAnchor` and D2b's admission
                 // check already use) is only now eligible to satisfy a
-                // pending site. `next_write_path`'s own cursor above is
-                // untouched by this and only ever gates a *different*
-                // symbol's reassignment check (#1891 remains orthogonal:
-                // this never reads or advances `next_write_path`, and
-                // `next_write_path`'s own logic never reads
-                // `pending_site_borrows`/`active_borrowed_paths` beyond the
-                // existing write-conflict check above). Uses `position` +
-                // `remove` (not `retain`) so a loop's second visit to the
-                // same anchor - already consumed on the first - finds no
-                // match and is a harmless no-op, never re-activating or
-                // erroring; nothing is ever removed just because control
-                // passed elsewhere without this exact PC executing.
+                // pending site. Uses `position` + `remove` (not `retain`) so
+                // a loop's second visit to the same anchor - already
+                // consumed on the first - finds no match and is a harmless
+                // no-op, never re-activating or erroring; nothing is ever
+                // removed just because control passed elsewhere without this
+                // exact PC executing.
                 if let Some(index) = vm.callstack[frame_idx]
                     .pending_site_borrows
                     .iter()
@@ -3001,7 +3072,6 @@ fn push_frame(
         locals: HashMap::new(),
         active_borrowed_paths,
         pending_site_borrows,
-        next_write_path: 0,
         func: f.name.clone(),
         return_dst,
     };
@@ -3018,7 +3088,6 @@ fn access_paths_overlap(lhs: &AccessPath, rhs: &AccessPath) -> bool {
 }
 
 fn ensure_write_path_allowed(
-    _symbol_name: &str,
     write_path: &AccessPath,
     borrowed_paths: &[AccessPath],
 ) -> Result<(), RuntimeError> {
@@ -3027,6 +3096,33 @@ fn ensure_write_path_allowed(
         .any(|borrowed_path| access_paths_overlap(write_path, borrowed_path))
     {
         return Err(RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict));
+    }
+    Ok(())
+}
+
+/// #1891 Checkpoint W2F: the single dynamic hook - called once per
+/// instruction dispatch, before that instruction's own effects commit (see
+/// the call site in the dispatch loop above). Looks up every Write path
+/// verifier-authenticated (Checkpoint W2E) against this exact PC and checks
+/// each in the artifact's own declared order (`write_execution_sites` is a
+/// plain sorted `Vec`, never a HashMap, so this is always deterministic).
+/// Uniform across StoreVar and MakeRecord - see `WriteExecutionSite`'s own
+/// doc comment for why the VM never re-derives which opcode class `pc`
+/// belongs to. A PC with no matching site (the overwhelming majority of
+/// instructions) costs one `binary_search_by_key` and nothing else - no
+/// allocation, no per-visit rebuilding.
+fn check_write_execution_site(
+    f: &FunctionBytecode,
+    pc: usize,
+    active_borrowed_paths: &[AccessPath],
+) -> Result<(), RuntimeError> {
+    if let Ok(index) = f
+        .write_execution_sites
+        .binary_search_by_key(&pc, |site| site.pc)
+    {
+        for write_path in &f.write_execution_sites[index].paths {
+            ensure_write_path_allowed(write_path, active_borrowed_paths)?;
+        }
     }
     Ok(())
 }
@@ -7244,6 +7340,163 @@ mod tests {
         rewrite_adt_main_ownership_section(bytes, borrowed_adt, write_adt)
     }
 
+    /// #1891 Checkpoint W2F: harvests a genuine `StoreVarSite` anchor from
+    /// the REAL (pre-rewrite) compiled artifact's own Write event, for reuse
+    /// as the anchor of a synthetic Write event the fixtures below
+    /// hand-author. `check_write_execution_site` (Checkpoint W2F's own
+    /// runtime hook) never requires an anchor's instruction to correspond to
+    /// the synthetic path's root/component - that provenance is explicitly
+    /// out of scope for both the verifier (Checkpoint W2E) and the runtime
+    /// (see `WriteExecutionSite`'s own doc comment) - so any genuine
+    /// StoreVar PC in this function satisfies it, not only one tied to a
+    /// particular local. Every fixture below reassigns a real local via
+    /// compound assignment (`x += ...`), which the current compiler
+    /// (#1891 Checkpoints W2A/W2C) always resolves to a genuine
+    /// `StoreVarSite` Write event - reusing that real anchor here avoids
+    /// both a hand-rolled instruction decoder and the `disasm` feature gate
+    /// `disasm_semcode` sits behind (these fixtures back tests that run
+    /// without that feature enabled).
+    fn real_store_var_anchor(env: &sm_format::semcode_decode::DecodedFunctionEnvelope) -> u32 {
+        env.write_paths
+            .iter()
+            .find_map(|p| match p.write_execution {
+                Some(sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(a)) => Some(a),
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "function '{}' has no real StoreVarSite Write event to borrow an anchor from",
+                    env.name
+                )
+            })
+    }
+
+    /// #1891 Checkpoint W2F, item 5/11.J: white-box proof of the required
+    /// Write-check -> StoreVar-commit -> Borrow-activation ordering. No real
+    /// source can produce a Borrow and a Write sharing the identical
+    /// StoreVar anchor - there is no construct that both reassigns a local
+    /// and introduces a `ref` borrow of that same local at the same
+    /// instruction - so this hand-declares a synthetic
+    /// `Borrow(StoreVarSite(A))` on `x`, rooted at zero components, at the
+    /// exact same real anchor `x`'s own genuine `Write(StoreVarSite(A))`
+    /// events already carry (harvested via `real_store_var_anchor`, never
+    /// invented). Every real Write event is re-emitted verbatim (its own
+    /// real anchor/root, not reconstructed from scratch) so this never risks
+    /// silently changing what the real compiler actually emitted; only a
+    /// deliberate hand-authored Borrow event is added, and only real
+    /// instruction bytes execute.
+    fn rewrite_main_with_self_referencing_store_var_borrow(bytes: Vec<u8>) -> Vec<u8> {
+        let mut cursor = 8usize;
+        let name_len = read_u16_le(&bytes, &mut cursor).expect("name len") as usize;
+        let name = read_utf8(&bytes, &mut cursor, name_len).expect("name");
+        assert_eq!(name, "main");
+        let code_len_pos = cursor;
+        let code_len = read_u32_le(&bytes, &mut cursor).expect("code len") as usize;
+        let code_start = cursor;
+        let code_end = code_start + code_len;
+        let code = &bytes[code_start..code_end];
+        let (_, mut decoded_functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let env = decoded_functions.remove(0);
+        assert!(
+            !env.write_paths.is_empty(),
+            "expected at least one real Write event to borrow an anchor from"
+        );
+        assert!(
+            env.write_paths.iter().all(|p| p.components.is_empty()),
+            "this fixture only supports bare scalar reassignments (zero-component paths)"
+        );
+        let real_anchor = real_store_var_anchor(&env);
+        let x_root = env.write_paths[0].root_symbol_id;
+        let instr_start = env.instr_start_offset;
+        let sig0_len = env
+            .signature
+            .as_ref()
+            .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
+            .unwrap_or(0);
+        let own0_end = instr_start - sig0_len;
+        let ownership_start = code[..own0_end]
+            .windows(OWNERSHIP_SECTION_TAG.len())
+            .position(|window| window == OWNERSHIP_SECTION_TAG)
+            .expect("OWN0 section");
+
+        let mut new_own0 = Vec::new();
+        new_own0.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        let total = 1 + env.write_paths.len();
+        new_own0.extend_from_slice(&(total as u16).to_le_bytes());
+        new_own0.push(OWNERSHIP_EVENT_KIND_BORROW);
+        new_own0.push(sm_format::semcode_format::ACTIVATION_MODE_STORE_VAR_SITE);
+        new_own0.extend_from_slice(&real_anchor.to_le_bytes());
+        new_own0.extend_from_slice(&x_root.to_le_bytes());
+        new_own0.extend_from_slice(&0u16.to_le_bytes());
+        for p in &env.write_paths {
+            let anchor = match p.write_execution {
+                Some(sm_format::semcode_decode::DecodedWriteExecution::StoreVarSite(a)) => a,
+                other => {
+                    panic!("expected every real Write event here to be StoreVarSite, got {other:?}")
+                }
+            };
+            new_own0.push(OWNERSHIP_EVENT_KIND_WRITE);
+            new_own0.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
+            new_own0.extend_from_slice(&anchor.to_le_bytes());
+            new_own0.extend_from_slice(&p.root_symbol_id.to_le_bytes());
+            new_own0.extend_from_slice(&0u16.to_le_bytes());
+        }
+
+        let mut new_code = Vec::with_capacity(code.len());
+        new_code.extend_from_slice(&code[..ownership_start]);
+        new_code.extend_from_slice(&new_own0);
+        new_code.extend_from_slice(&code[own0_end..]);
+
+        let mut out = Vec::with_capacity(bytes.len() + new_code.len().saturating_sub(code.len()));
+        out.extend_from_slice(&bytes[..code_len_pos]);
+        out.extend_from_slice(&(new_code.len() as u32).to_le_bytes());
+        out.extend_from_slice(&new_code);
+        out.extend_from_slice(&bytes[code_end..]);
+        out
+    }
+
+    #[test]
+    fn j1_write_does_not_conflict_with_the_borrow_it_is_about_to_activate() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 1;
+                x = 2;
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let bytes = rewrite_main_with_self_referencing_store_var_borrow(bytes);
+        run_semcode(&bytes).expect(
+            "a StoreVar's own write must not conflict with the Borrow it is about to activate \
+             at the identical PC - the write check must run before activation, using the \
+             active-borrow set as it stood BEFORE this instruction",
+        );
+    }
+
+    #[test]
+    fn j2_later_write_conflicts_once_the_self_activated_borrow_is_active() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 1;
+                x = 2;
+                x = 3;
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let bytes = rewrite_main_with_self_referencing_store_var_borrow(bytes);
+        let err = run_semcode(&bytes).expect_err(
+            "once `x = 2;` has committed and activated its own same-PC Borrow, the LATER, \
+             independent `x = 3;` write must now conflict - proving the Borrow really did \
+             activate after the first write, not merely that the first write was never checked",
+        );
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
+        ));
+    }
+
     fn rewrite_adt_main_ownership_section(
         bytes: Vec<u8>,
         borrowed_adt: Option<(u32, u16)>,
@@ -7262,6 +7515,14 @@ mod tests {
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let header_rev = header.rev;
         let env = decoded_functions.remove(0);
+        // #1891 Checkpoint W2F: harvested from the REAL (pre-rewrite)
+        // compiled artifact's own genuine `StoreVarSite` Write event (minted
+        // unconditionally by the current compiler for `e += 2.0;` below,
+        // per Checkpoints W2A/W2C) - see `real_store_var_anchor`'s own doc
+        // comment for why any genuine StoreVar boundary satisfies
+        // `check_write_execution_site` regardless of which local it belongs
+        // to.
+        let real_anchor = real_store_var_anchor(&env);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
         // #1773 (FA-09-005): see the identical fix (and rationale) in
@@ -7291,6 +7552,7 @@ mod tests {
             e_root,
             borrowed_adt,
             header_rev,
+            real_anchor,
         );
         append_adt_payload_ownership_event(
             &mut out_ownership,
@@ -7298,6 +7560,7 @@ mod tests {
             e_root,
             write_adt,
             header_rev,
+            real_anchor,
         );
 
         new_code.extend_from_slice(&out_ownership);
@@ -7311,26 +7574,31 @@ mod tests {
         out
     }
 
+    /// #1891 Checkpoint W2F: `real_anchor` must be a genuine StoreVar PC
+    /// harvested from this same function's own real compile
+    /// (`real_store_var_anchor`) - Checkpoint W2F's runtime now looks up
+    /// Write paths by exact PC (`check_write_execution_site`), so a
+    /// placeholder like `0` would either miss entirely or, worse,
+    /// coincidentally collide with an unrelated real instruction's PC. Any
+    /// genuine StoreVar boundary works: this checkpoint's own trust
+    /// boundary never requires the anchor's instruction to correspond to
+    /// the synthetic path's root/component (see `WriteExecutionSite`'s doc
+    /// comment).
     fn append_adt_payload_ownership_event(
         out: &mut Vec<u8>,
         kind: u8,
         root: u32,
         adt: Option<(u32, u16)>,
         header_rev: u16,
+        real_anchor: u32,
     ) {
         out.push(kind);
-        // #1891 Checkpoint W2D: these are synthetic events, not resolved
-        // from a real compile, so there is no real anchor to encode -
-        // mirrors `ownership_section_bytes` in tests/runtime_ownership_e2e.rs.
-        // sm-vm does not consult either mode tag's anchor yet, so any valid
-        // tag satisfies the rev21 structural grammar without expressing a
-        // particular activation/execution semantic.
         if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
             if kind == OWNERSHIP_EVENT_KIND_BORROW {
                 out.push(ACTIVATION_MODE_FRAME_ENTRY);
             } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
                 out.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
-                out.extend_from_slice(&0u32.to_le_bytes());
+                out.extend_from_slice(&real_anchor.to_le_bytes());
             }
         }
         out.extend_from_slice(&root.to_le_bytes());
@@ -7423,6 +7691,10 @@ mod tests {
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let header_rev = header.rev;
         let env = decoded_functions.remove(0);
+        // #1891 Checkpoint W2F: see the identical rationale on
+        // `append_adt_payload_ownership_event` - harvested from `ctx += 2.0;`
+        // below's own real StoreVarSite Write event.
+        let real_anchor = real_store_var_anchor(&env);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
         // #1773 (FA-09-005): see the identical fix (and rationale) in
@@ -7446,6 +7718,7 @@ mod tests {
             borrowed_field,
             write_field,
             header_rev,
+            real_anchor,
         ));
         new_code.extend_from_slice(&code[own0_end..]);
 
@@ -7463,6 +7736,7 @@ mod tests {
         borrowed_field: Option<&str>,
         write_field: Option<&str>,
         header_rev: u16,
+        real_anchor: u32,
     ) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&OWNERSHIP_SECTION_TAG);
@@ -7474,6 +7748,7 @@ mod tests {
             strings,
             borrowed_field,
             header_rev,
+            real_anchor,
         );
         append_record_field_ownership_event(
             &mut out,
@@ -7482,10 +7757,13 @@ mod tests {
             strings,
             write_field,
             header_rev,
+            real_anchor,
         );
         out
     }
 
+    /// #1891 Checkpoint W2F: see `append_adt_payload_ownership_event`'s
+    /// identical rationale for `real_anchor`.
     fn append_record_field_ownership_event(
         out: &mut Vec<u8>,
         kind: u8,
@@ -7493,16 +7771,15 @@ mod tests {
         strings: &[String],
         field: Option<&str>,
         header_rev: u16,
+        real_anchor: u32,
     ) {
         out.push(kind);
-        // #1891 Checkpoint W2D: see `append_adt_payload_ownership_event`'s
-        // identical rationale above.
         if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
             if kind == OWNERSHIP_EVENT_KIND_BORROW {
                 out.push(ACTIVATION_MODE_FRAME_ENTRY);
             } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
                 out.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
-                out.extend_from_slice(&0u32.to_le_bytes());
+                out.extend_from_slice(&real_anchor.to_le_bytes());
             }
         }
         out.extend_from_slice(&root.to_le_bytes());
@@ -7555,6 +7832,10 @@ mod tests {
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let header_rev = header.rev;
         let env = decoded_functions.remove(0);
+        // #1891 Checkpoint W2F: see the identical rationale on
+        // `append_adt_payload_ownership_event` - harvested from
+        // `total += 2.0;` below's own real StoreVarSite Write event.
+        let real_anchor = real_store_var_anchor(&env);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
         // #1773 (FA-09-005): a real SIG0 section now sits between OWN0 and
@@ -7582,6 +7863,7 @@ mod tests {
             borrowed_components,
             write_components,
             header_rev,
+            real_anchor,
         ));
         new_code.extend_from_slice(&code[own0_end..]);
 
@@ -7598,6 +7880,7 @@ mod tests {
         borrowed_components: &[u16],
         write_components: &[u16],
         header_rev: u16,
+        real_anchor: u32,
     ) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&OWNERSHIP_SECTION_TAG);
@@ -7608,6 +7891,7 @@ mod tests {
             root,
             borrowed_components,
             header_rev,
+            real_anchor,
         );
         append_ownership_event(
             &mut out,
@@ -7615,26 +7899,28 @@ mod tests {
             root,
             write_components,
             header_rev,
+            real_anchor,
         );
         out
     }
 
+    /// #1891 Checkpoint W2F: see `append_adt_payload_ownership_event`'s
+    /// identical rationale for `real_anchor`.
     fn append_ownership_event(
         out: &mut Vec<u8>,
         kind: u8,
         root: u32,
         components: &[u16],
         header_rev: u16,
+        real_anchor: u32,
     ) {
         out.push(kind);
-        // #1891 Checkpoint W2D: see `append_adt_payload_ownership_event`'s
-        // identical rationale above.
         if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
             if kind == OWNERSHIP_EVENT_KIND_BORROW {
                 out.push(ACTIVATION_MODE_FRAME_ENTRY);
             } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
                 out.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
-                out.extend_from_slice(&0u32.to_le_bytes());
+                out.extend_from_slice(&real_anchor.to_le_bytes());
             }
         }
         out.extend_from_slice(&root.to_le_bytes());
