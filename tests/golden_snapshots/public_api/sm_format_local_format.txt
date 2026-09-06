@@ -19,6 +19,7 @@ pub const MAGIC16: [u8; 8] = *b"SEMCOD16";
 pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
 pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
 pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
+pub const MAGIC20: [u8; 8] = *b"SEMCOD20";
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
 pub const CAP_GATE_SURFACE: u32 = 1 << 2;
@@ -80,6 +81,10 @@ pub const HEADER_V17: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC17, ep
 pub const HEADER_V18: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC18, epoch: 0, rev: 19, capabilities: HEADER_V17.capabilities, };
 pub const HEADER_V19: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC19, epoch: 0, rev: 20, capabilities: HEADER_V18.capabilities, };
 pub const SEMCODE_SIGNATURE_MIN_REVISION: u16 = HEADER_V19.rev;
+pub const SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION: u16 = HEADER_V20.rev;
+pub const ACTIVATION_MODE_FRAME_ENTRY: u8 = 0;
+pub const ACTIVATION_MODE_STORE_VAR_SITE: u8 = 1;
+pub const HEADER_V20: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC20, epoch: 0, rev: 21, capabilities: HEADER_V19.capabilities, };
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
 pub fn header_spec_from_magic(magic: &[u8; 8]) -> Option<SemcodeHeaderSpec> {
 #[repr(u8)]

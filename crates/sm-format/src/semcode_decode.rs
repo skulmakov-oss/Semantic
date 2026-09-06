@@ -34,10 +34,25 @@ pub enum DecodedAccessPathComponent {
     SequenceIndexStatic(u32),
 }
 
+/// #1726 Checkpoint D2a: a Borrow event's resolved activation authority, as
+/// carried on the wire from `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION` onward.
+/// `StoreVarSite`'s `u32` is an `ExecutableAnchor` value (a byte offset
+/// relative to the function's own `instr_start`, the same domain `sm-vm`'s
+/// `Frame.pc` already uses) - `sm-format` decodes it as an opaque `u32` and
+/// makes no claim about what it points at; that cross-check is a separate,
+/// later checkpoint (verifier admission, D2b). Always `None` for Write events
+/// and for any Borrow event decoded under a pre-anchor revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodedBorrowActivation {
+    FrameEntry,
+    StoreVarSite(u32),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedAccessPath {
     pub root_symbol_id: u32,
     pub components: Vec<DecodedAccessPathComponent>,
+    pub activation: Option<DecodedBorrowActivation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -352,6 +367,41 @@ fn parse_string_table_debug_and_ownership(
                     offset: entry_offset,
                     msg: "missing ownership event kind",
                 })?;
+            // #1726 Checkpoint D2a: the activation tag exists ONLY for
+            // Borrow-kind events, and ONLY at/above the anchor revision - the
+            // header revision is the sole grammar authority (no sniffing, no
+            // try-then-fallback). Write events are never touched here, at any
+            // revision, on any kind byte.
+            let activation = if kind == OWNERSHIP_EVENT_KIND_BORROW
+                && header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
+            {
+                let mode = read_u8(code, &mut cursor).map_err(|_| {
+                    DecodeError::InvalidOwnershipSection {
+                        offset: diag_offset(base_offset, cursor),
+                        msg: "missing borrow activation mode",
+                    }
+                })?;
+                match mode {
+                    ACTIVATION_MODE_FRAME_ENTRY => Some(DecodedBorrowActivation::FrameEntry),
+                    ACTIVATION_MODE_STORE_VAR_SITE => {
+                        let anchor = read_u32_le(code, &mut cursor).map_err(|_| {
+                            DecodeError::InvalidOwnershipSection {
+                                offset: diag_offset(base_offset, cursor),
+                                msg: "missing borrow executable anchor",
+                            }
+                        })?;
+                        Some(DecodedBorrowActivation::StoreVarSite(anchor))
+                    }
+                    _ => {
+                        return Err(DecodeError::InvalidOwnershipSection {
+                            offset: diag_offset(base_offset, cursor),
+                            msg: "unrecognized borrow activation mode",
+                        });
+                    }
+                }
+            } else {
+                None
+            };
             let root_symbol_id = read_u32_le(code, &mut cursor).map_err(|_| {
                 DecodeError::InvalidOwnershipSection {
                     offset: diag_offset(base_offset, cursor),
@@ -428,10 +478,12 @@ fn parse_string_table_debug_and_ownership(
                 OWNERSHIP_EVENT_KIND_BORROW => borrowed_paths.push(DecodedAccessPath {
                     root_symbol_id,
                     components,
+                    activation,
                 }),
                 OWNERSHIP_EVENT_KIND_WRITE => write_paths.push(DecodedAccessPath {
                     root_symbol_id,
                     components,
+                    activation: None,
                 }),
                 _ => {
                     return Err(DecodeError::InvalidOwnershipSection {
@@ -904,5 +956,242 @@ mod tests {
         bytes.pop();
         let err = decode_semcode_envelope(&bytes).expect_err("must reject");
         assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    // #1726 Checkpoint D2a: rev21 (HEADER_V20/MAGIC20) OWN0 Borrow grammar,
+    // structural round-trip and fail-closed corruption coverage. Numeric
+    // discipline throughout: HEADER_V19.rev == 20 (SIG0/#1773's floor,
+    // legacy Borrow grammar); HEADER_V20.rev == 21 (this section's floor,
+    // new Borrow grammar). A minimal empty SIG0 section is included in every
+    // rev21/rev20 fixture below because both header revisions are
+    // `>= SEMCODE_SIGNATURE_MIN_REVISION` and therefore structurally require
+    // one, unrelated to anything OWN0-specific being tested here.
+
+    fn empty_sig0() -> Vec<u8> {
+        let mut sig0 = Vec::new();
+        sig0.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        sig0.extend_from_slice(&0u16.to_le_bytes());
+        sig0
+    }
+
+    #[test]
+    fn decode_rev21_header_borrow_frame_entry_round_trips() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes()); // empty string table
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.push(ACTIVATION_MODE_FRAME_ENTRY);
+        code.extend_from_slice(&7u32.to_le_bytes()); // root_symbol_id
+        code.extend_from_slice(&0u16.to_le_bytes()); // component_count
+        code.extend_from_slice(&empty_sig0());
+
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let (header, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        assert_eq!(header.rev, 21);
+        assert_eq!(functions[0].borrowed_paths.len(), 1);
+        assert_eq!(functions[0].borrowed_paths[0].root_symbol_id, 7);
+        assert_eq!(
+            functions[0].borrowed_paths[0].activation,
+            Some(DecodedBorrowActivation::FrameEntry)
+        );
+    }
+
+    #[test]
+    fn decode_rev21_header_borrow_store_var_site_round_trips() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.push(ACTIVATION_MODE_STORE_VAR_SITE);
+        code.extend_from_slice(&123u32.to_le_bytes()); // executable anchor
+        code.extend_from_slice(&9u32.to_le_bytes()); // root_symbol_id
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&empty_sig0());
+
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let (header, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        assert_eq!(header.rev, 21);
+        assert_eq!(functions[0].borrowed_paths[0].root_symbol_id, 9);
+        assert_eq!(
+            functions[0].borrowed_paths[0].activation,
+            Some(DecodedBorrowActivation::StoreVarSite(123))
+        );
+    }
+
+    #[test]
+    fn decode_rev21_header_write_event_bytes_unchanged() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_WRITE);
+        // No activation byte at all -- Write events never carry one, at any
+        // revision. root_symbol_id follows `kind` immediately, exactly as in
+        // every prior revision.
+        code.extend_from_slice(&42u32.to_le_bytes());
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&empty_sig0());
+
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        assert_eq!(functions[0].write_paths.len(), 1);
+        assert_eq!(functions[0].write_paths[0].root_symbol_id, 42);
+        assert_eq!(functions[0].write_paths[0].activation, None);
+    }
+
+    #[test]
+    fn decode_rev21_header_mixed_frame_entry_and_store_var_site() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&2u16.to_le_bytes());
+        // ADT/Option/Result-shaped: FrameEntry.
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.push(ACTIVATION_MODE_FRAME_ENTRY);
+        code.extend_from_slice(&1u32.to_le_bytes());
+        code.extend_from_slice(&0u16.to_le_bytes());
+        // Tuple/Record-shaped: StoreVarSite.
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.push(ACTIVATION_MODE_STORE_VAR_SITE);
+        code.extend_from_slice(&55u32.to_le_bytes());
+        code.extend_from_slice(&2u32.to_le_bytes());
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&empty_sig0());
+
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        assert_eq!(functions[0].borrowed_paths.len(), 2);
+        assert_eq!(
+            functions[0].borrowed_paths[0].activation,
+            Some(DecodedBorrowActivation::FrameEntry)
+        );
+        assert_eq!(functions[0].borrowed_paths[0].root_symbol_id, 1);
+        assert_eq!(
+            functions[0].borrowed_paths[1].activation,
+            Some(DecodedBorrowActivation::StoreVarSite(55))
+        );
+        assert_eq!(functions[0].borrowed_paths[1].root_symbol_id, 2);
+    }
+
+    #[test]
+    fn decode_rev20_header_borrow_still_uses_legacy_grammar() {
+        // Numeric-explicit: HEADER_V19.rev == 20, the SIG0 floor -- NOT the
+        // ownership-anchor grammar, which starts at HEADER_V20.rev == 21.
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        // No activation byte: legacy layout, root_symbol_id immediately
+        // follows kind, byte-for-byte identical to every pre-D2a revision.
+        code.extend_from_slice(&3u32.to_le_bytes());
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&empty_sig0());
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let (header, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        assert_eq!(header.rev, 20);
+        assert_eq!(functions[0].borrowed_paths[0].root_symbol_id, 3);
+        assert_eq!(functions[0].borrowed_paths[0].activation, None);
+    }
+
+    #[test]
+    fn decode_rejects_unrecognized_borrow_activation_mode() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.push(2); // neither ACTIVATION_MODE_FRAME_ENTRY nor _STORE_VAR_SITE
+        code.extend_from_slice(&1u32.to_le_bytes());
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&empty_sig0());
+
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject, never guess");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    #[test]
+    fn decode_rejects_truncated_borrow_activation_mode() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        // Truncated immediately after `kind` -- no activation mode byte at all.
+
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject, never panic");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    #[test]
+    fn decode_rejects_truncated_store_var_site_anchor() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.push(ACTIVATION_MODE_STORE_VAR_SITE);
+        code.extend_from_slice(&[0x01, 0x02]); // anchor needs 4 bytes, only 2 present
+
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject, never panic");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    #[test]
+    fn decode_rejects_legacy_borrow_bytes_under_rev21_header_deterministically() {
+        // A real pre-D2a producer emits root_symbol_id immediately after
+        // `kind`, with no activation byte. Decoded under a rev21 header, the
+        // decoder unconditionally expects an activation-mode byte first: this
+        // must reject deterministically (root_symbol_id's own low byte is 5,
+        // neither a valid FrameEntry(0) nor StoreVarSite(1) tag), never
+        // silently reinterpret the legacy bytes as if they were rev21-shaped.
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.extend_from_slice(&5u32.to_le_bytes()); // legacy root_symbol_id
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&empty_sig0());
+
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let err = decode_semcode_envelope(&bytes)
+            .expect_err("legacy bytes must not be heuristically reinterpreted as rev21");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    #[test]
+    fn decode_rejects_rev21_shaped_borrow_bytes_under_rev20_header() {
+        // The reverse direction: bytes shaped for the new grammar, decoded
+        // under HEADER_V19 (rev 20, the SIG0 floor -- NOT the ownership-anchor
+        // floor). rev20 always uses the legacy reader, which has no concept
+        // of an activation-mode byte at all, so it misreads the mode/anchor
+        // bytes as the start of root_symbol_id/component_count. The header
+        // revision is the only grammar authority in either direction -- no
+        // fallback or retry is attempted -- so this must not decode into
+        // anything resembling the intended rev21 event; it must fail
+        // structurally somewhere in this same section.
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.push(ACTIVATION_MODE_STORE_VAR_SITE);
+        code.extend_from_slice(&0xAAAA_AAAAu32.to_le_bytes()); // intended anchor
+        code.extend_from_slice(&0xBBBB_BBBBu32.to_le_bytes()); // intended root_symbol_id
+        code.extend_from_slice(&0u16.to_le_bytes()); // intended component_count
+        code.extend_from_slice(&empty_sig0());
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        assert!(
+            decode_semcode_envelope(&bytes).is_err(),
+            "rev21-shaped bytes read under the legacy rev20 grammar must not succeed"
+        );
     }
 }

@@ -118,13 +118,18 @@ mod tests {
         let bytes_again = compile_program_to_semcode(src).expect("emit");
 
         assert_eq!(bytes, bytes_again);
-        // #1773 (FA-09-005): SEMCOD19/rev20 is now the floor (was
-        // SEMCOD11/rev12).
-        assert_eq!(&bytes[0..8], &MAGIC19);
+        // #1726 Checkpoint D2a: a Tuple/Record Borrow event now always
+        // carries a resolved ActivationSiteId (Checkpoint D1), so this
+        // program's own artifact is promoted to SEMCOD20/rev21 -- was
+        // SEMCOD19/rev20 before D2a (itself promoted from SEMCOD11/rev12 by
+        // #1773). Verified semantically unchanged: same event count, same
+        // roots, same Write-event shape, same trailing Ret -- only the
+        // Borrow event's own bytes gained the new activation prefix.
+        assert_eq!(&bytes[0..8], &MAGIC20);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 20);
+        assert_eq!(spec.rev, 21);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
 
         let code = function_code(&bytes, "main");
@@ -137,6 +142,11 @@ mod tests {
             read_u8(code, &mut cursor).expect("event kind"),
             OWNERSHIP_EVENT_KIND_BORROW
         );
+        assert_eq!(
+            read_u8(code, &mut cursor).expect("activation mode"),
+            ACTIVATION_MODE_STORE_VAR_SITE
+        );
+        let _anchor = read_u32_le(code, &mut cursor).expect("executable anchor");
         let borrow_root = read_u32_le(code, &mut cursor).expect("root");
         assert_eq!(read_u16_le(code, &mut cursor).expect("component count"), 1);
         assert_eq!(
@@ -185,11 +195,16 @@ mod tests {
         let bytes_again = compile_program_to_semcode(src).expect("emit");
 
         assert_eq!(bytes, bytes_again);
-        assert_eq!(&bytes[0..8], &MAGIC19);
+        // #1726 Checkpoint D2a: same reasoning as the sibling tuple-borrow
+        // test above -- a record-field Borrow event from a frozen producer
+        // now always carries a resolved ActivationSiteId, promoting this
+        // artifact to SEMCOD20/rev21. Verified semantically unchanged: same
+        // root, same field symbol, same component shape.
+        assert_eq!(&bytes[0..8], &MAGIC20);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 20);
+        assert_eq!(spec.rev, 21);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_FIELD_PATHS, 0);
 
@@ -207,6 +222,11 @@ mod tests {
             read_u8(code, &mut cursor).expect("event kind"),
             OWNERSHIP_EVENT_KIND_BORROW
         );
+        assert_eq!(
+            read_u8(code, &mut cursor).expect("activation mode"),
+            ACTIVATION_MODE_STORE_VAR_SITE
+        );
+        let _anchor = read_u32_le(code, &mut cursor).expect("executable anchor");
         assert_eq!(read_u32_le(code, &mut cursor).expect("root"), root_index);
         assert_eq!(read_u16_le(code, &mut cursor).expect("component count"), 1);
         assert_eq!(

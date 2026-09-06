@@ -18,6 +18,7 @@ pub const MAGIC16: [u8; 8] = *b"SEMCOD16";
 pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
 pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
 pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
+pub const MAGIC20: [u8; 8] = *b"SEMCOD20";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -379,11 +380,40 @@ pub const HEADER_V19: SemcodeHeaderSpec = SemcodeHeaderSpec {
 /// cannot prove their contracts.
 pub const SEMCODE_SIGNATURE_MIN_REVISION: u16 = HEADER_V19.rev;
 
+/// #1726 Checkpoint D2a: a Tuple/Record Borrow event's activation authority
+/// (`BorrowActivationResolved::StoreVarSite`, resolved by `sm-ir`'s emitter in
+/// Checkpoint D1) becomes structurally representable in OWN0 starting at this
+/// revision. Numeric-vs-name discipline (learned from a prior false "V20
+/// collision" claim during design, corrected in Checkpoint D1.5): this
+/// constant's numeric VALUE is **21**. `HEADER_V19.rev == 20` (that revision
+/// belongs to #1773/SIG0). `HEADER_V20.rev == 21` (this one). Never write
+/// "numeric revision 20" and "HEADER_V20" as though they were the same thing.
+pub const SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION: u16 = HEADER_V20.rev;
+
+/// OWN0 Borrow-event activation mode tag, revision-gated at
+/// `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION` (see that constant's doc comment).
+/// Below this revision, OWN0's Borrow-event layout is unchanged from every
+/// prior revision and carries no activation tag at all. At or above it, every
+/// Borrow event (including the ADT/Option/Result producer's, which always
+/// encodes `ACTIVATION_MODE_FRAME_ENTRY`) carries exactly one of these two
+/// tags. An unrecognized tag byte is a hard structural rejection
+/// (`DecodeError::InvalidOwnershipSection`) - never treated as
+/// `ACTIVATION_MODE_FRAME_ENTRY` by default, and never a source for guessing.
+pub const ACTIVATION_MODE_FRAME_ENTRY: u8 = 0;
+pub const ACTIVATION_MODE_STORE_VAR_SITE: u8 = 1;
+
+pub const HEADER_V20: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC20,
+    epoch: 0,
+    rev: 21,
+    capabilities: HEADER_V19.capabilities,
+};
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
-        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19,
+        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20,
     ]
 }
 

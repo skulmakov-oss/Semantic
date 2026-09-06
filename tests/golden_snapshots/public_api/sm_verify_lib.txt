@@ -30,6 +30,7 @@ CallArgumentCountMismatch,
 UndefinedRegisterRead,
 AnalysisStateLimitExceeded,
 AnalysisWorkLimitExceeded,
+InvalidOwnershipAnchor,
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerificationDiagnostic {

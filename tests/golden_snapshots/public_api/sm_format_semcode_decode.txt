@@ -26,10 +26,15 @@ TupleIndex(u16),
 FieldSymbol(u32),
 AdtPayload { variant: u32, index: u16 },
 SequenceIndexStatic(u32),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodedBorrowActivation {
+FrameEntry,
+StoreVarSite(u32),
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedAccessPath {
 pub root_symbol_id: u32,
 pub components: Vec<DecodedAccessPathComponent>,
+pub activation: Option<DecodedBorrowActivation>,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedFunctionEnvelope<'a> {
 pub name: String,

@@ -4297,6 +4297,7 @@ fn verification_code_contract_name(code: sm_verify::VerificationCode) -> &'stati
         VerificationCode::UndefinedRegisterRead => "UndefinedRegisterRead",
         VerificationCode::AnalysisStateLimitExceeded => "AnalysisStateLimitExceeded",
         VerificationCode::AnalysisWorkLimitExceeded => "AnalysisWorkLimitExceeded",
+        VerificationCode::InvalidOwnershipAnchor => "InvalidOwnershipAnchor",
     }
 }
 
@@ -4329,6 +4330,7 @@ fn verification_code_variants_match_public_contract() {
         VerificationCode::UndefinedRegisterRead,
         VerificationCode::AnalysisStateLimitExceeded,
         VerificationCode::AnalysisWorkLimitExceeded,
+        VerificationCode::InvalidOwnershipAnchor,
     ];
 
     for variant in variants {
@@ -5679,7 +5681,7 @@ fn supported_headers_match_canonical_contract() {
     let canonical_family: &[SemcodeHeaderSpec] = &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
-        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19,
+        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20,
     ];
 
     let actual = supported_headers();
