@@ -1454,17 +1454,8 @@ fn vm_trap_message_needle(trap: sm_runtime_core::RuntimeTrap) -> String {
         sm_runtime_core::RuntimeTrap::BorrowWriteConflict => {
             "write path overlaps active borrow".to_string()
         }
-        sm_runtime_core::RuntimeTrap::StackOverflow => "stack overflow".to_string(),
-        sm_runtime_core::RuntimeTrap::StackUnderflow => "stack underflow".to_string(),
-        sm_runtime_core::RuntimeTrap::TypeMismatch => "runtime type mismatch".to_string(),
-        sm_runtime_core::RuntimeTrap::InvalidOpcode => "invalid opcode".to_string(),
-        sm_runtime_core::RuntimeTrap::InvalidJump => "invalid jump".to_string(),
         sm_runtime_core::RuntimeTrap::DivisionByZero => "division by zero".to_string(),
         sm_runtime_core::RuntimeTrap::ArithmeticOverflow => "arithmetic overflow".to_string(),
-        sm_runtime_core::RuntimeTrap::CapabilityDenied => "capability denied".to_string(),
-        sm_runtime_core::RuntimeTrap::AbiViolation => "abi violation".to_string(),
-        sm_runtime_core::RuntimeTrap::VerifierRejected => "verifier rejected".to_string(),
-        sm_runtime_core::RuntimeTrap::QuotaExceeded(_) => "quota exceeded".to_string(),
     }
 }
 

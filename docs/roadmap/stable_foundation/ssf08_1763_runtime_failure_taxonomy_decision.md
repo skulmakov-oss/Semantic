@@ -760,4 +760,84 @@ governing brief requires before `CONTRACT FROZEN = YES` /
 **Nothing above is left open.** A future implementation checkpoint may
 proceed directly from this document without a further design pass.
 
-**Wait for owner GO before implementation.**
+## 26. Implementation update (§21 mechanic executed)
+
+Implementation baseline: `main` @ `2a74e107342a70985139962b4e46825efb1a6ad0`
+(the merge commit of this decision's own PR, #1912). Branch:
+`fix/1763-runtime-trap-taxonomy`.
+
+- `RuntimeTrap` narrowed 13 → 4: `AssertionFailed`, `BorrowWriteConflict`,
+  `DivisionByZero`, `ArithmeticOverflow` retained unchanged, in their
+  original order; the 9 dead variants listed in §21 removed exactly as
+  specified. No rename, no reserved/wildcard variant added.
+- `RuntimeError` unchanged: still 15 variants, `Trap(RuntimeTrap)`
+  retained in name and position, narrowed automatically.
+- Compiler fallout matched the frozen prediction exactly: a focused
+  `cargo check --workspace --all-targets` against the narrowed enum
+  produced exactly 9 errors, all in `src/bin/smc.rs::vm_trap_message_needle`,
+  each naming one of the 9 removed variants - zero other production
+  consumers broke. The 9 dead match arms were deleted; the 4 live arms'
+  text is unchanged; no wildcard arm was added.
+- Public API RED→GREEN: `cargo test --test public_api_contracts` against
+  the stale golden failed RED, diff isolated to exactly the 9 removed
+  `RuntimeTrap` lines in `sm_runtime_core_lib.txt` (no other file, no
+  other line). Regenerated via `SM_UPDATE_PUBLIC_API_SNAPSHOTS=1`;
+  resulting diff confirmed isolated to the same single file, 9 deletions,
+  nothing else. Re-run GREEN (88/88). `sm_vm_semcode_vm.txt` unaffected,
+  as predicted by §18.
+- Live-trap regression evidence: existing tests already proved exact
+  execution-routing for all four kept variants, reused per §10/§11's own
+  preference rather than duplicated - `crates/sm-vm/src/semcode_vm.rs`'s
+  own `#[test]` module (151 tests, includes direct assertions for all
+  four variants), plus `tests/ssf03_assert_positional_only.rs`
+  (`AssertionFailed`), `tests/borrow_activation_v20.rs`,
+  `tests/fa_04_025_reconciliation.rs`, `tests/own0_root_identity_e2e.rs`,
+  `tests/runtime_ownership_e2e.rs`, `tests/write_cursor_1891_repro.rs`,
+  `tests/write_execution_site_e2e.rs` (all `BorrowWriteConflict`). All
+  227 tests across these 8 surfaces pass GREEN against the narrowed enum.
+  `AssertionFailed`: GREEN. `BorrowWriteConflict`: GREEN.
+  `DivisionByZero`: GREEN. `ArithmeticOverflow`: GREEN.
+- Mutation M1 (dead-vocabulary regression): temporarily re-added
+  `RuntimeTrap::StackOverflow`. First observation: a compile-time RED via
+  `vm_trap_message_needle`'s now-non-exhaustive match (an even earlier,
+  stronger guard than the snapshot text-diff). To isolate the snapshot
+  guard's own RED specifically, temporarily added a matching scratch match
+  arm in `smc.rs` so compilation succeeded and
+  `public_api_inventory_matches_checked_in_contract_snapshots` itself ran
+  - it failed RED, diff showing the re-added variant against the correct
+  4-variant golden. Both scratch edits fully reverted; `git grep` for
+  `RuntimeTrap::StackOverflow` in `.rs` files confirmed zero remaining
+  traces; guard re-confirmed GREEN (88/88) after revert.
+- Mutation M2 (live-trap routing regression): temporarily redirected
+  `fx_div_raw`'s zero-denominator branch from
+  `RuntimeError::Trap(RuntimeTrap::DivisionByZero)` to
+  `RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow)`. The existing
+  focused regression `vm_traps_on_fx_division_by_zero` failed RED exactly
+  as required, proving it asserts real execution routing rather than mere
+  enum constructibility. Reverted completely; re-run GREEN.
+- Docs reconciled: `docs/spec/vm.md`'s "Trap And Error Model" section now
+  lists `HostAbi`, `CapabilityDenied`, and `Trap` (wrapping the 4 live
+  `RuntimeTrap` variants, explicitly represented as the wrapping variant
+  it is rather than flattening `BorrowWriteConflict` to top level).
+  `docs/roadmap/language_maturity/core_trust_freeze/trap_taxonomy.md`
+  received an append-only addendum after its frozen table, preserving the
+  original "Stack overflow" row verbatim and correcting the E1-code
+  citation to `RuntimeError::StackOverflow`, including the `StackDepth`
+  compatibility-remap note.
+- Repository-wide stale-vocabulary sweep: zero hits for any of the 9
+  removed variant names in any `.rs` file (production or test). All
+  remaining `.md` hits are historical/decision-analysis text in this
+  document, `trap_taxonomy.md`'s own addendum, and prior, already-closed
+  decision documents (`#1759`) discussing the pre-#1763 state as history
+  - none is an active claim that a removed variant is emitted.
+- Zero behavior-routing change outside the removed dead vocabulary:
+  execution order, quota-charge order, verifier-vs-execution precedence,
+  and every live `RuntimeError`/`RuntimeTrap` construction site are
+  unmodified - confirmed by the full workspace test suite passing
+  unchanged (`cargo test --workspace --all-targets`,
+  `cargo test --workspace --doc`) and by the no_std gate
+  (`cargo check --no-default-features --quiet`) passing clean.
+
+**Implementation qualified. `#1763` remains OPEN pending owner-reviewed
+merge of the implementation PR - AC4.d and AC4.e become satisfied on that
+merge, not before.**
