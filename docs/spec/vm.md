@@ -131,7 +131,13 @@ Current public runtime error families include:
 Contract rule:
 
 - verifier rejection must be surfaced distinctly from runtime execution failure
-- quota exhaustion must preserve the exceeded quota kind, limit, and usage
+- `RuntimeError::QuotaExceeded(QuotaExceeded)` preserves the exceeded
+  `{kind, limit, used}` for `Steps`, `Calls`, `Frames`, `Registers`, and
+  `EffectCalls`. `StackDepth` exhaustion is the existing compatibility
+  exception: it surfaces as `RuntimeError::StackOverflow`, which does not
+  expose the `QuotaExceeded` payload to the caller. `SymbolTable` is
+  enforced statically by `sm-verify` at admission and is not an `sm-vm`
+  runtime `QuotaExceeded` channel at all.
 - malformed or unsupported bytecode must not be treated as a successful run
 
 `MAP_GET` evaluates its default register only on a key miss. Failure to

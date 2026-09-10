@@ -838,6 +838,10 @@ Implementation baseline: `main` @ `2a74e107342a70985139962b4e46825efb1a6ad0`
   `cargo test --workspace --doc`) and by the no_std gate
   (`cargo check --no-default-features --quiet`) passing clean.
 
-**Implementation qualified. `#1763` remains OPEN pending owner-reviewed
-merge of the implementation PR - AC4.d and AC4.e become satisfied on that
-merge, not before.**
+**Implementation qualified on its branch.** Branch qualification alone
+does not mutate issue state. AC4.d and AC4.e become satisfied when this
+implementation is integrated into `main` through the owner-reviewed
+merge of the implementation PR - not by branch-level qualification
+evidence alone. Issue closure itself is an owner-controlled GitHub
+lifecycle action taken at that merge, not a fact this document asserts
+about current state.

@@ -55,10 +55,9 @@ The "Stack overflow" row's original E1-code citation above,
 preserved verbatim as historical evidence and is **no longer the current
 code authority**. `docs/roadmap/stable_foundation/ssf08_1763_runtime_failure_taxonomy_decision.md`
 found, via exhaustive workspace grep, zero construction sites for
-`RuntimeTrap::StackOverflow` at the time of that audit, and the
-implementation that closed `#1763` removed the variant entirely (it was
-never constructed). The current, and only, code authority for this trap
-class is:
+`RuntimeTrap::StackOverflow` at the time of that audit, and the `#1763`
+implementation removes the variant entirely (it was never constructed).
+The current, and only, code authority for this trap class is:
 
 ```
 E1-code: crates/sm-vm/src/semcode_vm.rs::RuntimeError::StackOverflow

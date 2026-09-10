@@ -169,13 +169,21 @@ Current enforced areas include:
 - register growth
 - effect-call budget
 
-Quota exhaustion produces `QuotaExceeded { kind, limit, used }`.
+Quota exhaustion is not a single caller-visible channel; the real,
+current split is:
 
-Current compatibility note:
-
-- stack-depth quota overflow is still surfaced to callers as `StackOverflow` on
-  the VM path
-- the stack limit is nonetheless governed by the shared runtime quota contract
+- `Steps`, `Calls`, `Frames`, `Registers`, `EffectCalls` exhaustion
+  produces `RuntimeError::QuotaExceeded(QuotaExceeded { kind, limit,
+  used })`, with the payload preserved and caller-visible.
+- `StackDepth` exhaustion is an existing compatibility exception: it is
+  remapped to `RuntimeError::StackOverflow` before reaching a caller,
+  which does **not** carry the `QuotaExceeded { kind, limit, used }`
+  payload - the stack limit is still governed by the shared runtime
+  quota contract (`max_stack_depth`), but its exhaustion is not
+  caller-visible as a `QuotaExceeded` occurrence.
+- `SymbolTable` exhaustion is not an `sm-vm` runtime `QuotaExceeded`
+  occurrence at all - it is a static `sm-verify` admission rejection,
+  before execution begins (see "Ownership Rule").
 
 `Steps`/`Calls` semantics (charge point, root-frame exemption, exhaustion
 timing, and `usize::MAX` overflow discipline) are frozen in
@@ -199,7 +207,12 @@ The VM must not:
 
 - continue execution after quota exhaustion
 - downgrade quota failure to a warning
-- hide which quota kind was exceeded
+- hide which quota kind was exceeded for `Steps`, `Calls`, `Frames`,
+  `Registers`, or `EffectCalls` - the `QuotaExceeded { kind, limit, used }`
+  payload for these five is caller-visible in full. `StackDepth` is the
+  existing, documented compatibility exception to this rule (see
+  "Enforcement Rule"); `SymbolTable` is not a runtime `QuotaExceeded`
+  occurrence at all.
 
 ## Ownership Rule
 

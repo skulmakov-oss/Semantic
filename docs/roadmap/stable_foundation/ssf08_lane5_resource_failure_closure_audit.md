@@ -699,9 +699,12 @@ release-bundle verification all pass locally; `cargo fmt --all --check`
 could not run locally due to a confirmed pre-existing Windows path-length
 environment limitation (reproduces identically on an untouched baseline
 worktree, unrelated to this change) and is deferred to hosted `pr-ready`
-CI. **AC4.d and AC4.e become satisfied only on owner-reviewed merge of
-the implementation PR - not by this qualification alone.** `#1763`
-remains OPEN until that merge.
+CI. Branch qualification alone does not mutate issue state. **AC4.d and
+AC4.e become satisfied when this implementation is integrated into
+`main` through the owner-reviewed merge of the implementation PR - not
+by branch-level qualification evidence alone.** Issue closure itself is
+an owner-controlled GitHub lifecycle action taken at that merge, not a
+fact this document asserts about current state.
 
 ## 8. New residual findings discovered during this audit
 
