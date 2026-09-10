@@ -48,6 +48,30 @@ only with code or test evidence and an explicit PCC review note.
 | Borrow-write conflict | Runtime detects an overlapping write against an active borrow. | `sm-vm` | `E2-test: crates/sm-vm/src/semcode_vm.rs::vm_rejects_write_after_borrow_same_path; E2-test: tests/runtime_ownership_e2e.rs::runtime_ownership_rejects_same_path_write_deterministically` | VM execution | frozen | VM, CLI, diagnostics |
 | Verifier rejected | Verified execution rejects invalid SemCode before VM run. | `sm-verify`, `sm-vm` | `E2-test: crates/sm-vm/src/semcode_vm.rs::verified_run_rejects_invalid_bytecode_before_execution; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_malformed_semcode_rejects_before_execution` | verifier admission | frozen | verifier, VM, CLI, diagnostics |
 
+### Addendum (SSF-08 #1763): "Stack overflow" row E1-code correction
+
+The "Stack overflow" row's original E1-code citation above,
+`crates/sm-runtime-core/src/lib.rs::RuntimeTrap::StackOverflow`, is
+preserved verbatim as historical evidence and is **no longer the current
+code authority**. `docs/roadmap/stable_foundation/ssf08_1763_runtime_failure_taxonomy_decision.md`
+found, via exhaustive workspace grep, zero construction sites for
+`RuntimeTrap::StackOverflow` at the time of that audit, and the
+implementation that closed `#1763` removed the variant entirely (it was
+never constructed). The current, and only, code authority for this trap
+class is:
+
+```
+E1-code: crates/sm-vm/src/semcode_vm.rs::RuntimeError::StackOverflow
+```
+
+Additionally, `QuotaKind::StackDepth` exhaustion is deliberately remapped
+to this same `RuntimeError::StackOverflow` by a live, test-backed
+compatibility mapping in `push_frame`
+(`crates/sm-vm/src/semcode_vm.rs`), rather than surfacing as
+`RuntimeError::QuotaExceeded`. This addendum corrects only the evidence
+citation; the row's classification, meaning, source/owner, allowed phase,
+stability status, and impact columns are unchanged and remain frozen.
+
 ## 4. Freeze-candidate classes
 
 None remain in the PCC-0F freeze set after this pass.

@@ -118,9 +118,15 @@ Current public runtime error families include:
 - `StackOverflow`
 - `QuotaExceeded`
 - `VerifierRejected`
-- `BorrowWriteConflict`
 - `UnknownVariable`
 - `InvalidStringId`
+- `HostAbi`
+- `CapabilityDenied`
+- `Trap`, wrapping `sm_runtime_core::RuntimeTrap` (`AssertionFailed`,
+  `BorrowWriteConflict`, `DivisionByZero`, `ArithmeticOverflow`) - a
+  semantic program trap produced by an executing instruction's own
+  semantics, distinct from the structural/resource/capability/ABI
+  families above
 
 Contract rule:
 

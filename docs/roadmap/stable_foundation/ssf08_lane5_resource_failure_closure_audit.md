@@ -679,6 +679,30 @@ variant, diagnostic, or golden snapshot was touched by this update -
 AC4.d/AC4.e remain not satisfied until a separately authorized
 implementation checkpoint executes this now-complete mechanic.**
 
+**Implementation update (§21 mechanic qualified, merge-gated):** the
+frozen mechanic has been executed on branch `fix/1763-runtime-trap-taxonomy`
+against baseline `main` @ `2a74e107342a70985139962b4e46825efb1a6ad0`.
+`RuntimeTrap` narrows 13 → 4 (`AssertionFailed`, `BorrowWriteConflict`,
+`DivisionByZero`, `ArithmeticOverflow` kept unchanged); `RuntimeError`'s
+own 15-variant shape is unchanged, `Trap(RuntimeTrap)` retained. Compiler
+fallout matched the frozen prediction exactly (9 errors, all in
+`src/bin/smc.rs::vm_trap_message_needle`, zero other production
+consumers). Public-API drift guard RED→GREEN on
+`sm_runtime_core_lib.txt` only, isolated to the 9 removed lines;
+`sm_vm_semcode_vm.txt` unaffected. Both required mutation proofs (dead-
+vocabulary re-add; live-trap routing redirect) produced RED as required
+and were fully reverted. All four live variants' existing regression
+tests (227 tests across 8 test surfaces) pass unchanged. `docs/spec/vm.md`
+and `trap_taxonomy.md` (append-only addendum) reconciled per §21. Full
+workspace test suite, no_std gate, clippy, the 7hell PCC gate, and the
+release-bundle verification all pass locally; `cargo fmt --all --check`
+could not run locally due to a confirmed pre-existing Windows path-length
+environment limitation (reproduces identically on an untouched baseline
+worktree, unrelated to this change) and is deferred to hosted `pr-ready`
+CI. **AC4.d and AC4.e become satisfied only on owner-reviewed merge of
+the implementation PR - not by this qualification alone.** `#1763`
+remains OPEN until that merge.
+
 ## 8. New residual findings discovered during this audit
 
 Per item 11's explicit instruction, this section records findings outside

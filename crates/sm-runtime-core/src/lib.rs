@@ -153,17 +153,8 @@ pub struct QuotaExceeded {
 pub enum RuntimeTrap {
     AssertionFailed,
     BorrowWriteConflict,
-    StackOverflow,
-    StackUnderflow,
-    TypeMismatch,
-    InvalidOpcode,
-    InvalidJump,
     DivisionByZero,
     ArithmeticOverflow,
-    CapabilityDenied,
-    AbiViolation,
-    VerifierRejected,
-    QuotaExceeded(QuotaExceeded),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
