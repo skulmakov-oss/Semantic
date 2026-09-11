@@ -227,20 +227,55 @@ committed; never part of any commit).
 sufficiently large custom `ExecutionConfig` (`VerifiedLocal` context,
 all quota fields raised) to reach completion:**
 
-- **Total Steps: 753,864**
-- **Total Calls (`Opcode::Call`): 42,481** (`Opcode::ClosureCall`: 0 - no
-  closures are used)
+- **Total Steps quota charges: 753,864** - `vm.steps = charge_counter(...)`
+  (`semcode_vm.rs:2051`) is the sole `Steps` choke point, charged
+  unconditionally on every opcode dispatch, so this figure is the exact
+  real quota consumption, not an approximation.
+- **`Opcode::Call` dispatch count: 42,481** (`Opcode::ClosureCall`: 0 - no
+  closures are used). This is **not** the same counter as the `Calls`
+  quota charge - see below.
 - Completion result: success, both golden asserts (`total_score == 8`,
   `total_steps == 1417`) hold.
+
+**`Opcode::Call` dispatches vs. real `Calls` quota charges - distinguished
+precisely.** `Calls` is charged only inside `push_frame`
+(`semcode_vm.rs:3115`: `vm.calls = charge_counter(vm.calls,
+vm.config.quotas.max_calls, QuotaKind::Calls)?`), which fires only when
+`Opcode::Call` resolves to a genuine internal/user-defined function
+(`semcode_vm.rs:2783-2789`). When `Opcode::Call` instead resolves to a
+builtin, it is evaluated inline via `try_eval_builtin_call`
+(`semcode_vm.rs:2790-2796`) **without** calling `push_frame` - no `Calls`
+charge occurs for that dispatch. `snake_learning.sm`'s final output line
+(`print("snake_learning: ..." + to_text(total_score) + ... +
+to_text(total_steps) + ... + to_text(n_episodes))`) makes exactly one
+`print` and three `to_text` builtin calls, each **once**, outside the
+training loop - every other repeatedly-invoked operation in the loop
+(`map_get`/`map_set`, `pop`/`prepend`/`contains`, `random_next_i32`,
+`assert`) compiles to its own dedicated opcode, never generic
+`Opcode::Call`.
+
+**Exact `Calls` quota charge count, empirically proven** (temporary,
+uncommitted binary-search diagnostic over `max_calls`, deleted before
+this document was committed; never part of any commit): the unmodified
+`n_episodes = 10` workload's real `Calls` charge count is **42,477** -
+exactly 4 less than the `Opcode::Call` dispatch count, matching the 4
+builtin calls identified above precisely. Proof:
+
+- `max_calls = 42_476` (all other quota fields, including `max_steps`,
+  held at a value already proven sufficient): **FAILS** -
+  `QuotaExceeded { kind: Calls, limit: 42476, used: 42477 }`.
+- `max_calls = 42_477`: **PASSES** to completion, confirmed across 3
+  consecutive runs (fully deterministic, consistent with §14).
 
 **Minimal-raise precision check**: raising *only* `max_steps` to
 `1_500_000` and `max_calls` to `90_000`, leaving every other
 `VerifiedLocal` quota field (`max_frames = 256`, `max_registers = 4096`,
 `max_stack_depth = 256`, `max_effect_calls = 1024`, `max_symbol_table =
 16384`) at its exact default, still **succeeds** with the identical
-753,864/42,481 counts. This confirms exactly **two** of `VerifiedLocal`'s
-seven quota fields are the workload's real binding constraints; none of
-the other five needs to move at all.
+753,864 Steps / 42,481 `Opcode::Call` dispatches (42,477 real `Calls`
+charges). This confirms exactly **two** of `VerifiedLocal`'s seven quota
+fields are the workload's real binding constraints; none of the other
+five needs to move at all.
 
 ## 14. Determinism evidence
 
@@ -260,8 +295,8 @@ problem masked by an envelope decision.
 
 ## 15. VerifiedLocal evidence
 
-Fails: `753,864 > 100,000` (Steps, 7.5×) and `42,481 > 16,384` (Calls,
-2.6×) - **both** dimensions exceeded, not just the one the original
+Fails: `753,864 > 100,000` (Steps, 7.5×) and `42,477 > 16,384` (real
+`Calls` quota charges, 2.6×; §13) - **both** dimensions exceeded, not just the one the original
 failure message names. `VerifiedLocal` is the only CLI-reachable
 context; no test in the workspace pins the literal `100_000` value
 except the already-`#[ignore]`d `snake_learning_benchmark.rs` itself
@@ -273,8 +308,8 @@ baseline; `tests/ssf04_effect_quota.rs` only ever overrides
 
 ## 16. KernelBound evidence
 
-Fails: `753,864 > 250,000` (Steps, 3.0×) and `42,481 > 32,768` (Calls,
-1.3×) - **H3 is falsified**. `KernelBound`'s own published budget is not
+Fails: `753,864 > 250,000` (Steps, 3.0×) and `42,477 > 32,768` (real
+`Calls` quota charges, 1.3×; §13) - **H3 is falsified**. `KernelBound`'s own published budget is not
 merely "a little short," it is roughly a third of what the unmodified
 workload needs on the Steps dimension. Selecting `KernelBound` instead
 of `VerifiedLocal` changes nothing besides the `RuntimeQuotas` values
@@ -376,7 +411,7 @@ Cut `n_episodes` until the workload fits `VerifiedLocal`. Measured
 scaling (unmodified per-episode logic, golden asserts stripped for the
 experiment only):
 
-| `n_episodes` | Total Steps | Total Calls | Fits VerifiedLocal (100k/16384)? | Fits KernelBound (250k/32768)? |
+| `n_episodes` | Total Steps | `Opcode::Call` dispatches | Fits VerifiedLocal (100k/16384)? | Fits KernelBound (250k/32768)? |
 |---|---|---|---|---|
 | 1 | 2,342 | 125 | Yes | Yes |
 | 2 | 5,111 | 281 | Yes | Yes |
@@ -384,7 +419,19 @@ experiment only):
 | 4 | 116,672 | 6,571 | **No** | Yes |
 | 5 | 222,874 | 12,556 | No | Yes |
 | 6 | 329,064 | 18,541 | No | **No** |
-| 10 (current) | 753,856-753,864 | 42,481 | No | No |
+| 10, diagnostic variant (goldens stripped) | 753,856 | 42,481 | No | No |
+| 10, unmodified authored benchmark | 753,864 | 42,481 (42,477 real `Calls` charges - §13) | No | No |
+
+This table uses `Opcode::Call` dispatch counts for shape/scaling only,
+not as quota-boundary authority (§13 distinguishes `Opcode::Call`
+dispatches from real `Calls` quota charges precisely; only the
+unmodified `n=10` row's exact `Calls` charge count was independently
+proven). The `n=10` diagnostic-variant row (goldens stripped, used to
+produce this scaling curve) differs from the unmodified authored
+benchmark by exactly 8 Steps - the two stripped `assert(...)` calls each
+compile to several dedicated opcodes (not `Opcode::Call`), accounting
+for the gap without touching `Opcode::Call` dispatch count at all
+(unchanged at 42,481 in both variants).
 
 Scaling is **sharply non-linear**, not accidental bloat: cost jumps
 ~11× between `n=3` (10,491) and `n=4` (116,672), then increases by a
@@ -419,7 +466,7 @@ remedy."
 Route `snake_learning` through `KernelBound` via a new CLI/library
 selection surface. Falsified by §16: `KernelBound`'s own published
 budget is itself insufficient (753,864 > 250,000 Steps, 3.0× short;
-42,481 > 32,768 Calls, 1.3× short) - the numeric problem is not solved by
+42,477 real `Calls` quota charges > 32,768, 1.3× short) - the numeric problem is not solved by
 switching contexts, only by *also* raising `KernelBound`'s own values,
 which is its own separate, unauthorized quota-baseline change and
 carries the same single-benchmark-justification weakness as raising
@@ -552,7 +599,7 @@ alone or combination survives falsification.**
 
 - **snake_learning classification**: an unchanged, deliberately-authored,
   fully-deterministic feature-completeness demonstration whose true
-  execution cost (753,864 Steps / 42,481 Calls) was never measured
+  execution cost (753,864 Steps / 42,477 real `Calls` quota charges) was never measured
   against a real budget until `#1759`'s enforcement went live. Not a
   performance stress benchmark in intent; not a "shrink-to-fit" example
   in practice either, since its cost is an emergent function of the
@@ -576,9 +623,15 @@ alone or combination survives falsification.**
   unignored `check`/`compile`/`verify` test (restoring coverage that
   exists nowhere today, zero risk since neither touches runtime quotas),
   and (b) a new, separately-named test that runs `snake_learning.sm` to
-  completion under the explicit custom envelope above and asserts the
-  exact golden values (`total_score == 8`, `total_steps == 1417`),
-  proving completion is real rather than merely "no longer failing."
+  completion under the explicit custom envelope above. Successful
+  (`Ok`) completion is itself the proof that the embedded Semantic
+  golden assertions (`assert(total_score == 8)`, `assert(total_steps ==
+  1417)`, `assert(map_contains(qtable, ...))`) executed and held - a
+  failed `assert` inside the program produces
+  `RuntimeError::Trap(RuntimeTrap::AssertionFailed)`, not `Ok`, so there
+  is no separate Rust-side re-assertion of `total_score`/`total_steps`
+  to write or that could be written: the verified-execution entrypoint
+  returns `Result<(), RuntimeError>`, not `main`'s locals.
 - **provenance**: unaffected for default CLI usage (nothing changes
   there); the new test does not route through the CLI/audit-trail path
   at all, so no audit-record change is implicated - if a future,
@@ -634,14 +687,23 @@ nothing here is left as an open choice.
     `snake_learning_completes_under_explicit_high_budget_envelope`) that
     reads/compiles/verifies the same file, constructs
     `ExecutionConfig::new(ExecutionContext::VerifiedLocal, quotas)` with
-    `quotas.max_steps` and `quotas.max_calls` raised per §22's measured
-    margin, executes to completion via an existing verified-execution
-    entrypoint (e.g. `run_verified_entry_semcode_with_config` or
-    equivalent), and asserts the exact golden invariants already present
-    in the source (`total_score == 8`, `total_steps == 1417`,
-    non-empty Q-table). Does not assert an exact Steps/Calls count as a
-    pass/fail gate (§30) - only that completion succeeds and the golden
-    program output is correct.
+    `quotas.max_steps` and `quotas.max_calls` raised per §13's measured
+    margin, and executes to completion via an existing **verified**
+    execution entrypoint (e.g. `run_verified_entry_semcode_with_config`
+    or equivalent) - asserting only that the call returns `Ok(())`.
+    That entrypoint returns `Result<(), RuntimeError>`, not `main`'s
+    locals, so the golden invariants (`total_score == 8`,
+    `total_steps == 1417`, non-empty Q-table) are proven *by* successful
+    completion (§13's binary-search result already demonstrates the
+    inverse: an under-sized quota fails with a distinct `RuntimeError`,
+    never a silent wrong answer), not by a separate Rust-side
+    re-assertion of those values, which this entrypoint cannot provide.
+    Do not switch to the raw/unverified observation-collecting entrypoint
+    (`run_semcode_collecting_hello_observations_with_config`) merely to
+    inspect the printed text - it bypasses `sm-verify` admission
+    (`semcode_vm.rs:674-683`) and is not needed here. Does not assert an
+    exact Steps/Calls count as a pass/fail gate (§30) - only that
+    completion succeeds.
 - No change to `crates/smc-cli/src/app.rs`, `crates/sm-runtime-core/src/lib.rs`,
   `crates/sm-vm/src/semcode_vm.rs`, or `examples/benchmarks/snake_learning.sm`.
 - No change to any golden snapshot.
@@ -656,14 +718,18 @@ nothing here is left as an open choice.
 
 - The restored `check`/`compile`/`verify` test must pass unconditionally
   (no quota dependency).
-- The new completion test must assert the exact golden values
-  (`total_score == 8`, `total_steps == 1417`), not merely "did not
-  error" - protecting against a future silent behavior change being
-  masked by a generously-sized envelope.
+- The new completion test must assert successful (`Ok`) completion via
+  a **verified** execution entrypoint - which is only reachable if the
+  embedded golden asserts held, since a failed `assert` produces
+  `RuntimeError::Trap(RuntimeTrap::AssertionFailed)`, not `Ok` (§29). It
+  must not attempt to re-derive `total_score`/`total_steps` from outside
+  the VM (no such API is used), and must not switch to the
+  raw/unverified observation-collecting entrypoint merely to inspect
+  printed output.
 - The new completion test's envelope must not assert an exact
   Steps/Calls count as a hard boundary (that would reintroduce the same
   fragility this decision is correcting) - it must simply provide
-  enough headroom (§22) for the already-measured, deterministic cost.
+  enough headroom (§13, §36) for the already-measured, deterministic cost.
 - No test may re-introduce a hardcoded exact-boundary assertion against
   `VerifiedLocal`'s or `KernelBound`'s published values for this
   benchmark.
@@ -722,9 +788,9 @@ SSF-08 is complete. Final `#1579` reconciliation happens only after
 - exact target `RuntimeTrap`/`RuntimeError`/quota/CLI shape: N/A (no
   production code changes in this decision or its implementation)
 - exact test-suite mechanic: frozen (§29)
-- exact envelope values and margin: frozen (§22's 753,864/42,481
-  measured cost, 1,500,000/90,000 proposed limits, ~49.7%/52.8%
-  headroom)
+- exact envelope values and margin: frozen (§13's measured cost -
+  753,864 Steps quota charges, 42,477 real `Calls` quota charges -
+  against proposed limits 1,500,000/90,000, i.e. ~49.7%/52.8% headroom)
 - payload/behavior preservation: confirmed zero change to default CLI
   behavior, benchmark source, or any published quota value
 - documentation consequence: none required (§31)
