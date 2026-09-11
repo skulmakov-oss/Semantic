@@ -447,3 +447,104 @@ between. Scope: quota enforcement (`max_steps`/`max_calls`/`ConstPool`/
 variants ever constructed) across `sm-vm`, entirely unstarted, 5 issues.
 
 Awaiting explicit GO to begin Lane 5.
+
+## 12. FINAL RECONCILIATION (fresh, post-Lane-5-closure, current `main`)
+
+**2026-09-11 addendum — Lane 5 closed, all seven acceptance criteria
+re-derived from fresh evidence, not inherited from §3's 2026-09-06 table.**
+
+Audit SHA for this addendum: `4bfa9e141d067bd6b4b8db440266243cabbe10e7`
+(`main`, confirmed via `git fetch origin && git rev-parse origin/main`
+immediately before this reconciliation; unmoved throughout). Lane 5
+(#1759, #1760, #1761, #1762, #1763, #1900, #1902) is now **CLOSED, 7/7**,
+implemented across PRs #1907, #1908 (decision)/#1911, #1912 (decision)/
+#1913, #1914 (decision)/#1915, each independently exact-head-qualified
+(hosted CI + fresh Codex review) and owner-merged. This section
+independently re-derives every AC verdict from current implementation,
+current tests, and current specification — per this checkpoint's own
+governing instruction, historical audit prose (§1-§11 above) and issue
+narrative are corroboration, not the primary evidence source.
+
+### 12.1 AC1-AC7 fresh matrix
+
+| AC | Requirement | Authoritative contract | Implementation evidence | Test evidence | Relevant issues/PRs | Residual blocker | Verdict |
+|---|---|---|---|---|---|---|---|
+| AC1 | Public ownership/memory claim matches implementation evidence | `ssf08_ownership_position_decision.md` (Position A); `docs/spec/runtime_ownership.md`, `semcode.md`, `verifier.md` | Fresh repo-wide scan (independent research pass) confirms `runtime_ownership.md` is the current authority and matches implementation exactly for tuple/record/Sequence-static-index/ADT-payload-Borrow paths; `semcode.md`'s `SEMCOD21` section correctly reflects the two-capability-bit (`CAP_OWNERSHIP_SEQUENCE_PATHS`/`CAP_OWNERSHIP_ADT_BORROW_PATHS`) rev22 contract. Zero current-facing overclaim found anywhere in the corpus (README, LANGUAGE.md, getting_started, status/*, roadmap/public_*, spec/*, architecture/*). | Independent research pass's full document-by-document Position-A comparison (5 docs) plus a ~30-file repo-wide term scan for "Rust-like/borrow checker/memory safety/lifetime/region/alias/ownership/systems language" | #1718 (CLOSED, PR #1896) | none | **SATISFIED** |
+| AC2 | Aggregate/path/frame/host ownership behavior is documented and tested | `runtime_ownership.md`'s "Current supported slice" table | rev22 contract confirmed live at all four layers (emitter capability bits, SemCode decoder, verifier, VM) for every path-component kind: scalar/root, tuple, record field, `SequenceIndexStatic` (Borrow+Write), `AdtPayload` (Borrow only; Write unconditionally rejected at decode *and* independently at the verifier, not merely at one layer), frame boundary (fresh-frame `active_borrowed_paths` never inherits caller state), call boundary (arity/signature validated on every entry route), host transfer (zero ownership state crosses the ABI boundary; a separate non-ownership value-canonicality issue exists there, see #1778 below). Map/deferred-absence paths: no frontend `AccessPath` resolution exists at all — a documented non-goal, not a gap. | Live this-session test runs: `sm-format` ownership-component tests (2/2), `sm-verify` `ownership_path_family_contract_tests` (6/6, includes the decode-independent ADT-Write-rejection test), `sm-vm` adt_payload/sequence_index tests (7/7), `sequence_ownership_golden` (2/2, includes a header-downgrade-attack test proving the rev22 gate can't be bypassed by relabeling), `runtime_ownership_e2e` (33/33) | #1718 (CLOSED, PR #1896) | none | **SATISFIED** |
+| AC3 | Partial move and sibling-access rules are deterministic | `runtime_ownership.md` overlap rules; decision record's Normative Invariants (fail-closed) | `ScopeEnv::join_ownership_from` implements a conservative-join law (OR across successors on `consumed`; restriction entries accumulate, never drop, across arms) — confirmed live, not merely by source inspection. `#1888`'s root cause (RecordUpdate Write-event generation skippable for range-loop headers/foreach iterables/guard-return payloads) is structurally eliminated, not patched at three call sites: Checkpoint W2A relocated the Write-event mint into `lower_expr_with_expected` itself, the single function every admitted expression lowers through - confirmed by direct tracing that all three named roots route through it. The "unknown ownership state must never resolve to a guessed successful state" invariant is enforced independently at the frontend (`ScopeEnv`'s seven query APIs now route through `require_binding`/`require_binding_mut`, failing closed - closes the frontend half of a residual the decision record's own text still describes as open, see §12.3) and at the VM (a pre-rev21 Write event with no resolvable executable anchor is rejected, not approximated). | `ssf08_1656_*` join tests (5/5, live), `tests/fa_04_025_reconciliation.rs` (8/8, all three #1888 roots plus a real downstream `BorrowWriteConflict` enforcement case), `runtime_ownership_e2e` (33/33, includes `runtime_ownership_unsupported_paths_do_not_silently_claim_support` and `*_is_stable_across_runs`/`*_rejects_identically_across_runs` determinism checks), `tests/write_cursor_1891_repro.rs` (4/4) | #1888 (CLOSED, root-caused to PR #1891 Checkpoint W2A, regression-guarded by PR #1894) | none | **SATISFIED** |
+| AC4 | Resource quotas and failure taxonomy are explicit | `docs/spec/quotas.md`; `docs/spec/vm.md`'s Trap And Error Model; `ssf08_1759_steps_calls_contract_decision.md` through `ssf08_1902_snake_learning_envelope_decision.md` | Fresh-checked directly against this exact SHA: `QuotaKind` = exactly 7 variants (`Steps, Calls, StackDepth, Frames, Registers, SymbolTable, EffectCalls`; no `ConstPool`, no `TraceEntries`). `RuntimeTrap` = exactly 4 live variants (`AssertionFailed, BorrowWriteConflict, DivisionByZero, ArithmeticOverflow`); `RuntimeError`'s 15 variants each have real, correctly-staged authority. `ExecutionConfig`/`RuntimeQuotas` provenance: the effective envelope actually used is what gets recorded (`#1762`), not a value re-derived from the context label. `#1902`: `VerifiedLocal` (100,000/16,384) and `KernelBound` (250,000/32,768) both confirmed byte-identical to their pre-#1902 values; `examples/benchmarks/snake_learning.sm` confirmed to still have exactly one commit in its history (never edited); `smc-cli` confirmed to have zero quota/context CLI flags; the explicit high-budget envelope (`max_steps=1,500,000`, `max_calls=90,000`) exists only inside `tests/snake_learning_benchmark.rs`'s own dedicated test, constructed via the already-public `ExecutionConfig::new`/`verify_semcode_token_with_quotas` library API - not a new CLI surface, not an automatic escalation, not a fallback. | Full `cargo test --workspace --all-targets` this session: 27/27 test binaries green, 0 failures (superset of `snake_learning_benchmark`'s 2 unignored tests, `tests/public_api_contracts.rs`'s `sm_runtime_core_lib.txt`/`sm_vm_semcode_vm.txt` golden-snapshot checks) | #1759, #1760, #1761, #1762, #1763, #1900, #1902 (all 7 CLOSED - PRs #1907/#1908+#1911/#1912+#1913/#1914+#1915) | none | **SATISFIED** |
+| AC5 | Verifier and runtime agree on admitted/rejected ownership states | `runtime_ownership.md` Verifier/VM Enforcement Contracts | Every stable ownership path family classifies cleanly into exactly one of: verifier-admits-and-VM-enforces (tuple, record, `SequenceIndexStatic` Borrow+Write, `AdtPayload` Borrow), or verifier-rejects-deterministically (`AdtPayload` Write, at decode *and* independently at the verifier - a mutation-testing finding, M4b, specifically closed this so the verifier's own check can't silently degrade to "decode already caught it"), or compiler-cannot-produce-and-contract-excludes (Map paths). No production path found where the verifier admits and the VM silently discards ownership metadata, and no canonical path found where a verifier rejection is followed by continued execution: the raw/bypass execution helpers (`run_semcode`, `run_semcode_with_entry`, re-exported from `src/lib.rs`'s library facade) are self-documented as "must not be confused with verified execution" and are never invoked by any `smc` CLI canonical command without a preceding `verify_semcode_token(_with_quotas)` call in the same code path. Legacy pre-rev21 SemCode is a documented, intentional decode/execute divergence (verifier still structurally admits it for compatibility; VM deterministically rejects executing it, Checkpoints W2E/W2F), not a disagreement bug. | `checkpoint_w2e_legacy_pre_rev21_write_admitted_unchanged`, `legacy_pre_rev21_write_bearing_artifact_rejected_at_runtime`, `verifier_rejects_adt_payload_write_independently_of_decoder`, `vm_rejects_synthetic_adt_payload_write_artifact_regardless_of_overlap_shape` (7/7, live) | #1718 (CLOSED) | none | **SATISFIED** |
+| AC6 | No current documentation implies full Rust-like ownership unless actually qualified | Current-facing docs corpus | Independent repo-wide scan (README*, LANGUAGE*, docs/spec/**, docs/architecture/**, docs/status/**, docs/getting_started*, roadmap/public status docs) for Rust-like/Rust-equivalent/borrow-checker/memory-safety/lifetime/region/alias/ownership/systems-language: **zero stale overclaims found.** Every hit is either an accurate current claim matching Position A, an explicit non-claim, historical/rejected-alternative text clearly marked as such, or a same-spelling homonym carrying no memory-model claim (syntax-profile proper noun "Rust-like Semantic," Rust-crate/module ownership, session-object lifetime, import alias, capability-coordinate collision, or the Hub CLI tool's own Rust implementation). One documentation-currency (under-claim) gap noted, not an overclaim - see §12.3. | Independent research pass's full-corpus term scan | none | none | **SATISFIED** |
+| AC7 | SSF-09 entry conditions are explicit | #1579's own Exit gate; `#1580`'s own header | `#1580` confirmed **OPEN**, with an explicit `"Depends on: #1579"` header line and an explicit `"Status gate: **BLOCKED until SSF-08 closes.**"` line. Its own non-goals ("No editor-specific language semantics," "No autonomous patching," step 5's "`smc check`/canonical compiler services remain source of truth; server may orchestrate/cache but not reinterpret language semantics") preserve single canonical compiler/tooling authority, avoiding a second parser/typechecker/verifier authority. No circular dependency found: #1579's only stated dependency is `#1578` (SSF-07), confirmed **CLOSED**; #1579's own exit gate only forward-references SSF-09, never depends back on it. | none required (procedural/textual gate) | #1580 (OPEN, correctly gated), #1578 (CLOSED) | none | **SATISFIED** |
+
+### 12.2 Residual issue table
+
+| Issue | Live state | Root cause | Affected authority | Overlaps an AC? | Blocker? | Rationale |
+|---|---|---|---|---|---|---|
+| #1885 | OPEN | `tests/public_api_contracts.rs`'s `TARGETS` list omits `sm-front` (and `sm-sema`); the corresponding golden snapshot file is orphaned | CI/API-drift-guard tooling (`public-api-guard` job) | No (AC2 is satisfied by independent behavioral/adversarial test fixtures - `borrow_activation_v20`, `own0_root_identity_e2e`, `pcc6_option_result_ownership_golden`, `lexical_binding_identity_e2e` - not by the signature-snapshot guard) | **NO** | Confirmed still missing from `TARGETS` on this exact SHA. A future silent `ScopeEnv` signature change would go undetected by this *particular* CI job, but would not make an incorrect ownership *behavior* pass, since that's proven by separate fixtures unrelated to this guard. Legitimate CI-hygiene fix, independently scoped. |
+| #1778 | OPEN | `AbiValue::Quad(u8)` has no checked constructor; any raw `u8` 0-255 is constructible at the ABI-value type level | `prom-abi` wire-value canonicality | No (ownership-transfer scope is unaffected; the VM-side companion defect this issue cross-references, #1775, is already fixed - `quad_from_abi` now rejects any byte outside `0..=3`) | **NO** | Narrow value-domain range-validation gap in a wire-representation type, not an ownership/move/borrow semantics defect. |
+| #1617 | OPEN | Broad, 18-crate/module, evidence-only "self-deception/fail-open" platform audit umbrella | Platform-wide (orthogonal to SSF-08's ownership scope) | No explicit dependency link to `#1579` found in either issue's body; only two of its many child findings (#1885, #1768) have any textual proximity to SSF-08, and both are independently non-blocking (see this table and below) | **NO** | No stated dependency either direction; its SSF-08-adjacent children are qualification/test-infrastructure gaps, not ownership-semantic defects. |
+| #1716 | OPEN | Same class as #1885: `sm-ir`'s public-API guard snapshots only wildcard re-exports, missing dedicated ownership-struct coverage | CI/API-drift-guard tooling | No (same reasoning as #1885 - ownership correctness is proven by dedicated behavior tests, not this guard) | **NO** | Newly surfaced during this reconciliation's open-issue search; same disposition class as #1885. |
+| #1768 | OPEN | Most `RuntimeQuotas` baseline numeric values lack a dedicated regression-pinning test (though current docs/code already agree with each other) | Quota qualification/test coverage | Weak overlap with AC4 (quotas), but the finding's own text states this is not evidence any current value is wrong - only that a future silent value change could go undetected by a *dedicated* pin test | **NO** | Qualification-coverage gap, not a correctness gap; AC4's own verdict rests on `QuotaKind`/`RuntimeTrap`'s current shape and #1902's resolution, both independently confirmed fresh above, not on this pin test existing. |
+
+No newly discovered issue in this pass names a live, unrepaired ownership-semantic or resource-taxonomy defect. Every item found is either CLOSED, or OPEN-and-INDEPENDENT with an evidence-based rationale distinguishing "test-infrastructure/qualification-coverage gap" (does not falsify a current, separately-tested guarantee) from "semantic-correctness gap" (would falsify one) - none of the five residuals in this table is the latter.
+
+### 12.3 Documentation-currency notes (non-blocking, flagged for follow-up)
+
+Two staleness items were found during this reconciliation. Neither is a
+current-facing overclaim (AC6 is unaffected) and neither reflects an
+implementation defect (AC1-AC5 are unaffected), but both are worth a future
+docs-only correction:
+
+- `docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md`'s
+  own "Known Blocking Findings"-style residual text still reads as if the
+  Lane 1 join-model work (#1656-#1664) and `ScopeEnv`'s "seven fail-open
+  query APIs" (#1664) are unrepaired. Both are in fact CLOSED and fixed in
+  current code (`require_binding`/`require_binding_mut` now fail closed) -
+  this is an *internal decision-record* staleness, not a public-facing
+  claim, since the actual public contract doc (`runtime_ownership.md`) is
+  current and accurate. An auditor who reads only the decision record
+  without cross-checking code could be misled.
+- `docs/spec/vm.md` and `docs/architecture/blueprint.md` still describe the
+  supported ownership slice as tuple+direct-record-field only, not yet
+  reflecting the `#1718` `Sequence`-static-index/`AdtPayload`-Borrow
+  additions that `runtime_ownership.md` (the current authority) already
+  documents correctly. This is an under-claim (narrower than reality), not
+  an overclaim, so it does not violate AC6 - but it is a currency gap worth
+  closing.
+
+### 12.4 Qualification replay (this session, exact SHA `4bfa9e14`)
+
+- `cargo test --workspace --all-targets`: 27/27 test binaries green, 0
+  failures (covers tuple/record/sequence/ADT/scalar ownership, borrow
+  activation, write execution-site, runtime ownership, verifier ownership
+  admission, resource quota/failure taxonomy, and the `snake_learning`
+  benchmark suites named in this checkpoint's own required replay list).
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo fmt --all --check`: could not run locally - a pre-existing,
+  previously-confirmed Windows path-length environment limitation specific
+  to this machine (reproduces identically on unrelated worktrees regardless
+  of branch content); hosted `pr-ready` CI (`ubuntu-latest`) is the
+  authoritative gate for `fmt` and is required green at this addendum's own
+  exact HEAD before owner review.
+- `git diff --check`: clean.
+- Hosted security/release gates (CodeQL, boundary-enforcement,
+  `pcc-qualification-7hell`, `public-api-guard`, `release-bundle-process`,
+  `runtime-release-gates`): required green at this addendum's exact HEAD -
+  see the PR's own exact-head qualification record.
+
+### 12.5 Final verdict
+
+**AC1 SATISFIED. AC2 SATISFIED. AC3 SATISFIED. AC4 SATISFIED. AC5
+SATISFIED. AC6 SATISFIED. AC7 SATISFIED.**
+
+**Scoped blockers remaining: NONE.** (#1885, #1778, #1617, #1716, #1768 are
+each independently confirmed non-blocking, §12.2; the two documentation-
+currency items in §12.3 are follow-up-worthy but do not falsify any
+acceptance criterion.)
+
+**SSF-08 ACCEPTANCE READY FOR OWNER DECISION.**
+
+This document does not close `#1579` and does not mutate its lifecycle
+state - that remains an explicit, separate owner action. SSF-08 umbrella
+`#1579` remains OPEN.
