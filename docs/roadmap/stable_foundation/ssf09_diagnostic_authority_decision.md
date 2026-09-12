@@ -254,24 +254,47 @@ match, try the next one."
   RustLike's own top-level keywords (`enum`/`fn`/`record`/`schema`/
   `trait`/`impl`) never appear in Logos's.
 
+  **CORRECTION NOTE (owner review round - E1A, round 1)**: the first
+  draft of this correction over-generalized the collision from `import`
+  (the one genuinely shared keyword) to `import`/`pulse`/`profile` as a
+  single category, in several places implying `pulse` and `profile`
+  alone are also merely "shared" evidence requiring combination with
+  `system`/`entity`/`law` to become unique. That is wrong and
+  self-contradicts this same section's own dependency-graph-style
+  evidence a few lines above: `KwPulse`/`KwProfile` never appear in
+  RustLike's parser at all (only `KwSystem`/`KwEntity`/`KwLaw`/
+  `KwImport`/`KwPulse`/`KwProfile` are Logos's six top-level forms;
+  RustLike's own seven are `Import`/`enum`/`fn`/`record`/`schema`/
+  `trait`/`impl`/role-marked-schema-decl). `KwImport` is confirmed the
+  **only** keyword the two grammars share. A bare, valid `Pulse ...` or
+  `Profile ...` top-level directive, with nothing else, is therefore
+  already Logos-exclusive positive evidence on its own - RustLike has no
+  grammar rule that could ever accept it, so there is no second
+  candidate to conflict with. Only `import` needs the ambiguity
+  treatment.
+
   **Corrected law**: a declaration/token being *valid* Logos syntax does
-  NOT by itself imply it is *unique* Logos evidence. The general rule,
-  stated once for any current or future shared surface vocabulary:
-  - Logos-exclusive positive evidence (`system`/`entity`/`law`, or
-    `import`/`pulse`/`profile` *only when combined with* Logos-exclusive
-    evidence elsewhere in the same input - see below) with no
-    RustLike-positive evidence -> UNIQUE POSITIVE LOGOS CLAIM.
+  NOT by itself imply it is *unique* Logos evidence - but this only
+  bites for evidence that is *actually* shared with another candidate
+  grammar, not for every Logos-recognized form. The general rule, stated
+  once for any current or future shared surface vocabulary:
+  - Logos-exclusive positive evidence - `system`/`entity`/`law`, **or
+    `pulse`/`profile` on their own, with no combination requirement** -
+    with no RustLike-positive evidence -> UNIQUE POSITIVE LOGOS CLAIM.
   - RustLike-exclusive positive evidence (`enum`/`fn`/`record`/`schema`/
     `trait`/`impl`, or a role-marked schema declaration) with no
     Logos-positive evidence -> UNIQUE POSITIVE RUSTLIKE CLAIM.
-  - Evidence that is itself shared and, for this specific input,
-    independently admits **both** grammars to completion (a bare
-    top-level `import`/`pulse`/`profile`-only source is the confirmed
-    concrete case) -> **AMBIGUOUS / CONFLICTING CLAIMS**, not a
-    unique claim for either side. `import`/`pulse`/`profile` alone,
-    with no accompanying `system`/`entity`/`law`, is *shared* evidence,
-    not unique evidence, precisely because RustLike's grammar admits
-    the identical `Import "..."` shape on its own.
+  - `import` specifically, when it is the *only* positive evidence in
+    the input (no accompanying `system`/`entity`/`law`/`pulse`/
+    `profile` and no RustLike-exclusive form either) -> **AMBIGUOUS /
+    CONFLICTING CLAIMS**, because RustLike's grammar admits the
+    identical `Import "..."` shape on its own and there is nothing else
+    in the input to break the tie. If `import` appears *alongside*
+    genuinely Logos-exclusive evidence in the same input (e.g. a file
+    with both a `Law` declaration and an `Import` line), the
+    Logos-exclusive evidence already establishes UNIQUE POSITIVE LOGOS
+    CLAIM for the whole input independent of the `import` line - the
+    ambiguity only arises when `import` is the *sole* evidence present.
 
   This corrected law still fully covers what actually motivated the
   original wording: the current discriminator
@@ -280,19 +303,31 @@ match, try the next one."
   is `#1670`'s own filed observation and remains a real, valid defect
   (see the repair-direction correction below) - the fix is just that
   the *previously expected* correct classification for a bare
-  import-only file was itself wrong, not that the underlying discarding
-  bug isn't real.
+  import-only file was itself wrong (it is ambiguous, not uniquely
+  Logos), while a bare `pulse`/`profile`-only file's correct
+  classification really is UNIQUE POSITIVE LOGOS CLAIM, exactly as the
+  pre-E1A text originally (if over-broadly) claimed for that specific
+  case.
 
-  This correction concerns the **implicit `Auto` classification path
-  only**. An explicit `CompileProfile::Logos` or `CompileProfile::RustLike`
-  request already bypasses classification entirely per the INVARIANT
-  below (explicit `RustLike` must not probe Logos; explicit `Logos` must
-  not probe RustLike) - a caller who explicitly names the surface for a
-  bare `import`/`pulse`/`profile`-only file gets that surface, by caller
-  authority, with no ambiguity question to resolve. Ambiguity is only a
-  concern where no caller-supplied authority exists to break the tie,
-  which today is exactly the implicit-`Auto` `check_source_with_profile`
-  path `#1670` is filed against.
+  **This correction concerns the implicit `Auto` classification path
+  only, and states a normative requirement, not a description of
+  already-conforming production code.** By the frozen INVARIANT below,
+  an explicit `CompileProfile::Logos` or `CompileProfile::RustLike`
+  request MUST bypass Auto surface classification entirely (explicit
+  `RustLike` must not probe Logos; explicit `Logos` must not probe
+  RustLike) - conceptually, a caller who explicitly names the surface
+  for a bare `import`-only file gets that surface by caller authority,
+  with no ambiguity question to resolve. **Current production code does
+  not yet satisfy this for path 3**: `compile_program_to_ir_with_options_and_profile`
+  still unconditionally invokes the Logos parser even under explicit
+  `CompileProfile::RustLike` (see this Decision's own path-3 evidence
+  above) - that is a separate, already-tracked production defect
+  ([#1920](https://github.com/skulmakov-oss/Semantic/issues/1920)), not
+  something this correction is claiming is already fixed. Ambiguity
+  under `Auto` is a concern specifically because no caller-supplied
+  authority exists to break the tie there, which today is exactly the
+  implicit-`Auto` `check_source_with_profile` path `#1670` is filed
+  against.
 
   Reaching UNIQUE POSITIVE SURFACE CLAIM (for either grammar, under the
   corrected law above) ends classification: no other surface may be
@@ -307,19 +342,23 @@ match, try the next one."
   independently produces sufficient positive evidence for the same
   input, or the classifier cannot deterministically resolve which
   surface owns it. **A concrete, confirmed instance of this outcome (not
-  merely hypothetical) is a bare top-level `import`/`pulse`/`profile`-only
-  file that is simultaneously valid under RustLike's own structured
-  `Import "<path>"` declaration** - see the corrected UNIQUE POSITIVE
-  SURFACE CLAIM law above for the evidence. This outcome must remain
-  genuinely reachable by the classifier, not defined away by an
-  implementation that stops evaluating after the first candidate
-  satisfies UNIQUE POSITIVE SURFACE CLAIM's evidence threshold without
-  checking uniqueness. This is itself a deterministic classification
-  error, reported as such - **never** resolved by picking a "winner"
-  through evaluation order, fallback, or any other implicit tie-break.
-  Folding ambiguity into "no match, try the next candidate" (an earlier
-  draft's error) is precisely the guessed-source-surface outcome the
-  "Fail-closed rules" section below already forbids.
+  merely hypothetical) is a bare top-level `import`-only file (e.g.
+  `Import "a.sm"` and nothing else) that is simultaneously valid under
+  RustLike's own structured `Import "<path>"` declaration** - see the
+  corrected UNIQUE POSITIVE SURFACE CLAIM law above for the evidence.
+  This is specific to `import`, the one shared keyword - a bare
+  `pulse`-only or `profile`-only file has no RustLike-side counterpart
+  to conflict with and is UNIQUE POSITIVE LOGOS CLAIM, not this outcome.
+  This outcome must remain genuinely reachable by the classifier, not
+  defined away by an implementation that stops evaluating after the
+  first candidate satisfies UNIQUE POSITIVE SURFACE CLAIM's evidence
+  threshold without checking uniqueness. This is itself a deterministic
+  classification error, reported as such - **never** resolved by
+  picking a "winner" through evaluation order, fallback, or any other
+  implicit tie-break. Folding ambiguity into "no match, try the next
+  candidate" (an earlier draft's error) is precisely the
+  guessed-source-surface outcome the "Fail-closed rules" section below
+  already forbids.
 
 This decision freezes the semantic distinction only, not the concrete
 classifier implementation (e.g., whether it is expressed as an enum,
@@ -407,29 +446,35 @@ explicit or defaulted `CompileProfile` wired into its call path (it has
 none today); `check_source_with_profile` must classify the Logos
 attempt's outcome using the corrected law above (NO SURFACE CLAIM /
 UNIQUE POSITIVE SURFACE CLAIM-with-success-or-AUTHORITATIVE-FAILURE /
-AMBIGUOUS-CONFLICTING CLAIMS, with `import`/`pulse`/`profile` alone
-counted as *shared*, not unique, evidence) - not the two-state split an
-earlier draft of this decision used, not the broader "or is being
-classified" framing a later draft used, and not the "import-only is
-automatically unique Logos evidence" claim a still-later draft used,
-all before this correction - before deciding whether to attempt
-RustLike; that classification must NOT treat a bare probe rejection
-with no prior positive evidence as authoritative (an ordinary `RustLike`
-program failing a Logos probe at the first token must still allow
-`RustLike` to be attempted), and must NOT treat a bare
-`import`/`pulse`/`profile`-only file as owned by either grammar when it
-is simultaneously valid RustLike syntax - that specific input must
-surface as a classification error instead;
+AMBIGUOUS-CONFLICTING CLAIMS, with bare `import` alone counted as
+*shared* evidence and bare `pulse`/`profile` alone counted as
+Logos-exclusive *unique* evidence, needing no combination with
+`system`/`entity`/`law`) - not the two-state split an earlier draft of
+this decision used, not the broader "or is being classified" framing a
+later draft used, not the "import-only is automatically unique Logos
+evidence" claim a still-later draft used, and not the "import/pulse/
+profile are all equally shared" over-generalization a first E1A draft
+introduced, all before this correction - before deciding whether to
+attempt RustLike; that classification must NOT treat a bare probe
+rejection with no prior positive evidence as authoritative (an ordinary
+`RustLike` program failing a Logos probe at the first token must still
+allow `RustLike` to be attempted), and must NOT treat a bare
+`import`-only file as owned by either grammar when it is simultaneously
+valid RustLike syntax - that specific input must surface as a
+classification error instead, while a bare `pulse`-only or
+`profile`-only file (which RustLike's grammar never recognizes at all)
+is owned by Logos outright with no such error;
 `compile_program_to_ir_with_options_and_profile` must stop invoking
 `parse_logos_program_with_profile` at all when `profile` is explicitly
-`RustLike` (not merely stop acting on its result), and its `Auto` branch
-needs the same corrected classification instead of `unwrap_or(false)`;
-and `cmd_check`'s `.or_else` must stop discarding a real multi-module
-load failure in favor of a silently-narrower single-file check. Whether
-these are one filed issue or several is an implementation-sequencing
-question, not a decision-authority question - out of scope here; see
-"Durable tracking for newly discovered defects" below (owner-approved
-for separate post-merge creation).
+`RustLike` (not merely stop acting on its result) - this is `#1920`'s
+own scope, not yet performed - and its `Auto` branch needs the same
+corrected classification instead of `unwrap_or(false)`; and
+`cmd_check`'s `.or_else` must stop discarding a real multi-module load
+failure in favor of a silently-narrower single-file check (`#1919`'s
+scope). Whether these are one filed issue or several is an
+implementation-sequencing question, not a decision-authority question -
+out of scope here; see "Durable tracking for newly discovered defects"
+below.
 
 **TEST CONSEQUENCE** (not performed here): a regression per path proving
 that a genuinely invalid (not merely empty) grammar-specific input is
@@ -441,23 +486,27 @@ mechanism - covering `check_source_with_profile`,
 these additional, distinct regressions: (1) for explicit `RustLike`,
 `compile_program_to_ir_with_options_and_profile(input, CompileProfile::RustLike,
 ..)` must never invoke the Logos parser at all for any input, verified
-directly (not merely that its result is ignored); (2) **corrected (E1A)**
-- a bare source file containing only `import`/`pulse`/`profile`
-directives and no `system`/`entity`/`law` declaration, where that same
-content is *also* a complete valid RustLike program (the confirmed
-concrete case being a top-level `Import "<path>"` and nothing else),
-must be rejected with a deterministic classification-ambiguity outcome
-- never silently resolved to Logos, never silently resolved to
-RustLike, and never silently reinterpreted as RustLike the way today's
-discriminator-blind-spot does; a *separate* regression must confirm that
-genuinely Logos-exclusive evidence (`system`/`entity`/`law`, or
-`import`/`pulse`/`profile` *combined with* such exclusive evidence in
-the same input) still reaches UNIQUE POSITIVE LOGOS CLAIM; (3) an
-ordinary, valid `RustLike` program (e.g. `fn main() { return; }`) must
-still compile successfully under `Auto` even though a Logos probe
-against it fails immediately with no prior positive evidence - proving
-the classifier does not treat every candidate-probe rejection as
-authoritative; (4) more generally, any input that independently
+directly (not merely that its result is ignored); (2) **corrected (E1A,
+round 1)** - a bare source file containing **only** an `import`
+directive (e.g. `Import "a.sm"`, the confirmed concrete collision, with
+no `system`/`entity`/`law`/`pulse`/`profile`), which is simultaneously a
+complete valid RustLike program, must be rejected with a deterministic
+classification-ambiguity outcome - never silently resolved to Logos,
+never silently resolved to RustLike; (2a) **separately, and distinctly**
+- a bare source file containing **only** a `pulse` or `profile`
+directive (with no `import`/`system`/`entity`/`law` either) has no
+RustLike-side counterpart at all and must reach UNIQUE POSITIVE LOGOS
+CLAIM on its own, with no combination requirement - this is not the same
+regression as (2) and must not be conflated with it; (2b) a source
+containing genuinely Logos-exclusive evidence (`system`/`entity`/`law`)
+alongside an `import` line must still reach UNIQUE POSITIVE LOGOS CLAIM
+for the whole input, proving `import`'s ambiguity is specific to being
+the *sole* evidence present, not a property of the keyword in
+combination; (3) an ordinary, valid `RustLike` program (e.g. `fn main()
+{ return; }`) must still compile successfully under `Auto` even though a
+Logos probe against it fails immediately with no prior positive evidence
+- proving the classifier does not treat every candidate-probe rejection
+as authoritative; (4) more generally, any input that independently
 satisfies both grammars' positive-claim conditions (the confirmed
 bare-`import` case in (2) is the concrete instance found so far, but the
 requirement is general) must be rejected with an explicit
@@ -1365,9 +1414,13 @@ tracking for newly discovered defects" below for the exact drafted text)
 
 ## Durable tracking for newly discovered defects
 
-Owner-approved for separate post-merge creation - **not created**. Two
-candidate issues, kept separate because they sit in different crates
-with independent repair and qualification surfaces:
+**CORRECTION NOTE (owner review round - E1A, round 1)**: since this
+document merged, both issues below were actually created post-merge and
+are now tracked separately: **[#1919](https://github.com/skulmakov-oss/Semantic/issues/1919)
+(issue A) and [#1920](https://github.com/skulmakov-oss/Semantic/issues/1920)
+(issue B) are both OPEN.** The text below is kept as the original,
+frozen proposal record (what was approved and why); it is bookkeeping
+history now, not a pending action.
 
 ---
 
@@ -1433,12 +1486,12 @@ with independent repair and qualification surfaces:
 crate/path/root-cause/repair-surface for each - `smc-cli`'s project-vs.
 -single-file authority loss for A, `sm-ir`'s `CompileProfile` dispatch
 and grammar-probe swallow for B - not folded into `#1670`, which is
-`sm-sema`-scoped). **Neither is created by this PR or before it merges.**
-After `#1918` merges, create both using the issue text above verbatim
-(or as refined at creation time) and record their issue numbers in the
-SSF-09 progress evidence (e.g. a follow-up comment on `#1580`), rather
-than reopening this document or its exact HEAD solely to add issue
-numbers.
+`sm-sema`-scoped). **Created post-merge as `#1919` (issue A) and
+`#1920` (issue B), both currently OPEN**, matching the approved,
+separate scoping above; their issue numbers were recorded in a
+follow-up comment on `#1580`, per the original plan, rather than
+reopening `#1918`'s exact HEAD solely to add them. This PR does not
+create, edit, or otherwise mutate either issue.
 
 ## Exit gate
 
@@ -1517,13 +1570,25 @@ authority's fail-closed outcome is "absent" (corrected this round - the
 Fail-closed rules section now states Decision A's outcome is a reported
 classification error and Decision B's is preservation, not absence;
 "absent" is specifically Decisions C and D's outcome), and does not
-claim a bare `import`/`pulse`/`profile`-only file is uniquely Logos
-evidence (corrected this round - `import` is confirmed shared with
-RustLike's own top-level grammar, so a bare import-only file is
-AMBIGUOUS/CONFLICTING, not a unique claim for either surface; found
-during SSF09-E2 implementation reconnaissance for `#1670`, before any
-production code was written, and corrected here rather than carried
-into implementation).
+claim a bare `import`-only file is uniquely Logos evidence (corrected
+this round - `import` is confirmed shared with RustLike's own top-level
+grammar, so a bare import-only file is AMBIGUOUS/CONFLICTING, not a
+unique claim for either surface; found during SSF09-E2 implementation
+reconnaissance for `#1670`, before any production code was written, and
+corrected here rather than carried into implementation) - **and does
+not weaken this into a claim that `pulse`/`profile` are also merely
+shared** (round 1 of this same correction over-generalized in exactly
+that direction and is fixed here): `pulse`/`profile` never appear in
+RustLike's grammar at all, so a bare `pulse`-only or `profile`-only file
+remains genuinely, uniquely Logos evidence with no combination
+requirement. This document also does not claim that explicit
+`CompileProfile::RustLike` already bypasses Auto classification in
+current production code - path 3
+(`compile_program_to_ir_with_options_and_profile`) is documented above,
+unchanged, as still invoking the Logos parser unconditionally even
+under explicit `RustLike`; the INVARIANT states what MUST hold, and
+`#1920` is the separate, already-tracked repair for where it does not
+yet hold.
 No historical document is rewritten by this decision; the TON618
 perimeter's own closure record is read, not altered.
 
