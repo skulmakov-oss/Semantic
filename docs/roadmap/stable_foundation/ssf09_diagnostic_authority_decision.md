@@ -1266,9 +1266,9 @@ tracking for newly discovered defects" below for the exact drafted text)
 
 ## Durable tracking for newly discovered defects
 
-Proposed for owner approval - **not created**. Two candidate issues,
-kept separate because they sit in different crates with independent
-repair and qualification surfaces:
+Owner-approved for separate post-merge creation - **not created**. Two
+candidate issues, kept separate because they sit in different crates
+with independent repair and qualification surfaces:
 
 ---
 
