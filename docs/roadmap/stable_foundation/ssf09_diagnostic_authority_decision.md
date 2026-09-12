@@ -197,29 +197,48 @@ match, try the next one."
   first token, having matched none of `system`/`entity`/`law`/`import`/
   `pulse`/`profile`, is exactly this case. Another candidate surface MAY
   be evaluated.
-- **POSITIVE SURFACE CLAIM** - a candidate surface has produced
-  sufficient surface-specific evidence to establish ownership of this
-  input. For Logos, this MUST include every supported Logos-only
-  declaration form, including import-only Logos source - a successful
-  parse that only consumed `import`/`pulse`/`profile` directives is a
-  positive Logos claim, not an empty result, even though today's
-  `system`/`entities`/`laws`-only discriminator cannot see it. Reaching
-  this outcome ends classification: no other surface may be attempted,
-  and precisely two sub-outcomes follow - **success** (parsing/policy
-  subsequently accepts the input under the owning surface), or
-  **AUTHORITATIVE FAILURE** (parsing/policy subsequently rejects it
-  under the owning surface; that failure is preserved as the outcome for
-  this input, and it alone - never a bare probe rejection with no prior
-  positive evidence - is what the swallowed-`Err` half of `#1670`, and
-  path 3's `unwrap_or(false)`, currently destroy).
+- **UNIQUE POSITIVE SURFACE CLAIM** - **CORRECTION NOTE (owner review
+  round 5)**: naming this outcome plain "POSITIVE SURFACE CLAIM" left a
+  loophole - it could be read as licensing a classifier that stops at
+  the first candidate producing positive evidence without ever checking
+  whether a second candidate also would, which would make the
+  AMBIGUOUS/CONFLICTING CLAIMS outcome below unreachable by
+  construction ("first positive wins" can never observe a conflict it
+  never looked for). Renamed to make explicit that reaching this outcome
+  requires the evidence to be *unique* among candidates, not merely
+  present in one - a candidate surface has produced sufficient
+  surface-specific evidence to establish ownership of this input, **and
+  no other candidate surface independently produces such evidence for
+  the same input** (that joint condition is exactly what separates this
+  outcome from AMBIGUOUS/CONFLICTING CLAIMS below; a classifier
+  satisfies this law only if it can actually detect the conflicting
+  case, however it chooses to do so - short-circuiting on the first hit
+  without any conflict check does not). For Logos, this MUST include
+  every supported Logos-only declaration form, including import-only
+  Logos source - a successful parse that only consumed `import`/`pulse`/
+  `profile` directives is a positive Logos claim, not an empty result,
+  even though today's `system`/`entities`/`laws`-only discriminator
+  cannot see it. Reaching this outcome ends classification: no other
+  surface may be attempted, and precisely two sub-outcomes follow -
+  **success** (parsing/policy subsequently accepts the input under the
+  owning surface), or **AUTHORITATIVE FAILURE** (parsing/policy
+  subsequently rejects it under the owning surface; that failure is
+  preserved as the outcome for this input, and it alone - never a bare
+  probe rejection with no prior positive evidence - is what the
+  swallowed-`Err` half of `#1670`, and path 3's `unwrap_or(false)`,
+  currently destroy).
 - **AMBIGUOUS / CONFLICTING CLAIMS** - more than one candidate surface
   independently produces sufficient positive evidence for the same
   input, or the classifier cannot deterministically resolve which
-  surface owns it. This is itself a deterministic classification error,
-  reported as such - **never** resolved by picking a "winner" through
-  evaluation order, fallback, or any other implicit tie-break. Folding
-  ambiguity into "no match, try the next candidate" (the prior version's
-  error) is precisely the guessed-source-surface outcome the "Fail-closed
+  surface owns it. This outcome must remain genuinely reachable by the
+  classifier, not defined away by an implementation that stops
+  evaluating after the first candidate satisfies UNIQUE POSITIVE
+  SURFACE CLAIM's evidence threshold without checking uniqueness. This
+  is itself a deterministic classification error, reported as such -
+  **never** resolved by picking a "winner" through evaluation order,
+  fallback, or any other implicit tie-break. Folding ambiguity into "no
+  match, try the next candidate" (an earlier draft's error) is precisely
+  the guessed-source-surface outcome the "Fail-closed
   rules" section below already forbids.
 
 This decision freezes the semantic distinction only, not the concrete
@@ -243,27 +262,31 @@ different clauses at once):
   single-grammar request, not merely about not acting on it.
 - Explicit `Logos`: MUST NOT silently probe RustLike.
 - `Auto`: may perform canonical surface classification using the law
-  below (NO SURFACE CLAIM / POSITIVE SURFACE CLAIM (success or
+  below (NO SURFACE CLAIM / UNIQUE POSITIVE SURFACE CLAIM (success or
   AUTHORITATIVE FAILURE) / AMBIGUOUS-CONFLICTING CLAIMS), but only a
   **NO SURFACE CLAIM** outcome permits evaluating another surface; a
-  **POSITIVE SURFACE CLAIM** ends classification (its AUTHORITATIVE
-  FAILURE sub-outcome MUST NOT be discarded in favor of another
-  grammar); and **AMBIGUOUS/CONFLICTING CLAIMS** MUST NOT be resolved by
-  picking a winner via fallback or evaluation order - it is reported as
-  a classification error. This applies equally to a whole-project
-  multi-module load failure (path 1's `.or_else`) and to a single-file
-  grammar-probe failure (paths 2 and 3's `unwrap_or`/`if let Ok`) - "try
-  a different mechanism after a real failure" is the same defect whether
-  the discarded failure came from a directory walk or a single parse
-  call, **provided that failure followed positive evidence** - a bare
-  probe rejection with no prior positive evidence is NO SURFACE CLAIM,
-  not an authoritative failure, and trying another candidate after it is
-  correct, not a violation. **Currently violated by path 3's `Auto`
-  branch** via the same `unwrap_or(false)` call site named above, and
-  **by paths 2 and 3's shared discriminator** which cannot distinguish a
-  POSITIVE SURFACE CLAIM (import-only Logos) from NO SURFACE CLAIM
-  (genuinely empty input) - see path 2's evidence above and `#1670`'s
-  own filed text.
+  **UNIQUE POSITIVE SURFACE CLAIM** ends classification (its
+  AUTHORITATIVE FAILURE sub-outcome MUST NOT be discarded in favor of
+  another grammar); and **AMBIGUOUS/CONFLICTING CLAIMS** MUST NOT be
+  resolved by picking a winner via fallback or evaluation order - it is
+  reported as a classification error, and the classifier must be capable
+  of reaching this outcome (see the correction under "UNIQUE POSITIVE
+  SURFACE CLAIM" above - a first-match-wins implementation that never
+  checks for a second candidate cannot satisfy this). This applies
+  equally to a whole-project multi-module load failure (path 1's
+  `.or_else`) and to a single-file grammar-probe failure (paths 2 and 3's
+  `unwrap_or`/`if let Ok`) - "try a different mechanism after a real
+  failure" is the same defect whether the discarded failure came from a
+  directory walk or a single parse call, **provided that failure
+  followed positive evidence** - a bare probe rejection with no prior
+  positive evidence is NO SURFACE CLAIM, not an authoritative failure,
+  and trying another candidate after it is correct, not a violation.
+  **Currently violated by path 3's `Auto` branch** via the same
+  `unwrap_or(false)` call site named above, and **by paths 2 and 3's
+  shared discriminator** which cannot distinguish a UNIQUE POSITIVE
+  SURFACE CLAIM (import-only Logos) from NO SURFACE CLAIM (genuinely
+  empty input) - see path 2's evidence above and `#1670`'s own filed
+  text.
 
 **WHY**: Fixing `#1670` alone, in `check_source_with_profile` alone,
 without freezing this invariant first, would leave the *general* rule
@@ -477,7 +500,23 @@ using `Path::canonicalize()` against the importer's own resolved path)
 and project-root detection (`resolve_project_root_check_entry*`) is the
 authority every `smc` subcommand already routes through. This is a real,
 working authority - it is simply never connected to diagnostic file
-identity today.
+identity today. The canonical package/module authority is richer than a
+bare path: `admit_package_entry_module(entry: &Path) -> Result<Option<PackageModuleAdmission>,
+PackageModuleAdmissionError>` (`package_manifest.rs:627-...`) returns a
+structured `PackageModuleAdmission { manifest_path: String, package_name:
+String, module_path: String }` when an entry is admitted into a package
+context, and `Option::None` (not an error) when no enclosing manifest
+exists - the exact "rootless standalone file" case this decision must
+resolve. Separately, dependency packages are real, structurally distinct
+subtrees: each dependency resolves to its own `package_root`/
+`dependency_root` with its own manifest (`package_manifest.rs:1908-1911`
+and surrounding), addressed by `package_name`/alias, not merely
+flattened into the top-level project's file tree. This matters directly
+for external identity: two different dependency packages (or a
+dependency and the top-level project) can each contain a module at the
+same *relative* path (e.g. `src/lib.sm`) - a bare "project-root-relative
+path," without saying relative to *which* package's root, does not
+distinguish them.
 
 **DECISION**: File identity has two distinct representations, not one:
 
@@ -485,43 +524,67 @@ identity today.
   `FileId`-shaped value, or the existing type widened as needed) suitable
   for compiler-internal data structures - comparable, hashable, does not
   need to be human-legible.
-- **EXTERNAL stable identity**: a **project-root-relative logical path**
-  string, derived from the same canonical project/module authority
-  `resolve_package_import_path`/`resolve_project_root_check_entry` already
-  use - not an absolute filesystem path (not portable across machines or
-  reproducible in tests/CI), not a URI (nothing in current canonical
-  tooling produces or consumes URIs; inventing one now would be choosing
-  a representation for LSP's future convenience, which this decision's
-  own governing rule forbids), and not a synthetic in-memory label
-  invented at the diagnostic layer itself. **CORRECTION NOTE (owner
-  review round 4)**: the first version of this decision resolved a
-  single-file CLI invocation's external identity as "the file's own path
-  relative to the invocation's working directory," calling that "stable."
-  It is not: the same physical file, invoked from two different working
-  directories (`smc check foo.sm` from its own directory vs. `smc check
-  a/b/foo.sm` from a parent directory), would earn two different
-  identity strings for identical input - the opposite of stable, and an
-  inconsistency with this section's own IMPLEMENTATION CONSEQUENCE below,
-  which separately (and correctly) calls this same case "identity
-  unprovable." Corrected: a single-file CLI invocation (`smc check
-  <file.sm>` with no project root) resolves its external identity as the
-  invocation's own **canonicalized path's file name** (`Path::canonicalize()`,
-  the same primitive `package_manifest.rs` already uses for import
-  resolution) - a value that does not depend on the invoking working
-  directory, deterministic for a given file regardless of how it is
-  invoked. This is a narrower guarantee than a project-relative path
-  (it does not disambiguate two different single files that happen to
-  share a file name, since there is no shared project structure to make
-  that distinction against) but it is genuinely stable under the
-  dimension that matters here - invocation directory - unlike the
-  rejected CWD-relative form. If even a canonicalized file name cannot be
-  established (a truly rootless synthetic/stdin source, out of scope
-  below), identity is absent, consistent with the invariant. An imported
-  module's external identity is the project-root-relative path already
-  computed to *load* it - not re-derived independently at the diagnostic
-  layer. Stdin/synthetic/virtual sources (none currently exist as a
-  compiler input path) have no frozen representation here - out of scope
-  until such an input path is added.
+- **EXTERNAL stable identity**: **CORRECTION NOTE (owner review round 5)**:
+  two successive drafts of this bullet each froze a concrete wire form
+  too early and each turned out collision-prone or unstable. Round 4
+  corrected a CWD-relative path (unstable: the same file invoked from two
+  different working directories earned two different strings) to a
+  canonicalized file name - but a bare file name is itself collision-prone
+  (`/a/foo.sm` and `/b/foo.sm`, or two different dependency packages each
+  containing `src/lib.sm`, would collide on the same external identity
+  for genuinely different sources), and a display-legible name is not the
+  same claim as a collision-free identity. This decision now freezes the
+  **law** external identity must satisfy, not a premature concrete
+  serialization:
+
+  External source identity MUST be:
+  - derived from the canonical project/package/module admission
+    authority (`admit_package_entry_module`/`PackageModuleAdmission`/
+    `resolve_package_import_path`) - never a second, diagnostic-only
+    resolver;
+  - **collision-free within one admitted compilation/project graph** -
+    two distinct admitted sources (whether in the same package, in
+    different dependency packages, or a mix) MUST NOT share an external
+    identity. For a package-admitted module, this means the identity is
+    scoped by *which package* the module belongs to
+    (`PackageModuleAdmission.package_name`) in addition to its
+    in-package `module_path`, not a bare path assumed unique
+    project-wide;
+  - **deterministic independent of invocation CWD** - the same admitted
+    logical source resolves to the same identity regardless of the
+    directory a command was invoked from;
+  - reproducible for the same admitted logical source across
+    invocations/machines/CI (ruling out absolute filesystem paths, per
+    "Rejected Alternatives" below);
+  - **absent** when the canonical authority cannot prove such an
+    identity - never a fabricated substitute.
+
+  A concrete exact serialization (e.g. whether package-scoped identity is
+  literally `package_name` + `module_path` joined by some separator, or a
+  structured pair) is **not frozen here** - that is wire-format work for
+  the future carrier/external-schema checkpoint (§6), constrained only by
+  the law above. A file name or any other human-legible label MAY exist
+  separately as a `display_name` for presentation, but a `display_name`
+  is explicitly **not** the canonical identity and must never be used as
+  one - a basename is display data, not identity, exactly like a
+  `file_id = 0` or a fabricated `"<input>"` string is forbidden as a
+  stand-in for absence elsewhere in this decision.
+
+  For a **rootless standalone source** (`admit_package_entry_module`
+  returns `None` - no enclosing manifest), the most honest resolution
+  consistent with the law above is: **external identity is absent**.
+  Inventing a basename-based identity for this case would violate the
+  collision-freedom requirement (two different standalone files can
+  trivially share a name) for no real benefit - `admit_package_entry_module`
+  already models "no admitted identity" as `None`, and this decision
+  follows that signal rather than working around it. A file name MAY
+  still be surfaced as a separate `display_name` in this case, distinct
+  from - and never presented as - the canonical identity. An imported
+  module's external identity is the package-scoped identity already
+  established when it was admitted and loaded - not re-derived
+  independently at the diagnostic layer. Stdin/synthetic/virtual sources
+  (none currently exist as a compiler input path) have no frozen
+  representation here - out of scope until such an input path is added.
 
 **INVARIANT**: If the canonical project/module authority cannot prove a
 file's identity for a given diagnostic, that diagnostic's file identity
@@ -557,24 +620,45 @@ extended to project structure itself.
   by this checkpoint's own instruction not to choose based on LSP
   convenience; URI conversion is a presentation-adapter concern (§6/§7),
   not the canonical identity itself.
+- *Use a bare project-root-relative path, assumed unique project-wide*
+  (round 4's framing) - rejected (round 5): does not account for
+  dependency packages, which are structurally distinct subtrees that can
+  each contain a module at the same relative path; collision-prone
+  across package boundaries.
+- *Use a canonicalized file name for rootless standalone files* (round
+  4's correction) - rejected (round 5): fixes CWD-instability but is
+  itself collision-prone (two different standalone files can share a
+  name), and a display-legible name is not the same claim as a
+  collision-free identity; superseded by treating this case as identity-
+  absent with an optional separate `display_name`.
 
-**IMPLEMENTATION CONSEQUENCE** (not performed here): thread the already-
-computed project-root-relative path (available at the point
-`check_file_with_provider`/`resolve_project_root_check_entry` already
-resolve it) into the diagnostic construction path, replacing every
-`file_id: 0`/string-prefix/`"<input>"` site; for a rootless single-file
-invocation, use the canonicalized file name (not a CWD-relative path,
-per the correction above); introduce an explicit "identity unprovable"
-representation reserved for sources where even that cannot be
-established (out-of-scope synthetic/stdin input).
+**IMPLEMENTATION CONSEQUENCE** (not performed here): thread
+`PackageModuleAdmission`'s `package_name` + `module_path` (available at
+the point `admit_package_entry_module`/`check_file_with_provider`
+already resolve them) into the diagnostic construction path as a single,
+package-scoped external identity, replacing every `file_id: 0`/
+string-prefix/`"<input>"` site; for a rootless single-file invocation
+(`admit_package_entry_module` returns `None`), represent external
+identity as absent, with the canonicalized file name available
+separately only as a `display_name`, never conflated with identity; the
+exact serialization of the package-scoped identity (e.g. how
+`package_name` and `module_path` combine into one string or structured
+value) is deferred to the future carrier/external-schema checkpoint, not
+frozen here.
 
-**TEST CONSEQUENCE** (not performed here): positive tests for ordinary
-project file and imported module (real, resolvable identity); a test
-that the same single file, invoked from two different working
-directories, resolves to the same external identity (proving the
-CWD-independence the correction above requires); a deterministic-absence
-test for a source whose identity cannot be proven at all (no invented
-`0`/`"<input>"` fallback).
+**TEST CONSEQUENCE** (not performed here): positive tests for an
+ordinary project file and an imported module (real, resolvable,
+package-scoped identity); a collision test proving two modules at the
+same relative path in two different admitted packages (or a package and
+its dependency) resolve to two *different* external identities; a
+collision test proving two different rootless standalone files sharing a
+file name do **not** resolve to the same identity (both must be absent,
+or otherwise provably distinct - never accidentally equal); a test that
+the same single file, invoked from two different working directories,
+never produces two different identities (whether that identity is
+present or absent, it must not depend on CWD); and a deterministic-
+absence test for a source whose identity cannot be proven at all (no
+invented `0`/`"<input>"`/basename fallback).
 
 ## Decision D - Source Range Authority
 
@@ -1237,11 +1321,20 @@ range-carrying role (corrected this round - Decision D cites them only
 as current/legacy evidence), does not claim a successful
 `DecodedDebugSymbol` lookup by itself proves a canonical source range
 (corrected this round - it lacks file identity and byte offsets), does
-not claim a CWD-relative path is a stable external file identity
-(corrected this round - Decision C now uses a canonicalized file name
-for rootless single-file invocations), and does not claim `#1704`'s
-repair grants `ton618-core` canonical registry ownership (corrected this
-round - Decision B now states it explicitly as qualification-only).
+not claim a CWD-relative path is a stable external file identity, does
+not claim a bare file name/basename is a collision-free external
+identity either (corrected this round - a rootless standalone source's
+identity is absent, with a file name available only as a separate,
+non-canonical `display_name`), does not claim a bare project-root-relative
+path is unique across dependency package boundaries (corrected this
+round - external identity for a package-admitted module is scoped by
+`package_name` in addition to `module_path`), does not claim a
+classifier that stops at the first positive-evidence candidate without
+checking for a conflicting second one satisfies the surface-
+classification law (corrected this round - renamed to UNIQUE POSITIVE
+SURFACE CLAIM to close that reading), and does not claim `#1704`'s
+repair grants `ton618-core` canonical registry ownership (Decision B
+states it explicitly as qualification-only).
 No historical document is rewritten by this decision; the TON618
 perimeter's own closure record is read, not altered.
 
