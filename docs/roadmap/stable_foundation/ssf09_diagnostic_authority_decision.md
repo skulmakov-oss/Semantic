@@ -100,18 +100,31 @@ is rewritten below from direct evidence.
    `sm_ir::legacy_lowering::compile_program_to_ir_with_options_and_profile`
    (`crates/sm-ir/src/legacy_lowering.rs:1176-1220`), which **does**
    take an explicit `profile: CompileProfile` alongside
-   `parser_profile: &ParserProfile`. Its `Auto` handling is partially
-   better than path 2: if Logos **content** is confidently detected
-   (`logos.system.is_some() || !logos.entities.is_empty() ||
-   !logos.laws.is_empty()`) under an incompatible request, it returns a
-   real, explicit error rather than silently proceeding. But the
-   detection itself is `parse_logos_program_with_profile(...)
-   .map(...).unwrap_or(false)` (`legacy_lowering.rs:1201-1203`) - a
-   genuine Logos parse/policy **failure** collapses to `false` via
-   `unwrap_or`, identical in shape to path 2's swallow, and execution
-   falls through to RustLike lowering on the same input. This is a
-   second, independent instance of the same defect class, in a
-   different function, not covered by `#1670`'s filed scope.
+   `parser_profile: &ParserProfile`. **This function probes Logos
+   unconditionally, for every profile value, including explicit
+   `RustLike`** - `let logos_detected = parse_logos_program_with_profile(input,
+   parser_profile).map(...).unwrap_or(false);` (`legacy_lowering.rs:1201-1203`)
+   runs before any branch on `profile`; the preceding `match profile { .. }`
+   only early-returns on disabled compile-time features, not on which
+   surface was explicitly requested. Two separate defects follow from
+   this one call site:
+   - A genuine Logos parse/policy **failure** collapses to `false` via
+     `unwrap_or`, identical in shape to path 2's swallow. For `Auto`,
+     this means execution falls through to RustLike lowering on the
+     same input without surfacing the real Logos failure - a second,
+     independent instance of path 2's defect class, in a different
+     function, not covered by `#1670`'s filed scope.
+   - For explicit `RustLike`, the Logos parser is invoked at all,
+     unconditionally, before `profile` is ever consulted for this
+     purpose. `logos_detected`'s *value* happens not to change
+     `RustLike`'s control flow today (the two `if` branches that consult
+     it below only match `Logos` or `Auto`), but the *invocation itself*
+     - a real attempt to parse the input as Logos, with any resulting
+     error silently discarded - already happens under an explicit
+     `RustLike` request. This is a distinct, present-tense violation of
+     the "explicit RustLike MUST NOT silently probe Logos" invariant
+     below, independent of whether the probe's result currently drives
+     any decision.
 
 No single function, and no single type, is the source-surface authority
 today. `CompileProfile` is the only type that is ever an *explicit,
@@ -131,9 +144,17 @@ extended with, or treated as carrying, surface-selection responsibility.
 
 **INVARIANT** (fail-closed law, applies to every entry point and every
 current implementation of "Auto" uniformly - paths 1-3 above each
-violate at least one clause of it today):
+violate at least one clause of it today, and path 3 alone violates two
+different clauses at once):
 
-- Explicit `RustLike`: MUST NOT silently probe Logos.
+- Explicit `RustLike`: MUST NOT silently probe Logos. **Currently
+  violated by path 3**: `compile_program_to_ir_with_options_and_profile`
+  invokes `parse_logos_program_with_profile` unconditionally, including
+  when the caller explicitly requested `RustLike`, before `profile` is
+  consulted for this purpose at all. This holds regardless of whether
+  the probe's result currently changes `RustLike`'s outcome - the
+  invariant is about not performing the probe under an explicit
+  single-grammar request, not merely about not acting on it.
 - Explicit `Logos`: MUST NOT silently probe RustLike.
 - `Auto`: may perform canonical surface classification, but once an
   authoritative parse/policy failure is produced for the classified
@@ -143,6 +164,8 @@ violate at least one clause of it today):
   failure (paths 2 and 3's `unwrap_or`/`if let Ok`) - "try a different
   mechanism after a real failure" is the same defect whether the
   discarded failure came from a directory walk or a single parse call.
+  **Currently violated by path 3's `Auto` branch** via the same
+  `unwrap_or(false)` call site named above.
 
 **WHY**: Fixing `#1670` alone, in `check_source_with_profile` alone,
 without freezing this invariant first, would leave the *general* rule
@@ -176,12 +199,17 @@ a fourth ad hoc partial fix.
 explicit or defaulted `CompileProfile` wired into its call path (it has
 none today); `check_source_with_profile` must classify the Logos
 attempt's outcome into (empty-but-valid / policy-invalid) before
-deciding whether to attempt RustLike; `compile_program_to_ir_with_options_and_profile`'s
-`Auto` branch needs the same classification instead of `unwrap_or(false)`;
-and `cmd_check`'s `.or_else` must stop discarding a real multi-module
-load failure in favor of a silently-narrower single-file check. Whether
-all four are one filed issue or several is an implementation-sequencing
-question, not a decision-authority question - out of scope here.
+deciding whether to attempt RustLike; `compile_program_to_ir_with_options_and_profile`
+must stop invoking `parse_logos_program_with_profile` at all when
+`profile` is explicitly `RustLike` (not merely stop acting on its
+result), and its `Auto` branch needs the same
+empty-but-valid/policy-invalid classification instead of
+`unwrap_or(false)`; and `cmd_check`'s `.or_else` must stop discarding a
+real multi-module load failure in favor of a silently-narrower
+single-file check. Whether these are one filed issue or several is an
+implementation-sequencing question, not a decision-authority question -
+out of scope here; see "Durable tracking for newly discovered defects"
+below for proposed issue text awaiting owner approval.
 
 **TEST CONSEQUENCE** (not performed here): a regression per path proving
 that a genuinely invalid (not merely empty) grammar-specific input is
@@ -189,7 +217,14 @@ rejected with a diagnostic attributed to the surface that actually failed,
 and never silently succeeds under a different surface or a narrower
 mechanism - covering `check_source_with_profile`,
 `compile_program_to_ir_with_options_and_profile`'s `Auto` branch, and
-`cmd_check`'s multi-module-to-single-file fallback independently.
+`cmd_check`'s multi-module-to-single-file fallback independently. Plus
+one additional, distinct regression for explicit `RustLike`:
+`compile_program_to_ir_with_options_and_profile(input, CompileProfile::RustLike,
+..)` must never invoke the Logos parser at all for any input, verified
+directly (not merely that its result is ignored) - e.g. by asserting no
+Logos-parse side effect occurs, or by restructuring the function so the
+call site is behind a branch that excludes `RustLike` and a compile-time
+guarantee replaces the runtime assertion.
 
 ## Decision B - Diagnostic Identity Authority
 
@@ -562,78 +597,71 @@ architectural reason (not merely "it's dead code") why the current
 canonical carrier even in principle, regardless of whether anyone ever
 constructs it.
 
-**Candidate owners for the future internal canonical model**, classified:
+**CORRECTION NOTE (owner review round 2)**: the prior version of this
+section named `ton618-core` as "SELECTED" future carrier owner, then
+separately flagged an "open question" about whether that selection is
+consistent with the TON618 perimeter's own ownership policy. Freezing a
+selection while simultaneously flagging that its legality is unresolved
+is a contradiction, not a decision. Re-reading the perimeter's own
+closure record settles the question directly rather than leaving it
+open: `docs/roadmap/language_maturity/ton618_compatibility_perimeter_scope.md`
+is `Status: completed post-stable closure track`. Its "Explicit
+Non-Goals" list includes, verbatim, "moving canonical ownership back
+from `sm-*` crates into TON618-named paths." Its "Why This Exists"
+section states plainly: "canonical public ownership for CLI, frontend,
+IR, SemCode, VM, and profile contracts already lives in the `sm-*`
+owners." Its "Close-Out Reading" states: "Any future change to \[the
+TON618 perimeter's\] behavior or ownership would require a new
+explicitly scoped follow-up track rather than incremental drift." This
+is a closed, frozen governance record, not merely a harness path list -
+`ton618-core` cannot be assigned a new ownership role (diagnostic
+carrier or otherwise) without first reopening that specific track, which
+this decision does not do and is not scoped to do. The candidate table
+and selection below are re-run under two constraints instead of one.
 
-| Candidate | Dependency-safe from `sm-verify`/`sm-vm`? | Architecturally correct? | Verdict |
+**Candidate owners for the future internal canonical model**, classified
+under **both** constraints - (A) dependency-graph correctness and (B)
+canonical-ownership / compatibility-perimeter policy:
+
+| Candidate | (A) Dependency-safe from `sm-verify`/`sm-vm`? | (B) Ownership-policy consistent? | Verdict |
 |---|---|---|---|
-| `ton618-core` | **YES** - zero dependencies itself, so any crate (including `sm-verify`/`sm-vm`) can add it as a dependency without creating a cycle | YES - already the semantic home for `SourceMark`/`Span`/diagnostic rendering/the code catalog; extending its reach is completing an existing role, not inventing a new one | **SELECTED** |
-| `sm-runtime-core` | trivially yes for `sm-verify`/`sm-vm` (already a dependency) but **NO** for `sm-front`/`sm-sema` (would require the frontend to depend on a runtime-execution crate) | NO - semantically a runtime/quota/trap-taxonomy crate (`#1759`-`#1763`'s own home); frontend diagnostics depending on it would be a layering violation, not merely inconvenient | REJECTED |
-| `sm-format` | trivially yes for `sm-verify`/`sm-vm`/`sm-ir`/`sm-emit` (already a dependency) but **NO** for `sm-front`/`sm-sema` | NO - a SemCode binary-format crate; diagnostic identity is not a bytecode-format concern | REJECTED |
-| A brand-new leaf crate | YES (zero dependencies by construction) | Not architecturally *incorrect*, but unnecessary - `ton618-core` already exists, already has the right shape of responsibility, and already has real (if underused) content | REJECTED (no new crate needed) |
+| `ton618-core` | YES - zero dependencies itself, so any crate (including `sm-verify`/`sm-vm`) can add it as a dependency without creating a cycle | **NO** - `ton618_compatibility_perimeter_scope.md` closes this crate's role as retained-non-owning and lists moving canonical ownership into TON618-named paths as an explicit non-goal; assigning it a new diagnostic-carrier ownership role would reopen a track that document declares closed | **DISQUALIFIED** (fails B) |
+| `sm-runtime-core` | trivially yes for `sm-verify`/`sm-vm` (already a dependency) but **NO** for `sm-front`/`sm-sema` (would require Construction-zone crates to depend backward into the Execution zone) | N/A - fails (A) on its own terms, and `dependency_boundary_rules.md`'s own "Allowed flow: Construction -> Execution -> Integration" and "construction crates must not depend on VM/runtime state" rules independently forbid this direction | REJECTED |
+| `sm-format` | trivially yes for `sm-verify`/`sm-vm`/`sm-ir`/`sm-emit` (already a dependency) but **NO** for `sm-front`/`sm-sema` | N/A - fails (A); also a SemCode binary-format crate, diagnostic identity is not a bytecode-format concern | REJECTED |
+| A brand-new `sm-*`-named Construction-zone leaf crate | YES - zero dependencies by construction, and `sm-verify`/`sm-vm` (Execution) depending on it follows the documented "Construction -> Execution" allowed flow directly | YES - `dependency_boundary_rules.md`'s own zone model already places canonical Construction-zone ownership in `sm-*`-named crates (`sm-front`, `sm-sema`, `sm-ir`, `sm-emit`, `sm-profile`), and the perimeter-scope document's own stated principle is that canonical ownership belongs in `sm-*` owners, not TON618-named paths | **NO EXISTING CRATE SATISFIES BOTH CONSTRAINTS - A NEW CRATE IS THE LEADING ARCHITECTURAL DIRECTION, NOT A FROZEN SELECTION** |
 
-**Selected future carrier owner: `ton618-core`.** This is a graph-position
-and existing-role finding, not an endorsement of `Diagnostic<M>`'s current
-*shape* - per this checkpoint's own governing instruction, the fact that
-`Diagnostic<M>` and `SourceMark` already live there is not by itself
-sufficient reasoning (the reconnaissance found `Diagnostic<M>` is dead
-code, and `SourceMark`/`Span` are both structurally inadequate per
-Decisions C/D as they stand - `SourceMark` has no file-identity-absence
-representation and `Span` is unused by the compiler itself). The decision
-is that **wherever the future internal canonical model lands, it belongs
-in `ton618-core`, in a shape this decision has now specified but not yet
-written** - not that the existing `Diagnostic<M>` struct is adopted
-as-is.
-
-**CORRECTION NOTE (owner review round)**: the first version of this
-section additionally claimed that adding `ton618-core` as a dependency
-of `sm-verify`/`sm-vm` "requires no `.harness/current.task.yaml` scope
-change." That claim is false and is corrected below - dependency-graph
-safety and governance authorization are two separate facts, and only
-the first was true.
+**No future carrier owner is selected by this decision.** Every existing
+crate fails at least one constraint: `ton618-core` fails (B) outright
+(a closed governance track forbids it); `sm-runtime-core` and
+`sm-format` fail (A) for the frontend-facing half of the diagnostic
+surface. A new `sm-*`-named, zero-dependency, Construction-zone leaf
+crate is the best-evidenced *direction* - it is dependency-safe, and it
+is consistent with the perimeter-scope document's own stated principle
+that canonical ownership belongs in `sm-*` owners - but naming, exact
+scope, and creation of such a crate is itself a decision this checkpoint
+is not scoped to make unilaterally (it would need its own
+`allowed_paths` entry and its own `dependency_changes` authorization,
+exactly like the disqualified `ton618-core` path would have). This is
+deliberately left as:
 
 ```
-SELECTED FUTURE CARRIER OWNER:                          ton618-core
-DEPENDENCY GRAPH SAFE:                                   YES
-CURRENT GOVERNANCE AUTHORIZED:                           NO
-GOVERNANCE CHANGE REQUIRED BEFORE CARRIER IMPLEMENTATION: YES
+CARRIER OWNER SELECTION:                                  NOT YET VALID
+DEPENDENCY GRAPH ANALYSIS:                                VALID
+ton618-core TECHNICALLY POSSIBLE (DEPENDENCY GRAPH ONLY): YES
+ton618-core ARCHITECTURALLY AUTHORIZED:                   NO
+LEADING CANDIDATE DIRECTION:                              new sm-*-named Construction-zone leaf crate
+CANDIDATE DIRECTION FROZEN:                               NO - requires a separate governance/ownership checkpoint
 ```
 
-- **Dependency graph safe: YES** - `ton618-core` has zero dependencies of
-  its own, so adding it as a dependency of `sm-verify`/`sm-vm` cannot
-  create a cycle. This part of the original claim is correct and
-  unchanged.
-- **Current governance authorized: NO** - re-read directly from
-  `.harness/current.task.yaml` at this exact baseline:
-  `scope.allowed_paths` lists `crates/sm-format/**`, `crates/sm-front/**`,
-  `crates/sm-sema/**`, `crates/sm-ir/**`, `crates/sm-emit/**`,
-  `crates/sm-verify/**`, `crates/sm-vm/**`, and `crates/smc-cli/**` - it
-  does **not** list `crates/ton618-core/**`. Separately,
-  `authorization.dependency_changes: false` is set explicitly at the
-  top level, independent of which paths are listed. Either fact alone is
-  sufficient to make "no scope change required" false; both are present.
-- **Governance change required before carrier implementation: YES** - a
-  future carrier-implementation checkpoint needs its own governance
-  authorization step (adding `crates/ton618-core/**` to `allowed_paths`
-  and flipping `dependency_changes` for that specific edge) before adding
-  the dependency, not as part of this contract-only decision. This PR
-  does not widen the harness and does not add the dependency.
-
-**Additional open question surfaced by this correction, flagged for
-owner judgment rather than resolved here**: `docs/architecture/
-dependency_boundary_rules.md` states, under "Current pending ownership
-notes," that "the retained non-owning TON618 compatibility perimeter
-(`ton618_core`, `ton618-core`) must not grow into second owners." Every
-other note in that same list is about a crate not duplicating an
-*already-owned* Construction-zone responsibility (lexer/AST stays in
-`sm-front`, optimizer and SemCode format stay in `sm-ir`, CLI contract
-stays in `smc-cli`). Diagnostic-carrier ownership has no existing owner
-today - selecting `ton618-core` for it can be read as filling a
-currently-unowned role rather than duplicating an existing one, but that
-reading is an interpretation, not a fact this evidence pass can settle
-on its own. The future governance-authorization request for the
-carrier-implementation checkpoint (not this PR) should explicitly confirm
-this reading with the owner before it proceeds, rather than treat
-`ton618-core`'s selection here as having already resolved it.
+**A separate governance/ownership checkpoint - not this decision - must
+select and authorize the final carrier owner**, informed by this
+dependency-and-policy analysis, before any carrier-implementation PR is
+opened. That checkpoint's own future governance-authorization request
+should evaluate a new `sm-*` leaf crate as the leading candidate,
+propose its exact name and scope for owner approval, and add the
+resulting path to `.harness/current.task.yaml`'s `allowed_paths` with
+`dependency_changes` enabled for that specific edge - none of which this
+PR performs.
 
 ## Verifier/runtime source-mapping law
 
@@ -693,16 +721,20 @@ authority succeeding.
 
 ## Dependency-owner analysis addendum: implementation sequencing note
 
-Because `sm-verify`/`sm-vm` do not currently depend on `ton618-core`,
-the *first* piece of actual carrier work (not authorized by this
-decision, listed here only to keep §9's DAG accurate) will need a
-governance-authorization step - adding `crates/ton618-core/**` to
-`.harness/current.task.yaml`'s `allowed_paths` and enabling
-`dependency_changes` for that specific edge, per the correction above -
-**before** the dependency edge itself can be added. The `Cargo.toml`
-change itself is a small, dependency-graph-safe (acyclic) one-line edit;
-it is the governance authorization for it, not its size or graph
-position, that is not yet in place.
+**CORRECTION NOTE (owner review round 2)**: this note previously assumed
+`ton618-core` as the carrier owner and only flagged a governance-path
+gap. Per the correction above, `ton618-core` is disqualified outright by
+the TON618 perimeter's own closed governance track, not merely
+ungoverned. The *first* piece of actual carrier work (not authorized by
+this decision) is therefore not "add `ton618-core` to `allowed_paths`" -
+it is a separate governance/ownership checkpoint that selects and
+authorizes the actual owner (the leading candidate being a new `sm-*`
+Construction-zone leaf crate), adds that crate's path to
+`.harness/current.task.yaml`'s `allowed_paths`, and enables
+`dependency_changes` for the resulting edge into `sm-verify`/`sm-vm`.
+Only after that checkpoint can the dependency edge itself - a small,
+dependency-graph-safe one-line `Cargo.toml` change regardless of which
+crate is finally selected - be added.
 
 ## Non-goals
 
@@ -717,27 +749,33 @@ position, that is not yet in place.
   *to* those existing types' diagnostics, it does not reopen them.
 - No repair of `#1670`, `#1697`, `#1698`, `#1699`, or `#1704`/`E0243` in
   this checkpoint.
-- No `.harness/current.task.yaml` scope widening in this PR. `sm-verify`
-  and `sm-vm` (the new consumers) are already inside the
-  currently-authorized path list, but `crates/ton618-core/**` (the
-  selected future carrier owner) is **not**, and
-  `authorization.dependency_changes` is currently `false`. A separate,
-  future governance-authorization checkpoint must add that path and
-  enable that dependency edge before any carrier-implementation PR - see
-  the correction under "Dependency-owner analysis" above. This document
-  does not perform, and does not claim to have already obtained, that
-  authorization.
+- No `.harness/current.task.yaml` scope widening in this PR, and no
+  carrier owner is frozen by this PR. `ton618-core` is disqualified as a
+  carrier owner by the TON618 perimeter's own closed governance track
+  (`ton618_compatibility_perimeter_scope.md`); a new `sm-*`
+  Construction-zone leaf crate is the leading candidate direction but is
+  not itself authorized, named, or created here. A separate governance/
+  ownership checkpoint must select the final owner, add its path to
+  `allowed_paths`, and enable `dependency_changes` for the resulting
+  edge before any carrier-implementation PR - see the correction under
+  "Dependency-owner analysis" above. This document does not perform, and
+  does not claim to have already obtained, that authorization.
+- No new crate is created by this PR.
 
 ## Qualification requirements (for the future implementation checkpoint)
 
 - Every one of Decision A-D's "TEST CONSEQUENCE" items.
 - The registry-completeness mechanical check (Decision B).
-- Confirmation that `sm-verify`/`sm-vm` gaining a `ton618-core` dependency
-  does not introduce a build cycle (`cargo tree` / a full workspace build
-  is sufficient evidence, no new tooling required).
+- Confirmation that `sm-verify`/`sm-vm` gaining a dependency on whichever
+  crate the future governance/ownership checkpoint selects does not
+  introduce a build cycle (`cargo tree` / a full workspace build is
+  sufficient evidence, no new tooling required).
 - Re-confirmation that `#1670`'s fix does not change any *admitted*
   program's compilation result - only failure-classification behavior for
   currently-misclassified inputs.
+- A test proving `compile_program_to_ir_with_options_and_profile(input,
+  CompileProfile::RustLike, ..)` never invokes the Logos parser, for any
+  input (see Decision A's TEST CONSEQUENCE).
 
 ## Residual/open issues
 
@@ -768,7 +806,14 @@ Diagnostic Authority Decision (this document)
 #1704 + E0243 catalog coherence             (Decision B)
         |
         v
-canonical internal diagnostic carrier       (§6, ton618-core - Decisions B/C/D combined)
+carrier-owner governance/ownership checkpoint (selects and authorizes
+                                                the owner; NOT ton618-core -
+                                                see "Dependency-owner analysis")
+        |
+        v
+canonical internal diagnostic carrier       (§6 - Decisions B/C/D combined,
+                                              built in the crate that
+                                              checkpoint selects)
         |
         v
 versioned external machine schema           (§6, separate document/versioning policy)
@@ -790,29 +835,127 @@ diagnostic-code call sites the catalog check would otherwise need to
 track through churn. Catalog coherence must land before the carrier
 because the carrier's Decision-B-mandated code/severity/family fields are
 only as trustworthy as the registry they are validated against. The
+governance/ownership checkpoint must land before the carrier
+implementation itself because the carrier cannot be built in a crate
+that has not yet been selected and authorized - see "Dependency-owner
+analysis" above for why `ton618-core` cannot fill that role. The
 carrier must land before the external schema because the schema versions
 the carrier's shape, not the other way around, per §6's own boundary.
 
-**Scope note (owner review round)**: this DAG covers the currently-filed
-issues only. Decision A's evidence pass additionally found two
+**Scope note (owner review round 2)**: this DAG covers the
+currently-filed issues only. Decision A's evidence pass found three
 same-defect-class instances that are not covered by `#1670`'s filed
-scope: `cmd_check`'s `.or_else` discarding a real multi-module load
-failure in favor of a narrower single-file check, and
-`compile_program_to_ir_with_options_and_profile`'s `Auto` branch
-swallowing a Logos parse/policy failure via `unwrap_or(false)`. Both
-must be judged against Decision A's invariant when repaired, whether
-that happens under `#1670` itself or a new, separately-filed issue - a
-filing decision left to the owner, not made by this document.
+scope (see "Durable tracking for newly discovered defects" below for
+proposed, owner-approval-pending issue text): `cmd_check`'s `.or_else`
+discarding a real multi-module load failure in favor of a narrower
+single-file check; `compile_program_to_ir_with_options_and_profile`'s
+`Auto` branch swallowing a Logos parse/policy failure via
+`unwrap_or(false)`; and that same function's unconditional Logos-parser
+invocation even under an explicit `RustLike` request. All three must be
+judged against Decision A's invariant when repaired, whether that
+happens under `#1670` itself or new, separately-filed issues - a filing
+decision left to the owner, not made by this document.
+
+## Durable tracking for newly discovered defects
+
+Proposed for owner approval - **not created**. Two candidate issues,
+kept separate because they sit in different crates with independent
+repair and qualification surfaces:
+
+---
+
+**Proposed issue A**
+
+> **Title**: `smc check` discards a real multi-module project failure in
+> favor of a narrower single-file fallback
+>
+> **Body**: `cmd_check` (`crates/smc-cli/src/app.rs:588-589`) calls
+> `check_file_with_provider_and_profile` first - a strict, Logos-only
+> multi-module project loader (`crates/sm-sema/src/std_adapters.rs:134-171`,
+> `load_module_recursive` returns a real `Err`/`E0239` on any non-Logos
+> or otherwise invalid module, with no fallback internally). On **any**
+> error from that whole multi-module load - including a genuine
+> cross-module import error unrelated to grammar choice - `cmd_check`
+> discards it via `.or_else(|_| check_source_with_profile(&src,
+> &parser_profile))` and silently retries as a single-file,
+> non-project check of only the root source. For a multi-file project
+> whose entry point is not valid standalone Logos, this means `smc
+> check <project-root>` can silently validate only the entry file in
+> isolation, never surfacing the discarded project-level error and
+> never checking imported modules against it. Found during the SSF09-E1
+> Diagnostic Authority Decision's Source Surface Authority evidence
+> pass (`docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`,
+> Decision A, path 1); not covered by `#1670`'s filed scope. Repair
+> must follow that decision's fail-closed invariant: an authoritative
+> multi-module load failure must never be discarded in favor of a
+> narrower mechanism.
+
+---
+
+**Proposed issue B**
+
+> **Title**: `compile_program_to_ir_with_options_and_profile` probes
+> Logos unconditionally (including under explicit `RustLike`) and
+> swallows a real Logos failure under `Auto`
+>
+> **Body**: `crates/sm-ir/src/legacy_lowering.rs:1201-1220` computes
+> `logos_detected` via `parse_logos_program_with_profile(input,
+> parser_profile).map(...).unwrap_or(false)` **unconditionally**, for
+> every `CompileProfile` value, before `profile` is consulted for this
+> purpose. Two independent defects follow: (1) under `CompileProfile::Auto`,
+> a genuine Logos parse/policy failure collapses to `false` via
+> `unwrap_or`, and execution silently falls through to RustLike
+> lowering on the same input without surfacing the real failure - the
+> same defect class as `#1670`, in a different function; (2) under
+> explicit `CompileProfile::RustLike`, the Logos parser is invoked at
+> all, with any error discarded, before `profile` is ever branched on -
+> a real probe of the non-selected grammar under an explicit
+> single-grammar request, independent of whether its result currently
+> changes `RustLike`'s outcome. Found during the SSF09-E1 Diagnostic
+> Authority Decision's Source Surface Authority evidence pass
+> (`docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`,
+> Decision A, path 3); not covered by `#1670`'s filed scope. Repair must
+> follow that decision's fail-closed invariant: explicit `RustLike` must
+> not invoke the Logos parser at all, and `Auto`'s classification must
+> distinguish a real failure from "no Logos content" instead of
+> collapsing both to `false`.
+
+---
+
+The owner may approve both as filed, request they be merged into one,
+request different scoping, or fold either into an expanded `#1670`.
+Neither is created by this PR.
 
 ## Exit gate
 
-**CONTRACT FROZEN = YES** if: Decisions A-D are each internally complete
-(current state / decision / invariant / why / rejected alternatives /
-implementation + test consequence - all four are, above); the
-canonical-carrier boundary and verifier/runtime mapping law are stated
-precisely enough to judge a future PR against; the dependency-owner
-analysis is evidence-derived, not assumed; and no public claim is
-overstated (§10, checked below).
+**CONTRACT FROZEN is split into two independent verdicts - it is not one
+yes/no answer:**
+
+```
+DECISIONS A-D (source surface / diagnostic identity /
+file identity / source range authority):           FROZEN
+CANONICAL-CARRIER OWNER SELECTION:                  NOT FROZEN
+```
+
+**Decisions A-D: FROZEN.** Each is internally complete (current state /
+decision / invariant / why / rejected alternatives / implementation +
+test consequence, all above); the canonical-carrier *boundary* (internal
+model vs. external schema, §6) and the verifier/runtime mapping law are
+stated precisely enough to judge a future PR against, independent of
+which crate ends up building them.
+
+**Canonical-carrier owner selection: NOT FROZEN, by design.** Re-reading
+`ton618_compatibility_perimeter_scope.md` in this owner review round
+found that document's own closed governance track disqualifies
+`ton618-core` outright for any new ownership role, including a
+diagnostic carrier. No existing crate satisfies both the dependency-graph
+and ownership-policy constraints (see "Dependency-owner analysis"); a
+new `sm-*` Construction-zone leaf crate is the leading direction, not a
+selection. This is not a gap left by oversight - it is the correct,
+honest output of re-evaluating the evidence, and it means a separate
+governance/ownership checkpoint (not this document, not an
+implementation PR) must select and authorize the final owner before any
+carrier code is written.
 
 **Public claim check**: this document does not claim source spans are
 already fully qualified (Decision D states the opposite precisely), does
@@ -823,22 +966,19 @@ diagnostics already exist (unaffected by this decision, still `ABSENT`
 per the SSF09-E0 reconnaissance), does not claim verifier/runtime already
 map every error to source (the mapping law's own "if and only if" clause
 states today's real answer is "never, in every current production case"),
-does not claim an LSP exists, and does not touch the formatter's already-
-accurate narrow-scope claim in `docs/spec/source_style.md`. Corrected in
-this owner review round: this document no longer claims that adding
-`ton618-core` as a dependency of `sm-verify`/`sm-vm` requires no
-governance change - it does, and that requirement is now stated
-explicitly rather than assumed away. No historical document is rewritten
-by this decision.
+does not claim an LSP exists, does not claim a carrier owner has been
+selected (corrected this round - see above), and does not touch the
+formatter's already-accurate narrow-scope claim in
+`docs/spec/source_style.md`. No historical document is rewritten by this
+decision; the TON618 perimeter's own closure record is read, not
+altered.
 
-**One question is deliberately left open for owner judgment, not
-resolved here**: whether selecting `ton618-core` as the future carrier
-owner is consistent with `docs/architecture/dependency_boundary_rules.md`'s
-"must not grow into second owners" rule for the TON618 perimeter (see
-"Dependency-owner analysis" above). Everything else is not left open - a
-future implementation checkpoint may proceed directly from this document,
-in the exact sequencing above (subject to that one confirmation and to
-the separate governance authorization both decisions above call for),
-without a further architecture pass.
+**Sequencing implication**: a future implementation checkpoint may
+proceed directly from Decisions A-D and the repair DAG for the
+currently-filed issues (`#1670`, `#1697`, `#1698`, `#1699`, `#1704`)
+without a further architecture pass on those. It may **not** proceed to
+carrier implementation until the separate governance/ownership
+checkpoint above has run - that is a hard sequencing gate, not a
+recommendation.
 
 **Wait for owner review and a separate implementation GO.**
