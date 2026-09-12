@@ -1,36 +1,45 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-08
-  title: "ownership: select and qualify a memory/ownership model position"
-  type: ownership_and_memory_positioning_contract_qualification_and_bounded_implementation
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-09
+  title: "diagnostics: freeze diagnostic/source-span authority and an editor baseline contract"
+  type: diagnostics_and_editor_baseline_contract_qualification_and_bounded_implementation
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-07
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-08
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-07 closed through the governance-only transition PR this file
-    is part of, branched from main at
-    437ea872609bda57bb5bf735dfa3f29376377b8c: four residual findings
-    (#1633, #1639, #1646, #1861) repaired and merged, one lifecycle-only
-    correction (#1717) reconciled without new code, and every other open
-    SSF-07-module finding classified RETURN or DEFER rather than silently
-    absorbed. Full evidence:
-    docs/roadmap/stable_foundation/ssf07_exit_reconciliation_record.md. Only
-    SSF-08 is now active.
+    order. SSF-08 closed 2026-09-11 through a final acceptance-reconciliation
+    PR (#1916), which freshly re-derived all seven of #1579's acceptance
+    criteria as SATISFIED at merge commit
+    bb4beec123e729c41e244ab204a66bf9cee81344 (Lane 5 — #1759, #1760, #1761,
+    #1762, #1763, #1900, #1902 — fully closed beforehand). Full evidence:
+    docs/roadmap/stable_foundation/ssf08_closure_audit.md. This file's own
+    prior activation (chore(ssf07): ..., commit 5ddb703b) established the
+    precedent this transition follows. Only SSF-09 is now active.
 
 intent:
   summary: >-
-    Select an ownership/memory model position (Position A vs Position B, per
-    the Stable Foundation dependency map) before repairing any individual
-    ownership finding — this is SSF-08's required first step, not an
-    implementation-order convenience. Only after that decision is recorded:
-    work the ownership-state cluster in dependency order (ScopeEnv/state
-    model -> control-flow propagation -> lowering event preservation -> OWN0
-    identity -> OWN0 event timing -> VM/frame/host ownership boundary ->
-    runtime quota and failure taxonomy), each grounded in the selected
-    position rather than patched independently. Add positive end-to-end
-    tests and deterministic negative cases for every included ownership
-    form; give every deferred form an explicit non-goal and a deterministic
-    rejection diagnostic instead of leaving it silently unsupported.
+    Before repairing any individual diagnostic/span/formatter/editor
+    finding, first freeze a Diagnostic Authority decision answering: source
+    surface authority, diagnostic identity authority, file identity
+    authority, and source range authority — this is SSF-09's required first
+    step, not an implementation-order convenience, mirroring SSF-08's own
+    Position A/B precedent. A read-only entry reconnaissance
+    (SSF09-E0 predecessor checkpoint) already reconstructed the current
+    state: no single canonical diagnostic type exists (FrontendError/
+    SemanticDiagnostic/VerificationDiagnostic/RuntimeError are four
+    independent shapes), no single span authority exists (four incompatible
+    position models, `file_id` always 0), and no machine-readable schema
+    exists at all. Only after the Diagnostic Authority decision is recorded:
+    work the diagnostic repair DAG in dependency order (#1670 -> #1697 +
+    #1698 + #1699 -> catalog coherence (#1704 and the E0243 gap) -> a
+    canonical internal carrier -> a versioned external schema), each
+    grounded in the selected authority rather than patched independently.
+    Editor/LSP work may only orchestrate this canonical authority — it must
+    never become a second parser/typechecker/verifier/diagnostic authority.
+    Add positive end-to-end tests and deterministic negative cases for every
+    included diagnostic/span form; give every deferred form an explicit
+    non-goal and a deterministic rejection diagnostic instead of leaving it
+    silently unsupported.
 
 scope:
   allowed_paths:
@@ -81,8 +90,8 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-08
-  issue: 1579
+  active_phase: SSF-09
+  issue: 1580
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
@@ -92,11 +101,12 @@ constraints:
   ownership_position: A
   ownership_position_decision_record: >-
     docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md
-  ownership_position_decision_required_before_any_finding_repair: true
   no_rust_equivalent_lifetime_region_claim: true
-  ownership_state_cluster_worked_in_dependency_order_not_independently: true
-  public_claims_and_negative_examples_match_selected_position: true
-  positive_and_deterministic_negative_tests_required_per_included_ownership_form: true
+  diagnostic_authority_decision_required_before_any_implementation: true
+  diagnostic_repair_dag_worked_in_dependency_order_not_independently: true
+  public_claims_match_actual_diagnostic_and_span_qualification_state: true
+  no_second_parser_typechecker_verifier_diagnostic_authority: true
+  positive_and_deterministic_negative_tests_required_per_included_diagnostic_form: true
   deferred_forms_have_explicit_non_goals_and_deterministic_rejection: true
   no_global_refactor_unless_invariant_cannot_be_preserved_otherwise: true
   no_stable_abstraction_depends_on_unstable_internal_crate_apis: true
