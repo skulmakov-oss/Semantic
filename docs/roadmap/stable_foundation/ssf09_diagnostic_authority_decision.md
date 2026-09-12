@@ -95,7 +95,26 @@ is rewritten below from direct evidence.
    (`#1670`, FA-03-001). This is also the exact function where the
    RustLike-path position loss (`#1698`) is hardcoded
    (`SourceMark::default()`), which is why the repair DAG (§9) still
-   sequences `#1670` immediately before `#1698`/`#1699`.
+   sequences `#1670` immediately before `#1698`/`#1699`. `#1670`'s own
+   filed text names a **second**, distinct defect in this same
+   discriminator: "an import-only Logos parse can also fall through
+   because the surface discriminator only checks System/Entity/Law
+   presence." Confirmed directly against the parser
+   (`crates/sm-front/src/parser.rs:2954-3005`,
+   `parse_logos_program`): an `import`/`pulse`/`profile` directive is
+   recognized as valid Logos syntax (it requires legacy-compatibility
+   mode via `require_legacy_compatibility` and is consumed without
+   error) but its content is discarded - the loop skips to the next
+   newline without populating `out.system`/`out.entities`/`out.laws`.
+   A source file containing **only** import directives therefore parses
+   as `Ok(LogosProgram { system: None, entities: vec![], laws: vec![] })`
+   - a **successful** Logos parse that the `system.is_some() ||
+   !entities.is_empty() || !laws.is_empty()` discriminator cannot
+   distinguish from a genuinely non-Logos empty result, so it is
+   misclassified as "not really Logos" and falls through to RustLike.
+   This is a distinct failure mode from the swallowed-`Err` case above:
+   the parse here does not fail at all, it succeeds and is
+   under-recognized.
 3. `smc compile`/`dump-ir`/`hash-ir`/`hash-smc` route through
    `sm_ir::legacy_lowering::compile_program_to_ir_with_options_and_profile`
    (`crates/sm-ir/src/legacy_lowering.rs:1176-1220`), which **does**
@@ -142,6 +161,40 @@ surface-independent admission/policy configuration, applied identically
 under whichever surface `CompileProfile` selects; it must never be
 extended with, or treated as carrying, surface-selection responsibility.
 
+**Surface-classification law (three outcomes, not two)**: a two-state
+"empty-but-valid vs. policy-invalid" split is insufficient - it is
+exactly what lets the import-only-Logos case above stay misclassified,
+because an import-only parse is neither an error nor genuinely empty of
+Logos content. Any future classifier (wherever `Auto` or an implicit
+probe is implemented) MUST distinguish three outcomes, semantically, not
+just as an implementation detail:
+
+- **POSITIVE SURFACE CLAIM** - the input is canonically classified as
+  belonging to a specific surface. For Logos, this MUST include every
+  supported Logos-only declaration form, including import-only Logos
+  source - a successful parse that only consumed `import`/`pulse`/
+  `profile` directives is a positive Logos claim, not an empty result,
+  even though today's `system`/`entities`/`laws`-only discriminator
+  cannot see it. Reaching this outcome ends classification for that
+  input; no other surface may be attempted.
+- **NO SURFACE MATCH** - no positive claim was made and no authoritative
+  failure occurred (e.g., the input is syntactically ambiguous under
+  every profile-eligible grammar, or is trivially empty of any
+  grammar-specific construct). **Only this outcome** permits `Auto` to
+  evaluate another surface.
+- **AUTHORITATIVE FAILURE** - a surface has already been established or
+  is being classified, and parsing or policy rejects the input under
+  that surface. The failure is preserved as the outcome for that input;
+  no other surface may be attempted afterward. This is the outcome the
+  swallowed-`Err` half of `#1670` (and path 3's `unwrap_or(false)`)
+  currently destroys.
+
+This decision freezes the semantic distinction only, not the concrete
+classifier implementation (e.g., whether it is expressed as an enum,
+which exact declaration forms count toward a positive claim beyond
+`system`/`entities`/`laws`/imports, or how it composes with policy
+checks) - that is implementation work, out of scope here.
+
 **INVARIANT** (fail-closed law, applies to every entry point and every
 current implementation of "Auto" uniformly - paths 1-3 above each
 violate at least one clause of it today, and path 3 alone violates two
@@ -156,16 +209,21 @@ different clauses at once):
   invariant is about not performing the probe under an explicit
   single-grammar request, not merely about not acting on it.
 - Explicit `Logos`: MUST NOT silently probe RustLike.
-- `Auto`: may perform canonical surface classification, but once an
-  authoritative parse/policy failure is produced for the classified
-  surface, that failure MUST NOT be discarded in favor of another
-  grammar. This applies equally to a whole-project multi-module load
-  failure (path 1's `.or_else`) and to a single-file grammar-probe
-  failure (paths 2 and 3's `unwrap_or`/`if let Ok`) - "try a different
-  mechanism after a real failure" is the same defect whether the
-  discarded failure came from a directory walk or a single parse call.
-  **Currently violated by path 3's `Auto` branch** via the same
-  `unwrap_or(false)` call site named above.
+- `Auto`: may perform canonical surface classification using the
+  three-state law below (POSITIVE SURFACE CLAIM / NO SURFACE MATCH /
+  AUTHORITATIVE FAILURE), but only a **NO SURFACE MATCH** outcome
+  permits evaluating another surface; a **POSITIVE SURFACE CLAIM** ends
+  classification, and an **AUTHORITATIVE FAILURE** MUST NOT be discarded
+  in favor of another grammar. This applies equally to a whole-project
+  multi-module load failure (path 1's `.or_else`) and to a single-file
+  grammar-probe failure (paths 2 and 3's `unwrap_or`/`if let Ok`) - "try
+  a different mechanism after a real failure" is the same defect whether
+  the discarded failure came from a directory walk or a single parse
+  call. **Currently violated by path 3's `Auto` branch** via the same
+  `unwrap_or(false)` call site named above, and **by paths 2 and 3's
+  shared discriminator** which cannot distinguish a POSITIVE SURFACE
+  CLAIM (import-only Logos) from NO SURFACE MATCH (genuinely empty
+  input) - see path 2's evidence above and `#1670`'s own filed text.
 
 **WHY**: Fixing `#1670` alone, in `check_source_with_profile` alone,
 without freezing this invariant first, would leave the *general* rule
@@ -198,18 +256,21 @@ a fourth ad hoc partial fix.
 **IMPLEMENTATION CONSEQUENCE** (not performed here): `smc check` needs an
 explicit or defaulted `CompileProfile` wired into its call path (it has
 none today); `check_source_with_profile` must classify the Logos
-attempt's outcome into (empty-but-valid / policy-invalid) before
-deciding whether to attempt RustLike; `compile_program_to_ir_with_options_and_profile`
-must stop invoking `parse_logos_program_with_profile` at all when
-`profile` is explicitly `RustLike` (not merely stop acting on its
-result), and its `Auto` branch needs the same
-empty-but-valid/policy-invalid classification instead of
-`unwrap_or(false)`; and `cmd_check`'s `.or_else` must stop discarding a
-real multi-module load failure in favor of a silently-narrower
-single-file check. Whether these are one filed issue or several is an
-implementation-sequencing question, not a decision-authority question -
-out of scope here; see "Durable tracking for newly discovered defects"
-below for proposed issue text awaiting owner approval.
+attempt's outcome using the three-state law above (positive surface
+claim / no surface match / authoritative failure) - not the two-state
+split an earlier draft of this decision used - before deciding whether
+to attempt RustLike, and that classification must recognize import-only
+Logos source as a positive claim, not as "empty";
+`compile_program_to_ir_with_options_and_profile` must stop invoking
+`parse_logos_program_with_profile` at all when `profile` is explicitly
+`RustLike` (not merely stop acting on its result), and its `Auto` branch
+needs the same three-state classification instead of `unwrap_or(false)`;
+and `cmd_check`'s `.or_else` must stop discarding a real multi-module
+load failure in favor of a silently-narrower single-file check. Whether
+these are one filed issue or several is an implementation-sequencing
+question, not a decision-authority question - out of scope here; see
+"Durable tracking for newly discovered defects" below for proposed issue
+text awaiting owner approval.
 
 **TEST CONSEQUENCE** (not performed here): a regression per path proving
 that a genuinely invalid (not merely empty) grammar-specific input is
@@ -218,13 +279,14 @@ and never silently succeeds under a different surface or a narrower
 mechanism - covering `check_source_with_profile`,
 `compile_program_to_ir_with_options_and_profile`'s `Auto` branch, and
 `cmd_check`'s multi-module-to-single-file fallback independently. Plus
-one additional, distinct regression for explicit `RustLike`:
+two additional, distinct regressions: (1) for explicit `RustLike`,
 `compile_program_to_ir_with_options_and_profile(input, CompileProfile::RustLike,
 ..)` must never invoke the Logos parser at all for any input, verified
-directly (not merely that its result is ignored) - e.g. by asserting no
-Logos-parse side effect occurs, or by restructuring the function so the
-call site is behind a branch that excludes `RustLike` and a compile-time
-guarantee replaces the runtime assertion.
+directly (not merely that its result is ignored); (2) a source file
+containing only `import` directives and no `system`/`entity`/`law`
+declaration must be classified as a positive Logos surface claim and
+must never be reinterpreted as RustLike - the exact case `#1670` itself
+names and the two-state classification would still miss.
 
 ## Decision B - Diagnostic Identity Authority
 
@@ -577,6 +639,7 @@ Reconstructed from each relevant crate's actual `Cargo.toml`
 | `ton618-core` | *(none)* | `sm-front`, `sm-sema`, `smc-cli` |
 | `sm-format` | *(none)* | `sm-ir`, `sm-emit`, `sm-verify`, `sm-vm` |
 | `sm-runtime-core` | *(none)* | `sm-verify`, `sm-vm` |
+| `sm-profile` | *(none - only optional external `serde`/`serde_json`)* | `sm-front`, `sm-sema`, `sm-ir` |
 | `sm-front` | `ton618-core`, `sm-profile` | `sm-sema`, `sm-ir`, `smc-cli` |
 | `sm-sema` | `ton618-core`, `sm-front`, `sm-profile` | `smc-cli` |
 | `sm-ir` | `sm-front`, `sm-profile`, `sm-format` | `sm-emit`, `smc-cli` |
@@ -585,14 +648,15 @@ Reconstructed from each relevant crate's actual `Cargo.toml`
 | `sm-vm` | `sm-runtime-core`, `sm-verify`, `sm-format`, `prom-*` | `smc-cli` |
 | `smc-cli` | (all of the above) | *(top of graph)* |
 
-**Load-bearing finding**: `ton618-core`, `sm-format`, and
-`sm-runtime-core` are three *separate*, non-overlapping zero-dependency
-leaf crates. `sm-front`/`sm-sema` reach only `ton618-core`; `sm-verify`/
-`sm-vm` reach only `sm-format`/`sm-runtime-core`. **Neither branch
-currently depends on the other's leaf crate at all** - `ton618-core`'s
-existing `Diagnostic<M>`/`SourceMark`/`Span` types are structurally
-unreachable from `sm-verify`/`sm-vm` today, which is an independent,
-architectural reason (not merely "it's dead code") why the current
+**Load-bearing finding**: `ton618-core`, `sm-format`, `sm-runtime-core`,
+and `sm-profile` are four *separate*, non-overlapping zero-dependency
+leaf crates. `sm-front`/`sm-sema` reach `ton618-core` and `sm-profile`;
+`sm-verify`/`sm-vm` reach only `sm-format`/`sm-runtime-core`. **Neither
+branch currently depends on any of the other branch's leaf crates** -
+`ton618-core`'s existing `Diagnostic<M>`/`SourceMark`/`Span` types, and
+`sm-profile` itself, are structurally unreachable from `sm-verify`/
+`sm-vm` today, which is an independent, architectural reason (not merely
+"it's dead code") why the current
 `ton618_core::diagnostics::Diagnostic<M>` cannot yet be a real cross-stage
 canonical carrier even in principle, regardless of whether anyone ever
 constructs it.
@@ -619,28 +683,52 @@ carrier or otherwise) without first reopening that specific track, which
 this decision does not do and is not scoped to do. The candidate table
 and selection below are re-run under two constraints instead of one.
 
-**Candidate owners for the future internal canonical model**, classified
-under **both** constraints - (A) dependency-graph correctness and (B)
-canonical-ownership / compatibility-perimeter policy:
+**CORRECTION NOTE (owner review round 3)**: the round-2 candidate table
+covered `ton618-core`, `sm-runtime-core`, and `sm-format` only, which
+made "no existing crate satisfies" an unproven assertion rather than an
+exhaustive conclusion - it omitted `sm-profile` (an existing `sm-*`,
+zero-dependency, Construction-zone crate that passes the dependency-graph
+test) and the non-leaf Construction crates entirely. The table below
+evaluates every architecturally-relevant existing crate under three
+independent criteria, so the "no existing crate satisfies" verdict is
+now evidence-derived rather than an artifact of an incomplete candidate
+list.
 
-| Candidate | (A) Dependency-safe from `sm-verify`/`sm-vm`? | (B) Ownership-policy consistent? | Verdict |
-|---|---|---|---|
-| `ton618-core` | YES - zero dependencies itself, so any crate (including `sm-verify`/`sm-vm`) can add it as a dependency without creating a cycle | **NO** - `ton618_compatibility_perimeter_scope.md` closes this crate's role as retained-non-owning and lists moving canonical ownership into TON618-named paths as an explicit non-goal; assigning it a new diagnostic-carrier ownership role would reopen a track that document declares closed | **DISQUALIFIED** (fails B) |
-| `sm-runtime-core` | trivially yes for `sm-verify`/`sm-vm` (already a dependency) but **NO** for `sm-front`/`sm-sema` (would require Construction-zone crates to depend backward into the Execution zone) | N/A - fails (A) on its own terms, and `dependency_boundary_rules.md`'s own "Allowed flow: Construction -> Execution -> Integration" and "construction crates must not depend on VM/runtime state" rules independently forbid this direction | REJECTED |
-| `sm-format` | trivially yes for `sm-verify`/`sm-vm`/`sm-ir`/`sm-emit` (already a dependency) but **NO** for `sm-front`/`sm-sema` | N/A - fails (A); also a SemCode binary-format crate, diagnostic identity is not a bytecode-format concern | REJECTED |
-| A brand-new `sm-*`-named Construction-zone leaf crate | YES - zero dependencies by construction, and `sm-verify`/`sm-vm` (Execution) depending on it follows the documented "Construction -> Execution" allowed flow directly | YES - `dependency_boundary_rules.md`'s own zone model already places canonical Construction-zone ownership in `sm-*`-named crates (`sm-front`, `sm-sema`, `sm-ir`, `sm-emit`, `sm-profile`), and the perimeter-scope document's own stated principle is that canonical ownership belongs in `sm-*` owners, not TON618-named paths | **NO EXISTING CRATE SATISFIES BOTH CONSTRAINTS - A NEW CRATE IS THE LEADING ARCHITECTURAL DIRECTION, NOT A FROZEN SELECTION** |
+**Candidate owners for the future internal canonical model**, classified
+under three independent criteria: **(A)** dependency-graph correctness
+(can `sm-verify`/`sm-vm` reach it without a cycle, and without violating
+`dependency_boundary_rules.md`'s "Construction -> Execution" flow
+direction), **(B)** ownership/naming-policy consistency (does assigning
+it this role conflict with an existing, frozen ownership record), and
+**(C)** semantic responsibility cohesion (does the crate's existing
+charter make diagnostic-carrier ownership a natural extension or a
+grab-bag):
+
+| Candidate | (A) Dependency-safe | (B) Ownership-policy consistent | (C) Responsibility cohesion | Verdict |
+|---|---|---|---|---|
+| `sm-profile` | YES - zero dependencies (only optional external `serde`/`serde_json`), so `sm-verify`/`sm-vm` could depend on it without a cycle | YES - already `sm-*`-named, already Construction-zone, no frozen record restricts its role | **NO** - its existing, sole charter is admission/policy configuration (`ParserProfile`: identity/version/abi/compatibility/features/capabilities/aliases); bolting on diagnostic-carrier ownership bundles two unrelated concerns (language-admission policy and diagnostic identity/representation) into one crate, which `dependency_boundary_rules.md`'s own per-crate single-responsibility pattern (lexer/AST in `sm-front`, optimizer/SemCode format in `sm-ir`, CLI contract in `smc-cli`) argues against | REJECTED (fails C) |
+| `sm-front` | **NO** - not a zero-dependency leaf (depends on `ton618-core`, `sm-profile`); `sm-verify`/`sm-vm` depending on it would pull in the entire lexer/parser/AST surface for one diagnostic type | N/A - fails (A) | N/A - already has a real, unrelated charter (lexer/AST/source-level type-check, per `dependency_boundary_rules.md`) | REJECTED (fails A; also `dependency_boundary_rules.md`'s "execution crates must not reach back into parser/sema internals" forbids the direction outright) |
+| `sm-sema` | **NO** - depends on `sm-front`, same transitive-weight problem, one layer further | N/A - fails (A) | N/A - already has a real, unrelated charter (semantic analysis) | REJECTED (fails A, same rule as `sm-front`) |
+| `sm-ir` | **NO** - depends on `sm-front`, `sm-profile`, `sm-format`; same transitive-weight and layering problem | N/A - fails (A) | N/A - already owns the optimizer and SemCode format contract per `dependency_boundary_rules.md` | REJECTED (fails A) |
+| `sm-emit` | **NO** - depends on `sm-format`, `sm-ir` | N/A - fails (A) | N/A - already a producer-facing SemCode facade | REJECTED (fails A) |
+| `sm-format` | trivially yes for `sm-verify`/`sm-vm`/`sm-ir`/`sm-emit` (already a dependency) but **NO** for `sm-front`/`sm-sema` | N/A - fails (A) for the frontend-facing half | N/A - a SemCode binary-format crate; diagnostic identity is not a bytecode-format concern | REJECTED (fails A and C) |
+| `sm-runtime-core` | trivially yes for `sm-verify`/`sm-vm` (already a dependency) but **NO** for `sm-front`/`sm-sema` (would require Construction-zone crates to depend backward into the Execution zone) | N/A - fails (A); `dependency_boundary_rules.md`'s own "Allowed flow: Construction -> Execution -> Integration" and "construction crates must not depend on VM/runtime state" rules independently forbid this direction | N/A - a runtime/quota/trap-taxonomy crate (`#1759`-`#1763`'s own home) | REJECTED (fails A and C) |
+| `ton618-core` | YES - zero dependencies itself, so any crate (including `sm-verify`/`sm-vm`) can add it as a dependency without creating a cycle | **NO** - `ton618_compatibility_perimeter_scope.md` closes this crate's role as retained-non-owning and lists moving canonical ownership into TON618-named paths as an explicit non-goal; assigning it a new diagnostic-carrier ownership role would reopen a track that document declares closed | N/A - fails (B) regardless | **DISQUALIFIED** (fails B) |
+| A brand-new `sm-*`-named Construction-zone leaf crate | YES - zero dependencies by construction, and `sm-verify`/`sm-vm` (Execution) depending on it follows the documented "Construction -> Execution" allowed flow directly | YES - `dependency_boundary_rules.md`'s own zone model already places canonical Construction-zone ownership in `sm-*`-named crates, and the perimeter-scope document's own stated principle is that canonical ownership belongs in `sm-*` owners, not TON618-named paths | YES - a purpose-built crate with no pre-existing, unrelated charter has no cohesion conflict by construction | **NO EXISTING CRATE SATISFIES ALL THREE CRITERIA - A NEW CRATE IS THE LEADING ARCHITECTURAL DIRECTION, NOT A FROZEN SELECTION** |
 
 **No future carrier owner is selected by this decision.** Every existing
-crate fails at least one constraint: `ton618-core` fails (B) outright
-(a closed governance track forbids it); `sm-runtime-core` and
-`sm-format` fail (A) for the frontend-facing half of the diagnostic
-surface. A new `sm-*`-named, zero-dependency, Construction-zone leaf
-crate is the best-evidenced *direction* - it is dependency-safe, and it
-is consistent with the perimeter-scope document's own stated principle
-that canonical ownership belongs in `sm-*` owners - but naming, exact
-scope, and creation of such a crate is itself a decision this checkpoint
-is not scoped to make unilaterally (it would need its own
-`allowed_paths` entry and its own `dependency_changes` authorization,
+crate fails at least one criterion: the zero-dependency leaves
+(`ton618-core`, `sm-format`, `sm-runtime-core`, `sm-profile`) each fail
+either (B) or (C); every non-leaf Construction crate (`sm-front`,
+`sm-sema`, `sm-ir`, `sm-emit`) fails (A) outright, both on raw dependency
+weight and on `dependency_boundary_rules.md`'s explicit "execution
+crates must not reach back into parser/sema internals" rule. A new
+`sm-*`-named, zero-dependency, Construction-zone leaf crate is the
+best-evidenced *direction* - it is dependency-safe, ownership-policy
+consistent, and free of any cohesion conflict by construction - but
+naming, exact scope, and creation of such a crate is itself a decision
+this checkpoint is not scoped to make unilaterally (it would need its
+own `allowed_paths` entry and its own `dependency_changes` authorization,
 exactly like the disqualified `ton618-core` path would have). This is
 deliberately left as:
 
@@ -839,8 +927,18 @@ governance/ownership checkpoint must land before the carrier
 implementation itself because the carrier cannot be built in a crate
 that has not yet been selected and authorized - see "Dependency-owner
 analysis" above for why `ton618-core` cannot fill that role. The
-carrier must land before the external schema because the schema versions
-the carrier's shape, not the other way around, per §6's own boundary.
+carrier should still land before the external schema, but not because
+"the schema versions the carrier's shape" - §6 explicitly forbids that
+framing (internal model and external schema are two independently
+versioned artifacts, never one struct serialized two ways). The real
+reason is authority and convergence: the external schema is a separately
+versioned *projection* of canonical diagnostic semantics, and it cannot
+honestly project semantics (Decision B's code/severity/family, Decision
+C's file identity, Decision D's source range) that the internal carrier
+has not yet settled. Building the schema first would mean guessing at a
+projection of a model that does not exist yet, then reconciling drift
+after the fact - the same "build a nicer-looking policy after the fact"
+anti-pattern the cross-cutting rejected alternatives above already name.
 
 **Scope note (owner review round 2)**: this DAG covers the
 currently-filed issues only. Decision A's evidence pass found three
@@ -922,9 +1020,16 @@ repair and qualification surfaces:
 
 ---
 
-The owner may approve both as filed, request they be merged into one,
-request different scoping, or fold either into an expanded `#1670`.
-Neither is created by this PR.
+**Owner decision recorded**: approved as two separate issues (different
+crate/path/root-cause/repair-surface for each - `smc-cli`'s project-vs.
+-single-file authority loss for A, `sm-ir`'s `CompileProfile` dispatch
+and grammar-probe swallow for B - not folded into `#1670`, which is
+`sm-sema`-scoped). **Neither is created by this PR or before it merges.**
+After `#1918` merges, create both using the issue text above verbatim
+(or as refined at creation time) and record their issue numbers in the
+SSF-09 progress evidence (e.g. a follow-up comment on `#1580`), rather
+than reopening this document or its exact HEAD solely to add issue
+numbers.
 
 ## Exit gate
 
@@ -945,12 +1050,15 @@ stated precisely enough to judge a future PR against, independent of
 which crate ends up building them.
 
 **Canonical-carrier owner selection: NOT FROZEN, by design.** Re-reading
-`ton618_compatibility_perimeter_scope.md` in this owner review round
-found that document's own closed governance track disqualifies
-`ton618-core` outright for any new ownership role, including a
-diagnostic carrier. No existing crate satisfies both the dependency-graph
-and ownership-policy constraints (see "Dependency-owner analysis"); a
-new `sm-*` Construction-zone leaf crate is the leading direction, not a
+`ton618_compatibility_perimeter_scope.md` found that document's own
+closed governance track disqualifies `ton618-core` outright for any new
+ownership role, including a diagnostic carrier. An exhaustive pass over
+every architecturally-relevant existing crate - `sm-profile`, `sm-front`,
+`sm-sema`, `sm-ir`, `sm-emit`, `sm-format`, `sm-runtime-core`, and
+`ton618-core` - under three independent criteria (dependency-graph
+correctness, ownership-policy consistency, responsibility cohesion; see
+"Dependency-owner analysis") found none satisfies all three; a new
+`sm-*` Construction-zone leaf crate is the leading direction, not a
 selection. This is not a gap left by oversight - it is the correct,
 honest output of re-evaluating the evidence, and it means a separate
 governance/ownership checkpoint (not this document, not an
