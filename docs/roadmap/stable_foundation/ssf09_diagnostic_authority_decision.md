@@ -1000,32 +1000,106 @@ mapped range exist. Never a placeholder in any other case.
 ## Presentation/LSP boundary
 
 No editor/LSP node may own semantic truth (restated from the governing
-invariant, made concrete for the authority graph, §7). A future LSP
-adapter: converts the canonical UTF-8 byte range to LSP's UTF-16
-code-unit convention (a pure, lossless-in-the-safe-direction numeric
-conversion, not a reinterpretation); converts the canonical
-project-root-relative file identity to a `file://` URI; relays the
-canonical diagnostic identity (code/severity/family) unchanged; may cache
-canonical results keyed by file identity + a content/version stamp, but
-never recomputes a diagnostic itself. This mirrors, and is bound by, the
-same rule `.agents/skills/semantic-ui-boundary-guard/SKILL.md` already
-enforces for the unrelated UI-DNA2 presentation layer ("must NOT rewrite
-or alter verifier diagnostics") - a precedent this decision generalizes
-rather than invents.
+invariant, made concrete for the authority graph, §7).
+
+**CORRECTION NOTE (owner review round 6)**: the first version of this
+section said a future LSP adapter "converts the canonical
+project-root-relative file identity to a `file://` URI." That
+representation is no longer Decision C's contract - Decision C (as
+corrected in round 5) freezes a package/module-authority-derived law
+with an unfrozen concrete serialization, and explicitly allows canonical
+identity to be **absent** for a rootless standalone source. "Convert the
+canonical identity to a URI" silently assumed canonical identity is
+always a filesystem-shaped string, which is exactly the premature
+wire-format assumption round 5 removed. Corrected by separating two
+concepts this section previously conflated:
+
+- **CANONICAL LOGICAL SOURCE IDENTITY** - the compiler/project authority
+  from Decision C. May be present (derived from
+  `PackageModuleAdmission`) or **absent** (a rootless standalone source
+  with no provable identity). This is compiler-side semantic truth; an
+  LSP adapter never invents it.
+- **TRANSPORT / DOCUMENT LOCATOR** - editor/session routing metadata
+  (e.g. the `textDocument.uri` an LSP client supplies with a request or
+  an open-document notification). This is protocol plumbing supplied by
+  the *client*, not compiler semantic authority, and it exists
+  independently of whether canonical logical identity is present or
+  absent for that document.
+
+Rules for a future LSP adapter, given this separation:
+
+- It MAY route a diagnostic back to the transport/document locator the
+  client supplied for that document (`textDocument.uri`) - this is
+  ordinary protocol routing, not a semantic claim.
+- It MUST NOT promote that locator into canonical compiler identity, and
+  MUST NOT claim it was "derived from" canonical identity when canonical
+  identity is absent for that source (the rootless-standalone case).
+  Presenting a client-supplied URI as if it were the compiler's own
+  proven identity would be exactly the kind of guessed/fabricated
+  authority the "Fail-closed rules" section forbids.
+- For a package-admitted source, a canonical-identity-to-filesystem (and
+  from there, to URI) mapping may be derived only through the existing
+  canonical project/package/module authority - never a second,
+  LSP-specific path resolver.
+- A rootless standalone document with no canonical logical identity
+  remains fully routable and diagnosable through its transport locator
+  alone; identity being absent is not a reason to withhold diagnostics,
+  only a reason not to fabricate an identity that was not proven.
+
+Converting the canonical UTF-8 byte range to LSP's UTF-16 code-unit
+convention (a pure, lossless-in-the-safe-direction numeric conversion,
+not a reinterpretation) and relaying the canonical diagnostic identity
+(code/severity/family) unchanged remain as originally stated; caching
+keyed by canonical identity is only available when that identity is
+present, and must fall back to a transport-locator-scoped cache
+otherwise - it may never recompute a diagnostic itself. This mirrors,
+and is bound by, the same rule `.agents/skills/semantic-ui-boundary-guard/SKILL.md`
+already enforces for the unrelated UI-DNA2 presentation layer ("must NOT
+rewrite or alter verifier diagnostics") - a precedent this decision
+generalizes rather than invents. None of this freezes the external
+schema or an LSP implementation - both remain future work.
 
 ## Fail-closed rules
 
-Consolidated from all four decisions, restated once for the whole
-document: unknown/ambiguous/unsupported/unprovable never becomes a
-guessed diagnostic identity (Decision B), a guessed source surface
-(Decision A), a guessed file identity (Decision C: `file_id = 0`/
-`"<input>"` forbidden as a stand-in for absence), or a guessed source
-range (Decision D: `[0,0)`/`pc 0`/`offset 0` forbidden as a stand-in for
-absence). In every one of these cases the correct representation is a
-deterministic, explicit "absent" - never a default value presented as if
-it were meaningful, and never a silent retry under a different authority
-(Decision A's grammar-hopping case) presented as if it were the original
-authority succeeding.
+**CORRECTION NOTE (owner review round 6)**: the first version of this
+section consolidated all four decisions' fail-closed behavior into one
+claim - "the correct representation is a deterministic, explicit
+'absent'" - as if every authority's failure mode resolves the same way.
+That is no longer accurate: Decision A's AMBIGUOUS/CONFLICTING CLAIMS
+outcome is a **reported classification error**, not an absent surface,
+and Decision B's rule is about **preserving** an already-assigned
+identity, not producing an absent one. The common law across all four is
+narrower and more precise than "always absent": **never guess or
+fabricate authority** - what satisfies that law differs by which
+authority is missing or in conflict:
+
+- **Source surface (Decision A)**: an authoritative failure is preserved
+  as an error attributed to the surface that owns it, never discarded in
+  favor of another surface. Ambiguous or conflicting claims are reported
+  as a **deterministic classification error**, never resolved by
+  guessing a winner. Neither case produces an "absent" surface - both
+  produce an explicit, attributed failure.
+- **Diagnostic semantic identity (Decision B)**: code/severity/family are
+  preserved unchanged once originating-assigned; never invented, never
+  silently replaced by an adapter. There is no "absent" form of this rule
+  - a diagnostic that exists always has a real originating identity: the
+  rule forbids overwriting it, not producing an empty one.
+- **File identity (Decision C)**: unprovable is **absent** - `file_id =
+  0`/`"<input>"`/a collision-prone basename forbidden as a stand-in.
+- **Source range (Decision D)**: unprovable is **absent** - `[0,0)`/
+  `pc 0`/`offset 0` forbidden as a stand-in.
+
+"Absent" is the correct outcome specifically for Decisions C and D
+(identity/location data that may simply not exist for a given input).
+For Decision A, the correct outcome is a reported error, not an absence
+- a source file that fails to classify is not "sourceless," it is
+unclassifiable, and that fact must be surfaced, not silently swallowed
+into nothing. For Decision B, the correct outcome is preservation, not
+absence. The rule that generalizes across all four is **never guess or
+fabricate a value in place of the real authority** - never a default
+value presented as if it were meaningful, and never a silent retry under
+a different authority (Decision A's grammar-hopping case) presented as
+if it were the original authority succeeding.
 
 ## Rejected alternatives (cross-cutting)
 
@@ -1176,19 +1250,19 @@ projection of a model that does not exist yet, then reconciling drift
 after the fact - the same "build a nicer-looking policy after the fact"
 anti-pattern the cross-cutting rejected alternatives above already name.
 
-**Scope note (owner review round 2)**: this DAG covers the
+**Scope note (owner review round 6)**: this DAG covers the
 currently-filed issues only. Decision A's evidence pass found three
 same-defect-class instances that are not covered by `#1670`'s filed
-scope (see "Durable tracking for newly discovered defects" below for
-proposed, owner-approval-pending issue text): `cmd_check`'s `.or_else`
-discarding a real multi-module load failure in favor of a narrower
-single-file check; `compile_program_to_ir_with_options_and_profile`'s
+scope: `cmd_check`'s `.or_else` discarding a real multi-module load
+failure in favor of a narrower single-file check; `compile_program_to_ir_with_options_and_profile`'s
 `Auto` branch swallowing a Logos parse/policy failure via
 `unwrap_or(false)`; and that same function's unconditional Logos-parser
 invocation even under an explicit `RustLike` request. All three must be
-judged against Decision A's invariant when repaired, whether that
-happens under `#1670` itself or new, separately-filed issues - a filing
-decision left to the owner, not made by this document.
+judged against Decision A's invariant when repaired. **Owner has
+approved these as two separate, post-merge-only issues** (see "Durable
+tracking for newly discovered defects" below for the exact drafted text)
+- not folded into `#1670`, and not created by this document or before
+`#1918` merges.
 
 ## Durable tracking for newly discovered defects
 
@@ -1332,9 +1406,18 @@ round - external identity for a package-admitted module is scoped by
 classifier that stops at the first positive-evidence candidate without
 checking for a conflicting second one satisfies the surface-
 classification law (corrected this round - renamed to UNIQUE POSITIVE
-SURFACE CLAIM to close that reading), and does not claim `#1704`'s
-repair grants `ton618-core` canonical registry ownership (Decision B
-states it explicitly as qualification-only).
+SURFACE CLAIM to close that reading), does not claim `#1704`'s repair
+grants `ton618-core` canonical registry ownership (Decision B states it
+explicitly as qualification-only), does not claim a future LSP adapter
+converts canonical file identity to a URI as if that identity is always
+present and always filesystem-shaped (corrected this round - the
+Presentation/LSP boundary now separates canonical logical identity,
+which may be absent, from a client-supplied transport/document locator,
+which is not compiler semantic authority), and does not claim every
+authority's fail-closed outcome is "absent" (corrected this round - the
+Fail-closed rules section now states Decision A's outcome is a reported
+classification error and Decision B's is preservation, not absence;
+"absent" is specifically Decisions C and D's outcome).
 No historical document is rewritten by this decision; the TON618
 perimeter's own closure record is read, not altered.
 
