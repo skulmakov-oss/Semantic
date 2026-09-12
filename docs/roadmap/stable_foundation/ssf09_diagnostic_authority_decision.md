@@ -169,25 +169,58 @@ Logos content. Any future classifier (wherever `Auto` or an implicit
 probe is implemented) MUST distinguish three outcomes, semantically, not
 just as an implementation detail:
 
-- **POSITIVE SURFACE CLAIM** - the input is canonically classified as
-  belonging to a specific surface. For Logos, this MUST include every
-  supported Logos-only declaration form, including import-only Logos
-  source - a successful parse that only consumed `import`/`pulse`/
-  `profile` directives is a positive Logos claim, not an empty result,
-  even though today's `system`/`entities`/`laws`-only discriminator
-  cannot see it. Reaching this outcome ends classification for that
-  input; no other surface may be attempted.
-- **NO SURFACE MATCH** - no positive claim was made and no authoritative
-  failure occurred (e.g., the input is syntactically ambiguous under
-  every profile-eligible grammar, or is trivially empty of any
-  grammar-specific construct). **Only this outcome** permits `Auto` to
-  evaluate another surface.
-- **AUTHORITATIVE FAILURE** - a surface has already been established or
-  is being classified, and parsing or policy rejects the input under
-  that surface. The failure is preserved as the outcome for that input;
-  no other surface may be attempted afterward. This is the outcome the
-  swallowed-`Err` half of `#1670` (and path 3's `unwrap_or(false)`)
-  currently destroys.
+**CORRECTION NOTE (owner review round 4)**: the first version of this
+law defined AUTHORITATIVE FAILURE as triggering once a surface "has
+already been established **or is being classified**" and parsing/policy
+rejects it. That wording is dangerously broad: it can be read as making
+*any* candidate-probe rejection authoritative merely because a probe was
+attempted, which would make an ordinary `RustLike` program's Logos probe
+- e.g. `fn main() { return; }`, which fails immediately at the first
+token with `parse_logos_program`'s generic "expected Logos declaration"
+error, having established zero positive Logos evidence - block `RustLike`
+from ever being tried. That is a *worse* regression than `#1670` itself,
+not a fix for it. The law is also inconsistent with this document's own
+"Fail-closed rules" (below), which already forbids turning ambiguous
+input into a guessed source surface - the prior law's "NO SURFACE MATCH"
+outcome listed "syntactically ambiguous under every profile-eligible
+grammar" as an example that permits trying another surface, which is
+exactly that forbidden guess. Both are corrected below by requiring
+**positive evidence before a rejection can be authoritative**, and by
+separating ambiguity into its own outcome instead of folding it into "no
+match, try the next one."
+
+- **NO SURFACE CLAIM** - no candidate surface has yet produced sufficient
+  surface-specific *positive* evidence of ownership for this input. A
+  candidate probe failing with **no prior positive evidence** for that
+  surface is NOT automatically authoritative merely because the probe
+  was attempted - `fn main() { return; }` failing a Logos probe at the
+  first token, having matched none of `system`/`entity`/`law`/`import`/
+  `pulse`/`profile`, is exactly this case. Another candidate surface MAY
+  be evaluated.
+- **POSITIVE SURFACE CLAIM** - a candidate surface has produced
+  sufficient surface-specific evidence to establish ownership of this
+  input. For Logos, this MUST include every supported Logos-only
+  declaration form, including import-only Logos source - a successful
+  parse that only consumed `import`/`pulse`/`profile` directives is a
+  positive Logos claim, not an empty result, even though today's
+  `system`/`entities`/`laws`-only discriminator cannot see it. Reaching
+  this outcome ends classification: no other surface may be attempted,
+  and precisely two sub-outcomes follow - **success** (parsing/policy
+  subsequently accepts the input under the owning surface), or
+  **AUTHORITATIVE FAILURE** (parsing/policy subsequently rejects it
+  under the owning surface; that failure is preserved as the outcome for
+  this input, and it alone - never a bare probe rejection with no prior
+  positive evidence - is what the swallowed-`Err` half of `#1670`, and
+  path 3's `unwrap_or(false)`, currently destroy).
+- **AMBIGUOUS / CONFLICTING CLAIMS** - more than one candidate surface
+  independently produces sufficient positive evidence for the same
+  input, or the classifier cannot deterministically resolve which
+  surface owns it. This is itself a deterministic classification error,
+  reported as such - **never** resolved by picking a "winner" through
+  evaluation order, fallback, or any other implicit tie-break. Folding
+  ambiguity into "no match, try the next candidate" (the prior version's
+  error) is precisely the guessed-source-surface outcome the "Fail-closed
+  rules" section below already forbids.
 
 This decision freezes the semantic distinction only, not the concrete
 classifier implementation (e.g., whether it is expressed as an enum,
@@ -209,21 +242,28 @@ different clauses at once):
   invariant is about not performing the probe under an explicit
   single-grammar request, not merely about not acting on it.
 - Explicit `Logos`: MUST NOT silently probe RustLike.
-- `Auto`: may perform canonical surface classification using the
-  three-state law below (POSITIVE SURFACE CLAIM / NO SURFACE MATCH /
-  AUTHORITATIVE FAILURE), but only a **NO SURFACE MATCH** outcome
-  permits evaluating another surface; a **POSITIVE SURFACE CLAIM** ends
-  classification, and an **AUTHORITATIVE FAILURE** MUST NOT be discarded
-  in favor of another grammar. This applies equally to a whole-project
+- `Auto`: may perform canonical surface classification using the law
+  below (NO SURFACE CLAIM / POSITIVE SURFACE CLAIM (success or
+  AUTHORITATIVE FAILURE) / AMBIGUOUS-CONFLICTING CLAIMS), but only a
+  **NO SURFACE CLAIM** outcome permits evaluating another surface; a
+  **POSITIVE SURFACE CLAIM** ends classification (its AUTHORITATIVE
+  FAILURE sub-outcome MUST NOT be discarded in favor of another
+  grammar); and **AMBIGUOUS/CONFLICTING CLAIMS** MUST NOT be resolved by
+  picking a winner via fallback or evaluation order - it is reported as
+  a classification error. This applies equally to a whole-project
   multi-module load failure (path 1's `.or_else`) and to a single-file
   grammar-probe failure (paths 2 and 3's `unwrap_or`/`if let Ok`) - "try
   a different mechanism after a real failure" is the same defect whether
   the discarded failure came from a directory walk or a single parse
-  call. **Currently violated by path 3's `Auto` branch** via the same
-  `unwrap_or(false)` call site named above, and **by paths 2 and 3's
-  shared discriminator** which cannot distinguish a POSITIVE SURFACE
-  CLAIM (import-only Logos) from NO SURFACE MATCH (genuinely empty
-  input) - see path 2's evidence above and `#1670`'s own filed text.
+  call, **provided that failure followed positive evidence** - a bare
+  probe rejection with no prior positive evidence is NO SURFACE CLAIM,
+  not an authoritative failure, and trying another candidate after it is
+  correct, not a violation. **Currently violated by path 3's `Auto`
+  branch** via the same `unwrap_or(false)` call site named above, and
+  **by paths 2 and 3's shared discriminator** which cannot distinguish a
+  POSITIVE SURFACE CLAIM (import-only Logos) from NO SURFACE CLAIM
+  (genuinely empty input) - see path 2's evidence above and `#1670`'s
+  own filed text.
 
 **WHY**: Fixing `#1670` alone, in `check_source_with_profile` alone,
 without freezing this invariant first, would leave the *general* rule
@@ -256,21 +296,26 @@ a fourth ad hoc partial fix.
 **IMPLEMENTATION CONSEQUENCE** (not performed here): `smc check` needs an
 explicit or defaulted `CompileProfile` wired into its call path (it has
 none today); `check_source_with_profile` must classify the Logos
-attempt's outcome using the three-state law above (positive surface
-claim / no surface match / authoritative failure) - not the two-state
-split an earlier draft of this decision used - before deciding whether
-to attempt RustLike, and that classification must recognize import-only
-Logos source as a positive claim, not as "empty";
+attempt's outcome using the law above (NO SURFACE CLAIM / POSITIVE
+SURFACE CLAIM-with-success-or-AUTHORITATIVE-FAILURE / AMBIGUOUS-
+CONFLICTING CLAIMS) - not the two-state split an earlier draft of this
+decision used, and not the broader "or is being classified" framing a
+later draft used before this correction - before deciding whether to
+attempt RustLike; that classification must recognize import-only Logos
+source as a positive claim, not as "empty," and must NOT treat a bare
+probe rejection with no prior positive evidence as authoritative (an
+ordinary `RustLike` program failing a Logos probe at the first token
+must still allow `RustLike` to be attempted);
 `compile_program_to_ir_with_options_and_profile` must stop invoking
 `parse_logos_program_with_profile` at all when `profile` is explicitly
 `RustLike` (not merely stop acting on its result), and its `Auto` branch
-needs the same three-state classification instead of `unwrap_or(false)`;
-and `cmd_check`'s `.or_else` must stop discarding a real multi-module
-load failure in favor of a silently-narrower single-file check. Whether
-these are one filed issue or several is an implementation-sequencing
-question, not a decision-authority question - out of scope here; see
-"Durable tracking for newly discovered defects" below for proposed issue
-text awaiting owner approval.
+needs the same classification instead of `unwrap_or(false)`; and
+`cmd_check`'s `.or_else` must stop discarding a real multi-module load
+failure in favor of a silently-narrower single-file check. Whether these
+are one filed issue or several is an implementation-sequencing question,
+not a decision-authority question - out of scope here; see "Durable
+tracking for newly discovered defects" below for proposed issue text
+awaiting owner approval.
 
 **TEST CONSEQUENCE** (not performed here): a regression per path proving
 that a genuinely invalid (not merely empty) grammar-specific input is
@@ -286,7 +331,16 @@ directly (not merely that its result is ignored); (2) a source file
 containing only `import` directives and no `system`/`entity`/`law`
 declaration must be classified as a positive Logos surface claim and
 must never be reinterpreted as RustLike - the exact case `#1670` itself
-names and the two-state classification would still miss.
+names and the two-state classification would still miss; (3) an ordinary,
+valid `RustLike` program (e.g. `fn main() { return; }`) must still
+compile successfully under `Auto` even though a Logos probe against it
+fails immediately with no prior positive evidence - proving the
+classifier does not treat every candidate-probe rejection as
+authoritative; (4) an input that independently satisfies both grammars'
+positive-claim conditions (or otherwise cannot be deterministically
+resolved) must be rejected with an explicit classification-ambiguity
+diagnostic, never silently resolved to whichever grammar was tried
+first.
 
 ## Decision B - Diagnostic Identity Authority
 
@@ -343,6 +397,26 @@ list. A code that is ever constructed in production and absent from the
 registry, or vice versa, is a drift defect (`#1704`/`E0243`'s class) by
 this decision's own definition, and a future qualification gate (§11)
 must be able to detect it mechanically rather than by manual audit.
+
+**Ownership scope of this rule (owner review round 4 clarification)**:
+`diagnostic_catalog()` currently lives in `crates/ton618-core/src/
+diagnostics.rs` - the same crate the "Dependency-owner analysis" section
+disqualifies from any *new* ownership role. This rule does **not**
+conflict with that disqualification, because it does not assign
+`ton618-core` a new role: `#1704`'s repair, as scoped here, is
+**qualification/coherence of the existing catalog in its existing
+location** - making the current function mechanically accurate against
+current production call sites - not a decision that `ton618-core` is,
+or becomes, the *canonical* registry owner for the future internal
+diagnostic model (§6). When that future model is eventually built, its
+own registry component's physical location is a question for the
+carrier/governance checkpoint (see "Dependency-owner analysis"), not
+answered by this rule and not assumed to be `ton618-core` merely because
+today's stopgap function happens to live there. This is why the repair
+DAG (§9) can leave `#1704` sequenced *before* the carrier-governance
+checkpoint without reordering: a qualification-only fix to an existing
+utility function's accuracy does not require the future owner to be
+selected first, whereas building the actual canonical registry would.
 
 **INVARIANT**: A diagnostic's originating semantic identity
 (code/severity/family) is immutable once assigned; only structured
@@ -419,18 +493,35 @@ identity today.
   tooling produces or consumes URIs; inventing one now would be choosing
   a representation for LSP's future convenience, which this decision's
   own governing rule forbids), and not a synthetic in-memory label
-  invented at the diagnostic layer itself. A single-file CLI invocation
-  (`smc check <file.sm>` with no project root) resolves its external
-  identity as the file's own path relative to the invocation's working
-  directory, consistent with how `smc`'s existing single-file fallback
-  already treats such invocations project-root-equivalent
-  (`docs/roadmap/.../semantic_stable_foundation_matrix.md`'s "Single-file
-  fallback" row). An imported module's external identity is the
-  project-root-relative path already computed to *load* it - not
-  re-derived independently at the diagnostic layer. Stdin/synthetic/
-  virtual sources (none currently exist as a compiler input path) have no
-  frozen representation here - out of scope until such an input path is
-  added.
+  invented at the diagnostic layer itself. **CORRECTION NOTE (owner
+  review round 4)**: the first version of this decision resolved a
+  single-file CLI invocation's external identity as "the file's own path
+  relative to the invocation's working directory," calling that "stable."
+  It is not: the same physical file, invoked from two different working
+  directories (`smc check foo.sm` from its own directory vs. `smc check
+  a/b/foo.sm` from a parent directory), would earn two different
+  identity strings for identical input - the opposite of stable, and an
+  inconsistency with this section's own IMPLEMENTATION CONSEQUENCE below,
+  which separately (and correctly) calls this same case "identity
+  unprovable." Corrected: a single-file CLI invocation (`smc check
+  <file.sm>` with no project root) resolves its external identity as the
+  invocation's own **canonicalized path's file name** (`Path::canonicalize()`,
+  the same primitive `package_manifest.rs` already uses for import
+  resolution) - a value that does not depend on the invoking working
+  directory, deterministic for a given file regardless of how it is
+  invoked. This is a narrower guarantee than a project-relative path
+  (it does not disambiguate two different single files that happen to
+  share a file name, since there is no shared project structure to make
+  that distinction against) but it is genuinely stable under the
+  dimension that matters here - invocation directory - unlike the
+  rejected CWD-relative form. If even a canonicalized file name cannot be
+  established (a truly rootless synthetic/stdin source, out of scope
+  below), identity is absent, consistent with the invariant. An imported
+  module's external identity is the project-root-relative path already
+  computed to *load* it - not re-derived independently at the diagnostic
+  layer. Stdin/synthetic/virtual sources (none currently exist as a
+  compiler input path) have no frozen representation here - out of scope
+  until such an input path is added.
 
 **INVARIANT**: If the canonical project/module authority cannot prove a
 file's identity for a given diagnostic, that diagnostic's file identity
@@ -471,14 +562,19 @@ extended to project structure itself.
 computed project-root-relative path (available at the point
 `check_file_with_provider`/`resolve_project_root_check_entry` already
 resolve it) into the diagnostic construction path, replacing every
-`file_id: 0`/string-prefix/`"<input>"` site; introduce an explicit
-"identity unprovable" representation for single-file invocations with no
-resolvable root.
+`file_id: 0`/string-prefix/`"<input>"` site; for a rootless single-file
+invocation, use the canonicalized file name (not a CWD-relative path,
+per the correction above); introduce an explicit "identity unprovable"
+representation reserved for sources where even that cannot be
+established (out-of-scope synthetic/stdin input).
 
 **TEST CONSEQUENCE** (not performed here): positive tests for ordinary
-project file and imported module (real, resolvable identity); a
-deterministic-absence test for a source whose identity cannot be proven
-(no invented `0`/`"<input>"` fallback).
+project file and imported module (real, resolvable identity); a test
+that the same single file, invoked from two different working
+directories, resolves to the same external identity (proving the
+CWD-independence the correction above requires); a deterministic-absence
+test for a source whose identity cannot be proven at all (no invented
+`0`/`"<input>"` fallback).
 
 ## Decision D - Source Range Authority
 
@@ -509,47 +605,87 @@ and C's evidence) - a separate defect from the *representation* question
 this section answers, already covered by Decisions A/B's preservation
 rule.
 
-**DECISION**: The canonical **internal** source-range law is: **UTF-8
-byte offsets, zero-based, half-open `[start, end)`**, using a real range
-(two offsets) rather than a single point, extending `ton618_core::Span`'s
-existing shape (already a range type, already zero-dependency-safe per
-§7) rather than inventing a new one. Line/column is a **derived
-presentation view** computed from the canonical byte range plus the
-source text, never itself the canonical identity - this directly reverses
-today's lexer behavior (byte offset computed first, then immediately
-collapsed to line/col and discarded), not merely documents it. Concrete
-rules: an empty range is a valid zero-width `[n, n)`, not a special case
-requiring its own type; an EOF-anchored diagnostic uses
-`[len, len)` on the source's own byte length; a diagnostic with no
-provable location (a synthetic/whole-program-level finding) carries **no
-range at all**, not a `[0, 0)` placeholder presented as if it meant
-something; invalid UTF-8 is not a range-law concern (the compiler's own
-source-loading boundary already rejects non-UTF-8 input via
-`fs::read_to_string`'s `Result::Err`, confirmed panic-free, before any
-range is ever computed) and CRLF is not a range-law concern either (byte
-offsets are representation-agnostic to line-ending style; only the
-line/col *presentation* view needs a documented CRLF convention, which
-this decision does not need to fix since it is a derived view, not the
-canonical identity).
+**CORRECTION NOTE (owner review round 4)**: the first version of this
+section said the canonical byte range "extend[s] `ton618_core::Span`'s
+existing shape (already a range type...)." Two independent problems:
+(1) this reassigns `ton618-core` a new canonical-ownership role
+("extend its shape" makes it the future carrier of the canonical range
+type), which the "Dependency-owner analysis" section elsewhere in this
+same document already establishes `ton618-core` is disqualified from -
+a closed governance track forbids assigning it any new ownership role,
+diagnostic carrier or otherwise, and that conclusion must hold
+consistently across every section, not just the one that states it
+explicitly. (2) It also mischaracterizes the actual current shape:
+`ton618_core::Span` is `{ start: SourceMark, end: SourceMark }`, and
+`SourceMark` is `{ line: u32, col: u32, file_id: FileId }`
+(`crates/ton618-core/src/source.rs:1-17`) - two line/column/file-id
+*points*, not a pair of byte offsets. "Extending its existing shape" to
+mean byte offsets would not be an extension, it would be a different
+representation entirely. Both issues are corrected below by separating
+what this decision actually freezes (semantics) from what it explicitly
+does not freeze (a concrete Rust type or its owning crate).
+
+**DECISION**: The canonical **internal** source-range *semantics* are:
+**UTF-8 byte offsets, zero-based, half-open `[start, end)`**, using a
+real range (two offsets) rather than a single point. This decision
+freezes those semantics only - it does **not** freeze a concrete Rust
+type or a physical owning crate for them; per "Dependency-owner
+analysis," that selection belongs to the future carrier/governance
+checkpoint, exactly like the internal canonical diagnostic model's own
+carrier selection. `ton618_core::Span`/`SourceMark` are cited elsewhere
+in this document only as **current/legacy representation evidence**
+(what exists today and why it is inadequate - see "CURRENT STATE"
+above), never as the future implementation target. Line/column is a
+**derived presentation view** computed from the canonical byte range
+plus the source text, never itself the canonical identity - this
+directly reverses today's lexer behavior (byte offset computed first,
+then immediately collapsed to line/col and discarded), not merely
+documents it. Concrete rules: an empty range is a valid zero-width
+`[n, n)`, not a special case requiring its own type; an EOF-anchored
+diagnostic uses `[len, len)` on the source's own byte length; a
+diagnostic with no provable location (a synthetic/whole-program-level
+finding) carries **no range at all**, not a `[0, 0)` placeholder
+presented as if it meant something; invalid UTF-8 is not a range-law
+concern (the compiler's own source-loading boundary already rejects
+non-UTF-8 input via `fs::read_to_string`'s `Result::Err`, confirmed
+panic-free, before any range is ever computed) and CRLF is not a
+range-law concern either (byte offsets are representation-agnostic to
+line-ending style; only the line/col *presentation* view needs a
+documented CRLF convention, which this decision does not need to fix
+since it is a derived view, not the canonical identity).
 
 Downstream artifact/execution coordinates are explicitly **not** source
 ranges and must never be presented as one without a validated mapping:
-`DecodedDebugSymbol{pc,line,col}` is source-mapping *evidence* embedded in
-a compiled artifact, not itself the canonical source range;
+`DecodedDebugSymbol{pc,line,col:u16}` is source-mapping *evidence*
+embedded in a compiled artifact, not itself the canonical source range;
 `VerificationDiagnostic.offset` (`crates/sm-verify/src/lib.rs:88-225`) is
 a bytecode-byte-offset **artifact coordinate**; a VM's runtime program
 counter is an **execution coordinate**. A verifier- or runtime-originated
-diagnostic receives a canonical source range **only** when a validated
-mapping (walking the artifact's own `debug_symbols` table back to a
-source byte range) actually proves the relationship for that specific
-diagnostic. Today, that mapping exists as data (`DebugSymbol` is
-validated for structural well-formedness at VM load,
-`crates/sm-vm/src/semcode_vm.rs:1668-1684`) but is exhaustively never
+diagnostic receives a canonical source range **only** when validated
+provenance proves, for that specific diagnostic instance, **all** of:
+(a) which source the range belongs to (a resolvable file identity per
+Decision C), (b) that the mapping corresponds to the actual compiled
+source revision (not a stale or mismatched build), and (c) a concrete
+byte `[start, end)` pair against that source's bytes. **`DecodedDebugSymbol`'s
+existing `{pc, line, col}` shape does not, by itself, satisfy this** - it
+carries no file identity and no byte offsets, only a program counter and
+a presentation-level line/column point; a successful lookup against it
+proves at most "this PC maps to this line/column," which is not the same
+claim as a proven canonical byte range. If a future architecture decides
+that a `DecodedDebugSymbol` lookup can license a *derived* zero-width
+byte anchor (e.g. by re-deriving a byte offset from its line/column
+against a known-matching source text) or some other reduced-but-honest
+range, that is a **new, explicit rule** requiring its own decision - not
+assumed here, and not implied by "the mapping exists as data." Today,
+`DebugSymbol` is validated for structural well-formedness at VM load
+(`crates/sm-vm/src/semcode_vm.rs:1668-1684`) but is exhaustively never
 consulted at any of the eight production `RuntimeError::Trap(...)`
 construction sites - so under this decision's own rule, every current
 runtime trap correctly has **no** source range today, not a fabricated
-`offset 0`/`line 0` standing in for one. Closing that gap (actually
-performing the lookup) is future implementation, not this decision.
+`offset 0`/`line 0` standing in for one, and closing that gap requires
+both performing the lookup *and* resolving the file-identity/byte-range
+insufficiency named above - neither is future implementation performed
+here.
 
 **INVARIANT**: A source range is either a real, provably-mapped
 `[start, end)` byte pair against a specific source's actual bytes, or it
@@ -589,15 +725,26 @@ diverge.
 
 **IMPLEMENTATION CONSEQUENCE** (not performed here): the lexer preserves
 `(start_byte, end_byte)` per token instead of only `pos`/`mark`;
-`FrontendError` and every downstream diagnostic gain a real
-`Span`-shaped optional range field instead of/alongside the current point
-`pos`; `sm-verify`/`sm-vm` gain the actual debug-symbol lookup at trap
-sites, populating a range only when the lookup succeeds.
+`FrontendError` and every downstream diagnostic gain a real, `(start,
+end)`-range-shaped optional field (concrete type/owner not frozen here -
+see "DECISION" above) instead of/alongside the current point `pos`;
+`sm-verify`/`sm-vm` gain the actual debug-symbol lookup at trap sites -
+but populating a range requires *more* than a successful
+`DecodedDebugSymbol` lookup, per the corrected mapping law above: file
+identity and a genuine byte `[start, end)` must also be established
+(whether by extending what a debug symbol carries, or by a separately
+frozen derivation rule), or the range stays absent even when the
+existing `{pc, line, col}` lookup itself succeeds.
 
 **TEST CONSEQUENCE** (not performed here): positive range-preservation
 tests per error class (mirroring Decision C's per-class tests); an
 explicit test that a runtime trap with no available debug symbols
-produces a diagnostic with an absent range, not a fabricated one.
+produces a diagnostic with an absent range, not a fabricated one; and an
+explicit test that a *successful* `DecodedDebugSymbol` lookup alone
+(today's `{pc, line, col}` shape, with no file identity or byte offsets
+added) still produces an absent canonical range, proving the
+implementation does not conflate "PC mapped to a line/column" with "byte
+range proven."
 
 ## Canonical carrier boundary
 
@@ -755,11 +902,16 @@ PR performs.
 
 Stated fully under Decision D; restated here as the standalone rule
 future qualification (§11) must check: a verifier- or runtime-originated
-diagnostic's source range is present **if and only if** a validated
-debug-symbol mapping proves it for that specific diagnostic instance: no
-mapping attempted, no range; mapping attempted and failed (out-of-bounds,
-missing table), no range; mapping attempted and succeeded, the real
-mapped range. Never a placeholder in any of the first two cases.
+diagnostic's source range is present **if and only if** validated
+provenance proves file identity, source-revision correspondence, and a
+genuine byte `[start, end)` for that specific diagnostic instance - not
+merely that *some* debug-symbol lookup succeeded. No mapping attempted:
+no range. Mapping attempted and failed (out-of-bounds, missing table):
+no range. A `DecodedDebugSymbol` lookup succeeding on its own (today's
+`{pc, line, col}` shape) is **insufficient** and must still produce no
+range, because it carries neither file identity nor byte offsets. Only
+when the fuller provenance above is actually established does a real
+mapped range exist. Never a placeholder in any other case.
 
 ## Presentation/LSP boundary
 
@@ -1075,11 +1227,23 @@ per the SSF09-E0 reconnaissance), does not claim verifier/runtime already
 map every error to source (the mapping law's own "if and only if" clause
 states today's real answer is "never, in every current production case"),
 does not claim an LSP exists, does not claim a carrier owner has been
-selected (corrected this round - see above), and does not touch the
-formatter's already-accurate narrow-scope claim in
-`docs/spec/source_style.md`. No historical document is rewritten by this
-decision; the TON618 perimeter's own closure record is read, not
-altered.
+selected, does not touch the formatter's already-accurate narrow-scope
+claim in `docs/spec/source_style.md`, does not claim a bare
+candidate-probe rejection with no prior positive evidence is
+authoritative (corrected this round - Decision A's law now requires
+positive evidence first), does not claim `ton618_core::Span`/`SourceMark`
+is the future canonical range type or that `ton618-core` gains a new
+range-carrying role (corrected this round - Decision D cites them only
+as current/legacy evidence), does not claim a successful
+`DecodedDebugSymbol` lookup by itself proves a canonical source range
+(corrected this round - it lacks file identity and byte offsets), does
+not claim a CWD-relative path is a stable external file identity
+(corrected this round - Decision C now uses a canonicalized file name
+for rootless single-file invocations), and does not claim `#1704`'s
+repair grants `ton618-core` canonical registry ownership (corrected this
+round - Decision B now states it explicitly as qualification-only).
+No historical document is rewritten by this decision; the TON618
+perimeter's own closure record is read, not altered.
 
 **Sequencing implication**: a future implementation checkpoint may
 proceed directly from Decisions A-D and the repair DAG for the
