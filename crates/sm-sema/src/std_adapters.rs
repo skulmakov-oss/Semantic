@@ -114,57 +114,123 @@ fn is_layout_token(kind: TokenKind) -> bool {
     )
 }
 
-// Owner-review correction (round 1): a keyword's own token kind is
-// assigned by the lexer independent of syntactic position - `Entity`
-// inside a RustLike `fn` body still lexes as `KwEntity`. Evidence must
-// therefore be restricted to top-level declaration-head positions (the
-// only positions either real top-level parse loop ever inspects), not
-// membership anywhere in the whole token stream. `top_level_token_kinds`
-// tracks nesting purely via already-public structural tokens (brace/
-// paren/bracket delimiters and the lexer's own Indent/Dedent) - it does
-// not parse or recognize any declaration, so it duplicates no grammar.
-fn top_level_token_kinds(tokens: &[Token]) -> impl Iterator<Item = TokenKind> + '_ {
+fn is_schema_role_marker_text(text: &str) -> bool {
+    matches!(text, "config" | "api" | "wire")
+}
+
+// Owner-review correction (round 1, refined round 3): a keyword's own
+// token kind is assigned by the lexer independent of syntactic position
+// - `Entity` inside a RustLike `fn` body still lexes as `KwEntity`.
+// Round 1 restricted evidence to tokens outside any bracket/indent
+// nesting, but "outside nesting" (depth <= 0) is not the same as "is
+// the actual declaration head": in `fn Entity() { .. }`, `Entity` sits
+// at depth 0 too (before any `(`/`{`/indent), yet it occupies the
+// RustLike function's *name* slot, not a Logos declaration head.
+//
+// Both real top-level loops decide the declaration kind from exactly
+// ONE token per iteration - the first non-layout token found once the
+// previous declaration has been fully consumed (`next_non_layout_idx`
+// in `parse_program`; `skip_newlines_raw` + a single `check_raw` in
+// `parse_logos_program`) - with exactly one documented exception:
+// `parse_program`'s role-marked schema lookahead (a `config`/`api`/
+// `wire` Ident immediately followed by `KwSchema`,
+// `starts_role_marked_schema_decl`). `top_level_declaration_head_kinds`
+// replicates that same "one head per inter-declaration boundary" rule
+// using only already-public token kind/text fields: a boundary is
+// crossed by a `Newline` or a `Dedent` that returns nesting to depth 0
+// (an inter-declaration gap), never by a closing paren/brace/bracket
+// that merely ends part of the CURRENT declaration's own content (e.g.
+// a function's parameter list). This does not parse or recognize the
+// body of any declaration, so it duplicates no grammar.
+fn top_level_declaration_head_kinds(tokens: &[Token]) -> Vec<TokenKind> {
     let mut depth: i32 = 0;
-    tokens.iter().filter_map(move |t| {
-        let is_top_level = depth <= 0;
-        match t.kind {
-            TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket | TokenKind::Indent => {
-                depth += 1;
+    let mut at_boundary = true;
+    let mut heads = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let kind = tokens[i].kind;
+        match kind {
+            TokenKind::Newline => {
+                if depth <= 0 {
+                    at_boundary = true;
+                }
+                i += 1;
+                continue;
             }
-            TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket | TokenKind::Dedent => {
+            TokenKind::Indent => {
+                depth += 1;
+                i += 1;
+                continue;
+            }
+            TokenKind::Dedent => {
                 depth -= 1;
+                if depth <= 0 {
+                    at_boundary = true;
+                }
+                i += 1;
+                continue;
+            }
+            TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket => {
+                depth += 1;
+                i += 1;
+                continue;
+            }
+            TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket => {
+                depth -= 1;
+                i += 1;
+                continue;
             }
             _ => {}
         }
-        is_top_level.then_some(t.kind)
-    })
+        if depth <= 0 && at_boundary {
+            heads.push(kind);
+            at_boundary = false;
+            if kind == TokenKind::Ident && is_schema_role_marker_text(&tokens[i].text) {
+                let mut j = i + 1;
+                while j < tokens.len() && is_layout_token(tokens[j].kind) {
+                    j += 1;
+                }
+                if let Some(next) = tokens.get(j) {
+                    if next.kind == TokenKind::KwSchema {
+                        heads.push(TokenKind::KwSchema);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    heads
 }
 
 fn has_logos_exclusive_evidence(tokens: &[Token]) -> bool {
-    top_level_token_kinds(tokens).any(|kind| {
-        matches!(
-            kind,
-            TokenKind::KwSystem
-                | TokenKind::KwEntity
-                | TokenKind::KwLaw
-                | TokenKind::KwPulse
-                | TokenKind::KwProfile
-        )
-    })
+    top_level_declaration_head_kinds(tokens)
+        .into_iter()
+        .any(|kind| {
+            matches!(
+                kind,
+                TokenKind::KwSystem
+                    | TokenKind::KwEntity
+                    | TokenKind::KwLaw
+                    | TokenKind::KwPulse
+                    | TokenKind::KwProfile
+            )
+        })
 }
 
 fn has_rustlike_exclusive_evidence(tokens: &[Token]) -> bool {
-    top_level_token_kinds(tokens).any(|kind| {
-        matches!(
-            kind,
-            TokenKind::KwEnum
-                | TokenKind::KwFn
-                | TokenKind::KwRecord
-                | TokenKind::KwSchema
-                | TokenKind::KwTrait
-                | TokenKind::KwImpl
-        )
-    })
+    top_level_declaration_head_kinds(tokens)
+        .into_iter()
+        .any(|kind| {
+            matches!(
+                kind,
+                TokenKind::KwEnum
+                    | TokenKind::KwFn
+                    | TokenKind::KwRecord
+                    | TokenKind::KwSchema
+                    | TokenKind::KwTrait
+                    | TokenKind::KwImpl
+            )
+        })
 }
 
 fn is_blank_source(tokens: &[Token]) -> bool {
@@ -1943,6 +2009,57 @@ Law "Alpha" [priority 7]:
             !rendered.to_lowercase().contains("ambiguous")
                 && !rendered.to_lowercase().contains("conflict"),
             "a lexer failure must not be reported as a surface conflict: {rendered}"
+        );
+    }
+
+    // T12 (owner-review correction, round 3) - "outside any nesting"
+    // (depth <= 0) is not the same as "is the declaration head". In
+    // `fn Entity() { .. }`, `Entity` occupies the RustLike function's
+    // *name* slot - it sits at depth 0 too (before `(`/`{`), but it is
+    // not a Logos declaration head. `fn` is the genuine top-level
+    // RustLike evidence; RustLike's own parser requires a plain
+    // identifier after `fn` and rejects the keyword token `Entity`
+    // there. The originating RustLike failure must be preserved, never
+    // reinterpreted as a conflict merely because the name happens to
+    // lex as a Logos-exclusive keyword.
+    #[test]
+    fn check_source_ignores_non_head_keyword_in_rustlike_declaration() {
+        let src = "fn Entity() {\n    return;\n}\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile)
+            .expect_err("RustLike's own genuine parse failure must not become an admitted program");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("expected identifier"),
+            "expected the originating RustLike parse failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.to_lowercase().contains("ambiguous") && !rendered.to_lowercase().contains("conflict"),
+            "a non-head keyword in a RustLike declaration's own header must not manufacture a conflict: {rendered}"
+        );
+    }
+
+    // T13 (owner-review correction, round 3) - mirror of T12: `Entity`
+    // is the genuine top-level Logos declaration head; `fn` occupies
+    // the entity's *name* slot and sits at depth 0 too, but is not a
+    // RustLike declaration head. Logos's own entity-name parser
+    // requires a plain identifier and rejects the keyword token `fn`
+    // there. The originating Logos failure must be preserved, never
+    // reinterpreted as a conflict.
+    #[test]
+    fn check_source_ignores_non_head_keyword_in_logos_declaration() {
+        let src = "Entity fn:\n    state x: quad\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile)
+            .expect_err("Logos's own genuine parse failure must not become an admitted program");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("expected identifier"),
+            "expected the originating Logos parse failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.to_lowercase().contains("ambiguous") && !rendered.to_lowercase().contains("conflict"),
+            "a non-head keyword in a Logos declaration's own header must not manufacture a conflict: {rendered}"
         );
     }
 }
