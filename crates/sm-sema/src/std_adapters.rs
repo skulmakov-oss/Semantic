@@ -100,7 +100,10 @@ pub fn check_source(input: &str) -> Result<SemanticReport, SemanticError> {
 /// its ownership is never inferred from the keyword's presence, only from
 /// which grammar(s) actually admit the concrete input (see below).
 fn is_layout_token(kind: TokenKind) -> bool {
-    matches!(kind, TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent)
+    matches!(
+        kind,
+        TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent
+    )
 }
 
 fn has_logos_exclusive_evidence(tokens: &[Token]) -> bool {
@@ -1679,7 +1682,8 @@ Law "Alpha" [priority 7]:
         );
         let rendered = err.to_string();
         assert!(
-            rendered.to_lowercase().contains("ambiguous") || rendered.to_lowercase().contains("conflict"),
+            rendered.to_lowercase().contains("ambiguous")
+                || rendered.to_lowercase().contains("conflict"),
             "expected a deterministic ambiguity/conflict diagnosis, got: {rendered}"
         );
     }
@@ -1801,7 +1805,8 @@ Law "Alpha" [priority 7]:
         if let Err(e) = &result {
             let rendered = e.to_string();
             assert!(
-                !rendered.to_lowercase().contains("ambiguous") && !rendered.to_lowercase().contains("conflict"),
+                !rendered.to_lowercase().contains("ambiguous")
+                    && !rendered.to_lowercase().contains("conflict"),
                 "blank input must never be reported as an authority conflict: {rendered}"
             );
         }
