@@ -3279,20 +3279,25 @@ impl<'a> Parser<'a> {
     fn admit_logos_program(&mut self) -> GrammarAdmission<LogosProgram> {
         // Evaluated here, at the same call site (before any token is
         // consumed, `self.idx == 0`) as `parse_logos_program`'s own
-        // unconditional pre-loop `require_logos_surface(...)?` - matching
-        // that call site exactly, on principle, rather than relying on
-        // `Parser::pos()`'s `unwrap_or(0)` fallback to coincidentally
-        // agree with it if this were instead evaluated after the scan
-        // below (where `self.idx` has moved to end-of-input on a clean
-        // scan, which today also happens to read back as `pos: 0`, but
-        // that is `pos()`'s fallback semantics doing the work, not this
-        // call actually running at the same point in the scan).
-        // `require_logos_surface` is a pure, side-effect-free predicate,
-        // so calling it here does not gate or abort anything - the
-        // SSF-09 Decision E, round 5 requirement that evidence basis is
-        // determined "as if policy were not a factor" is about control
-        // flow (the scan is never skipped or aborted because of this
-        // check), not about which line of code happens to call it.
+        // unconditional pre-loop `require_logos_surface(...)?`. This is
+        // NOT merely stylistic: evaluating it after the scan instead
+        // (where `self.idx` has moved to end-of-input on a clean scan)
+        // reads back `Parser::pos()`'s `unwrap_or(0)` fallback for the
+        // resulting `FrontendError.pos`, which only coincidentally
+        // matches `self.idx == 0`'s value (also 0) for input with no
+        // content before the first declaration - it genuinely diverges
+        // for any input with leading content that itself consumes bytes
+        // without producing a token before the first declaration (e.g. a
+        // leading `//` comment: `tokens[0].pos` is the comment's length,
+        // not 0). See the `parity_global_logos_surface_denial_with_
+        // actual_logos_evidence` test, which deliberately uses a leading
+        // comment for exactly this reason. `require_logos_surface` is a
+        // pure, side-effect-free predicate, so calling it here does not
+        // gate or abort anything - the SSF-09 Decision E, round 5
+        // requirement that evidence basis is determined "as if policy
+        // were not a factor" is about control flow (the scan is never
+        // skipped or aborted because of this check), not about which
+        // line of code happens to call it.
         let surface_check =
             self.require_logos_surface("Logos surface is disabled by profile policy");
         let mut basis = EvidenceBasis::None;
@@ -8224,7 +8229,7 @@ mod grammar_admission_tests {
     #[test]
     fn parity_global_logos_surface_denial_with_actual_logos_evidence() {
         let profile = logos_surface_disabled();
-        let src = "Entity Player:\n    state hp: quad\n";
+        let src = "// leading comment\nEntity Player:\n    state hp: quad\n";
         let expected = parse_logos_with_profile(src, &profile).expect_err(
             "today's parser's unconditional pre-loop require_logos_surface \
              check rejects every input when the surface is disabled",
@@ -8236,7 +8241,12 @@ mod grammar_admission_tests {
         assert_eq!(
             actual, expected,
             "the global surface-denial error must equal today's parser's \
-             error exactly, including its position"
+             error exactly, including its position - the leading comment \
+             is deliberate: it is what actually distinguishes evaluating \
+             require_logos_surface at scan-start from evaluating it fresh \
+             after the scan completes (both otherwise happen to read back \
+             as pos: 0 for inputs with no content before the first real \
+             declaration, which would mask a regression here)"
         );
     }
 
