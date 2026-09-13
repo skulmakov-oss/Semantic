@@ -1634,6 +1634,660 @@ follow-up comment on `#1580`, per the original plan, rather than
 reopening `#1918`'s exact HEAD solely to add them. This PR does not
 create, edit, or otherwise mutate either issue.
 
+## Decision E - Surface Admission Contract
+
+**Status: FROZEN - owner-approved architecture contract**, after four
+owner review rounds (see "Audit history" under "Proposed decision"
+below for what each round found and corrected). This section is a new
+architectural decision added after Decisions A-D above were already
+frozen and merged (via `#1918`/`#1921`/`#1922`); it does not reopen or
+reinterpret any of them. **Freezing this contract does not authorize
+production implementation**: `sm-front` and `sm-sema` remain untouched
+by this checkpoint, and implementing `admit_program_with_profile`/
+`admit_logos_program_with_profile` (or rewriting `sm-sema`'s
+`check_source_with_profile` on top of them) each requires its own,
+separate, future implementation-only checkpoint GO - exactly as
+"Migration plan" below already specifies and has specified since this
+section's first draft.
+
+### Motivating evidence
+
+`#1670`'s implementation (PR `#1923`) went through four correction
+rounds, each fixing one class of false classification in `sm-sema`'s
+own from-scratch reconstruction of "which grammar owns this top-level
+declaration" by scanning the raw token stream, and each subsequently
+found - by independent adversarial review, not by the existing test
+suite or hosted CI, both of which stayed green throughout - to have
+introduced or left a *different* class of false classification:
+
+1. Round 1: scanning the whole token stream let a keyword nested inside
+   the *other* grammar's own body (e.g. `Entity` inside a RustLike `fn`
+   body) count as evidence.
+2. Round 3: restricting evidence to tokens outside any bracket/indent
+   nesting still let a keyword in a *non-head* position within a
+   declaration's own header at depth 0 count as evidence (e.g. `Entity`
+   as the function *name* in `fn Entity() {}`).
+3. Round 3 self-review: an excess closing delimiter in malformed input
+   could drive the nesting-depth counter negative, resurrecting false
+   "top level" status for everything after it.
+4. Round 4 (reverted): restricting the declaration-head boundary to
+   only fire after a real block closes (`RBrace`/`Dedent` returning to
+   depth 0) fixed round 3's residual gap, but is *itself* a regression:
+   `System`, `Pulse`, `Profile`, and a bare `Import` never produce a
+   `RBrace` or `Dedent` at all - so this rule permanently disables
+   further evidence detection for the rest of the file after any one of
+   them. Confirmed concretely:
+   - `Pulse "tick"\nfn main() {\n    return;\n}\n` - genuine dual
+     evidence (`Pulse` Logos-exclusive, `fn` RustLike-exclusive) -
+     silently misclassified as Logos-only, reporting `"expected Logos
+     declaration"` instead of the required `AMBIGUOUS/CONFLICTING`.
+   - `Import "a.sm"\nEntity A:\n    state x: quad\n` under
+     `allow_logos_surface = false` - genuine Logos-exclusive evidence
+     (`Entity`) masked by the preceding `Import`, silently
+     misclassified as no evidence at all, reporting a RustLike parse
+     error instead of the required Logos policy rejection (the same
+     invariant class as T2).
+
+   Reverted in `60c1e44c`; PR `#1923` is parked at that commit
+   (byte-identical to round 3) pending this decision.
+
+Separately, the same review round found `Import "a.sm" fn main() {
+return; }` (two declarations sharing one physical line with zero
+separator) still produces `AMBIGUOUS/CONFLICTING` rather than
+recognizing `fn` as the sole real head. This was investigated and is
+**not** attributed to a defect in the classification law itself:
+`parse_import_decl` requires no trailing terminator, so there is no
+lexical signal at all between the two declarations, and the resulting
+ambiguity is arguably consistent with the frozen law's own definition
+(Logos does admit this concrete input, via its already-documented
+content-blind legacy `Import`/`Pulse`/`Profile` skip - see Decision A's
+current-state discussion of `parse_logos_program`). It is listed here
+only as a data point for the "Cross-grammar authority matrix" section
+below, not as evidence requiring a fix.
+
+**Root cause (common to all four rounds' failures)**: different
+declaration kinds terminate via genuinely different, non-uniform
+lexical signals - `Newline` (Logos's legacy `Import`/`Pulse`/`Profile`
+skip), `Semi` (a RustLike expression-bodied function,
+`crates/sm-front/src/parser.rs:213-220`), `RBrace` (a braced body),
+`Dedent` (an indented body), or **no signal at all** (a bare `Import`
+with no trailing `as`/`*`/`{}`, which can be immediately followed by
+another declaration on the same physical line). No single rule over
+token kinds and bracket/indent depth can determine "has the current
+declaration finished" without first knowing *which kind* of declaration
+is currently open - and that is exactly the grammar-level knowledge
+`#1670`'s own brief prohibits `sm-sema` from duplicating (STOP clause:
+*"If existing public sm-front APIs do not let sm-sema establish the
+necessary top-level evidence without duplicating a material part of
+the grammar, introducing a brittle home-grown parser, or modifying
+sm-front, STOP and report before widening scope"*). Four rounds of
+concrete, reproducible counterexamples are the evidence that this STOP
+condition has been reached.
+
+### Current state (verified against baseline SHA
+`c0e2e50600e418f72af156a3c57616971d391494`)
+
+- `parse_program`'s top-level loop
+  (`crates/sm-front/src/parser.rs:89-135`): single-shot
+  `Result<Program, FrontendError>`. The first time any iteration hits
+  the `_ => Err(...)` branch (a genuinely unrecognized top-level token)
+  *or* a declaration's own sub-parser propagates an `Err` via `?`, the
+  whole function returns immediately, discarding every declaration
+  already successfully collected. Nothing distinguishes, from the
+  returned `Result` alone, "the very first token was never a
+  recognized declaration head" from "a head was recognized and its own
+  content later failed."
+- `parse_logos_program`'s top-level loop
+  (`crates/sm-front/src/parser.rs:2954-3020`): accumulates *multiple*
+  errors across iterations via `recover_logos_anchor()`-based recovery;
+  discards all partial success (`out`) if `errors` is non-empty at the
+  end, returning one merged `Err`; otherwise returns `Ok(LogosProgram)`.
+  Same gap: nothing distinguishes "never recognized a single
+  System/Entity/Law/legacy-directive" from "recognized at least one,
+  but something else in the file failed."
+- `FrontendError` (`crates/sm-front/src/types.rs:867-870`) is exactly
+  `{ pos: usize, message: String }` - no field distinguishes these two
+  cases either; the distinction currently exists only transiently, as
+  an artifact of *which code path* raised the error, and is discarded
+  the moment either function returns its flat `Result`.
+- `sm-sema`'s `check_source_with_profile` (`#1670`, PR `#1923`)
+  currently tries to reconstruct this exact missing information from
+  *outside* sm-front, by scanning the already-lexed token stream for
+  "declaration-head" positions using its own independently-invented
+  boundary heuristic (`top_level_declaration_head_kinds`). This section
+  proposes eliminating that reconstruction entirely by having sm-front
+  expose the information its own parsers already have transiently.
+
+### Frozen decision (owner-approved architecture, round 4)
+
+Add two new, purely **additive** public functions to `sm-front`
+returning a new type in place of today's flat `Result`, alongside - not
+replacing - every existing public parsing function:
+
+```rust
+pub enum GrammarAdmission<T> {
+    /// This grammar established no sufficient positive evidence for
+    /// ownership of this input. NOT the same as "this grammar's
+    /// dispatch never recognized a candidate keyword" - a shared-
+    /// vocabulary candidate (e.g. `Import`) can be dispatched and still
+    /// fail to cross this grammar's own sufficient-evidence threshold
+    /// (see `Import foo.bar` under RustLike, below), in which case the
+    /// correct result is still `NoClaim`.
+    NoClaim,
+    /// This grammar established sufficient evidence *only* through
+    /// vocabulary shared with the other grammar (`Import`, currently
+    /// the only member). Carries the grammar's own parse outcome for
+    /// the whole input.
+    Shared(Result<T, FrontendError>),
+    /// This grammar established sufficient evidence through at least
+    /// one declaration form exclusive to it (`System`/`Entity`/`Law`/
+    /// `Pulse`/`Profile` for Logos; `enum`/`fn`/`record`/`schema`/
+    /// `trait`/`impl`/role-marked-schema for RustLike) anywhere in the
+    /// input. Carries the grammar's own parse outcome for the whole
+    /// input.
+    Exclusive(Result<T, FrontendError>),
+}
+
+pub fn admit_program_with_profile(
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> GrammarAdmission<Program>;
+
+pub fn admit_logos_program_with_profile(
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> GrammarAdmission<LogosProgram>;
+```
+
+The exact Rust representation above is illustrative, not frozen; the
+**semantics** are what this decision fixes: a grammar-local admission
+reports two independent facts - **evidence basis** (did this grammar
+establish ownership through vocabulary it shares with the other
+grammar, or through vocabulary exclusive to it - `NoClaim` covers
+"neither") and **parse outcome** (`Ok`/`Err`, nested inside `Shared`/
+`Exclusive`). Critically, a grammar-local `Err` is **not, by itself, an
+authoritative failure** - see "Cross-grammar evidence resolver" below;
+authority is decided only after the two grammars' evidence bases are
+compared.
+
+**Naming - conceptual firewall (FROZEN by owner ruling, round 1)**: the
+type is named `GrammarAdmission<T>`, not `SurfaceAdmission<T>` as an
+earlier draft of this section proposed. This is a deliberate lexical
+firewall, not a style preference. `GrammarAdmission<T>` names what
+**one grammar's own parser** concludes about an input in isolation;
+Decision A's own frozen vocabulary - `NO SURFACE CLAIM`/`UNIQUE
+POSITIVE SURFACE CLAIM`/`AMBIGUOUS-CONFLICTING CLAIMS`, and any future
+`SurfaceAuthority`/`SurfaceVerdict` type naming the **cross-grammar
+coordinator's** decision - must stay visually and lexically distinct
+from it. Illustrative shape (naming only - `resolve_surface_authority`
+and any `SurfaceVerdict` type are not designed by this decision; their
+concrete shape is deferred to the implementation checkpoint in
+"Migration plan" below):
+
+```rust
+let logos: GrammarAdmission<LogosProgram> = admit_logos_program_with_profile(...);
+let rustlike: GrammarAdmission<Program> = admit_program_with_profile(...);
+let verdict: SurfaceVerdict = resolve_surface_authority(logos, rustlike);
+```
+
+**Audit history: how this shape was reached (owner review rounds 1-4)**
+- kept per the standing rule of this document not to delete correction
+history, condensed rather than reproduced verbatim:
+
+- **Round 1** proposed a flat `NoClaim`/`Accepted(T)`/
+  `ClaimedButFailed(FrontendError)` enum, with an implementation sketch
+  tracking `any_declaration_accepted`, set `true` only once a
+  declaration's own sub-parser *succeeded*. Wrong: ownership happens
+  before success or failure is known, not "success creates ownership."
+- **Round 2** corrected the flag to `any_declaration_claimed`, set
+  `true` universally *at dispatch* - the instant any top-level keyword
+  is recognized, including the shared `Import` keyword. Adversarial
+  review found this directly contradicted Decision A's own frozen
+  unquoted-`Import` ruling ("produces no RustLike claim to conflict
+  with... UNIQUE POSITIVE LOGOS CLAIM"): the round-2 model made an
+  unquoted import `ClaimedButFailed` on the RustLike side, which the
+  frozen matrix then resolved to AMBIGUOUS/CONFLICTING.
+- **Round 3** deferred the shared keyword's commit point to each
+  grammar's own frozen sufficient-evidence threshold (dispatch for
+  Logos; `expect_string_literal_text` success for RustLike), which
+  fixed the round-2 counterexample exactly. But a second adversarial
+  pass found this still broke ordinary multi-declaration files: `Import
+  "a.sm"` followed by genuine exclusive evidence in *either* grammar
+  (`Entity`, or `fn main() {}`) produced `Accepted`+`ClaimedButFailed`
+  in the frozen matrix - AMBIGUOUS/CONFLICTING - directly contradicting
+  Decision A's explicit rule that "if `import` appears alongside
+  genuinely Logos-exclusive evidence in the same input... the
+  Logos-exclusive evidence already establishes UNIQUE POSITIVE LOGOS
+  CLAIM for the whole input regardless of what the `import` line's own
+  dual-parseability would otherwise be" (and, by the document's own
+  stated symmetry, the mirror case for RustLike-exclusive evidence).
+  Root cause: a flat `ClaimedButFailed` treats "claimed only shared
+  vocabulary, then the rest of the file belongs to the other grammar"
+  identically to "claimed real exclusive evidence, then genuinely
+  failed" - two situations Decision A already treats as having
+  different strength, which the three-state enum had no way to
+  represent.
+- **Round 4 (this round)** is the fix: evidence basis (`NoClaim`/
+  `Shared`/`Exclusive`) and parse outcome (`Ok`/`Err`) become two
+  independent axes instead of one flat three-state enum. This is not a
+  new invention - it is Decision A's own already-frozen shared-vs-
+  exclusive distinction, promoted from prose into the type so `sm-sema`
+  can consume it directly instead of re-deriving it.
+
+Taking `&[Token]` rather than `&str`: lexing stays a prior, separate
+step exactly as it is today - a lex failure is not a surface-admission
+outcome for *either* grammar, it is a deterministic pre-parse failure
+`sm-sema` already handles on its own (SSF09-E2 round 1's lex-error-
+preservation fix), and both admission functions would otherwise re-lex
+the same input redundantly.
+
+**Implementation sketch** (for a future, separate implementation
+checkpoint - not authorized by this decision-only checkpoint):
+
+Each `admit_*` function tracks one local `evidence_basis` value
+(`None`/`Shared`/`Exclusive`, starting at `None`) alongside computing
+the grammar's own parse outcome exactly as today's `parse_program`/
+`parse_logos_program` already do (unchanged: RustLike aborts on the
+first sub-parser `Err` via `?`, discarding partial success, exactly as
+`Result<Program, FrontendError>` does today; Logos accumulates errors
+per iteration via `recover_logos_anchor()` and merges them at the end,
+exactly as today). `evidence_basis` promotion is **absorbing and
+monotonic**: `Exclusive` dominates `Shared` dominates `None`, and once
+reached it is never downgraded for the rest of the scan, regardless of
+what any individual declaration's own sub-parser does afterward. The
+final `GrammarAdmission` is `NoClaim` if `evidence_basis` stayed `None`;
+otherwise `Shared(outcome)` or `Exclusive(outcome)`, where `outcome` is
+the grammar's already-computed `Result<T, FrontendError>` for the whole
+input.
+
+- `parse_program`'s loop (RustLike): dispatch on any of the six
+  exclusive heads or role-marked-schema promotes `evidence_basis` to
+  `Exclusive` immediately, regardless of that declaration's own
+  eventual success or failure - illustrated by `fn main(\n` (a
+  recognized `fn` head whose own parameter list then fails to parse)
+  yielding `Exclusive(Err(...))`. For `Import`: dispatch on `KwImport`
+  alone does **not** promote anything. `parse_import_decl`
+  (`crates/sm-front/src/parser.rs:137-173`) reaches RustLike's shared
+  threshold only once `expect_string_literal_text` (`parser.rs:140`)
+  *succeeds* - exactly Decision A's own already-frozen "RustLike
+  requires a string literal specifically" rule, restated as a
+  threshold, not a new rule. An unquoted/bare path fails that check
+  *before* the threshold is reached, so `evidence_basis` is left
+  unchanged (an unquoted, standalone `Import` therefore leaves
+  `evidence_basis` at `None` -> `NoClaim` overall, since nothing else
+  was ever recognized). Once the string literal succeeds,
+  `evidence_basis` promotes to `Shared` (unless already `Exclusive`
+  from an earlier or later declaration in the same file, which always
+  wins per the absorbing rule); the optional `pub`/`as`/`*`/`{...}`
+  clauses that follow are threshold-*internal* to `Import`'s own shared
+  production, so a failure there (e.g. `Import "a.sm" as 123`) still
+  only yields `Shared(Err(...))`, never promotes to `Exclusive`.
+- `parse_logos_program`'s loop (Logos): dispatch on `System`/`Entity`/
+  `Law`/`Pulse`/`Profile` promotes `evidence_basis` to `Exclusive`
+  immediately - illustrated by `Entity\n    <malformed entity
+  body/header>` yielding `Exclusive(Err(...))`. For `Import`: Decision
+  A's frozen law imposes no additional structural requirement on
+  Logos's own `Import` handling beyond the keyword and the
+  `require_legacy_compatibility` policy check - Logos's content
+  handling "accepts anything up to the next newline once
+  legacy-compatibility passes," with zero further validation - so
+  Logos's shared threshold for `Import` is the keyword recognition
+  itself, promoting `evidence_basis` to `Shared` (unless already
+  `Exclusive`) at that point, independent of whether the subsequent
+  policy check passes.
+- **Concrete examples, frozen by this ruling**:
+
+  | Input | Logos | RustLike | `Auto` verdict |
+  |---|---|---|---|
+  | `Import "a.sm"` alone | `Shared(Ok)` | `Shared(Ok)` | AMBIGUOUS/CONFLICTING |
+  | `Import foo.bar` alone (unquoted) | `Shared(Ok)` | `NoClaim` | Logos accepted (unique) |
+  | `Import "a.sm"` + `Entity Player: ...` | `Exclusive(Ok)` | `Shared(Err)` | Logos accepted (unique) |
+  | `Import "a.sm"` + `fn main() {}` | `Shared(Err)` | `Exclusive(Ok)` | RustLike accepted (unique) |
+  | `fn main(` alone (malformed, no Logos evidence) | `NoClaim` | `Exclusive(Err)` | RustLike authoritative failure |
+  | `Entity\n    <malformed>` alone (no RustLike evidence) | `Exclusive(Err)` | `NoClaim` | Logos authoritative failure |
+
+  RustLike never establishes shared evidence merely by dispatching on
+  `KwImport`; its shared threshold is not crossed before the required
+  string-literal shape is satisfied - this is what makes the unquoted
+  case `NoClaim` rather than a competing claim, with **zero
+  `Import`-specific logic anywhere outside `admit_program_with_profile`
+  itself**. `Pulse`/`Profile` remain unconditional Logos-`Exclusive`
+  claims per T5's already-frozen invariant - unchanged - because
+  RustLike's grammar has no production for them at all, so they are
+  never `Shared` under any input.
+
+- **Policy-gate re-examination (`require_logos_surface`,
+  `require_legacy_compatibility`)**: neither may be classified by where
+  its `?` currently sits in the control flow - that was round 3's
+  mistake, and it is now resolved cleanly by the basis/outcome split:
+  **evidence basis is determined by scanning the input's syntax alone,
+  as if policy were not a factor**; policy pass/fail then applies
+  purely as an **outcome** modifier on whatever basis was already
+  found, never as a basis modifier. Concretely: if a file contains
+  genuine exclusive evidence (e.g. `Entity`) and the Logos surface is
+  policy-disabled, the result is `Exclusive(Err(policy violation))` -
+  the policy failure must not erase already-established exclusive
+  evidence by reporting `NoClaim` instead (today's code's blind
+  pre-loop `require_logos_surface(...)?` would do exactly that, since
+  it aborts before the loop ever sees `Entity` - the future
+  implementation must scan for evidence basis *before* applying this
+  gate, not call it as a pre-loop check). For `Import` specifically:
+  since Logos's own shared threshold is the bare keyword (no further
+  content requirement, per the paragraph above), and
+  `require_legacy_compatibility` fires *after* that keyword is
+  recognized, its failure is an outcome on an already-`Shared` basis -
+  `Shared(Err(policy violation))` - never a basis question. If a file
+  has no evidence of either kind, the result stays `NoClaim` regardless
+  of policy (there is nothing for a disabled surface to have blocked).
+  This also resolves a self-contradiction round 3 introduced between
+  two of its own paragraphs about whether `Import`'s Logos-side
+  "commit" happened before or after the policy check passed - the
+  basis/outcome split removes the ambiguity entirely, since "when is
+  evidence established" (syntax) and "did policy allow it" (outcome)
+  are no longer the same question.
+- Every existing public sm-front parsing function
+  (`parse_program(_with_profile)`, `parse_logos_program(_with_profile)`,
+  `parse_rustlike(_with_profile)`, `parse_logos(_with_profile)`) keeps
+  its exact current signature and behavior unchanged - reimplementable,
+  if desired, as a thin wrapper over the new `admit_*` functions
+  (`Shared(Ok(t)) | Exclusive(Ok(t)) => Ok(t)`, `NoClaim => Err(<today's
+  exact "expected top-level..." / "expected Logos declaration"
+  message>)`, `Shared(Err(e)) | Exclusive(Err(e)) => Err(e)`), so there
+  is exactly one source of truth with zero forced migration for any
+  other caller in the workspace.
+- `sm-sema`'s future implementation (a later, separate
+  implementation-only checkpoint) would delete
+  `top_level_declaration_head_kinds`, `has_logos_exclusive_evidence`,
+  `has_rustlike_exclusive_evidence`, and all depth/boundary tracking
+  entirely, replacing `check_source_with_profile`'s classification with
+  a direct call to the generic evidence-resolution law below over
+  `(admit_logos_program_with_profile(...), admit_program_with_profile(...))`.
+  `sm-sema` owns **none** of the following - it lives entirely inside
+  `sm-front`'s two `admit_*` functions: which forms are exclusive vs.
+  shared per grammar, where each grammar's shared threshold sits,
+  parser-branch identity, or declaration-boundary lexical signals
+  (`Newline`/`Semi`/`RBrace`/`Dedent`). `sm-sema` receives two
+  `GrammarAdmission` values and performs only the generic,
+  grammar-agnostic resolution law in the next section.
+
+### Cross-grammar evidence resolver (FROZEN by owner ruling, round 4 -
+supersedes the round-1 matrix, preserved below for audit history)
+
+Resolution happens in two stages: **evidence strength first, parse
+outcome second** - never the reverse, since resolving by outcome first
+is exactly what would let a `Shared`-only claim (e.g. bare `Import`)
+silently outrank the other grammar's genuine `Exclusive` evidence.
+
+**Stage 1 - evidence strength** (`Exclusive` > `Shared` > `NoClaim`):
+
+| Logos | RustLike | Resolution |
+|---|---|---|
+| `Exclusive` | `NoClaim` | Logos owns |
+| `NoClaim` | `Exclusive` | RustLike owns |
+| `Exclusive` | `Shared` | Logos owns |
+| `Shared` | `Exclusive` | RustLike owns |
+| `Exclusive` | `Exclusive` | AMBIGUOUS/CONFLICTING (both are the strongest class - tie, regardless of either side's own `Ok`/`Err`) |
+| `Shared` | `NoClaim` | Logos owns |
+| `NoClaim` | `Shared` | RustLike owns |
+| `NoClaim` | `NoClaim` | NO SURFACE CLAIM |
+| `Shared` | `Shared` | resolved by **Stage 2** below |
+
+When one side "owns," that side's own already-computed outcome becomes
+the `Auto` verdict directly: `Ok` -> accepted; `Err` -> **authoritative
+failure**. This is the fail-closed invariant this whole investigation
+exists to establish, stated precisely for the first time: **a
+grammar-local `Err` only becomes an authoritative failure after that
+grammar has won ownership resolution** - it is never itself sufficient
+grounds to discard an `Exclusive` claim in favor of the other side's
+`Shared`/`NoClaim` result (that would be exactly the fail-open pattern
+`#1670` exists to remove), but a `Shared(Err)` losing to the other
+side's `Exclusive` result (of either outcome) is not fail-open - the
+`Shared` side never held the strongest evidence to begin with.
+
+**Stage 2 - `Shared` vs `Shared`, resolved by parse outcome**:
+
+| Logos | RustLike | Resolution |
+|---|---|---|
+| `Ok` | `Ok` | AMBIGUOUS/CONFLICTING |
+| `Ok` | `Err` | Logos owns (accepted) |
+| `Err` | `Ok` | RustLike owns (accepted) |
+| `Err` | `Err` | AMBIGUOUS/CONFLICTING |
+
+**Worked examples** (the six from "Implementation sketch" above, traced
+through the resolver):
+
+- `Import "a.sm"` alone: `Shared(Ok)` vs `Shared(Ok)` -> Stage 2,
+  `Ok`+`Ok` -> AMBIGUOUS/CONFLICTING. Exactly Decision A's
+  already-confirmed concrete collision.
+- `Import foo.bar` alone: `Shared(Ok)` vs `NoClaim` -> Stage 1, `Shared`
+  vs `NoClaim` -> Logos owns, `Ok` -> Logos accepted. Exactly Decision
+  A's frozen ruling for this shape.
+- `Import "a.sm"` + `Entity ...`: `Exclusive(Ok)` vs `Shared(Err)` ->
+  Stage 1, `Exclusive` vs `Shared` -> Logos owns, `Ok` -> Logos
+  accepted. Preserves Decision A's "Logos-exclusive evidence alongside
+  `import` still reaches UNIQUE POSITIVE LOGOS CLAIM" rule exactly.
+- `Import "a.sm"` + `fn main() {}`: `Shared(Err)` vs `Exclusive(Ok)` ->
+  Stage 1, `Shared` vs `Exclusive` -> RustLike owns, `Ok` -> RustLike
+  accepted - the symmetric rule required to avoid ordinary RustLike
+  files beginning with `Import` being falsely classified as ambiguous
+  (the round-3 defect this round fixes).
+- `fn main(` alone (malformed): `NoClaim` vs `Exclusive(Err)` -> Stage
+  1, `NoClaim` vs `Exclusive` -> RustLike owns, `Err` -> **RustLike
+  authoritative failure**.
+- Validating trace not in the required list, included because it
+  stress-tests the model against a case none of rounds 1-3 got right:
+  `Import "a.sm"` + a **malformed** `fn main(`: Logos = `Shared(Err)`
+  (fails on the unrecognized `fn` token after committing to `Import`);
+  RustLike = `Exclusive(Err)` (commits on `fn`'s dispatch, then
+  genuinely fails inside it). Stage 1: `Shared` vs `Exclusive` ->
+  RustLike owns; RustLike's own outcome is `Err` -> **RustLike
+  authoritative failure** - correctly distinct from the well-formed
+  case above (`Ok` -> accepted), and correctly not silently reinterpreted
+  as Logos's problem merely because Logos also failed.
+- As a side effect, this model also resolves - with no special case -
+  a shape a round-2 adversarial pass flagged as unclear:
+  `Import "a.sm" as 123` (a valid string literal followed by a
+  malformed alias): RustLike commits at the string literal, then fails
+  in the *shared* production's own trailing clause -> `Shared(Err)`,
+  never promoted to `Exclusive` since nothing exclusive was ever
+  touched. Logos has no further content requirement -> `Shared(Ok)`.
+  Stage 2: `Ok`+`Err` -> Logos owns, accepted. Decision A never froze
+  this exact shape, so this is a consistent extension, not a
+  contradiction.
+
+**Evidence-gathering is bounded by each grammar's own existing scan
+mechanics, not a fresh whole-file re-scan (round 4 adversarial-review
+finding, corrected during verification)**: `evidence_basis` is tracked
+*during* the same loop that already computes parse outcome, not by a
+separate pass over the whole token stream. This matters because the
+two grammars' loops are not symmetric - a fact this document's own
+"Current state" section already establishes: `parse_program`'s loop
+(`crates/sm-front/src/parser.rs:97-123`) `return`s immediately via `?`
+on the *first* unrecognized top-level token, discarding everything
+after it, while `parse_logos_program`'s loop accumulates errors via
+`recover_logos_anchor()` and keeps scanning to the end of the input.
+Consequence for a source that mixes both grammars' exclusive vocabulary
+in an order RustLike cannot get past - e.g. `Entity Player:\n    state
+hp: int\nfn main() {}` (`Entity` first, `fn` second): Logos sees
+`Entity` (promotes to `Exclusive`), then fails on the unrecognized `fn`
+-> `Exclusive(Err)`. RustLike's loop returns on its very *first*
+iteration - `Entity` matches none of its top-level forms - **before
+`evidence_basis` is ever promoted and before `fn` is ever inspected**,
+regardless of what recognizable RustLike content exists later in the
+file -> `NoClaim`, not `Exclusive(Err)`. Stage 1 then gives `Exclusive`
+vs `NoClaim` -> **Logos authoritative failure**, not AMBIGUOUS/
+CONFLICTING (an initial trace of this exact input during adversarial
+review incorrectly assumed RustLike's scan reaches `fn` regardless of
+what precedes it, which the code above disproves). This is not a defect
+in the model: `NoClaim` here is not a fabricated absence of evidence -
+RustLike's own parser genuinely never reaches `fn` for this concrete
+input, so it genuinely never establishes a claim, the same way a
+human's ability to spot `fn` "in the file" is not the same claim as
+"RustLike's parser establishes evidence from it." Flagged explicitly to
+prevent a future implementer (or reviewer) from assuming both `admit_*`
+functions scan symmetrically; neither this document nor Decision A
+requires that they do.
+
+**Evidence preservation**: both `Exclusive`-vs-`Exclusive` and
+`Shared`-`Err`-vs-`Shared`-`Err` are AMBIGUOUS/CONFLICTING outcomes
+where **neither underlying `FrontendError` may be silently dropped** -
+both are genuine evidence, and neither is more authoritative than the
+other absent an explicit profile choosing one grammar. This does not
+require designing a full, versioned diagnostic carrier now (deferred to
+the future carrier/schema checkpoint, per Decision B/§6) - only that
+whatever concrete representation is eventually built preserves both,
+e.g. in spirit:
+
+```
+Primary:
+AMBIGUOUS / CONFLICTING SOURCE SURFACE
+
+Evidence:
+Logos     -> <original Logos FrontendError, or "accepted" if Ok>
+RustLike  -> <original RustLike FrontendError, or "accepted" if Ok>
+```
+
+**Why the round-1 matrix (below) is superseded, not merely extended**:
+the round-1 table was a pure function of a *flat* three-state
+`GrammarAdmission`, which implicitly assumed every positive claim has
+uniform strength. That assumption is exactly what Decision A's own
+shared-vs-exclusive distinction already contradicted - the round-1
+table cannot be patched with additional rows or a special case for
+`Import`, because the missing information (evidence strength) does not
+exist anywhere in its input. It is preserved immediately below, in
+full, as audit history - not deleted, and not reachable from the
+`Proposed decision` above, which now targets this section's two-stage
+resolver instead.
+
+<details>
+<summary>Superseded round-1 matrix (kept for audit history only - do
+not implement)</summary>
+
+For `CompileProfile::Auto`, an earlier draft proposed the coordinator's
+verdict as a pure function of the pair `(GrammarAdmission` from Logos,
+`GrammarAdmission` from RustLike`)` under the flat `NoClaim`/
+`Accepted(T)`/`ClaimedButFailed(FrontendError)` enum:
+
+| Logos              | RustLike           | Auto verdict                    |
+|--------------------|---------------------|----------------------------------|
+| `NoClaim`          | `NoClaim`           | NO SURFACE CLAIM                |
+| `Accepted`         | `NoClaim`           | Logos accepted                  |
+| `ClaimedButFailed` | `NoClaim`           | Logos authoritative failure     |
+| `NoClaim`          | `Accepted`          | RustLike accepted               |
+| `NoClaim`          | `ClaimedButFailed`  | RustLike authoritative failure  |
+| `Accepted`         | `Accepted`          | AMBIGUOUS / CONFLICTING         |
+| `Accepted`         | `ClaimedButFailed`  | AMBIGUOUS / CONFLICTING         |
+| `ClaimedButFailed` | `Accepted`          | AMBIGUOUS / CONFLICTING         |
+| `ClaimedButFailed` | `ClaimedButFailed`  | AMBIGUOUS / CONFLICTING         |
+
+Rounds 2 and 3 both attempted to fix how `GrammarAdmission` itself was
+*computed* while keeping this table fixed, and both were shown by
+adversarial review to break real inputs the table cannot distinguish
+(an unquoted `Import` in round 2; `Import` alongside genuine exclusive
+evidence from either grammar in round 3). The table itself was never
+wrong in isolation - it is simply insufficiently expressive for
+Decision A's own frozen law, which is why round 4 replaces it with the
+two-stage resolver above rather than patching it again.
+
+</details>
+
+### Dependency / call-site impact
+
+Workspace census (against baseline SHA `c0e2e50600e418f72af156a3c57616971d391494`)
+confirms the additive approach is not merely convenient but the *only*
+non-breaking option:
+
+- **~270+ call sites** across the workspace consume the 9 existing
+  public sm-front parse/lex functions, every one written against
+  `Result<T, FrontendError>` syntax - `?`, `.map_err(...)?`, `.expect`,
+  `.expect_err`, `.unwrap_or(...)`, `if let Ok(...)`, `match { Ok/Err }`.
+  None of that syntax compiles unmodified against a bespoke
+  `GrammarAdmission<T>` enum (no `Try`/`?` support, no `.map_err`,
+  `if let Ok(...)` will not match a differently-named variant). Changing
+  any existing function's
+  *return type* in place would be a hard breaking change to all of
+  them; adding new, separately-named `admit_*` functions alongside
+  touches **zero** existing call sites.
+- **Direct dependents of sm-front**: `semantic_language` (root),
+  `smc-cli`, `sm-sema`, `sm-ir`. **Transitive dependents** (via
+  `sm-ir`/`sm-sema`): `sm-emit`, `sm-vm`, `sm-verify`, `prom-runtime`,
+  plus the `workbench_semantic` and `quad_logic_calculator` examples.
+  No other workspace crate references sm-front or anything depending on
+  it (confirmed by a workspace-wide `Cargo.toml` grep). None of these
+  require any change under the additive proposal.
+- **Notable existing pattern, corroborating the root-cause diagnosis**:
+  several *other* call sites already do their own ad hoc version of
+  exactly the probe sm-sema's `check_source_with_profile` does -
+  `crates/smc-cli/src/executable_bundle.rs:25-28` uses
+  `match { Ok(p) => p, Err(_) => return Ok(source) }` as a binary
+  "is this RustLike at all" fallback; `crates/smc-cli/src/app.rs:1069-1076`
+  (and its `:1875` twin) use the identical
+  `if let Ok(logos) = parse_logos_program_with_profile(...) {..} else {
+  parse_program_with_profile(...)? }` shape #1670 is repairing, for
+  `--profile auto` CLI detection. These are exactly `#1919`/`#1920`'s
+  own filed scope (independent of `#1670`, untouched by this decision)
+  - noted here only because they confirm the "collapse any failure into
+  a single undifferentiated bucket" pattern is systemic, not local to
+  sm-sema, which is further evidence for fixing it once at the source
+  (sm-front) rather than re-deriving a workaround at each call site.
+- **Reconciliation needed with an existing type**: `FrontendError`
+  already has a `kind() -> FrontendErrorKind` method
+  (`crates/sm-front/src/types.rs`) distinguishing `Syntax` from
+  `PolicyViolation` via a `"policy violation:"` string-prefix check on
+  `message`. This is an orthogonal axis to evidence basis (`NoClaim`/
+  `Shared`/`Exclusive`) - the `Err` nested inside a `Shared`/`Exclusive`
+  result can itself be either `Syntax` or `PolicyViolation` - and
+  requires no change: `GrammarAdmission`'s `Shared`/`Exclusive` variants
+  simply wrap the existing `Result<T, FrontendError>` unchanged, so
+  `.kind()` remains available on the nested error exactly as today.
+- No call site anywhere in the workspace currently branches on
+  `FrontendErrorKind` or inspects `pos`/`message` to distinguish *where*
+  a failure occurred beyond the one `render_diag(...)`-embedding use in
+  `std_adapters.rs` - confirming today's flat `Result` genuinely
+  discards information no existing caller depends on, so recovering it
+  via new, additive functions is safe by construction, not merely by
+  convention.
+
+### Migration plan
+
+1. **This checkpoint (decision-only, FROZEN)**: the API shape, the
+   `GrammarAdmission<T>` naming, the evidence-basis/parse-outcome split,
+   and the cross-grammar evidence resolver above are frozen (round 4
+   owner ruling). No code changes; `sm-front` is not touched by this
+   PR. Freezing this contract does not by itself authorize step 2 or 3
+   below - each still requires its own separate GO.
+2. **A future, separate implementation-only checkpoint** (its own GO):
+   implement `admit_program_with_profile`/`admit_logos_program_with_profile`
+   in `sm-front` exactly as frozen here, with `sm-front`'s own
+   regressions proving `NoClaim`/`Shared`/`Exclusive` are each reachable
+   for both grammars, that `Exclusive` is absorbing over `Shared`, and
+   that the six frozen concrete examples (plus the policy-gate
+   examples) classify exactly as this document specifies.
+3. **A further, separate implementation-only checkpoint** (its own GO)
+   to rewrite `sm-sema`'s `check_source_with_profile` on top of the new
+   contract, deleting the lexical-heuristic classifier entirely and
+   restoring `#1670`/PR `#1923` to a design that cannot repeat this
+   failure class - re-running every regression from `#1923`'s four
+   rounds that remains meaningful once the heuristic itself is gone,
+   plus new regressions for the concrete counterexamples this
+   investigation found.
+4. `#1670`/PR `#1923` stays OPEN/parked throughout; `#1580` stays OPEN;
+   no issue-lifecycle changes anywhere in this checkpoint.
+
+### Non-goals (explicit)
+
+- No change to `ParserProfile` - profiles remain surface-independent,
+  per Decision A's own invariant, reaffirmed rather than reopened here.
+- No change to `CompileProfile`.
+- No change to `FrontendError`'s own structure - the new admission
+  types wrap the existing error type unchanged, preserving Decision B's
+  diagnostic-identity-preservation invariant.
+- No implementation in this checkpoint - `sm-front` is not touched;
+  this is a docs-only decision artifact.
+- Does not reopen or reinterpret Decisions A-D themselves - this is a
+  mechanism proposal for how `sm-sema` can safely *compute* the inputs
+  Decision A's own law already requires, not a change to that law.
+
 ## Exit gate
 
 **CONTRACT FROZEN is split into two independent verdicts - it is not one
