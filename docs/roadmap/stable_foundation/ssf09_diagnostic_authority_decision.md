@@ -1637,18 +1637,25 @@ create, edit, or otherwise mutate either issue.
 ## Decision E - Surface Admission Contract
 
 **Status: FROZEN - owner-approved architecture contract**, after four
-owner review rounds (see "Audit history" under "Proposed decision"
-below for what each round found and corrected). This section is a new
-architectural decision added after Decisions A-D above were already
-frozen and merged (via `#1918`/`#1921`/`#1922`); it does not reopen or
-reinterpret any of them. **Freezing this contract does not authorize
-production implementation**: `sm-front` and `sm-sema` remain untouched
-by this checkpoint, and implementing `admit_program_with_profile`/
-`admit_logos_program_with_profile` (or rewriting `sm-sema`'s
-`check_source_with_profile` on top of them) each requires its own,
-separate, future implementation-only checkpoint GO - exactly as
-"Migration plan" below already specifies and has specified since this
-section's first draft.
+owner review rounds (see "Audit history" under "Frozen decision" below
+for what each round found and corrected), **plus one round-5 precision
+amendment** (this revision) discovered during Stage 1 implementation of
+this same contract (PR `#1925`) - see the "Round 5" audit-history entry
+and the two paragraphs marked "FROZEN by owner ruling, round 5" below.
+This section is a new architectural decision added after Decisions A-D
+above were already frozen and merged (via `#1918`/`#1921`/`#1922`); it
+does not reopen or reinterpret any of them. **Freezing this contract
+does not authorize production implementation**: `sm-front` and
+`sm-sema` remain untouched by this checkpoint, and implementing
+`admit_program_with_profile`/`admit_logos_program_with_profile` (or
+rewriting `sm-sema`'s `check_source_with_profile` on top of them) each
+requires its own, separate, future implementation-only checkpoint GO -
+exactly as "Migration plan" below already specifies and has specified
+since this section's first draft. **This amendment is itself
+docs-only**: it corrects the frozen contract's own text before PR
+`#1925` resumes implementing it; `sm-front` is not touched by this
+revision, and PR `#1925`'s existing code is deliberately left
+unmodified pending it.
 
 ### Motivating evidence
 
@@ -1789,15 +1796,57 @@ pub enum GrammarAdmission<T> {
 }
 
 pub fn admit_program_with_profile(
+    source: &str,
     tokens: &[Token],
     profile: &ParserProfile,
 ) -> GrammarAdmission<Program>;
 
 pub fn admit_logos_program_with_profile(
+    source: &str,
     tokens: &[Token],
     profile: &ParserProfile,
 ) -> GrammarAdmission<LogosProgram>;
 ```
+
+**Source-context parameter (FROZEN by owner ruling, round 5)**: both
+signatures take `source: &str` in addition to `tokens: &[Token]` - this
+supersedes the original round-1..4 signature (`tokens` + `profile`
+only), discovered incomplete during PR `#1925`'s Stage 1 implementation
+(see "Round 5" audit history below for the concrete failing evidence).
+`source` is **diagnostic context only**, governed by one precondition
+and three prohibitions:
+
+- **Precondition**: `source` MUST be the exact source text `tokens` was
+  produced from (i.e. `tokens == lex(source)`, or the equivalent
+  already-lexed value). Callers that lex once and reuse `tokens` across
+  both `admit_*` calls (the whole reason `&[Token]` was chosen over
+  `&str` in the first place - see below) already have `source` on hand
+  from that same lex call; this adds no new lexing burden.
+- `source` MUST NOT be re-lexed by either `admit_*` function.
+- `source` MUST NOT participate in evidence classification - it has no
+  bearing on `NoClaim`/`Shared`/`Exclusive`, on where either grammar's
+  shared threshold sits, or on any `Ok`/`Err` determination. `tokens`
+  alone remains the sole syntactic/admission scan input, exactly as
+  rounds 1-4 already froze.
+- `source` MUST NOT become a second source-surface authority of any
+  kind - it exists solely so a `Parser` constructed inside `admit_*` can
+  populate the same source-line/caret-bearing `FrontendError.message`
+  that the existing `parse_*_with_profile` functions already produce
+  (via `Parser::error_at_token`/`format_parser_error_at_input`), instead
+  of an empty one.
+
+**On the precondition being unenforced (round 5 adversarial-review
+finding)**: the precondition above is a caller contract, not something
+`admit_*` can verify at runtime - checking it would require re-lexing
+`source`, which the second prohibition already forbids. This is
+deliberate, not an oversight: a caller violating it (passing `source`
+that doesn't match `tokens`) is fail-safe by construction, never a
+correctness or memory-safety hazard - `Parser::error_at_token`'s only
+use of `source` is `SourceMap::line(...).unwrap_or_default()` feeding a
+cosmetic caret-diagnostic line, which degrades to an empty or wrong
+line on mismatch and nothing else; `evidence_basis`, `Ok`/`Err`, and
+every other observable admission outcome are computed from `tokens`
+alone and cannot be affected by what `source` contains.
 
 The exact Rust representation above is illustrative, not frozen; the
 **semantics** are what this decision fixes: a grammar-local admission
@@ -1830,7 +1879,7 @@ let rustlike: GrammarAdmission<Program> = admit_program_with_profile(...);
 let verdict: SurfaceVerdict = resolve_surface_authority(logos, rustlike);
 ```
 
-**Audit history: how this shape was reached (owner review rounds 1-4)**
+**Audit history: how this shape was reached (owner review rounds 1-5)**
 - kept per the standing rule of this document not to delete correction
 history, condensed rather than reproduced verbatim:
 
@@ -1867,19 +1916,50 @@ history, condensed rather than reproduced verbatim:
   failed" - two situations Decision A already treats as having
   different strength, which the three-state enum had no way to
   represent.
-- **Round 4 (this round)** is the fix: evidence basis (`NoClaim`/
-  `Shared`/`Exclusive`) and parse outcome (`Ok`/`Err`) become two
-  independent axes instead of one flat three-state enum. This is not a
-  new invention - it is Decision A's own already-frozen shared-vs-
-  exclusive distinction, promoted from prose into the type so `sm-sema`
-  can consume it directly instead of re-deriving it.
+- **Round 4** is the fix for the round-1..3 failure class: evidence
+  basis (`NoClaim`/`Shared`/`Exclusive`) and parse outcome (`Ok`/`Err`)
+  become two independent axes instead of one flat three-state enum.
+  This is not a new invention - it is Decision A's own already-frozen
+  shared-vs-exclusive distinction, promoted from prose into the type so
+  `sm-sema` can consume it directly instead of re-deriving it.
+- **Round 5 (this revision)** is a precision correction discovered
+  during PR `#1925`'s Stage 1 implementation of round 4's frozen
+  contract - not a redesign of evidence strength, `Shared`/`Exclusive`
+  semantics, the RustLike/Logos scan-mechanics asymmetry, or the
+  cross-grammar resolver, all of which are unchanged by this revision.
+  Two independent gaps were found empirically, both by a regression
+  comparing `admit_logos_program_with_profile`'s nested `FrontendError`
+  against `parse_logos_with_profile`'s error for the identical source:
+  (1) `admit_*`, taking only `tokens` and `profile`, had no access to
+  the original source text, so its `Parser` was constructed with
+  `source: String::new()` - `Parser::error_at_token` reads `self.source`
+  to embed a caret-diagnostic source line into `FrontendError.message`,
+  so `admit_*`'s errors carried an empty line where `parse_*`'s carry
+  the real one; (2) independently, an implementation-side fix for a
+  *different*, related problem (a genuine policy-violation error being
+  merged through `merge_logos_errors`'s "multiple parser errors (N):"
+  wrapping, which strips the `"policy violation:"` message-prefix
+  `FrontendError::kind()` checks for, silently downgrading it to
+  `Syntax`) had used an ad hoc `errors.len() == 1` shortcut that itself
+  produced a *third* message shape, matching neither the old parser's
+  always-wrapped single-error format nor a policy-preserving one. This
+  revision resolves both by widening the signature (source-context
+  parameter, above) and by freezing an explicit policy-vs-syntax
+  finalization law (below) in place of the ad hoc shortcut - see both
+  paragraphs marked "FROZEN by owner ruling, round 5."
 
-Taking `&[Token]` rather than `&str`: lexing stays a prior, separate
-step exactly as it is today - a lex failure is not a surface-admission
-outcome for *either* grammar, it is a deterministic pre-parse failure
-`sm-sema` already handles on its own (SSF09-E2 round 1's lex-error-
-preservation fix), and both admission functions would otherwise re-lex
-the same input redundantly.
+Taking `&[Token]` (never re-lexed) as the sole syntactic input, with
+`source: &str` added in round 5 purely for diagnostic context: lexing
+stays a prior, separate step exactly as it is today - a lex failure is
+not a surface-admission outcome for *either* grammar, it is a
+deterministic pre-parse failure `sm-sema` already handles on its own
+(SSF09-E2 round 1's lex-error-preservation fix). A caller lexes once,
+keeps both the resulting `tokens` and the `source` string it lexed them
+from, and passes both to each `admit_*` call - `source` adds no new
+lexing burden and does not reintroduce the redundant-re-lexing problem
+this paragraph originally existed to rule out, because it is never fed
+back into a lexer or a classification decision, only into
+`Parser::error_at_token`'s existing caret-diagnostic formatting.
 
 **Implementation sketch** (for a future, separate implementation
 checkpoint - not authorized by this decision-only checkpoint):
@@ -1985,6 +2065,84 @@ input.
   basis/outcome split removes the ambiguity entirely, since "when is
   evidence established" (syntax) and "did policy allow it" (outcome)
   are no longer the same question.
+
+**Policy-vs-syntax finalization law (FROZEN by owner ruling, round 5)**:
+round 4's text above correctly established that policy is an *outcome*
+modifier, never a *basis* modifier, but left the exact aggregation
+underspecified - PR `#1925`'s implementation filled the gap with an ad
+hoc `errors.len() == 1` shortcut (accumulate every failure, including
+policy violations, into the same `errors: Vec<FrontendError>` used for
+ordinary syntax errors, then special-case the single-entry case to
+avoid `merge_logos_errors` stripping a policy violation's message
+prefix). That shortcut is **rejected**: continuing the evidence-basis
+scan past a legacy-compatibility policy failure (so later evidence can
+still strengthen `Shared` to `Exclusive`) does not mean the policy
+diagnostic itself becomes an ordinary accumulated syntax error to be
+merged alongside unrelated syntax failures - conflating the two loses
+the old parser's own terminal-policy behavior (today's
+`require_legacy_compatibility(...)?` aborts the whole function
+immediately, discarding everything else) without gaining anything the
+scan-continuation requirement actually needs. `admit_logos_program`
+tracks a policy violation **separately** from the ordinary syntax
+`errors: Vec`, and finalizes as follows:
+
+```
+if evidence_basis == None:
+    NoClaim
+else if the global Logos-surface policy check (`require_logos_surface`) failed:
+    Shared/Exclusive(Err(<that global policy FrontendError, unmodified>))
+else if a legacy-compatibility policy failure was encountered during the scan:
+    Shared/Exclusive(Err(<the FIRST such FrontendError encountered, unmodified>))
+else:
+    Shared/Exclusive(<the ordinary Logos syntax outcome, using
+        parse_logos_program's existing error-aggregation exactly -
+        Ok if the `errors: Vec` is empty, else Err(merge_logos_errors(errors)),
+        with NO `errors.len() == 1` special case>)
+```
+
+(`Shared`/`Exclusive` above is whichever the completed evidence-basis
+scan discovered - the finalization law governs the wrapped outcome
+only, never which variant wraps it.) In prose:
+
+- The global `require_logos_surface` gate outranks a
+  `require_legacy_compatibility` failure. **Precision note (round 5
+  adversarial-review finding)**: today's `parse_logos_program` doesn't
+  actually contain an explicit precedence *rule* between the two gates
+  to match - it calls `require_logos_surface` once, unconditionally,
+  before its loop runs at all (`parser.rs:2954-2956`), so a disabled
+  surface aborts the whole function immediately for *every* input, and
+  `require_legacy_compatibility` is simply never reached, regardless of
+  content. This ordering is a formalization of that existing early-exit
+  behavior's *outcome* - for any input with Logos evidence, today's code
+  and this law agree on which `FrontendError` results when the surface
+  is disabled - not a claim that today's code deliberately weighs one
+  gate against the other.
+- A legacy-compatibility failure is preserved **exactly as
+  `require_legacy_compatibility` constructed it** - never routed
+  through `merge_logos_errors`, never merged with unrelated syntax
+  errors found elsewhere in the same scan, so `FrontendError::kind()`
+  reliably reports `PolicyViolation` for it. This is the "preserve
+  policy failure separately" requirement: a mixed input (e.g. a
+  policy-disabled `Import` followed by a genuinely malformed `Entity`)
+  returns the policy error as the grammar's outcome, not a merge of
+  both - the malformed `Entity`'s own syntax error is real evidence
+  toward `Exclusive` (basis), but is not what the caller sees as the
+  `FrontendError`.
+- Only when **no** policy failure of either kind occurred does the
+  ordinary syntax path run, and it must reproduce
+  `parse_logos_program`'s exact existing aggregation - including
+  wrapping a *single* accumulated syntax error through
+  `merge_logos_errors` exactly as today, not returning it unwrapped.
+  `FrontendErrorKind::Syntax` for this path is correct and expected;
+  only a genuine policy violation needs `PolicyViolation` preserved.
+
+This is a finalization-time law only: it changes nothing about when
+`evidence_basis` promotes to `Shared`/`Exclusive` (round 4's rules,
+unchanged), and nothing about the cross-grammar evidence resolver
+(unchanged - it still only ever sees a completed `GrammarAdmission`
+value, regardless of which of the three finalization branches produced
+its wrapped outcome).
+
 - Every existing public sm-front parsing function
   (`parse_program(_with_profile)`, `parse_logos_program(_with_profile)`,
   `parse_rustlike(_with_profile)`, `parse_logos(_with_profile)`) keeps
@@ -2250,19 +2408,31 @@ non-breaking option:
 
 ### Migration plan
 
-1. **This checkpoint (decision-only, FROZEN)**: the API shape, the
-   `GrammarAdmission<T>` naming, the evidence-basis/parse-outcome split,
-   and the cross-grammar evidence resolver above are frozen (round 4
-   owner ruling). No code changes; `sm-front` is not touched by this
-   PR. Freezing this contract does not by itself authorize step 2 or 3
-   below - each still requires its own separate GO.
-2. **A future, separate implementation-only checkpoint** (its own GO):
-   implement `admit_program_with_profile`/`admit_logos_program_with_profile`
-   in `sm-front` exactly as frozen here, with `sm-front`'s own
-   regressions proving `NoClaim`/`Shared`/`Exclusive` are each reachable
-   for both grammars, that `Exclusive` is absorbing over `Shared`, and
-   that the six frozen concrete examples (plus the policy-gate
-   examples) classify exactly as this document specifies.
+1. **This checkpoint (decision-only, FROZEN)**: the API shape (including
+   round 5's `source: &str` parameter and policy-vs-syntax finalization
+   law), the `GrammarAdmission<T>` naming, the evidence-basis/parse-
+   outcome split, and the cross-grammar evidence resolver above are
+   frozen (round 4 owner ruling, round 5 precision amendment). No code
+   changes; `sm-front` is not touched by this PR. Freezing this
+   contract does not by itself authorize step 2 or 3 below - each still
+   requires its own separate GO.
+2. **A future, separate implementation-only checkpoint** (its own GO,
+   already in progress as PR `#1925` at the time of round 5 - to be
+   rebased onto this amendment once merged): implement
+   `admit_program_with_profile`/`admit_logos_program_with_profile` in
+   `sm-front` exactly as frozen here, with `sm-front`'s own regressions
+   proving `NoClaim`/`Shared`/`Exclusive` are each reachable for both
+   grammars, that `Exclusive` is absorbing over `Shared`, that the six
+   frozen concrete examples (plus the policy-gate examples) classify
+   exactly as this document specifies, **and** that
+   `admit_logos_program_with_profile`'s nested `FrontendError` is
+   exactly equal - not merely same-variant/same-`kind()`/same-`pos` - to
+   `parse_logos_with_profile`'s error for the same source, for: an
+   ordinary single Logos syntax failure; ordinary multiple Logos syntax
+   failures; a legacy-policy failure followed by later exclusive
+   evidence (outcome stays the preserved policy error even though basis
+   promotes to `Exclusive`); and a global Logos-surface denial with
+   actual Logos evidence present.
 3. **A further, separate implementation-only checkpoint** (its own GO)
    to rewrite `sm-sema`'s `check_source_with_profile` on top of the new
    contract, deleting the lexical-heuristic classifier entirely and
@@ -2287,6 +2457,18 @@ non-breaking option:
 - Does not reopen or reinterpret Decisions A-D themselves - this is a
   mechanism proposal for how `sm-sema` can safely *compute* the inputs
   Decision A's own law already requires, not a change to that law.
+- **Round 5 addendum**: this revision is an implementation-discovered
+  precision correction to round 4's own already-frozen contract, not a
+  redesign of it. It does not change evidence-basis semantics, the
+  `Shared`/`Exclusive` absorbing/monotonic rule, the RustLike-abort-
+  first/Logos-recover-and-continue scan-mechanics asymmetry, or the
+  cross-grammar evidence resolver - all unchanged. It changes only (a)
+  the `admit_*` signatures (adding `source: &str` as diagnostic-only
+  context) and (b) how a completed scan's policy-vs-syntax findings are
+  finalized into one `FrontendError`. `sm-front` is not touched by this
+  revision; PR `#1925` (which discovered the gap) is left unmodified
+  pending this amendment landing on `main`. No change to `sm-sema`; no
+  change to `#1923`.
 
 ## Exit gate
 
