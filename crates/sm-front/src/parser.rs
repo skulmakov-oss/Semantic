@@ -8072,4 +8072,95 @@ mod grammar_admission_tests {
             "RustLike must never claim evidence it structurally never reached"
         );
     }
+
+    // --- Owner-directed investigation: does admit_logos_program_with_
+    // profile's nested FrontendError match parse_logos_with_profile's
+    // error for the SAME source, not merely the same GrammarAdmission
+    // shape/kind/pos? admit_* is constructed with `source: String::new()`
+    // (see admit_program_with_profile/admit_logos_program_with_profile in
+    // this file), while the existing parse_*_with_profile entry points
+    // construct Parser with the real `input.to_string()`. Parser::
+    // error_at_token reads `self.source` to embed a caret-diagnostic
+    // source line into FrontendError.message via
+    // format_parser_error_at_input - this test is the first empirical
+    // check of whether that difference produces two different
+    // FrontendError values for the same logical failure. Do NOT weaken
+    // this assertion, and do NOT change GrammarAdmission/EvidenceBasis/
+    // admit_* signatures in response to it without a separate owner
+    // ruling - report the demonstrated mismatch instead.
+    //
+    // CONFIRMED FAILING, left in the codebase on purpose (`#[ignore]`
+    // rather than deleted or weakened): admit_logos_program_with_profile's
+    // nested FrontendError currently carries an empty caret-diagnostic
+    // source line (`source: String::new()`) where
+    // parse_logos_with_profile's error carries the real source text, and
+    // additionally uses a different message-wrapping shape for a single
+    // accumulated error than parse_logos_program's always-wrap-via-
+    // merge_logos_errors behavior. Pending an explicit owner ruling on
+    // whether admit_*'s signature must widen to accept the original
+    // source text (see the PR discussion) - do not resolve by
+    // reconstructing an approximate source line from tokens.
+    #[test]
+    #[ignore = "confirmed diagnostic-parity defect, pending owner ruling - see comment above"]
+    fn admission_error_matches_existing_parser_error_exactly() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\nfn main() { return; }\n";
+
+        let expected = parse_logos_with_profile(src, &profile)
+            .expect_err("this input is a genuine Logos syntax error today");
+        let tokens = lex_tokens(src).expect("fixture must lex cleanly");
+        let actual = match admit_logos_program_with_profile(&tokens, &profile) {
+            GrammarAdmission::Shared(Err(e)) => e,
+            other => panic!("unexpected admission: {other:?}"),
+        };
+
+        assert_eq!(
+            actual, expected,
+            "admit_logos_program_with_profile's nested FrontendError must be \
+             identical to parse_logos_with_profile's error for the same \
+             source - not merely the same variant/kind/pos - since Decision \
+             E describes admit_* as reporting 'the grammar's own parse \
+             outcome' and existing parse_* as reimplementable as thin \
+             wrappers over admit_*, and Decision B forbids a downstream \
+             layer from altering an originating stage's already-assigned \
+             diagnostic identity"
+        );
+    }
+
+    /// Owner-directed: does a *merged* (2+) error set also lose
+    /// `FrontendErrorKind::PolicyViolation` classification, on top of the
+    /// single-error case already fixed in `admit_logos_program`'s outcome
+    /// computation? Constructs a source with both a legacy-compatibility
+    /// policy failure (`Import` under a Strict-compatibility profile) and
+    /// a later, independent genuine syntax failure (a malformed `Entity`),
+    /// so `errors.len() == 2` and `merge_logos_errors` - not the len==1
+    /// shortcut - is what actually runs.
+    #[test]
+    fn merged_multi_error_policy_violation_kind_is_investigated_not_assumed() {
+        let profile = ParserProfile {
+            compatibility: CompatibilityMode::Strict,
+            ..ParserProfile::foundation_default()
+        };
+        let src = "Import \"a.sm\"\nEntity Player\n";
+        let admission = admit_logos_program_with_profile(&toks(src), &profile);
+        // Entity is genuine exclusive evidence encountered after Import's
+        // shared evidence, so absorption correctly promotes basis to
+        // Exclusive - this is the frozen absorbing rule, not part of what
+        // is being investigated here.
+        let GrammarAdmission::Exclusive(Err(e)) = admission else {
+            panic!("expected Exclusive(Err) with two accumulated errors, got {admission:?}");
+        };
+        // Recorded, not asserted as correct: Decision E does not define
+        // precedence between a policy-violation cause and a syntax-error
+        // cause when both are merged into one FrontendError. This is
+        // deliberately a probe, not a pass/fail regression - it exists so
+        // the actual behavior is visible to the owner rather than silently
+        // decided by whatever `merge_logos_errors`'s string-prefix check
+        // happens to do.
+        std::eprintln!(
+            "merged multi-error kind = {:?}, message = {:?}",
+            e.kind(),
+            e.message
+        );
+    }
 }
