@@ -1636,12 +1636,19 @@ create, edit, or otherwise mutate either issue.
 
 ## Decision E - Surface Admission Contract
 
-**Status: PROPOSED FOR OWNER REVIEW - NOT FROZEN.** This section is a
-new architectural investigation added after Decisions A-D above were
-already frozen and merged (via `#1918`/`#1921`/`#1922`); it does not
-reopen or reinterpret any of them. Investigation-only, per an explicit
-narrow owner GO: investigate a minimal `sm-front` contract shape and
-produce this decision artifact - no implementation in this checkpoint.
+**Status: FROZEN - owner-approved architecture contract**, after four
+owner review rounds (see "Audit history" under "Proposed decision"
+below for what each round found and corrected). This section is a new
+architectural decision added after Decisions A-D above were already
+frozen and merged (via `#1918`/`#1921`/`#1922`); it does not reopen or
+reinterpret any of them. **Freezing this contract does not authorize
+production implementation**: `sm-front` and `sm-sema` remain untouched
+by this checkpoint, and implementing `admit_program_with_profile`/
+`admit_logos_program_with_profile` (or rewriting `sm-sema`'s
+`check_source_with_profile` on top of them) each requires its own,
+separate, future implementation-only checkpoint GO - exactly as
+"Migration plan" below already specifies and has specified since this
+section's first draft.
 
 ### Motivating evidence
 
@@ -1751,7 +1758,7 @@ condition has been reached.
   proposes eliminating that reconstruction entirely by having sm-front
   expose the information its own parsers already have transiently.
 
-### Proposed decision (open for owner ruling, not yet frozen)
+### Frozen decision (owner-approved architecture, round 4)
 
 Add two new, purely **additive** public functions to `sm-front`
 returning a new type in place of today's flat `Result`, alongside - not
@@ -1759,8 +1766,13 @@ replacing - every existing public parsing function:
 
 ```rust
 pub enum GrammarAdmission<T> {
-    /// This grammar's top-level dispatch never recognized a single
-    /// declaration in this input, of any kind - zero evidence.
+    /// This grammar established no sufficient positive evidence for
+    /// ownership of this input. NOT the same as "this grammar's
+    /// dispatch never recognized a candidate keyword" - a shared-
+    /// vocabulary candidate (e.g. `Import`) can be dispatched and still
+    /// fail to cross this grammar's own sufficient-evidence threshold
+    /// (see `Import foo.bar` under RustLike, below), in which case the
+    /// correct result is still `NoClaim`.
     NoClaim,
     /// This grammar established sufficient evidence *only* through
     /// vocabulary shared with the other grammar (`Import`, currently
@@ -2238,12 +2250,12 @@ non-breaking option:
 
 ### Migration plan
 
-1. **This checkpoint (decision-only)**: freeze the API shape, the
+1. **This checkpoint (decision-only, FROZEN)**: the API shape, the
    `GrammarAdmission<T>` naming, the evidence-basis/parse-outcome split,
-   and the cross-grammar evidence resolver above (round 4 owner ruling
-   applied), or send back for a further round if the owner disagrees
-   with any part of this sketch. No code changes; `sm-front` is not
-   touched by this PR.
+   and the cross-grammar evidence resolver above are frozen (round 4
+   owner ruling). No code changes; `sm-front` is not touched by this
+   PR. Freezing this contract does not by itself authorize step 2 or 3
+   below - each still requires its own separate GO.
 2. **A future, separate implementation-only checkpoint** (its own GO):
    implement `admit_program_with_profile`/`admit_logos_program_with_profile`
    in `sm-front` exactly as frozen here, with `sm-front`'s own
