@@ -1634,6 +1634,329 @@ follow-up comment on `#1580`, per the original plan, rather than
 reopening `#1918`'s exact HEAD solely to add them. This PR does not
 create, edit, or otherwise mutate either issue.
 
+## Decision E - Surface Admission Contract
+
+**Status: PROPOSED FOR OWNER REVIEW - NOT FROZEN.** This section is a
+new architectural investigation added after Decisions A-D above were
+already frozen and merged (via `#1918`/`#1921`/`#1922`); it does not
+reopen or reinterpret any of them. Investigation-only, per an explicit
+narrow owner GO: investigate a minimal `sm-front` contract shape and
+produce this decision artifact - no implementation in this checkpoint.
+
+### Motivating evidence
+
+`#1670`'s implementation (PR `#1923`) went through four correction
+rounds, each fixing one class of false classification in `sm-sema`'s
+own from-scratch reconstruction of "which grammar owns this top-level
+declaration" by scanning the raw token stream, and each subsequently
+found - by independent adversarial review, not by the existing test
+suite or hosted CI, both of which stayed green throughout - to have
+introduced or left a *different* class of false classification:
+
+1. Round 1: scanning the whole token stream let a keyword nested inside
+   the *other* grammar's own body (e.g. `Entity` inside a RustLike `fn`
+   body) count as evidence.
+2. Round 3: restricting evidence to tokens outside any bracket/indent
+   nesting still let a keyword in a *non-head* position within a
+   declaration's own header at depth 0 count as evidence (e.g. `Entity`
+   as the function *name* in `fn Entity() {}`).
+3. Round 3 self-review: an excess closing delimiter in malformed input
+   could drive the nesting-depth counter negative, resurrecting false
+   "top level" status for everything after it.
+4. Round 4 (reverted): restricting the declaration-head boundary to
+   only fire after a real block closes (`RBrace`/`Dedent` returning to
+   depth 0) fixed round 3's residual gap, but is *itself* a regression:
+   `System`, `Pulse`, `Profile`, and a bare `Import` never produce a
+   `RBrace` or `Dedent` at all - so this rule permanently disables
+   further evidence detection for the rest of the file after any one of
+   them. Confirmed concretely:
+   - `Pulse "tick"\nfn main() {\n    return;\n}\n` - genuine dual
+     evidence (`Pulse` Logos-exclusive, `fn` RustLike-exclusive) -
+     silently misclassified as Logos-only, reporting `"expected Logos
+     declaration"` instead of the required `AMBIGUOUS/CONFLICTING`.
+   - `Import "a.sm"\nEntity A:\n    state x: quad\n` under
+     `allow_logos_surface = false` - genuine Logos-exclusive evidence
+     (`Entity`) masked by the preceding `Import`, silently
+     misclassified as no evidence at all, reporting a RustLike parse
+     error instead of the required Logos policy rejection (the same
+     invariant class as T2).
+
+   Reverted in `60c1e44c`; PR `#1923` is parked at that commit
+   (byte-identical to round 3) pending this decision.
+
+Separately, the same review round found `Import "a.sm" fn main() {
+return; }` (two declarations sharing one physical line with zero
+separator) still produces `AMBIGUOUS/CONFLICTING` rather than
+recognizing `fn` as the sole real head. This was investigated and is
+**not** attributed to a defect in the classification law itself:
+`parse_import_decl` requires no trailing terminator, so there is no
+lexical signal at all between the two declarations, and the resulting
+ambiguity is arguably consistent with the frozen law's own definition
+(Logos does admit this concrete input, via its already-documented
+content-blind legacy `Import`/`Pulse`/`Profile` skip - see Decision A's
+current-state discussion of `parse_logos_program`). It is listed here
+only as a data point for open question 1 below, not as evidence
+requiring a fix.
+
+**Root cause (common to all four rounds' failures)**: different
+declaration kinds terminate via genuinely different, non-uniform
+lexical signals - `Newline` (Logos's legacy `Import`/`Pulse`/`Profile`
+skip), `Semi` (a RustLike expression-bodied function,
+`crates/sm-front/src/parser.rs:213-220`), `RBrace` (a braced body),
+`Dedent` (an indented body), or **no signal at all** (a bare `Import`
+with no trailing `as`/`*`/`{}`, which can be immediately followed by
+another declaration on the same physical line). No single rule over
+token kinds and bracket/indent depth can determine "has the current
+declaration finished" without first knowing *which kind* of declaration
+is currently open - and that is exactly the grammar-level knowledge
+`#1670`'s own brief prohibits `sm-sema` from duplicating (STOP clause:
+*"If existing public sm-front APIs do not let sm-sema establish the
+necessary top-level evidence without duplicating a material part of
+the grammar, introducing a brittle home-grown parser, or modifying
+sm-front, STOP and report before widening scope"*). Four rounds of
+concrete, reproducible counterexamples are the evidence that this STOP
+condition has been reached.
+
+### Current state (verified against baseline SHA
+`c0e2e50600e418f72af156a3c57616971d391494`)
+
+- `parse_program`'s top-level loop
+  (`crates/sm-front/src/parser.rs:89-135`): single-shot
+  `Result<Program, FrontendError>`. The first time any iteration hits
+  the `_ => Err(...)` branch (a genuinely unrecognized top-level token)
+  *or* a declaration's own sub-parser propagates an `Err` via `?`, the
+  whole function returns immediately, discarding every declaration
+  already successfully collected. Nothing distinguishes, from the
+  returned `Result` alone, "the very first token was never a
+  recognized declaration head" from "a head was recognized and its own
+  content later failed."
+- `parse_logos_program`'s top-level loop
+  (`crates/sm-front/src/parser.rs:2954-3020`): accumulates *multiple*
+  errors across iterations via `recover_logos_anchor()`-based recovery;
+  discards all partial success (`out`) if `errors` is non-empty at the
+  end, returning one merged `Err`; otherwise returns `Ok(LogosProgram)`.
+  Same gap: nothing distinguishes "never recognized a single
+  System/Entity/Law/legacy-directive" from "recognized at least one,
+  but something else in the file failed."
+- `FrontendError` (`crates/sm-front/src/types.rs:867-870`) is exactly
+  `{ pos: usize, message: String }` - no field distinguishes these two
+  cases either; the distinction currently exists only transiently, as
+  an artifact of *which code path* raised the error, and is discarded
+  the moment either function returns its flat `Result`.
+- `sm-sema`'s `check_source_with_profile` (`#1670`, PR `#1923`)
+  currently tries to reconstruct this exact missing information from
+  *outside* sm-front, by scanning the already-lexed token stream for
+  "declaration-head" positions using its own independently-invented
+  boundary heuristic (`top_level_declaration_head_kinds`). This section
+  proposes eliminating that reconstruction entirely by having sm-front
+  expose the information its own parsers already have transiently.
+
+### Proposed decision (open for owner ruling, not yet frozen)
+
+Add two new, purely **additive** public functions to `sm-front`
+returning a new three-outcome type in place of today's flat `Result`,
+alongside - not replacing - every existing public parsing function:
+
+```rust
+pub enum SurfaceAdmission<T> {
+    /// This grammar's top-level dispatch never recognized a single
+    /// declaration in this input - zero positive evidence, nothing to
+    /// attribute a failure to.
+    NoClaim,
+    /// At least one top-level declaration was recognized, and the
+    /// whole input was successfully parsed to completion under this
+    /// grammar.
+    Accepted(T),
+    /// At least one top-level declaration was recognized (a genuine
+    /// positive claim on some part of the input), but the overall
+    /// parse did not complete successfully.
+    ClaimedButFailed(FrontendError),
+}
+
+pub fn admit_program_with_profile(
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> SurfaceAdmission<Program>;
+
+pub fn admit_logos_program_with_profile(
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> SurfaceAdmission<LogosProgram>;
+```
+
+Taking `&[Token]` rather than `&str`: lexing stays a prior, separate
+step exactly as it is today - a lex failure is not a surface-admission
+outcome for *either* grammar, it is a deterministic pre-parse failure
+`sm-sema` already handles on its own (SSF09-E2 round 1's lex-error-
+preservation fix), and both admission functions would otherwise re-lex
+the same input redundantly.
+
+**Implementation sketch** (for a future, separate implementation
+checkpoint - not authorized by this decision-only checkpoint):
+
+- `parse_program`'s loop: track one local
+  `any_declaration_accepted: bool`, set `true` immediately after any
+  successful `KwImport|KwEnum|KwFn|KwRecord|KwSchema|KwTrait|KwImpl` or
+  role-marked-schema branch. On the `_ => Err(...)` branch: `NoClaim`
+  if still `false`, else `ClaimedButFailed`. On a declaration's own
+  sub-parser failing: always `ClaimedButFailed` (the head keyword was,
+  by construction, already recognized before entering that
+  sub-parser). Loop completion with no error: `Accepted(Program)`.
+- `parse_logos_program`'s loop: the same boolean, set `true` on any
+  successful `KwSystem|KwEntity|KwLaw` branch *and* on any successfully
+  -consumed legacy `KwImport|KwPulse|KwProfile` directive (consistent
+  with T5's already-frozen requirement that a bare `Pulse`/`Profile`
+  is unconditional positive Logos evidence regardless of how little
+  content validation its own skip performs - see open question 3).
+  `errors.is_empty()` → `Accepted`; else `any_declaration_accepted` →
+  `ClaimedButFailed(merged_errors)`; else → `NoClaim`.
+- Every existing public sm-front parsing function
+  (`parse_program(_with_profile)`, `parse_logos_program(_with_profile)`,
+  `parse_rustlike(_with_profile)`, `parse_logos(_with_profile)`) keeps
+  its exact current signature and behavior unchanged - reimplementable,
+  if desired, as a thin wrapper over the new `admit_*` functions
+  (`Accepted(t) => Ok(t)`, `NoClaim => Err(<today's exact "expected
+  top-level..." / "expected Logos declaration" message>)`,
+  `ClaimedButFailed(e) => Err(e)`), so there is exactly one source of
+  truth with zero forced migration for any other caller in the
+  workspace.
+- `sm-sema`'s future implementation (a later, separate
+  implementation-only checkpoint) would delete
+  `top_level_declaration_head_kinds`, `has_logos_exclusive_evidence`,
+  `has_rustlike_exclusive_evidence`, and all depth/boundary tracking
+  entirely, replacing `check_source_with_profile`'s classification with
+  a direct match over
+  `(admit_logos_program_with_profile(...), admit_program_with_profile(...))`.
+
+### Genuinely open questions (owner ruling needed before any
+implementation GO)
+
+1. **`Accepted` + `ClaimedButFailed`**: if one grammar fully succeeds
+   and the other made a genuine claim but failed, does the `Accepted`
+   side win outright (current lean: yes - the frozen law defines
+   `AMBIGUOUS/CONFLICTING` as both grammars genuinely *admitting* the
+   input, and a claim that ends in failure never reaches admission),
+   or does any positive claim from the other side, even one that
+   ultimately failed, still force `AMBIGUOUS/CONFLICTING`? This changes
+   real behavior for inputs like `Import "a.sm" fn main(x` (malformed):
+   Logos `Accepted` (the import-only content is vacuously valid),
+   RustLike `ClaimedButFailed` (`fn` recognized, then a genuine syntax
+   error inside the parameter list).
+2. **`ClaimedButFailed` + `ClaimedButFailed`**: both grammars made a
+   genuine positive claim and both failed. Is this `AMBIGUOUS/
+   CONFLICTING` too (symmetric to `Accepted` + `Accepted` - both made a
+   real claim), or must one of the two failures be preferred as *the*
+   authoritative one (and by what rule, if so)? Today's code (both
+   pre-`#1670` and the in-flight `#1923`) unconditionally returns the
+   RustLike-side error for this case, without ever asking whether
+   Logos's own claim might be the more authoritative one.
+3. Confirmed, not merely proposed: a bare legacy `Pulse`/`Profile`/
+   `Import` directive counts as `any_declaration_accepted = true` for
+   Logos even though its own internal handling performs "zero content
+   validation at all" - this is required by T5's already-frozen
+   invariant (bare `Pulse`/`Profile` is unconditional positive Logos
+   evidence), not a new question, restated here for completeness since
+   the new contract makes it an explicit implementation requirement
+   rather than an implicit one.
+4. **Naming**: `SurfaceAdmission` risks colliding with the frozen
+   decision's own cross-grammar "SURFACE CLAIM" vocabulary (which
+   describes the *combined*, two-grammar verdict, not one grammar's own
+   outcome). Candidates that keep the two vocabularies visually
+   distinct: `GrammarAdmission<T>`, `DeclarationAdmission<T>`,
+   `ParseAdmission<T>`.
+
+### Dependency / call-site impact
+
+Workspace census (against baseline SHA `c0e2e50600e418f72af156a3c57616971d391494`)
+confirms the additive approach is not merely convenient but the *only*
+non-breaking option:
+
+- **~270+ call sites** across the workspace consume the 9 existing
+  public sm-front parse/lex functions, every one written against
+  `Result<T, FrontendError>` syntax - `?`, `.map_err(...)?`, `.expect`,
+  `.expect_err`, `.unwrap_or(...)`, `if let Ok(...)`, `match { Ok/Err }`.
+  None of that syntax compiles unmodified against a bespoke 3-variant
+  enum (no `Try`/`?` support, no `.map_err`, `if let Ok(...)` will not
+  match a differently-named variant). Changing any existing function's
+  *return type* in place would be a hard breaking change to all of
+  them; adding new, separately-named `admit_*` functions alongside
+  touches **zero** existing call sites.
+- **Direct dependents of sm-front**: `semantic_language` (root),
+  `smc-cli`, `sm-sema`, `sm-ir`. **Transitive dependents** (via
+  `sm-ir`/`sm-sema`): `sm-emit`, `sm-vm`, `sm-verify`, `prom-runtime`,
+  plus the `workbench_semantic` and `quad_logic_calculator` examples.
+  No other workspace crate references sm-front or anything depending on
+  it (confirmed by a workspace-wide `Cargo.toml` grep). None of these
+  require any change under the additive proposal.
+- **Notable existing pattern, corroborating the root-cause diagnosis**:
+  several *other* call sites already do their own ad hoc version of
+  exactly the probe sm-sema's `check_source_with_profile` does -
+  `crates/smc-cli/src/executable_bundle.rs:25-28` uses
+  `match { Ok(p) => p, Err(_) => return Ok(source) }` as a binary
+  "is this RustLike at all" fallback; `crates/smc-cli/src/app.rs:1069-1076`
+  (and its `:1875` twin) use the identical
+  `if let Ok(logos) = parse_logos_program_with_profile(...) {..} else {
+  parse_program_with_profile(...)? }` shape #1670 is repairing, for
+  `--profile auto` CLI detection. These are exactly `#1919`/`#1920`'s
+  own filed scope (independent of `#1670`, untouched by this decision)
+  - noted here only because they confirm the "collapse any failure into
+  a single undifferentiated bucket" pattern is systemic, not local to
+  sm-sema, which is further evidence for fixing it once at the source
+  (sm-front) rather than re-deriving a workaround at each call site.
+- **Reconciliation needed with an existing type**: `FrontendError`
+  already has a `kind() -> FrontendErrorKind` method
+  (`crates/sm-front/src/types.rs`) distinguishing `Syntax` from
+  `PolicyViolation` via a `"policy violation:"` string-prefix check on
+  `message`. This is an orthogonal axis to `NoClaim`/`Accepted`/
+  `ClaimedButFailed` (a `ClaimedButFailed` result can itself be either
+  `Syntax` or `PolicyViolation`) and requires no change - `SurfaceAdmission::ClaimedButFailed`
+  simply wraps the existing `FrontendError` unchanged, so `.kind()`
+  remains available on it exactly as today.
+- No call site anywhere in the workspace currently branches on
+  `FrontendErrorKind` or inspects `pos`/`message` to distinguish *where*
+  a failure occurred beyond the one `render_diag(...)`-embedding use in
+  `std_adapters.rs` - confirming today's flat `Result` genuinely
+  discards information no existing caller depends on, so recovering it
+  via new, additive functions is safe by construction, not merely by
+  convention.
+
+### Migration plan
+
+1. **This checkpoint (decision-only)**: freeze the API shape and
+   resolve the four open questions above, or send back for a further
+   round if the owner disagrees with any part of this sketch. No code
+   changes; `sm-front` is not touched by this PR.
+2. **A future, separate implementation-only checkpoint** (its own GO):
+   implement `admit_program_with_profile`/`admit_logos_program_with_profile`
+   in `sm-front` exactly as frozen here, with `sm-front`'s own
+   regressions proving `NoClaim`/`Accepted`/`ClaimedButFailed` are each
+   reachable and correctly distinguish "first-token unrecognized" from
+   "recognized head, later failure," for both grammars.
+3. **A further, separate implementation-only checkpoint** (its own GO)
+   to rewrite `sm-sema`'s `check_source_with_profile` on top of the new
+   contract, deleting the lexical-heuristic classifier entirely and
+   restoring `#1670`/PR `#1923` to a design that cannot repeat this
+   failure class - re-running every regression from `#1923`'s four
+   rounds that remains meaningful once the heuristic itself is gone,
+   plus new regressions for the concrete counterexamples this
+   investigation found.
+4. `#1670`/PR `#1923` stays OPEN/parked throughout; `#1580` stays OPEN;
+   no issue-lifecycle changes anywhere in this checkpoint.
+
+### Non-goals (explicit)
+
+- No change to `ParserProfile` - profiles remain surface-independent,
+  per Decision A's own invariant, reaffirmed rather than reopened here.
+- No change to `CompileProfile`.
+- No change to `FrontendError`'s own structure - the new admission
+  types wrap the existing error type unchanged, preserving Decision B's
+  diagnostic-identity-preservation invariant.
+- No implementation in this checkpoint - `sm-front` is not touched;
+  this is a docs-only decision artifact.
+- Does not reopen or reinterpret Decisions A-D themselves - this is a
+  mechanism proposal for how `sm-sema` can safely *compute* the inputs
+  Decision A's own law already requires, not a change to that law.
+
 ## Exit gate
 
 **CONTRACT FROZEN is split into two independent verdicts - it is not one
