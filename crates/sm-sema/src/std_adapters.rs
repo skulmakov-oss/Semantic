@@ -154,6 +154,22 @@ fn is_schema_role_marker_text(text: &str) -> bool {
 // direction, matching the existing "insufficient evidence => no claim"
 // policy elsewhere in this classifier - and is identical to `<= 0` for
 // every well-formed input, where depth never goes negative.
+//
+// Owner-review correction (round 4, adversarial finding): a bare
+// `Newline` at depth 0 is NOT a reliable inter-declaration boundary,
+// because a single declaration's own header can itself span multiple
+// physical lines while still at depth 0 - e.g. `fn\nEntity() { .. }`
+// (a newline between `fn` and its name) or `fn foo<\n Entity\n>() {}`
+// (a newline inside a still-open, but depth-untracked, generic
+// parameter list). Under the round-3 rule, that Newline wrongly
+// re-armed `at_boundary`, letting `Entity` be counted as a second,
+// spurious head. The only reliable signal that a declaration's own
+// body has genuinely ended is a real block closing - `RBrace` (a
+// RustLike braced body) or `Dedent` (a Logos indented body) - returning
+// nesting to exactly depth 0; a bare `Newline` never does. `RParen`/
+// `RBracket` still do not re-arm the boundary even at depth 0, since
+// those close an inline group (a parameter list, an attribute list)
+// nested *within* a declaration's own header, never a body.
 fn top_level_declaration_head_kinds(tokens: &[Token]) -> Vec<TokenKind> {
     let mut depth: i32 = 0;
     let mut at_boundary = true;
@@ -163,9 +179,6 @@ fn top_level_declaration_head_kinds(tokens: &[Token]) -> Vec<TokenKind> {
         let kind = tokens[i].kind;
         match kind {
             TokenKind::Newline => {
-                if depth == 0 {
-                    at_boundary = true;
-                }
                 i += 1;
                 continue;
             }
@@ -187,7 +200,15 @@ fn top_level_declaration_head_kinds(tokens: &[Token]) -> Vec<TokenKind> {
                 i += 1;
                 continue;
             }
-            TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket => {
+            TokenKind::RBrace => {
+                depth -= 1;
+                if depth == 0 {
+                    at_boundary = true;
+                }
+                i += 1;
+                continue;
+            }
+            TokenKind::RParen | TokenKind::RBracket => {
                 depth -= 1;
                 i += 1;
                 continue;
@@ -2073,6 +2094,48 @@ Law "Alpha" [priority 7]:
             !rendered.to_lowercase().contains("ambiguous") && !rendered.to_lowercase().contains("conflict"),
             "a non-head keyword in a Logos declaration's own header must not manufacture a conflict: {rendered}"
         );
+    }
+
+    // T15 (Antigravity adversarial review, round 4) - a declaration's
+    // own header can span multiple physical lines while still at depth
+    // 0 (e.g. a bare newline between `fn` and its name). A `Newline` at
+    // depth 0 is therefore NOT a reliable inter-declaration boundary by
+    // itself; only a real block closing (`RBrace`/`Dedent` returning to
+    // depth 0) is. Confirmed against the real parser: RustLike's own
+    // `expect_symbol` skips the newline via `next_non_layout_idx` and
+    // still rejects the keyword `Entity` as a function name.
+    #[test]
+    fn check_source_ignores_non_head_keyword_across_a_newline_in_header() {
+        let src = "fn\nEntity() {\n    return;\n}\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile)
+            .expect_err("RustLike's own genuine parse failure must not become an admitted program");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("expected identifier"),
+            "expected the originating RustLike parse failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.to_lowercase().contains("ambiguous") && !rendered.to_lowercase().contains("conflict"),
+            "a newline inside a declaration's own header must not manufacture a conflict: {rendered}"
+        );
+    }
+
+    // T16 (Antigravity adversarial review, round 4) - the same class as
+    // T15, for an expression-bodied function (`fn foo() = expr;`) whose
+    // header wraps across a newline before the misleading keyword.
+    #[test]
+    fn check_source_ignores_non_head_keyword_in_expression_bodied_function_header() {
+        let src = "fn foo() =\nEntity;\n";
+        let profile = ParserProfile::foundation_default();
+        let result = check_source_with_profile(src, &profile);
+        if let Err(e) = &result {
+            let rendered = e.to_string();
+            assert!(
+                !rendered.to_lowercase().contains("ambiguous") && !rendered.to_lowercase().contains("conflict"),
+                "a newline inside an expression-bodied function's header must not manufacture a conflict: {rendered}"
+            );
+        }
     }
 
     // T14 (self-review, round 3) - a malformed input with an excess
