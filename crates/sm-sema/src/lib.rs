@@ -31,8 +31,8 @@ mod frontend {
     #[cfg(test)]
     pub use sm_front::parse_logos_program;
     pub use sm_front::{
-        parse_logos_program_with_profile, parse_program_with_profile, type_check_program,
-        LogosEntity, LogosEntityFieldKind, LogosProgram, Type,
+        lex, parse_logos_program_with_profile, parse_program_with_profile, type_check_program,
+        LogosEntity, LogosEntityFieldKind, LogosProgram, Token, TokenKind, Type,
     };
     pub use sm_profile::ParserProfile;
     pub use ton618_core::SourceMark;
