@@ -93,12 +93,20 @@ pub fn check_source(input: &str) -> Result<SemanticReport, SemanticError> {
 /// SSF09-E2 (#1670): source-surface classification law from
 /// `docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`
 /// (Decision A, as corrected by SSF09-E1A). `System`/`Entity`/`Law`/
-/// `Pulse`/`Profile` never appear anywhere in RustLike's grammar, and
-/// RustLike's own top-level forms never appear in Logos's - each set is
-/// confirmed unique keyword vocabulary, safe to detect by token-kind
-/// membership alone. `Import` is the one keyword both grammars recognize;
-/// its ownership is never inferred from the keyword's presence, only from
-/// which grammar(s) actually admit the concrete input (see below).
+/// `Pulse`/`Profile` never appear anywhere in RustLike's own top-level
+/// declaration loop, and RustLike's own top-level forms never appear in
+/// Logos's - each set is confirmed unique top-level-declaration
+/// vocabulary. This is a claim about *top-level declaration-head*
+/// positions specifically, never about token-kind membership anywhere
+/// in the stream: the lexer assigns a keyword's token kind from its
+/// text alone, independent of syntactic position, so e.g. a bare
+/// `Entity` written inside a RustLike `fn` body still lexes as
+/// `KwEntity` - evidence extraction (`top_level_token_kinds` below)
+/// must therefore see only tokens outside any bracket/paren/indent
+/// nesting (owner-review correction, round 1). `Import` is the one
+/// keyword both grammars recognize at top level; its ownership is never
+/// inferred from the keyword's presence, only from which grammar(s)
+/// actually admit the concrete input (see below).
 fn is_layout_token(kind: TokenKind) -> bool {
     matches!(
         kind,
@@ -106,10 +114,36 @@ fn is_layout_token(kind: TokenKind) -> bool {
     )
 }
 
+// Owner-review correction (round 1): a keyword's own token kind is
+// assigned by the lexer independent of syntactic position - `Entity`
+// inside a RustLike `fn` body still lexes as `KwEntity`. Evidence must
+// therefore be restricted to top-level declaration-head positions (the
+// only positions either real top-level parse loop ever inspects), not
+// membership anywhere in the whole token stream. `top_level_token_kinds`
+// tracks nesting purely via already-public structural tokens (brace/
+// paren/bracket delimiters and the lexer's own Indent/Dedent) - it does
+// not parse or recognize any declaration, so it duplicates no grammar.
+fn top_level_token_kinds(tokens: &[Token]) -> impl Iterator<Item = TokenKind> + '_ {
+    let mut depth: i32 = 0;
+    tokens.iter().filter_map(move |t| {
+        let is_top_level = depth <= 0;
+        match t.kind {
+            TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket | TokenKind::Indent => {
+                depth += 1;
+            }
+            TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket | TokenKind::Dedent => {
+                depth -= 1;
+            }
+            _ => {}
+        }
+        is_top_level.then_some(t.kind)
+    })
+}
+
 fn has_logos_exclusive_evidence(tokens: &[Token]) -> bool {
-    tokens.iter().any(|t| {
+    top_level_token_kinds(tokens).any(|kind| {
         matches!(
-            t.kind,
+            kind,
             TokenKind::KwSystem
                 | TokenKind::KwEntity
                 | TokenKind::KwLaw
@@ -120,9 +154,9 @@ fn has_logos_exclusive_evidence(tokens: &[Token]) -> bool {
 }
 
 fn has_rustlike_exclusive_evidence(tokens: &[Token]) -> bool {
-    tokens.iter().any(|t| {
+    top_level_token_kinds(tokens).any(|kind| {
         matches!(
-            t.kind,
+            kind,
             TokenKind::KwEnum
                 | TokenKind::KwFn
                 | TokenKind::KwRecord
@@ -138,12 +172,19 @@ fn is_blank_source(tokens: &[Token]) -> bool {
 }
 
 fn ambiguous_surface_error(input: &str) -> SemanticError {
+    // Owner-review correction (round 1): the prior wording claimed the
+    // whole input "is independently valid under both grammars," which
+    // is true for the confirmed `Import "a.sm"` case but not for a
+    // dual-exclusive-evidence conflict (SSF09-E1's own filed scenario),
+    // where a real parse under either grammar was never attempted at
+    // this branch. State only what is actually known: conflicting
+    // positive ownership evidence, not a claim about parse success.
     SemanticError {
         diag: render_diag(
             DiagLevel::Error,
             "E0000",
-            "ambiguous source surface: this input is independently valid under both the Logos \
-             and RustLike grammars, and no explicit surface was requested to break the tie"
+            "conflicting source-surface claims: positive ownership evidence exists for both \
+             Logos and RustLike, and no explicit surface authority resolves the conflict"
                 .to_string(),
             SourceMark::default(),
             input,
@@ -202,7 +243,23 @@ pub fn check_source_with_profile(
     input: &str,
     profile: &ParserProfile,
 ) -> Result<SemanticReport, SemanticError> {
-    let tokens = lex(input).unwrap_or_default();
+    // Owner-review correction (round 1): a lexer failure means
+    // classification evidence could not be obtained - it does not prove
+    // the source is blank. Silently mapping `Err` to an empty token
+    // vector previously let a real lexical failure (unterminated
+    // string, bad indent, unexpected character) fall through to
+    // `is_blank_source` and be delegated to RustLike as if nothing was
+    // there at all. Preserve the lexer's own deterministic failure
+    // instead.
+    let tokens = lex(input).map_err(|e| SemanticError {
+        diag: render_diag(
+            DiagLevel::Error,
+            "E0000",
+            e.message,
+            SourceMark::default(),
+            input,
+        ),
+    })?;
 
     let logos_exclusive = has_logos_exclusive_evidence(&tokens);
     let rustlike_exclusive = has_rustlike_exclusive_evidence(&tokens);
@@ -1672,7 +1729,9 @@ Law "Alpha" [priority 7]:
     // T3/T9 - confirmed shared Import collision. `Import "a.sm"` alone
     // parses to completion under both grammars (SSF09-E1A). Must be
     // rejected with a deterministic ambiguity outcome - intentionally
-    // different from the pre-#1670-fix silent RustLike-fallback success.
+    // different from the baseline (pre-#1670-fix) wrong-authority
+    // RustLike-side `E0201` ("program must define fn main()") failure
+    // (SSF09-E1B), not a success being turned into an error.
     #[test]
     fn check_source_reports_confirmed_import_collision_as_ambiguous() {
         let src = "Import \"a.sm\"\n";
@@ -1810,5 +1869,80 @@ Law "Alpha" [priority 7]:
                 "blank input must never be reported as an authority conflict: {rendered}"
             );
         }
+    }
+
+    // T10 (owner-review correction, round 1) - a Logos-exclusive keyword
+    // occurring only in a non-top-level position (inside a RustLike `fn`
+    // body) must not manufacture a false Logos claim. `Entity` lexes as
+    // `KwEntity` from its text alone regardless of syntactic position;
+    // genuine top-level evidence exists only for RustLike (`fn`), and
+    // RustLike's own parse of this exact input fails (a bare keyword
+    // token is not a valid expression). The originating RustLike failure
+    // must be preserved, never reinterpreted as a conflict.
+    #[test]
+    fn check_source_ignores_nested_logos_keyword_in_rustlike_body() {
+        let src = "fn main() {\n    Entity\n}\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile)
+            .expect_err("RustLike's own genuine parse failure must not become an admitted program");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("expected primary expression"),
+            "expected the originating RustLike parse failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.to_lowercase().contains("ambiguous")
+                && !rendered.to_lowercase().contains("conflict"),
+            "a nested Logos-exclusive keyword must not manufacture a conflict: {rendered}"
+        );
+    }
+
+    // T11 (owner-review correction, round 1) - mirror of T10: a
+    // RustLike-exclusive keyword occurring only in a non-top-level
+    // position (as a field name inside a Logos `Entity` body) must not
+    // manufacture a false RustLike claim. `fn` lexes as `KwFn` from its
+    // text alone; genuine top-level evidence exists only for Logos
+    // (`Entity`), and Logos's own parse of this exact input fails (the
+    // field-name parser requires a plain identifier, not a keyword). The
+    // originating Logos failure must be preserved, never reinterpreted
+    // as a conflict.
+    #[test]
+    fn check_source_ignores_nested_rustlike_keyword_in_logos_body() {
+        let src = "Entity A:\n    state fn: quad\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile)
+            .expect_err("Logos's own genuine parse failure must not become an admitted program");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("expected identifier"),
+            "expected the originating Logos parse failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.to_lowercase().contains("ambiguous")
+                && !rendered.to_lowercase().contains("conflict"),
+            "a nested RustLike-exclusive keyword must not manufacture a conflict: {rendered}"
+        );
+    }
+
+    // Owner-review correction (round 1) - a genuine lexer failure must
+    // remain a deterministic, lexer-attributed error, never silently
+    // treated as blank/no-evidence and delegated to RustLike.
+    #[test]
+    fn check_source_preserves_lexer_failure() {
+        let src = "Import \"unterminated";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile).expect_err(
+            "an unterminated string literal must fail the lexer, not be treated as blank",
+        );
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("unterminated string literal"),
+            "expected the originating lexer failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.to_lowercase().contains("ambiguous")
+                && !rendered.to_lowercase().contains("conflict"),
+            "a lexer failure must not be reported as a surface conflict: {rendered}"
+        );
     }
 }
