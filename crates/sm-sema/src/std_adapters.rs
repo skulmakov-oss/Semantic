@@ -122,7 +122,7 @@ fn is_schema_role_marker_text(text: &str) -> bool {
 // token kind is assigned by the lexer independent of syntactic position
 // - `Entity` inside a RustLike `fn` body still lexes as `KwEntity`.
 // Round 1 restricted evidence to tokens outside any bracket/indent
-// nesting, but "outside nesting" (depth <= 0) is not the same as "is
+// nesting, but "outside nesting" (depth == 0) is not the same as "is
 // the actual declaration head": in `fn Entity() { .. }`, `Entity` sits
 // at depth 0 too (before any `(`/`{`/indent), yet it occupies the
 // RustLike function's *name* slot, not a Logos declaration head.
@@ -142,6 +142,18 @@ fn is_schema_role_marker_text(text: &str) -> bool {
 // that merely ends part of the CURRENT declaration's own content (e.g.
 // a function's parameter list). This does not parse or recognize the
 // body of any declaration, so it duplicates no grammar.
+//
+// Self-review addendum (round 3): depth is compared with `== 0`, not
+// `<= 0`. A malformed input with an excess closing delimiter (a stray
+// `}`/`)`/`]` with no matching opener) can drive `depth` negative;
+// `<= 0` would then treat every subsequent token as "top level" again
+// (since a negative depth never returns to exactly 0 for well-formed
+// trailing content), manufacturing evidence from content that is only
+// reachable via already-malformed structure. `== 0` instead disables
+// further evidence detection once depth goes negative - the safe
+// direction, matching the existing "insufficient evidence => no claim"
+// policy elsewhere in this classifier - and is identical to `<= 0` for
+// every well-formed input, where depth never goes negative.
 fn top_level_declaration_head_kinds(tokens: &[Token]) -> Vec<TokenKind> {
     let mut depth: i32 = 0;
     let mut at_boundary = true;
@@ -151,7 +163,7 @@ fn top_level_declaration_head_kinds(tokens: &[Token]) -> Vec<TokenKind> {
         let kind = tokens[i].kind;
         match kind {
             TokenKind::Newline => {
-                if depth <= 0 {
+                if depth == 0 {
                     at_boundary = true;
                 }
                 i += 1;
@@ -164,7 +176,7 @@ fn top_level_declaration_head_kinds(tokens: &[Token]) -> Vec<TokenKind> {
             }
             TokenKind::Dedent => {
                 depth -= 1;
-                if depth <= 0 {
+                if depth == 0 {
                     at_boundary = true;
                 }
                 i += 1;
@@ -182,7 +194,7 @@ fn top_level_declaration_head_kinds(tokens: &[Token]) -> Vec<TokenKind> {
             }
             _ => {}
         }
-        if depth <= 0 && at_boundary {
+        if depth == 0 && at_boundary {
             heads.push(kind);
             at_boundary = false;
             if kind == TokenKind::Ident && is_schema_role_marker_text(&tokens[i].text) {
@@ -2013,7 +2025,7 @@ Law "Alpha" [priority 7]:
     }
 
     // T12 (owner-review correction, round 3) - "outside any nesting"
-    // (depth <= 0) is not the same as "is the declaration head". In
+    // (depth == 0) is not the same as "is the declaration head". In
     // `fn Entity() { .. }`, `Entity` occupies the RustLike function's
     // *name* slot - it sits at depth 0 too (before `(`/`{`), but it is
     // not a Logos declaration head. `fn` is the genuine top-level
@@ -2060,6 +2072,31 @@ Law "Alpha" [priority 7]:
         assert!(
             !rendered.to_lowercase().contains("ambiguous") && !rendered.to_lowercase().contains("conflict"),
             "a non-head keyword in a Logos declaration's own header must not manufacture a conflict: {rendered}"
+        );
+    }
+
+    // T14 (self-review, round 3) - a malformed input with an excess
+    // closing delimiter (a stray `}` with no matching opener) drives
+    // the depth counter negative. Genuine top-level RustLike evidence
+    // (`fn`) precedes the malformed content; `Entity` afterward must
+    // NOT be treated as fresh top-level Logos evidence merely because
+    // negative depth also satisfies a `<= 0` check - RustLike's own
+    // parse failure (from the stray `}` itself) must be preserved.
+    #[test]
+    fn check_source_ignores_evidence_after_unbalanced_closing_delimiter() {
+        let src = "fn foo() {}}\nEntity\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile)
+            .expect_err("RustLike's own genuine parse failure must not become an admitted program");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("expected top-level"),
+            "expected the originating RustLike parse failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.to_lowercase().contains("ambiguous")
+                && !rendered.to_lowercase().contains("conflict"),
+            "an unbalanced closing delimiter must not manufacture a conflict: {rendered}"
         );
     }
 }
