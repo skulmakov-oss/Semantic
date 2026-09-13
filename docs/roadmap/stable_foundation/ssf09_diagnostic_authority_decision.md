@@ -1826,77 +1826,127 @@ checkpoint - not authorized by this decision-only checkpoint):
   outcome as evidence about an earlier commitment) this whole
   investigation exists to remove from `sm-sema`'s classifier. Corrected
   below.
-- `parse_program`'s loop: track one local `any_declaration_claimed: bool`,
-  set `true` at the grammar-level **dispatch/commit point** - the
-  instant the top-level `match` selects the
-  `KwImport|KwEnum|KwFn|KwRecord|KwSchema|KwTrait|KwImpl` (or
-  role-marked-schema) arm and enters that declaration's own sub-parser -
-  **before** that sub-parser has succeeded or failed. Concrete
-  illustrative RustLike case this corrected semantics must get right:
-  the input `fn main(\n` (a recognized `fn` head whose own parameter
-  list then fails to parse) MUST yield `ClaimedButFailed`, never
-  `NoClaim` - `fn` was already claimed the moment the head keyword was
-  recognized, regardless of what its sub-parser does afterward (the
-  symmetric Logos illustration, `Entity\n    <malformed entity
-  body/header>`, belongs under `parse_logos_program`'s bullet below -
-  `Entity` is a Logos-only keyword and cannot appear as a RustLike
-  example). On the `_ => Err(...)` branch: `NoClaim` if
-  `any_declaration_claimed` is still `false`, else `ClaimedButFailed`. On
-  a declaration's own sub-parser failing: always `ClaimedButFailed` - the
-  claim was already made unconditionally at dispatch, not conditionally
-  on the sub-parser's own outcome. **CORRECTION NOTE (owner review round
-  2, adversarial-review finding)**: loop completion with *zero*
-  declarations and no error - an empty or comment/whitespace-only file;
-  `crates/sm-front/src/parser.rs:98-101`'s `if i >= self.tokens.len() {
-  break; }` fires before the `match` is ever reached - is **not**
-  `Accepted`: the type's own definition requires "at least one
-  top-level declaration was recognized" for `Accepted`. Loop completion
-  must be gated on the same flag: `if any_declaration_claimed {
-  Accepted(Program) } else { NoClaim }`, not an unconditional `Accepted`
-  on any error-free exit.
-- `parse_logos_program`'s loop: the same corrected semantics, symmetric
-  to RustLike's above - track `any_declaration_claimed: bool`, set
-  `true` at the dispatch point, the instant `check_raw` recognizes
-  `KwSystem|KwEntity|KwLaw` or the legacy `KwImport|KwPulse|KwProfile`
-  branch is entered, **not** contingent on that branch's own content
-  handling completing without error (this holds even though today's
-  legacy-directive handling performs no content validation at all before
-  consuming to the next newline - dispatch, not validation outcome, is
-  what sets the flag; consistent with T5's already-frozen requirement
-  that a bare `Pulse`/`Profile` is unconditional positive Logos evidence
-  - see the confirmed item in the matrix section below). Concrete
-  illustrative case: the input `Entity\n    <malformed entity
+- **CORRECTION NOTE (owner review round 3, owner ruling)**: round 2's fix
+  was still wrong, in a different way. It set `any_declaration_claimed =
+  true` universally "at dispatch" - the instant *any* top-level keyword,
+  including a *shared* one like `Import`, is recognized. That is too
+  early for shared vocabulary: recognizing `KwImport` only means "this
+  grammar has a rule that *could* apply," not that the grammar has yet
+  crossed *its own* sufficient-positive-evidence threshold for this
+  input - and Decision A already froze exactly where that threshold sits
+  for `Import` specifically (a string-literal token, for RustLike). The
+  corrected invariant, replacing "claim at dispatch" as a universal rule:
+
+  **positive grammar claim = the grammar has crossed its own frozen
+  sufficient-evidence / commit point** - not merely "a parser dispatch
+  branch was entered."
+
+  This splits top-level heads into two kinds:
+  - **Exclusive heads** - RustLike's `enum`/`fn`/`record`/`schema`/
+    `trait`/`impl`/role-marked-schema, and Logos's `System`/`Entity`/
+    `Law`/`Pulse`/`Profile`. Decision A's own frozen evidence-status law
+    already treats the bare keyword as sufficient positive evidence for
+    every one of these, unconditionally, with no combination or
+    further-content requirement. For these, **commit = dispatch**: the
+    moment the keyword is recognized, the claim is established - round
+    1 and round 2's "claim at dispatch" reasoning is correct and
+    unchanged for this class.
+  - **Shared heads** - `Import` (the only current member; the only
+    keyword either grammar has a production for in common). `KwImport`
+    being recognized only means both grammars *could* apply - Decision
+    A's own frozen law is explicit that resolving `Import`'s ambiguity
+    "depends on whether the concrete input is actually admitted by both
+    grammars," never on the keyword's presence alone. For a shared head,
+    **commit happens later**, at whatever point that specific grammar's
+    own production reaches the sufficient-evidence threshold Decision A
+    already froze for it - not at dispatch.
+- `parse_program`'s loop (RustLike): for the six exclusive heads and
+  role-marked-schema, `any_declaration_claimed = true` at dispatch
+  exactly as before - illustrated by `fn main(\n` (a recognized `fn`
+  head whose own parameter list then fails to parse) MUST yield
+  `ClaimedButFailed`, never `NoClaim`. For `Import` specifically:
+  dispatch on `KwImport` alone does **not** set the flag.
+  `parse_import_decl` (`crates/sm-front/src/parser.rs:137-173`) commits
+  only once `expect_string_literal_text` (`parser.rs:140`) *succeeds* -
+  that call succeeding is exactly Decision A's own already-frozen
+  "RustLike requires a string literal specifically" threshold, so this
+  is the existing frozen rule restated as a commit point, not a new rule
+  invented here. Concretely: an unquoted/bare path fails
+  `expect_string_literal_text` *before* the claim is established ->
+  `NoClaim` for RustLike (a candidate path was tried and rejected before
+  crossing its own evidence threshold); a string literal makes
+  `expect_string_literal_text` succeed, establishing the claim - the
+  rest of `parse_import_decl` (optional `pub`/`as`/`*`/`{...}` select
+  list) is *after* commit, so any failure there is `ClaimedButFailed`,
+  and reaching the function's end successfully is `Accepted`. On the
+  `_ => Err(...)` branch: `NoClaim` if `any_declaration_claimed` is
+  still `false`, else `ClaimedButFailed`. **CORRECTION NOTE (owner
+  review round 2, adversarial-review finding, unchanged by round 3)**:
+  loop completion with *zero* declarations and no error - an empty or
+  comment/whitespace-only file; `parser.rs:98-101`'s `if i >=
+  self.tokens.len() { break; }` fires before the `match` is ever reached
+  - is **not** `Accepted`: the type's own definition requires "at least
+  one top-level declaration was recognized" for `Accepted`. Loop
+  completion must be gated on the same flag: `if any_declaration_claimed
+  { Accepted(Program) } else { NoClaim }`, not an unconditional
+  `Accepted` on any error-free exit.
+- `parse_logos_program`'s loop (Logos): for `System`/`Entity`/`Law`/
+  `Pulse`/`Profile`, `any_declaration_claimed = true` at dispatch exactly
+  as before - illustrated by `Entity\n    <malformed entity
   body/header>` (a recognized `Entity` head whose own body then fails to
-  parse) MUST yield `ClaimedButFailed`, never `NoClaim` - `Entity` was
-  already claimed the moment the head keyword was recognized, regardless
-  of what its sub-parser does afterward. `errors.is_empty()` →
-  `Accepted` **if** `any_declaration_claimed`, **else** `NoClaim` (loop
-  completion with zero declarations and no error - an empty file - must
-  not be `Accepted`, symmetric to the RustLike correction above); else
+  parse) MUST yield `ClaimedButFailed`, never `NoClaim`. For `Import` on
+  the Logos side specifically: Decision A's frozen law imposes **no
+  additional structural requirement** on Logos's own `Import` handling
+  beyond the keyword and the `require_legacy_compatibility` policy check
+  - Logos's content handling "accepts anything up to the next newline
+  once legacy-compatibility passes," with zero further validation.
+  Because Decision A never froze a deeper evidence threshold for Logos's
+  side of `Import`, there is nothing later to defer commit to: **Logos's
+  own commit point for `Import` remains at dispatch** (immediately after
+  `check_raw` matches and `require_legacy_compatibility` passes). This
+  is genuinely asymmetric between the two grammars for the *same* shared
+  keyword, and that asymmetry is correct, not an inconsistency: each
+  grammar's commit point is defined by that grammar's own frozen
+  evidence law, and the two grammars simply froze different thresholds
+  for `Import`. `errors.is_empty()` → `Accepted` **if**
+  `any_declaration_claimed`, **else** `NoClaim` (loop completion with
+  zero declarations and no error - an empty file - must not be
+  `Accepted`, symmetric to the RustLike correction above); else
   (`errors` non-empty) `any_declaration_claimed` →
   `ClaimedButFailed(merged_errors)`; else → `NoClaim`.
-  **CORRECTION NOTE (owner review round 2, adversarial-review finding)**:
-  two call sites in `parse_logos_program` fail via an immediate `?`
-  early return rather than the `errors: Vec` accumulation this sketch
-  otherwise assumes for every failure - `self.require_logos_surface(...)?`
-  at function entry (`parser.rs:2955`, **before** any token is
-  inspected) and `self.require_legacy_compatibility(...)?` inside the
-  legacy-directive branch (`parser.rs:2997`, **after**
-  `KwImport`/`KwPulse`/`KwProfile` is already recognized). These two
-  sites need different classifications, not one shared rule: the
-  function-entry `require_logos_surface` failure happens before a
-  single token is inspected, so it is `NoClaim` - zero evidence
-  gathered, nothing to attribute a failure to. The legacy-directive
-  `require_legacy_compatibility` failure happens **after** the head
-  keyword is already recognized (dispatch already occurred, per the
-  corrected semantics above), so it is `ClaimedButFailed` - this is
-  exactly the already-confirmed T2 counterexample in "Motivating
-  evidence" above (`Import "a.sm"\nEntity A:...` under
-  `allow_logos_surface = false` must report a Logos policy rejection,
-  never silently discard it). The future implementation must catch
-  these two `?`-sites' errors and classify them by this rule rather than
-  let them propagate as a raw early return past the point where
-  `admit_logos_program_with_profile` needs to observe them.
+  **CORRECTION NOTE (owner review round 3, policy-gate re-examination)**:
+  round 2 classified `parse_logos_program`'s two `?`-based policy checks
+  as: function-entry `require_logos_surface` (`parser.rs:2955`) ->
+  `NoClaim`; per-directive `require_legacy_compatibility`
+  (`parser.rs:2997`) -> `ClaimedButFailed`. The per-directive
+  classification is **unchanged and correct** under the corrected
+  commit-point law: for `Pulse`/`Profile` it fires after an exclusive
+  head's dispatch-is-commit point, and for `Import` it fires after
+  Logos's own dispatch-is-commit point (per the paragraph above) -
+  either way commit already happened, so `ClaimedButFailed` is right.
+  The function-entry `require_logos_surface` classification needs a
+  **structural** correction, not just a relabeling: today's code calls
+  it *before* the loop scans a single token, so a naive translation
+  would always report `NoClaim` when the Logos surface is
+  policy-disabled - **even when the input contains genuine
+  exclusive-head evidence** (e.g. `Entity`) elsewhere in the file -
+  reproducing exactly the T2 counterexample this whole investigation
+  exists to fix (a Logos policy rejection silently discarded as "no
+  evidence"). The future implementation must **not** call
+  `require_logos_surface` as a blind pre-loop gate:
+  `admit_logos_program_with_profile` must scan for commit points
+  *first*, independent of whether the Logos surface is policy-enabled,
+  and apply the surface-disablement check only *after* - if a commit
+  point was crossed anywhere in the input, report `ClaimedButFailed`
+  with a policy-violation `FrontendError` (consistent with
+  `FrontendError::kind() == PolicyViolation`); if no commit point exists
+  anywhere in the input, report `NoClaim` regardless of the policy
+  setting (there was never anything for the disabled surface to have
+  claimed). This is a required reordering of today's
+  `require_logos_surface(...)?` call site relative to the scan loop, not
+  merely a reclassification of its existing failure - flagged here as an
+  implementation consequence for the future implementation checkpoint,
+  not implemented in this decision-only checkpoint.
 - Every existing public sm-front parsing function
   (`parse_program(_with_profile)`, `parse_logos_program(_with_profile)`,
   `parse_rustlike(_with_profile)`, `parse_logos(_with_profile)`) keeps
@@ -1914,6 +1964,13 @@ checkpoint - not authorized by this decision-only checkpoint):
   entirely, replacing `check_source_with_profile`'s classification with
   a direct match over
   `(admit_logos_program_with_profile(...), admit_program_with_profile(...))`.
+  Critically, this includes **zero `Import`-specific logic in
+  `sm-sema`** - the exclusive-vs-shared-head distinction and every
+  grammar's commit-point threshold live entirely inside `sm-front`'s two
+  `admit_*` functions, exactly the architectural boundary this whole
+  investigation exists to establish: `sm-sema` never needs to know that
+  `Import` requires a string literal, or where a declaration's body
+  ends - it only ever inspects the two `GrammarAdmission` values.
 
 ### Cross-grammar authority matrix (FROZEN by owner ruling, round 1)
 
@@ -1950,6 +2007,13 @@ each single-sided row is Decision A's UNIQUE POSITIVE SURFACE CLAIM
 (the `Accepted` rows are its success sub-outcome, the `ClaimedButFailed`
 rows are its AUTHORITATIVE FAILURE sub-outcome); all four double-positive
 rows are Decision A's AMBIGUOUS/CONFLICTING CLAIMS.
+
+**This table is unchanged across every owner review round on Decision E
+(rounds 1-3)**: the round-2-to-round-3 correction (see "Implementation
+sketch" above and the "Import ruling" below) is entirely about *how*
+`GrammarAdmission::Accepted`/`ClaimedButFailed`/`NoClaim` are computed
+for shared vocabulary like `Import` - the coordinator function over the
+resulting admission *pair* never changed.
 
 **Rationale (resolves former open questions 1 and 2)**: `Accepted` and
 `ClaimedButFailed` are **both** positive grammar claims - the only
@@ -2014,69 +2078,83 @@ this evidence sketch). This is a labeling difference, not a new
 exception to the matrix - both `Accepted`+`ClaimedButFailed` orderings
 still resolve to AMBIGUOUS/CONFLICTING per the frozen matrix above.
 
-**Import ruling (precision correction)**: a bare or legacy `Import` line
-may produce a **local** Logos `GrammarAdmission::Accepted` (or, if
-policy-rejected - e.g. `require_legacy_compatibility` fails - a
-`ClaimedButFailed`; Logos's own content handling for legacy directives
-performs no syntax validation at all, so only a *policy*-driven failure
-is possible here, never a *content*-driven parse failure) when Logos's
-own parser genuinely admits or claims it - but `Import` is **not
-Logos-exclusive evidence** the way `System`/`Entity`/`Law`/`Pulse`/
-`Profile` are. A local Logos admission on `Import` content does not, by
-itself, entitle the coordinator to skip evaluating RustLike - the
-coordinator must still compute RustLike's own `GrammarAdmission` for the
-same content, and the matrix above (not an `Import`-specific shortcut)
-governs the final `Auto` verdict. `Pulse`/`Profile` remain unconditional
-Logos-positive claims per T5's already-frozen invariant - unchanged and
-not reopened by this ruling; they are Logos-exclusive specifically
-because RustLike's own grammar has no rule that could ever accept them,
-which is not true of `Import`.
+**Import ruling (RESOLVED, owner review round 3 - supersedes the round-2
+conflict flag preserved for audit history at the end of this
+subsection)**: round 2 correctly identified a genuine conflict between
+the frozen matrix and Decision A's own frozen unquoted-`Import`
+carve-out. The owner's ruling: **neither
+Decision A nor the matrix was wrong - round 2's `GrammarAdmission`
+computation was wrong**, by setting `any_declaration_claimed = true`
+universally at dispatch, including for `Import`'s shared vocabulary. The
+corrected commit-point law (see "Implementation sketch" above) resolves
+this without touching Decision A's text or the matrix's shape:
 
-Two concrete cases, evaluated separately:
+A bare or legacy `Import` line may produce a **local** Logos
+`GrammarAdmission::Accepted` (or, if policy-rejected - e.g.
+`require_legacy_compatibility` fails - a `ClaimedButFailed`; Logos's own
+content handling for legacy directives performs no syntax validation at
+all, so only a *policy*-driven failure is possible here, never a
+*content*-driven one) when Logos's own parser genuinely admits or claims
+it - but `Import` is **not Logos-exclusive evidence** the way
+`System`/`Entity`/`Law`/`Pulse`/`Profile` are. A local Logos admission on
+`Import` content does not, by itself, entitle the coordinator to skip
+evaluating RustLike - the coordinator always computes RustLike's own
+`GrammarAdmission` too, and the unchanged matrix above governs the
+verdict. There is **no `Import`-specific branch anywhere in `sm-sema`**;
+the distinction that used to look like an "Import special case" lives
+entirely inside `admit_program_with_profile`'s own definition of when
+RustLike's `Import` production reaches its commit point, which
+`sm-sema` never inspects.
 
-- `Import "a.sm"` (a quoted string literal): Logos `Accepted`, RustLike
-  `Accepted` (RustLike's `parse_import_decl` fully admits this shape) -
-  an ordinary `Accepted`+`Accepted` row in the matrix above -
-  AMBIGUOUS/CONFLICTING - which is exactly the already-confirmed
-  `Import "a.sm"` concrete collision from Decision A, now expressed in
-  the new contract's terms rather than as a hand-rolled special case. No
-  tension with Decision A here - Decision A already ruled this exact
-  input AMBIGUOUS/CONFLICTING.
-- **CONFLICT FLAGGED (round 2 adversarial review) - AWAITING OWNER
-  RULING, NOT RESOLVED BY THIS DRAFT**: an unquoted import, e.g.
-  `Import foo.bar` (no string literal): Logos `Accepted` (legacy
-  handling performs no content validation), RustLike `ClaimedButFailed`
-  (`parse_import_decl`'s `expect_string_literal_text` genuinely errors
-  on a non-string token, but only *after* `KwImport` is already
-  recognized at dispatch - a real positive claim under the corrected
-  claim-vs-accept semantics above). Applying the frozen matrix
-  mechanically, `Accepted`+`ClaimedButFailed`, gives AMBIGUOUS/
-  CONFLICTING. **This directly contradicts Decision A's own already-
-  frozen, merged text for this exact shape**: *"an `Import`-led line
-  whose content does not satisfy RustLike's structured shape (e.g. an
-  unquoted/bare path with no string literal) is accepted by Logos but
-  genuinely rejected by RustLike's own parser - that is not a conflict,
-  it is a real RustLike parse failure with nothing to be ambiguous
-  against, and correctly falls to UNIQUE POSITIVE LOGOS CLAIM"* (Decision
-  A, "UNIQUE POSITIVE SURFACE CLAIM" correction note) and *"a
-  Logos-accepted `import` line whose content RustLike's own
-  `parse_import_decl` would reject ... produces no RustLike claim to
-  conflict with, and is UNIQUE POSITIVE LOGOS CLAIM instead"* (Decision
-  A, corrected law). Decision A treats RustLike's rejection here as "no
-  claim to conflict with"; Decision E's general matrix treats every
-  `ClaimedButFailed` as a positive claim, unconditionally. Both cannot
-  be simultaneously true for this exact input. This decision does
-  **not** resolve the tension unilaterally - doing so either way is
-  itself a substantive change to a frozen decision (amending Decision
-  A's carve-out, or narrowing Decision E's matrix with a
-  content-comparison exception the owner explicitly ruled out
-  elsewhere in this same section) and requires an explicit owner
-  ruling before this row of the matrix - and this specific concrete
-  case - can be considered frozen.
+Two concrete cases, now fully resolved and consistent with Decision A:
+
+- **`Import foo.bar`** (an unquoted path, no string literal): Logos
+  `Accepted` (dispatch is commit on the Logos side); RustLike
+  **`NoClaim`**, not `ClaimedButFailed` - `expect_string_literal_text`
+  fails *before* RustLike's `Import` production reaches its own commit
+  point, so no RustLike claim was ever established to conflict with.
+  Matrix row: `Accepted` + `NoClaim` -> **Logos accepted**. This is
+  exactly Decision A's own frozen ruling for this shape ("produces no
+  RustLike claim to conflict with... UNIQUE POSITIVE LOGOS CLAIM"),
+  reached through the unmodified matrix, with no exception and no
+  reopening of Decision A.
+- **`Import "a.sm"`** (a string literal): Logos `Accepted`; RustLike
+  `Accepted` - `expect_string_literal_text` succeeding *is* RustLike's
+  `Import` commit point, and nothing after it fails for this input, so
+  this case genuinely reaches `Accepted` on both sides. Matrix row:
+  `Accepted` + `Accepted` -> **AMBIGUOUS/CONFLICTING**, exactly
+  Decision A's already-confirmed concrete collision.
+
+`Pulse`/`Profile` remain unconditional Logos-positive claims per T5's
+already-frozen invariant, unchanged and not reopened by this ruling -
+they are Logos-exclusive specifically because RustLike's own grammar has
+no production for them at all, so there is no commit-point question to
+ask on the RustLike side. `Import`'s asymmetry (immediate commit on the
+Logos side, deferred commit on the RustLike side) is what makes it
+different from `Pulse`/`Profile` - a difference in each grammar's own
+frozen evidence law, not an inconsistency in how this decision treats
+the two.
+
+**Previously flagged, now resolved (round 2's conflict, preserved for
+audit history)**: round 2 found that applying the matrix mechanically to
+`Accepted`+`ClaimedButFailed` for an unquoted import would contradict
+Decision A's text - *"an `Import`-led line whose content does not
+satisfy RustLike's structured shape... is accepted by Logos but
+genuinely rejected by RustLike's own parser - that is not a conflict...
+and correctly falls to UNIQUE POSITIVE LOGOS CLAIM"* (Decision A) versus
+Decision E's then-current claim that this same case was
+`ClaimedButFailed` on the RustLike side. Under the corrected commit-point
+law above, `Import foo.bar` never actually reaches RustLike
+`ClaimedButFailed` in the first place - it is `NoClaim`, per the case
+above - so the `Accepted`+`ClaimedButFailed` row is simply never reached
+for this input, and the conflict dissolves without amending Decision A
+or narrowing the matrix.
 
 **Already confirmed, restated for completeness (not reopened, former
 open question 3)**: a bare legacy `Pulse`/`Profile`/`Import` directive
-counts as `any_declaration_claimed = true` for Logos even though its own
+counts as `any_declaration_claimed = true` **on the Logos side**
+(RustLike's side of `Import` has its own, later commit point - see
+above; this bullet is about Logos's side only) even though Logos's own
 internal handling performs "zero content validation at all" - required
 by T5's already-frozen invariant (bare `Pulse`/`Profile` is
 unconditional positive Logos evidence), not a new question, restated
