@@ -1835,6 +1835,19 @@ and three prohibitions:
   (via `Parser::error_at_token`/`format_parser_error_at_input`), instead
   of an empty one.
 
+**On the precondition being unenforced (round 5 adversarial-review
+finding)**: the precondition above is a caller contract, not something
+`admit_*` can verify at runtime - checking it would require re-lexing
+`source`, which the second prohibition already forbids. This is
+deliberate, not an oversight: a caller violating it (passing `source`
+that doesn't match `tokens`) is fail-safe by construction, never a
+correctness or memory-safety hazard - `Parser::error_at_token`'s only
+use of `source` is `SourceMap::line(...).unwrap_or_default()` feeding a
+cosmetic caret-diagnostic line, which degrades to an empty or wrong
+line on mismatch and nothing else; `evidence_basis`, `Ok`/`Err`, and
+every other observable admission outcome are computed from `tokens`
+alone and cannot be affected by what `source` contains.
+
 The exact Rust representation above is illustrative, not frozen; the
 **semantics** are what this decision fixes: a grammar-local admission
 reports two independent facts - **evidence basis** (did this grammar
@@ -2092,11 +2105,18 @@ scan discovered - the finalization law governs the wrapped outcome
 only, never which variant wraps it.) In prose:
 
 - The global `require_logos_surface` gate outranks a
-  `require_legacy_compatibility` failure, matching the existing
-  parser's own gate order (`parse_logos_program` checks
-  `require_logos_surface` once, before its loop runs at all, so under
-  today's code a disabled surface is already terminal before any
-  per-directive legacy-compatibility check could ever fire).
+  `require_legacy_compatibility` failure. **Precision note (round 5
+  adversarial-review finding)**: today's `parse_logos_program` doesn't
+  actually contain an explicit precedence *rule* between the two gates
+  to match - it calls `require_logos_surface` once, unconditionally,
+  before its loop runs at all (`parser.rs:2954-2956`), so a disabled
+  surface aborts the whole function immediately for *every* input, and
+  `require_legacy_compatibility` is simply never reached, regardless of
+  content. This ordering is a formalization of that existing early-exit
+  behavior's *outcome* - for any input with Logos evidence, today's code
+  and this law agree on which `FrontendError` results when the surface
+  is disabled - not a claim that today's code deliberately weighs one
+  gate against the other.
 - A legacy-compatibility failure is preserved **exactly as
   `require_legacy_compatibility` constructed it** - never routed
   through `merge_logos_errors`, never merged with unrelated syntax
