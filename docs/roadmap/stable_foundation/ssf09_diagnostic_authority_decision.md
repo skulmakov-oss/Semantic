@@ -2083,6 +2083,39 @@ through the resolver):
   this exact shape, so this is a consistent extension, not a
   contradiction.
 
+**Evidence-gathering is bounded by each grammar's own existing scan
+mechanics, not a fresh whole-file re-scan (round 4 adversarial-review
+finding, corrected during verification)**: `evidence_basis` is tracked
+*during* the same loop that already computes parse outcome, not by a
+separate pass over the whole token stream. This matters because the
+two grammars' loops are not symmetric - a fact this document's own
+"Current state" section already establishes: `parse_program`'s loop
+(`crates/sm-front/src/parser.rs:97-123`) `return`s immediately via `?`
+on the *first* unrecognized top-level token, discarding everything
+after it, while `parse_logos_program`'s loop accumulates errors via
+`recover_logos_anchor()` and keeps scanning to the end of the input.
+Consequence for a source that mixes both grammars' exclusive vocabulary
+in an order RustLike cannot get past - e.g. `Entity Player:\n    state
+hp: int\nfn main() {}` (`Entity` first, `fn` second): Logos sees
+`Entity` (promotes to `Exclusive`), then fails on the unrecognized `fn`
+-> `Exclusive(Err)`. RustLike's loop returns on its very *first*
+iteration - `Entity` matches none of its top-level forms - **before
+`evidence_basis` is ever promoted and before `fn` is ever inspected**,
+regardless of what recognizable RustLike content exists later in the
+file -> `NoClaim`, not `Exclusive(Err)`. Stage 1 then gives `Exclusive`
+vs `NoClaim` -> **Logos authoritative failure**, not AMBIGUOUS/
+CONFLICTING (an initial trace of this exact input during adversarial
+review incorrectly assumed RustLike's scan reaches `fn` regardless of
+what precedes it, which the code above disproves). This is not a defect
+in the model: `NoClaim` here is not a fabricated absence of evidence -
+RustLike's own parser genuinely never reaches `fn` for this concrete
+input, so it genuinely never establishes a claim, the same way a
+human's ability to spot `fn` "in the file" is not the same claim as
+"RustLike's parser establishes evidence from it." Flagged explicitly to
+prevent a future implementer (or reviewer) from assuming both `admit_*`
+functions scan symmetrically; neither this document nor Decision A
+requires that they do.
+
 **Evidence preservation**: both `Exclusive`-vs-`Exclusive` and
 `Shared`-`Err`-vs-`Shared`-`Err` are AMBIGUOUS/CONFLICTING outcomes
 where **neither underlying `FrontendError` may be silently dropped** -
