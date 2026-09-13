@@ -1422,26 +1422,44 @@ crate is finally selected - be added.
   requirement previously said `#1670`'s fix "does not change any
   admitted program's compilation result - only failure-classification
   behavior." That is no longer compatible with this decision as
-  corrected: the confirmed `Import "a.sm"` collision is *currently*
-  admitted (it silently succeeds today via `check_source_with_profile`'s
-  RustLike fallback), and the corrected law explicitly requires it to
-  become a deterministic AMBIGUOUS/CONFLICTING classification error
-  under implicit `Auto` - a real, intentional change to that specific
-  input's result, not a regression. The requirement is restated more
-  precisely:
+  corrected: the corrected law explicitly requires the confirmed
+  `Import "a.sm"` collision to become a deterministic AMBIGUOUS/
+  CONFLICTING classification error under implicit `Auto`, replacing
+  its current RustLike-side terminal failure (see the E1B correction
+  note below for the precise baseline evidence) - a real, intentional
+  change to that specific input's result, not a regression. The
+  requirement is restated more precisely:
   - Inputs with exactly one authoritative surface (a UNIQUE POSITIVE
     SURFACE CLAIM under the corrected law) must preserve their existing
     admitted semantic result - an ordinary valid `RustLike` program, or
     a Logos program uniquely owned by `system`/`entity`/`law`/`pulse`/
     `profile` evidence, must not regress.
-  - Inputs currently admitted **only** because today's fail-open
-    dispatch silently resolves a real authority conflict toward one
-    grammar are explicitly **not** covered by that preservation
-    guarantee - their result is expected, and required, to change.
-  - The confirmed `Import "a.sm"` collision is the concrete instance:
-    its current silent-success-via-RustLike-fallback result is expected
-    to become a deterministic classification error, and that change
-    must not be treated as a regression to guard against.
+  - Inputs whose current result exists **only** because today's
+    fail-open dispatch silently resolves a real authority conflict
+    toward one grammar are explicitly **not** covered by that
+    preservation guarantee - their result is expected, and required,
+    to change, regardless of whether that current result is itself a
+    success or a failure attributed to the wrong authority.
+  - **CORRECTION NOTE (owner review round - E1B)**: this bullet
+    previously described the confirmed `Import "a.sm"` collision as
+    "currently admitted" via "silent-success-via-RustLike-fallback."
+    Baseline evidence, re-verified directly against
+    `check_source_with_profile` on this decision's own merged-main SHA
+    (`262adc00369e23fb1ba92e5f093656041e983aa9`), shows that
+    description is factually wrong: Logos parses `Import "a.sm"`
+    successfully, but today's discriminator cannot see import-only
+    evidence (`system`/`entities`/`laws` are all empty) and silently
+    discards it, falling through to RustLike; RustLike's own parse of
+    the same input also succeeds (one import declaration), but the
+    subsequent `type_check_program` call then rejects the resulting
+    program with `E0201` ("program must define fn main()"), since a
+    bare `Import "a.sm"` file has no `main`. The confirmed
+    `Import "a.sm"` collision is the concrete instance: its current
+    RustLike-side terminal failure (`E0201`, missing `fn main`, reached
+    only after Logos's own successful parse is silently discarded) is
+    expected to become a deterministic AMBIGUOUS/CONFLICTING
+    classification error, and that change must not be treated as a
+    regression to guard against.
 - A test proving `compile_program_to_ir_with_options_and_profile(input,
   CompileProfile::RustLike, ..)` never invokes the Logos parser, for any
   input (see Decision A's TEST CONSEQUENCE).
@@ -1722,10 +1740,15 @@ yet hold. This document also does not claim that repairing `#1670`
 leaves every currently-admitted program's result unchanged - the
 "Qualification requirements" section above is corrected to state
 plainly that the confirmed `Import "a.sm"` collision is expected, and
-required, to change from its current silent-success result to a
-deterministic classification error, since that current success exists
-only because today's fail-open dispatch silently resolves a real
-authority conflict.
+required, to change from its current result to a deterministic
+classification error, since that current result exists only because
+today's fail-open dispatch silently discards Logos's own successful
+parse of this input and falls through to RustLike. **Corrected
+(E1B)**: that current result is a RustLike-side terminal failure
+(`E0201`, missing `fn main`) - not a silent success, as an earlier
+round's wording claimed; see the "Qualification requirements"
+section's E1B correction note above for the re-verified baseline
+evidence.
 No historical document is rewritten by this decision; the TON618
 perimeter's own closure record is read, not altered.
 
