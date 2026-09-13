@@ -7775,8 +7775,7 @@ mod grammar_admission_tests {
     #[test]
     fn rustlike_exclusive_ok_on_well_formed_function() {
         let profile = ParserProfile::foundation_default();
-        let admission =
-            admit_program_with_profile(&toks("fn main() { return; }\n"), &profile);
+        let admission = admit_program_with_profile(&toks("fn main() { return; }\n"), &profile);
         assert!(
             matches!(admission, GrammarAdmission::Exclusive(Ok(_))),
             "expected Exclusive(Ok), got {admission:?}"
