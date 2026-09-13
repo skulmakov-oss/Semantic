@@ -11,8 +11,9 @@ use crate::alloc_core::{
     SemanticType, Symbol, SymbolTable, TypeRegistry,
 };
 use crate::frontend::{
-    parse_logos_program_with_profile, parse_program_with_profile, type_check_program, LogosEntity,
-    LogosEntityFieldKind, LogosProgram, ParserProfile, SourceMark, Type,
+    lex, parse_logos_program_with_profile, parse_program_with_profile, type_check_program,
+    LogosEntity, LogosEntityFieldKind, LogosProgram, ParserProfile, SourceMark, Token, TokenKind,
+    Type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -89,15 +90,86 @@ pub fn check_source(input: &str) -> Result<SemanticReport, SemanticError> {
     check_source_with_profile(input, &profile)
 }
 
-pub fn check_source_with_profile(
+/// SSF09-E2 (#1670): source-surface classification law from
+/// `docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`
+/// (Decision A, as corrected by SSF09-E1A). `System`/`Entity`/`Law`/
+/// `Pulse`/`Profile` never appear anywhere in RustLike's grammar, and
+/// RustLike's own top-level forms never appear in Logos's - each set is
+/// confirmed unique keyword vocabulary, safe to detect by token-kind
+/// membership alone. `Import` is the one keyword both grammars recognize;
+/// its ownership is never inferred from the keyword's presence, only from
+/// which grammar(s) actually admit the concrete input (see below).
+fn is_layout_token(kind: TokenKind) -> bool {
+    matches!(kind, TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent)
+}
+
+fn has_logos_exclusive_evidence(tokens: &[Token]) -> bool {
+    tokens.iter().any(|t| {
+        matches!(
+            t.kind,
+            TokenKind::KwSystem
+                | TokenKind::KwEntity
+                | TokenKind::KwLaw
+                | TokenKind::KwPulse
+                | TokenKind::KwProfile
+        )
+    })
+}
+
+fn has_rustlike_exclusive_evidence(tokens: &[Token]) -> bool {
+    tokens.iter().any(|t| {
+        matches!(
+            t.kind,
+            TokenKind::KwEnum
+                | TokenKind::KwFn
+                | TokenKind::KwRecord
+                | TokenKind::KwSchema
+                | TokenKind::KwTrait
+                | TokenKind::KwImpl
+        )
+    })
+}
+
+fn is_blank_source(tokens: &[Token]) -> bool {
+    tokens.iter().all(|t| is_layout_token(t.kind))
+}
+
+fn ambiguous_surface_error(input: &str) -> SemanticError {
+    SemanticError {
+        diag: render_diag(
+            DiagLevel::Error,
+            "E0000",
+            "ambiguous source surface: this input is independently valid under both the Logos \
+             and RustLike grammars, and no explicit surface was requested to break the tie"
+                .to_string(),
+            SourceMark::default(),
+            input,
+        ),
+    }
+}
+
+fn logos_authoritative_result(
     input: &str,
     profile: &ParserProfile,
 ) -> Result<SemanticReport, SemanticError> {
-    if let Ok(logos) = parse_logos_program_with_profile(input, profile) {
-        if logos.system.is_some() || !logos.entities.is_empty() || !logos.laws.is_empty() {
-            return analyze_logos_program(&logos, input);
-        }
+    match parse_logos_program_with_profile(input, profile) {
+        Ok(logos) => analyze_logos_program(&logos, input),
+        Err(e) => Err(SemanticError {
+            diag: render_diag(
+                DiagLevel::Error,
+                "E0000",
+                e.message,
+                SourceMark::default(),
+                input,
+            ),
+        }),
     }
+}
+
+fn rustlike_authoritative_result(
+    input: &str,
+    profile: &ParserProfile,
+) -> Result<SemanticReport, SemanticError> {
     let parsed = parse_program_with_profile(input, profile).map_err(|e| SemanticError {
         diag: render_diag(
             DiagLevel::Error,
@@ -121,6 +193,81 @@ pub fn check_source_with_profile(
         scheduled_laws: Vec::new(),
         arena_nodes: 0,
     })
+}
+
+pub fn check_source_with_profile(
+    input: &str,
+    profile: &ParserProfile,
+) -> Result<SemanticReport, SemanticError> {
+    let tokens = lex(input).unwrap_or_default();
+
+    let logos_exclusive = has_logos_exclusive_evidence(&tokens);
+    let rustlike_exclusive = has_rustlike_exclusive_evidence(&tokens);
+
+    match (logos_exclusive, rustlike_exclusive) {
+        // Unique Logos-exclusive evidence (System/Entity/Law/Pulse/Profile):
+        // Logos owns this input outright. Its own success or failure is
+        // authoritative and is never replaced by a RustLike retry.
+        (true, false) => return logos_authoritative_result(input, profile),
+        // Unique RustLike-exclusive evidence: RustLike owns this input
+        // outright, symmetrically.
+        (false, true) => return rustlike_authoritative_result(input, profile),
+        // Both grammars' own exclusive vocabulary is present in the same
+        // input - a genuine, if rare, authority conflict. Never resolved
+        // by picking a winner.
+        (true, true) => return Err(ambiguous_surface_error(input)),
+        (false, false) => {}
+    }
+
+    // Neither grammar's exclusive vocabulary is present. A genuinely blank
+    // (or comment-only) source is NO SURFACE CLAIM, not evidence for
+    // either side - preserve today's behavior of evaluating it as
+    // RustLike rather than manufacturing ambiguity from nothing.
+    if is_blank_source(&tokens) {
+        return rustlike_authoritative_result(input, profile);
+    }
+
+    // Only shared vocabulary (`import`) - or no recognizable top-level
+    // vocabulary at all - can be present here. `KwImport` being shared
+    // does not by itself establish ambiguity: ownership is derived from
+    // which grammar(s) actually admit this exact input to completion, so
+    // both real parsers are consulted directly rather than dispatched on
+    // by first token.
+    let logos_result = parse_logos_program_with_profile(input, profile);
+    let rustlike_result = parse_program_with_profile(input, profile);
+    match (logos_result, rustlike_result) {
+        (Ok(_), Ok(_)) => Err(ambiguous_surface_error(input)),
+        (Ok(logos), Err(_)) => analyze_logos_program(&logos, input),
+        (Err(_), Ok(parsed)) => {
+            type_check_program(&parsed).map_err(|e| SemanticError {
+                diag: render_diag(
+                    DiagLevel::Error,
+                    "E0201",
+                    e.message,
+                    SourceMark::default(),
+                    input,
+                ),
+            })?;
+            Ok(SemanticReport {
+                warnings: Vec::new(),
+                scheduled_laws: Vec::new(),
+                arena_nodes: 0,
+            })
+        }
+        // Neither grammar admits this input at all - no unique owner was
+        // established, so no ambiguity is manufactured either. Preserve
+        // the existing terminal error behavior (the RustLike-attributed
+        // parse failure this input already produced before this fix).
+        (Err(_), Err(rustlike_err)) => Err(SemanticError {
+            diag: render_diag(
+                DiagLevel::Error,
+                "E0000",
+                rustlike_err.message,
+                SourceMark::default(),
+                input,
+            ),
+        }),
+    }
 }
 
 pub fn check_file_with_provider(
@@ -1471,5 +1618,192 @@ Law "Alpha" [priority 7]:
             .map(|l| l.name)
             .collect();
         assert_eq!(names, vec!["Zeta".to_string(), "Alpha".to_string()]);
+    }
+
+    // SSF09-E2 (#1670): check_source_with_profile fail-closed surface dispatch.
+    // Regressions below are written against the corrected SSF09-E1/E1A contract
+    // (docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md).
+
+    // T1 - authoritative malformed Logos: clear Logos-exclusive evidence
+    // (Entity) followed by a genuine Logos syntax failure (empty When
+    // condition, E0231). Must fail with the originating Logos error, never
+    // reinterpreted as RustLike.
+    #[test]
+    fn check_source_preserves_authoritative_malformed_logos_failure() {
+        let src = "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When -> System.recovery()\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile).expect_err("must fail");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("E0231") || rendered.contains("empty When condition"),
+            "expected the originating Logos failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("expected top-level"),
+            "must not be reinterpreted as a RustLike parse failure: {rendered}"
+        );
+    }
+
+    // T2 - Logos policy rejection: clear Logos-exclusive evidence under a
+    // profile with the Logos surface disabled. Must fail with the policy
+    // rejection, never reinterpreted as RustLike. Uses the existing
+    // `FeaturePolicy::allow_logos_surface` knob - no new profile knob
+    // invented.
+    #[test]
+    fn check_source_preserves_logos_policy_rejection() {
+        let src = "Entity A:\n    state x: quad\n";
+        let mut profile = ParserProfile::foundation_default();
+        profile.features.allow_logos_surface = false;
+        let err = check_source_with_profile(src, &profile).expect_err("must fail");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("disabled by profile policy"),
+            "expected the Logos policy rejection, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("expected top-level"),
+            "must not be reinterpreted as a RustLike parse failure: {rendered}"
+        );
+    }
+
+    // T3/T9 - confirmed shared Import collision. `Import "a.sm"` alone
+    // parses to completion under both grammars (SSF09-E1A). Must be
+    // rejected with a deterministic ambiguity outcome - intentionally
+    // different from the pre-#1670-fix silent RustLike-fallback success.
+    #[test]
+    fn check_source_reports_confirmed_import_collision_as_ambiguous() {
+        let src = "Import \"a.sm\"\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile).expect_err(
+            "Import \"a.sm\" is independently valid under both grammars and must not silently succeed",
+        );
+        let rendered = err.to_string();
+        assert!(
+            rendered.to_lowercase().contains("ambiguous") || rendered.to_lowercase().contains("conflict"),
+            "expected a deterministic ambiguity/conflict diagnosis, got: {rendered}"
+        );
+    }
+
+    // T4 - shared vocabulary is not automatic ambiguity. `Import a.sm`
+    // (no string literal) is accepted by Logos's permissive legacy
+    // handling but rejected by RustLike's own parse_import_decl, which
+    // requires a string literal. This must resolve to unique Logos
+    // ownership (and therefore succeed, since Logos's own parse of a
+    // bare import-only file is trivially valid), never manufactured
+    // ambiguity from the shared `Import` keyword alone.
+    #[test]
+    fn check_source_does_not_treat_shared_keyword_alone_as_ambiguous() {
+        let src = "Import a.sm\n";
+        let profile = ParserProfile::foundation_default();
+        let result = check_source_with_profile(src, &profile);
+        assert!(
+            result.is_ok(),
+            "an Import line RustLike's own parser rejects (no string literal) must be unique \
+             Logos ownership, not ambiguity: {result:?}"
+        );
+    }
+
+    // T5 - bare Pulse/Profile: Logos-exclusive evidence on its own, no
+    // System/Entity/Law companion required, no RustLike fallback. The
+    // second assertion in each test proves "no RustLike fallback"
+    // concretely (not just "is_ok"): under a profile with the Logos
+    // surface disabled, the authoritative-path error must be the Logos
+    // policy rejection, never RustLike's "expected top-level" parse
+    // error - `parse_logos_program`'s `require_logos_surface` gate fires
+    // before any Pulse/Profile-specific handling, so this distinguishes
+    // "reached via the Logos-exclusive fast path" from "reached via the
+    // generic dual-parse fallback" even though both fixtures happen to
+    // admit under RustLike's own rejection either way.
+    #[test]
+    fn check_source_treats_bare_pulse_as_unique_logos_evidence() {
+        // ParserProfile::foundation_default() already sets
+        // CompatibilityMode::LegacySupport, which Pulse/Profile require.
+        let profile = ParserProfile::foundation_default();
+        let src = "Pulse \"x\"\n";
+        let result = check_source_with_profile(src, &profile);
+        assert!(
+            result.is_ok(),
+            "a bare Pulse directive is unconditional Logos-exclusive evidence: {result:?}"
+        );
+
+        let mut policy_profile = ParserProfile::foundation_default();
+        policy_profile.features.allow_logos_surface = false;
+        let err = check_source_with_profile(src, &policy_profile)
+            .expect_err("Logos surface disabled must fail, never silently pass to RustLike");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("disabled by profile policy"),
+            "a bare Pulse directive must fail via the Logos-authoritative policy path, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("expected top-level"),
+            "must not fall through to RustLike's own rejection of `Pulse`: {rendered}"
+        );
+    }
+
+    #[test]
+    fn check_source_treats_bare_profile_as_unique_logos_evidence() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Profile \"x\"\n";
+        let result = check_source_with_profile(src, &profile);
+        assert!(
+            result.is_ok(),
+            "a bare Profile directive is unconditional Logos-exclusive evidence: {result:?}"
+        );
+
+        let mut policy_profile = ParserProfile::foundation_default();
+        policy_profile.features.allow_logos_surface = false;
+        let err = check_source_with_profile(src, &policy_profile)
+            .expect_err("Logos surface disabled must fail, never silently pass to RustLike");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("disabled by profile policy"),
+            "a bare Profile directive must fail via the Logos-authoritative policy path, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("expected top-level"),
+            "must not fall through to RustLike's own rejection of `Profile`: {rendered}"
+        );
+    }
+
+    // T6 - ordinary RustLike must keep working: a speculative Logos probe
+    // failing with zero positive evidence must never block it.
+    #[test]
+    fn check_source_preserves_ordinary_rustlike_program() {
+        let src = "fn main() {\n    return;\n}\n";
+        let profile = ParserProfile::foundation_default();
+        assert!(
+            check_source_with_profile(src, &profile).is_ok(),
+            "an ordinary RustLike program must still be admitted"
+        );
+    }
+
+    // T7 - existing valid Logos program must keep succeeding exactly as
+    // before (unique Logos ownership via System/Entity/Law).
+    #[test]
+    fn check_source_preserves_existing_valid_logos_program() {
+        let src = "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When true -> System.recovery()\n";
+        let profile = ParserProfile::foundation_default();
+        assert!(
+            check_source_with_profile(src, &profile).is_ok(),
+            "an existing valid Logos program must still be admitted"
+        );
+    }
+
+    // T8 - no-evidence / empty case: neither grammar's exclusive evidence
+    // is present and the input is blank. Must not manufacture ambiguity
+    // merely because both parser entry points can trivially return Ok.
+    #[test]
+    fn check_source_does_not_manufacture_ambiguity_for_blank_input() {
+        let src = "\n";
+        let profile = ParserProfile::foundation_default();
+        let result = check_source_with_profile(src, &profile);
+        if let Err(e) = &result {
+            let rendered = e.to_string();
+            assert!(
+                !rendered.to_lowercase().contains("ambiguous") && !rendered.to_lowercase().contains("conflict"),
+                "blank input must never be reported as an authority conflict: {rendered}"
+            );
+        }
     }
 }
