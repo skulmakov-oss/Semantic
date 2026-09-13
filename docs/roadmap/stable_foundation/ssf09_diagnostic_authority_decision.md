@@ -1695,8 +1695,8 @@ ambiguity is arguably consistent with the frozen law's own definition
 (Logos does admit this concrete input, via its already-documented
 content-blind legacy `Import`/`Pulse`/`Profile` skip - see Decision A's
 current-state discussion of `parse_logos_program`). It is listed here
-only as a data point for open question 1 below, not as evidence
-requiring a fix.
+only as a data point for the "Cross-grammar authority matrix" section
+below, not as evidence requiring a fix.
 
 **Root cause (common to all four rounds' failures)**: different
 declaration kinds terminate via genuinely different, non-uniform
@@ -1758,7 +1758,7 @@ returning a new three-outcome type in place of today's flat `Result`,
 alongside - not replacing - every existing public parsing function:
 
 ```rust
-pub enum SurfaceAdmission<T> {
+pub enum GrammarAdmission<T> {
     /// This grammar's top-level dispatch never recognized a single
     /// declaration in this input - zero positive evidence, nothing to
     /// attribute a failure to.
@@ -1776,12 +1776,36 @@ pub enum SurfaceAdmission<T> {
 pub fn admit_program_with_profile(
     tokens: &[Token],
     profile: &ParserProfile,
-) -> SurfaceAdmission<Program>;
+) -> GrammarAdmission<Program>;
 
 pub fn admit_logos_program_with_profile(
     tokens: &[Token],
     profile: &ParserProfile,
-) -> SurfaceAdmission<LogosProgram>;
+) -> GrammarAdmission<LogosProgram>;
+```
+
+**Naming - conceptual firewall (FROZEN by owner ruling, round 1)**: the
+type above is named `GrammarAdmission<T>`, not `SurfaceAdmission<T>` as
+an earlier draft of this section proposed. This is a deliberate lexical
+firewall, not a style preference. `GrammarAdmission<T>` names what
+**one grammar's own parser** concludes about an input in isolation
+(`NoClaim`/`Accepted`/`ClaimedButFailed`); Decision A's own frozen
+vocabulary - `NO SURFACE CLAIM`/`UNIQUE POSITIVE SURFACE CLAIM`/
+`AMBIGUOUS-CONFLICTING CLAIMS`, and any future `SurfaceAuthority`/
+`SurfaceVerdict` type naming the **cross-grammar coordinator's**
+decision - must stay visually and lexically distinct from it. Reusing
+"Surface" for the per-grammar type risked exactly the confusion this
+investigation exists to remove: conflating "this grammar made a claim"
+with "the compiler has decided which grammar owns this input."
+Illustrative shape (naming only - `resolve_surface_authority` and any
+`SurfaceVerdict` type are not designed by this decision; their concrete
+shape is deferred to the implementation checkpoint in "Migration plan"
+below):
+
+```rust
+let logos: GrammarAdmission<LogosProgram> = admit_logos_program_with_profile(...);
+let rustlike: GrammarAdmission<Program> = admit_program_with_profile(...);
+let verdict: SurfaceVerdict = resolve_surface_authority(logos, rustlike);
 ```
 
 Taking `&[Token]` rather than `&str`: lexing stays a prior, separate
@@ -1794,21 +1818,43 @@ the same input redundantly.
 **Implementation sketch** (for a future, separate implementation
 checkpoint - not authorized by this decision-only checkpoint):
 
-- `parse_program`'s loop: track one local
-  `any_declaration_accepted: bool`, set `true` immediately after any
-  successful `KwImport|KwEnum|KwFn|KwRecord|KwSchema|KwTrait|KwImpl` or
-  role-marked-schema branch. On the `_ => Err(...)` branch: `NoClaim`
-  if still `false`, else `ClaimedButFailed`. On a declaration's own
-  sub-parser failing: always `ClaimedButFailed` (the head keyword was,
-  by construction, already recognized before entering that
-  sub-parser). Loop completion with no error: `Accepted(Program)`.
-- `parse_logos_program`'s loop: the same boolean, set `true` on any
-  successful `KwSystem|KwEntity|KwLaw` branch *and* on any successfully
-  -consumed legacy `KwImport|KwPulse|KwProfile` directive (consistent
-  with T5's already-frozen requirement that a bare `Pulse`/`Profile`
-  is unconditional positive Logos evidence regardless of how little
-  content validation its own skip performs - see open question 3).
-  `errors.is_empty()` → `Accepted`; else `any_declaration_accepted` →
+- **CORRECTION NOTE (owner review round 1)**: the original sketch here
+  tracked `any_declaration_accepted`, set `true` only after a
+  declaration's own sub-parser *succeeded*. That is backwards - ownership
+  happens **before** success or failure is known, not "success creates
+  ownership" - and is exactly the defect class (misreading a later
+  outcome as evidence about an earlier commitment) this whole
+  investigation exists to remove from `sm-sema`'s classifier. Corrected
+  below.
+- `parse_program`'s loop: track one local `any_declaration_claimed: bool`,
+  set `true` at the grammar-level **dispatch/commit point** - the
+  instant the top-level `match` selects the
+  `KwImport|KwEnum|KwFn|KwRecord|KwSchema|KwTrait|KwImpl` (or
+  role-marked-schema) arm and enters that declaration's own sub-parser -
+  **before** that sub-parser has succeeded or failed. Concrete
+  illustrative case this corrected semantics must get right: the input
+  `Entity\n    <malformed entity body/header>` (a recognized `Entity`
+  head whose own body then fails to parse) MUST yield `ClaimedButFailed`,
+  never `NoClaim` - `Entity` was already claimed the moment the head
+  keyword was recognized, regardless of what its sub-parser does
+  afterward. On the `_ => Err(...)` branch: `NoClaim` if
+  `any_declaration_claimed` is still `false`, else `ClaimedButFailed`. On
+  a declaration's own sub-parser failing: always `ClaimedButFailed` - the
+  claim was already made unconditionally at dispatch, not conditionally
+  on the sub-parser's own outcome. Loop completion with no error:
+  `Accepted(Program)`.
+- `parse_logos_program`'s loop: the same corrected semantics, symmetric
+  to RustLike's above - track `any_declaration_claimed: bool`, set
+  `true` at the dispatch point, the instant `check_raw` recognizes
+  `KwSystem|KwEntity|KwLaw` or the legacy `KwImport|KwPulse|KwProfile`
+  branch is entered, **not** contingent on that branch's own content
+  handling completing without error (this holds even though today's
+  legacy-directive handling performs no content validation at all before
+  consuming to the next newline - dispatch, not validation outcome, is
+  what sets the flag; consistent with T5's already-frozen requirement
+  that a bare `Pulse`/`Profile` is unconditional positive Logos evidence
+  - see the confirmed item in the matrix section below).
+  `errors.is_empty()` → `Accepted`; else `any_declaration_claimed` →
   `ClaimedButFailed(merged_errors)`; else → `NoClaim`.
 - Every existing public sm-front parsing function
   (`parse_program(_with_profile)`, `parse_logos_program(_with_profile)`,
@@ -1828,42 +1874,118 @@ checkpoint - not authorized by this decision-only checkpoint):
   a direct match over
   `(admit_logos_program_with_profile(...), admit_program_with_profile(...))`.
 
-### Genuinely open questions (owner ruling needed before any
-implementation GO)
+### Cross-grammar authority matrix (FROZEN by owner ruling, round 1)
 
-1. **`Accepted` + `ClaimedButFailed`**: if one grammar fully succeeds
-   and the other made a genuine claim but failed, does the `Accepted`
-   side win outright (current lean: yes - the frozen law defines
-   `AMBIGUOUS/CONFLICTING` as both grammars genuinely *admitting* the
-   input, and a claim that ends in failure never reaches admission),
-   or does any positive claim from the other side, even one that
-   ultimately failed, still force `AMBIGUOUS/CONFLICTING`? This changes
-   real behavior for inputs like `Import "a.sm" fn main(x` (malformed):
-   Logos `Accepted` (the import-only content is vacuously valid),
-   RustLike `ClaimedButFailed` (`fn` recognized, then a genuine syntax
-   error inside the parameter list).
-2. **`ClaimedButFailed` + `ClaimedButFailed`**: both grammars made a
-   genuine positive claim and both failed. Is this `AMBIGUOUS/
-   CONFLICTING` too (symmetric to `Accepted` + `Accepted` - both made a
-   real claim), or must one of the two failures be preferred as *the*
-   authoritative one (and by what rule, if so)? Today's code (both
-   pre-`#1670` and the in-flight `#1923`) unconditionally returns the
-   RustLike-side error for this case, without ever asking whether
-   Logos's own claim might be the more authoritative one.
-3. Confirmed, not merely proposed: a bare legacy `Pulse`/`Profile`/
-   `Import` directive counts as `any_declaration_accepted = true` for
-   Logos even though its own internal handling performs "zero content
-   validation at all" - this is required by T5's already-frozen
-   invariant (bare `Pulse`/`Profile` is unconditional positive Logos
-   evidence), not a new question, restated here for completeness since
-   the new contract makes it an explicit implementation requirement
-   rather than an implicit one.
-4. **Naming**: `SurfaceAdmission` risks colliding with the frozen
-   decision's own cross-grammar "SURFACE CLAIM" vocabulary (which
-   describes the *combined*, two-grammar verdict, not one grammar's own
-   outcome). Candidates that keep the two vocabularies visually
-   distinct: `GrammarAdmission<T>`, `DeclarationAdmission<T>`,
-   `ParseAdmission<T>`.
+The prior draft of this section posed four open questions. Naming
+(former question 4) is resolved above, under "Naming - conceptual
+firewall." Former questions 1 and 2 are resolved below by freezing an
+exhaustive matrix instead of ruling on each pairing ad hoc. Former
+question 3 was already confirmed, not open, and is restated unchanged
+at the end of this section.
+
+**RULING - the matrix**: for `CompileProfile::Auto`, the coordinator's
+verdict is a pure function of the pair `(GrammarAdmission` from Logos,
+`GrammarAdmission` from RustLike`)`, covering all nine combinations:
+
+| Logos              | RustLike           | Auto verdict                    |
+|--------------------|---------------------|----------------------------------|
+| `NoClaim`          | `NoClaim`           | NO SURFACE CLAIM                |
+| `Accepted`         | `NoClaim`           | Logos accepted                  |
+| `ClaimedButFailed` | `NoClaim`           | Logos authoritative failure     |
+| `NoClaim`          | `Accepted`          | RustLike accepted               |
+| `NoClaim`          | `ClaimedButFailed`  | RustLike authoritative failure  |
+| `Accepted`         | `Accepted`          | AMBIGUOUS / CONFLICTING         |
+| `Accepted`         | `ClaimedButFailed`  | AMBIGUOUS / CONFLICTING         |
+| `ClaimedButFailed` | `Accepted`          | AMBIGUOUS / CONFLICTING         |
+| `ClaimedButFailed` | `ClaimedButFailed`  | AMBIGUOUS / CONFLICTING         |
+
+**Mapping to Decision A's frozen law**: this table does not introduce a
+fourth outcome or reopen Decision A - it is the concrete,
+`GrammarAdmission`-pair function that *computes* Decision A's
+already-frozen three-outcome law, stated exhaustively over all nine
+pair combinations instead of Decision A's own two-candidate abstract
+phrasing. The `NoClaim`+`NoClaim` row is Decision A's NO SURFACE CLAIM;
+each single-sided row is Decision A's UNIQUE POSITIVE SURFACE CLAIM
+(the `Accepted` rows are its success sub-outcome, the `ClaimedButFailed`
+rows are its AUTHORITATIVE FAILURE sub-outcome); all four double-positive
+rows are Decision A's AMBIGUOUS/CONFLICTING CLAIMS.
+
+**Rationale (resolves former open questions 1 and 2)**: `Accepted` and
+`ClaimedButFailed` are **both** positive grammar claims - the only
+`GrammarAdmission` outcome that is *not* a positive claim is `NoClaim`.
+Only a `NoClaim` on one side lets the other side's outcome, whatever it
+is, stand unopposed as the `Auto` verdict. The moment **both** sides
+produce a positive claim - in any combination of `Accepted`/
+`ClaimedButFailed` - `Auto` MUST NOT guess: it reports AMBIGUOUS/
+CONFLICTING rather than preferring one grammar's outcome over the
+other's, for two independent reasons:
+
+- Letting a bare `Accepted` on one side silently outrank a
+  `ClaimedButFailed` on the other (this section's prior "current lean"
+  on former question 1, now rejected) would treat "this grammar
+  positively claimed the input, then failed" as equivalent to "this
+  grammar never claimed the input at all" - exactly the fail-open
+  behavior `#1670` exists to remove. A `ClaimedButFailed` is
+  **established-then-failed ownership**, not an absence of ownership; it
+  must never be silently reinterpreted as permission to let the other
+  grammar's result stand instead.
+- Symmetrically, `ClaimedButFailed` + `ClaimedButFailed` (former open
+  question 2) is not resolved by preferring one grammar's failure as
+  *the* authoritative one by evaluation order or any other implicit rule
+  - today's pre-`#1670` and in-flight `#1923` code both unconditionally
+  return the RustLike-side error for this case, which this ruling now
+  supersedes. Both grammars made a genuine claim, so this is exactly as
+  ambiguous as `Accepted` + `Accepted`, just with both claims having
+  failed instead of succeeded.
+
+**Evidence preservation for `ClaimedButFailed` + `ClaimedButFailed`**:
+resolving to AMBIGUOUS/CONFLICTING must not silently drop either
+underlying `FrontendError` - both are genuine evidence, and neither is
+more authoritative than the other absent an explicit profile choosing
+one grammar. This ruling does **not** require designing a full,
+versioned diagnostic carrier now (that remains the future carrier/
+schema checkpoint's own scope, per Decision B/§6) - only that whatever
+concrete AMBIGUOUS/CONFLICTING representation is eventually built
+preserves both, e.g. in spirit:
+
+```
+Primary:
+AMBIGUOUS / CONFLICTING SOURCE SURFACE
+
+Evidence:
+Logos     -> <original Logos FrontendError>
+RustLike  -> <original RustLike FrontendError>
+```
+
+**Import ruling (precision correction)**: a bare or legacy `Import` line
+may produce a **local** Logos `GrammarAdmission::Accepted` (or
+`ClaimedButFailed`, if malformed) when Logos's own parser genuinely
+admits or claims it - but `Import` is **not Logos-exclusive evidence**
+the way `System`/`Entity`/`Law`/`Pulse`/`Profile` are. A local Logos
+admission on `Import` content does not, by itself, entitle the
+coordinator to skip evaluating RustLike - the coordinator must still
+compute RustLike's own `GrammarAdmission` for the same content, and the
+matrix above (not an `Import`-specific shortcut) governs the final
+`Auto` verdict. Concretely: Logos `Accepted` on `Import "a.sm"` plus
+RustLike `Accepted` (or `ClaimedButFailed`) on that same content is an
+ordinary `Accepted`+`Accepted` (or `Accepted`+`ClaimedButFailed`) row in
+the matrix above - AMBIGUOUS/CONFLICTING - which is exactly the
+already-confirmed `Import "a.sm"` concrete collision from Decision A,
+now expressed in the new contract's terms rather than as a hand-rolled
+special case. `Pulse`/`Profile` remain unconditional Logos-positive
+claims per T5's already-frozen invariant - unchanged and not reopened by
+this ruling; they are Logos-exclusive specifically because RustLike's
+own grammar has no rule that could ever accept them, which is not true
+of `Import`.
+
+**Already confirmed, restated for completeness (not reopened, former
+open question 3)**: a bare legacy `Pulse`/`Profile`/`Import` directive
+counts as `any_declaration_claimed = true` for Logos even though its own
+internal handling performs "zero content validation at all" - required
+by T5's already-frozen invariant (bare `Pulse`/`Profile` is
+unconditional positive Logos evidence), not a new question, restated
+here for completeness since the new contract makes it an explicit
+implementation requirement rather than an implicit one.
 
 ### Dependency / call-site impact
 
@@ -1909,7 +2031,7 @@ non-breaking option:
   `PolicyViolation` via a `"policy violation:"` string-prefix check on
   `message`. This is an orthogonal axis to `NoClaim`/`Accepted`/
   `ClaimedButFailed` (a `ClaimedButFailed` result can itself be either
-  `Syntax` or `PolicyViolation`) and requires no change - `SurfaceAdmission::ClaimedButFailed`
+  `Syntax` or `PolicyViolation`) and requires no change - `GrammarAdmission::ClaimedButFailed`
   simply wraps the existing `FrontendError` unchanged, so `.kind()`
   remains available on it exactly as today.
 - No call site anywhere in the workspace currently branches on
@@ -1922,8 +2044,9 @@ non-breaking option:
 
 ### Migration plan
 
-1. **This checkpoint (decision-only)**: freeze the API shape and
-   resolve the four open questions above, or send back for a further
+1. **This checkpoint (decision-only)**: freeze the API shape, the
+   `GrammarAdmission<T>` naming, and the cross-grammar authority matrix
+   above (round 1 owner ruling applied), or send back for a further
    round if the owner disagrees with any part of this sketch. No code
    changes; `sm-front` is not touched by this PR.
 2. **A future, separate implementation-only checkpoint** (its own GO):
