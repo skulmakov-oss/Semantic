@@ -26,7 +26,10 @@ use sm_emit::{
     compile_program_to_semcode, compile_program_to_semcode_with_options_debug, CompileProfile,
     OptLevel,
 };
-use sm_front::{lex, parse_logos_program_with_profile, parse_program_with_profile, ParserProfile};
+use sm_front::{
+    admit_logos_program_with_profile, admit_program_with_profile, lex,
+    parse_logos_program_with_profile, parse_program_with_profile, GrammarAdmission, ParserProfile,
+};
 use sm_ir::{compile_program_to_ir_with_options_and_profile, lower_logos_laws_to_ir};
 use sm_runtime_core::hello_observation_sink::HelloObservationClass;
 use sm_runtime_core::{ExecutionConfig, ExecutionContext};
@@ -80,6 +83,143 @@ fn ensure_package_module_admission(path: &Path) -> Result<(), String> {
 
 fn cli_profile() -> ParserProfile {
     ParserProfile::foundation_default()
+}
+
+/// SSF-09 fail-closed project authority (#1919): decides whether the
+/// multi-module project mechanism (`check_file_with_provider_and_profile`)
+/// *applies* to `root_src` at all, before ever calling it, instead of
+/// calling it unconditionally and discarding whatever `Err` it returns
+/// via `.or_else`. The two states that pattern collapsed into one opaque
+/// `Err` are semantically different: the project mechanism never being a
+/// candidate for this input (no Logos entry to recurse imports from) is
+/// not the same fact as the project mechanism positively recognizing a
+/// Logos entry, attempting real multi-module work, and failing.
+///
+/// **Owner correction round 1 (2026-09-14)**: applicability is decided
+/// by `GrammarAdmission`'s *evidence basis*, never by parse *outcome* -
+/// a root with genuine Logos evidence whose own parse then fails is
+/// still `Applied`, not `NotApplicable`.
+///
+/// **Owner correction round 2 (2026-09-14)**: evidence basis from Logos
+/// *alone* is still not enough, because `Import "x.sm"` is `Shared`
+/// evidence for *both* grammars (Decision A) - a genuine RustLike
+/// program using the pre-existing "executable helper import" convention
+/// (`crates/smc-cli/src/executable_bundle.rs`) would otherwise be
+/// misclassified as `Applied`.
+///
+/// **Owner correction round 3, found by independent adversarial review
+/// (2026-09-14)**: comparing *evidence strength* alone (Stage 1 of
+/// Decision E: `Exclusive` > `Shared` > `NoClaim`) is still not the
+/// complete law. Decision E's frozen resolver
+/// (`sm-sema::std_adapters::resolve_surface_authority`, `#1670`) has a
+/// **Stage 2**: a `Shared`/`Shared` tie is broken by parse *outcome*,
+/// not just declared `Applied` outright, and both `Exclusive`/`Exclusive`
+/// and `Shared`/`Shared`-with-matching-outcome are genuine ties that
+/// resolve to `Ambiguous` - neither grammar owns. Collapsing every
+/// `Shared`/`Shared` (or `Exclusive`/`Exclusive`) pairing to "the
+/// project mechanism applies" silently reintroduced a real divergence
+/// from the frozen resolver: `Shared(Err)`/`Shared(Ok)` must route to
+/// RustLike (already covered by `resolve_surface_authority`'s own
+/// regression `resolver_shared_vs_shared_err_ok_rustlike_owns`), but the
+/// evidence-strength-only version above routed it into the strict
+/// Logos-only project loader instead, making Logos's `Err` incorrectly
+/// authoritative over a case Decision E gives to RustLike.
+///
+/// The fix: reuse the exact same two-stage table `resolve_surface_authority`
+/// already implements, but only to answer one question - would Decision
+/// E give Logos *outright* ownership? Every other outcome (`RustLike`
+/// ownership, a tie, `NoClaim`/`NoClaim`) defers verbatim to
+/// `check_source_with_profile`, which independently re-derives both
+/// admissions and calls the real `resolve_surface_authority` itself -
+/// so this function never has to invent or duplicate any of that
+/// resolver's diagnostic text, only decide whether the *project*
+/// mechanism (multi-module import loading) is the right one to run at
+/// all. See `resolve_project_route`'s doc comment for the full table.
+fn check_root_with_project_authority(
+    root_canon: &Path,
+    root_src: &str,
+    provider: &CliFsModuleProvider,
+    parser_profile: &ParserProfile,
+) -> Result<sm_sema::SemanticReport, sm_sema::SemanticError> {
+    let route = match lex(root_src) {
+        Ok(tokens) => {
+            let logos = admit_logos_program_with_profile(root_src, &tokens, parser_profile);
+            let rustlike = admit_program_with_profile(root_src, &tokens, parser_profile);
+            resolve_project_route(&logos, &rustlike)
+        }
+        // A lex failure carries no admission evidence for either grammar
+        // (Decision E) - `check_source_with_profile` below will lex the
+        // identical text and surface the identical lex error itself.
+        Err(_) => ProjectRoute::SingleFile,
+    };
+    match route {
+        // Logos owns outright (Decision E Stage 1 or Stage 2): the
+        // project mechanism is authoritative from here, never replaced
+        // by the single-file check.
+        ProjectRoute::Project => {
+            check_file_with_provider_and_profile(root_canon, provider, parser_profile)
+        }
+        // RustLike owns, or the two grammars tie (`Ambiguous`), or
+        // neither claims anything (`NoClaim`/`NoClaim`): the project
+        // mechanism was never a candidate. `check_source_with_profile`
+        // re-derives both admissions itself and calls the real
+        // `resolve_surface_authority`, so it produces the identical
+        // RustLike/ambiguous/no-claim result Decision E requires.
+        ProjectRoute::SingleFile | ProjectRoute::Ambiguous => {
+            check_source_with_profile(root_src, parser_profile)
+        }
+    }
+}
+
+/// Which mechanism Decision E's frozen two-stage law gives ownership to,
+/// for the purpose of deciding whether the *multi-module project*
+/// mechanism (Logos-only) is a candidate at all. Mirrors
+/// `sm-sema::std_adapters::resolve_surface_authority`'s `SurfaceVerdict`
+/// exactly - `Project` corresponds to `LogosOwns`, `SingleFile` covers
+/// both `RustLikeOwns` and `NoSurfaceClaim` (both defer to the same
+/// `check_source_with_profile` call), and `Ambiguous` corresponds to
+/// `SurfaceVerdict::Ambiguous`.
+///
+/// | Logos       | RustLike    | Route        |
+/// |-------------|-------------|--------------|
+/// | `NoClaim`   | `NoClaim`   | `SingleFile` (no surface claim)  |
+/// | `NoClaim`   | `Shared`/`Exclusive` | `SingleFile` (RustLike owns) |
+/// | `Shared`/`Exclusive` | `NoClaim` | `Project` (Logos owns) |
+/// | `Exclusive` | `Shared`    | `Project` (Logos owns)  |
+/// | `Shared`    | `Exclusive` | `SingleFile` (RustLike owns) |
+/// | `Exclusive` | `Exclusive` | `Ambiguous` (tie)       |
+/// | `Shared(Ok)` | `Shared(Ok)`  | `Ambiguous` (tie)    |
+/// | `Shared(Ok)` | `Shared(Err)` | `Project` (Logos owns) |
+/// | `Shared(Err)` | `Shared(Ok)` | `SingleFile` (RustLike owns) |
+/// | `Shared(Err)` | `Shared(Err)` | `Ambiguous` (tie)   |
+#[derive(Debug, PartialEq, Eq)]
+enum ProjectRoute {
+    Project,
+    SingleFile,
+    Ambiguous,
+}
+
+fn resolve_project_route<L, R>(
+    logos: &GrammarAdmission<L>,
+    rustlike: &GrammarAdmission<R>,
+) -> ProjectRoute {
+    use GrammarAdmission::{Exclusive, NoClaim, Shared};
+    match (logos, rustlike) {
+        (NoClaim, NoClaim) => ProjectRoute::SingleFile,
+        (NoClaim, Shared(_) | Exclusive(_)) => ProjectRoute::SingleFile,
+        (Shared(_) | Exclusive(_), NoClaim) => ProjectRoute::Project,
+        (Exclusive(_), Shared(_)) => ProjectRoute::Project,
+        (Shared(_), Exclusive(_)) => ProjectRoute::SingleFile,
+        (Exclusive(_), Exclusive(_)) => ProjectRoute::Ambiguous,
+        (Shared(logos_outcome), Shared(rustlike_outcome)) => {
+            match (logos_outcome.is_ok(), rustlike_outcome.is_ok()) {
+                (true, true) => ProjectRoute::Ambiguous,
+                (true, false) => ProjectRoute::Project,
+                (false, true) => ProjectRoute::SingleFile,
+                (false, false) => ProjectRoute::Ambiguous,
+            }
+        }
+    }
 }
 
 fn reject_leading_unknown_flag(input: &str) -> Result<(), String> {
@@ -585,8 +725,7 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
     let root_canon = root
         .canonicalize()
         .map_err(|e| format!("failed to resolve '{}': {}", root.display(), e))?;
-    let report = check_file_with_provider_and_profile(&root_canon, &provider, &parser_profile)
-        .or_else(|_| check_source_with_profile(&src, &parser_profile))
+    let report = check_root_with_project_authority(&root_canon, &src, &provider, &parser_profile)
         .map_err(|e| e.to_string())?;
     let t_check = Instant::now();
     let color_enabled = resolve_color_mode(color);
@@ -716,32 +855,34 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
                     };
                     let provider = CliFsModuleProvider;
                     let parser_profile = cli_profile();
-                    let snapshot = match root
-                        .canonicalize()
-                        .map_err(|e| e.to_string())
-                        .and_then(|p| {
-                            check_file_with_provider_and_profile(&p, &provider, &parser_profile)
+                    let snapshot =
+                        match root
+                            .canonicalize()
+                            .map_err(|e| e.to_string())
+                            .and_then(|p| {
+                                check_root_with_project_authority(
+                                    &p,
+                                    &src,
+                                    &provider,
+                                    &parser_profile,
+                                )
                                 .map_err(|e| e.to_string())
-                        })
-                        .or_else(|_| {
-                            check_source_with_profile(&src, &parser_profile)
-                                .map_err(|e| e.to_string())
-                        }) {
-                        Ok(report) => {
-                            let mut out = String::new();
-                            for w in &report.warnings {
-                                out.push_str(w.rendered.trim_end());
-                                out.push('\n');
+                            }) {
+                            Ok(report) => {
+                                let mut out = String::new();
+                                for w in &report.warnings {
+                                    out.push_str(w.rendered.trim_end());
+                                    out.push('\n');
+                                }
+                                out.push_str(&format!(
+                                    "ok: {} warning(s), {} scheduled law(s)",
+                                    report.warnings.len(),
+                                    report.scheduled_laws.len()
+                                ));
+                                out
                             }
-                            out.push_str(&format!(
-                                "ok: {} warning(s), {} scheduled law(s)",
-                                report.warnings.len(),
-                                report.scheduled_laws.len()
-                            ));
-                            out
-                        }
-                        Err(e) => format!("{e}"),
-                    };
+                            Err(e) => format!("{e}"),
+                        };
                     let changed = last_snapshot
                         .as_ref()
                         .map(|prev| prev != &snapshot)
@@ -965,11 +1106,9 @@ fn cmd_lint(args: &[String]) -> Result<(), String> {
             .canonicalize()
             .map_err(|e| format!("failed to resolve '{}': {}", input, e))
             .and_then(|p| {
-                check_file_with_provider_and_profile(&p, &provider, &parser_profile)
+                check_root_with_project_authority(&p, &src, &provider, &parser_profile)
                     .map_err(|e| e.to_string())
-            })
-            .or_else(|_| check_source_with_profile(&src, &parser_profile))
-            .map_err(|e| e.to_string())?
+            })?
     } else {
         check_source_with_profile(&src, &parser_profile).map_err(|e| e.to_string())?
     };
@@ -2070,6 +2209,7 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sm_front::FrontendError;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn mk_temp_dir(prefix: &str) -> PathBuf {
@@ -2084,6 +2224,521 @@ mod tests {
         ));
         std::fs::create_dir_all(&base).expect("mkdir");
         base
+    }
+
+    // ------------------------------------------------------------------
+    // #1919 Stage 2B: `check_root_with_project_authority` regressions.
+    // Tier A - direct unit tests of the applicability seam itself.
+
+    // Owner correction (2026-09-14): applicability must be decided by
+    // GrammarAdmission's evidence basis, never by parse outcome. These
+    // exercise `project_mechanism_applies` directly against every
+    // GrammarAdmission shape, with synthetic values - no real source
+    // text or filesystem needed.
+    //
+    // The owner's own five required mappings (NoClaim -> NotApplicable;
+    // every Shared/Exclusive variant, regardless of its own Ok/Err, ->
+    // Applied) are exactly what holds when RustLike offers no competing
+    // claim (`NoClaim`) - the first five tests below pair each Logos
+    // admission against RustLike `NoClaim` for exactly this reason.
+    //
+    // Testing against real fixtures then surfaced a real regression the
+    // single-admission model could not see: `Import "x.sm"` is `Shared`
+    // evidence for *both* grammars, so a genuine RustLike program using
+    // the pre-existing "executable helper import" convention
+    // (`Import "helper.sm"` + `fn main() {...}`) is Logos-`Shared` too,
+    // even though it has zero Logos intent. The corrected law compares
+    // *both* grammars' evidence; the last two tests below prove the
+    // specific cross-grammar cases that distinguish it from the
+    // single-admission model - see `check_root_with_project_authority`'s
+    // doc comment for the full table.
+
+    fn synth_err(msg: &str) -> Result<i32, FrontendError> {
+        Err(FrontendError::syntax(0, msg))
+    }
+    fn synth_ok(v: i32) -> Result<i32, FrontendError> {
+        Ok(v)
+    }
+
+    #[test]
+    fn project_mechanism_no_claim_is_not_applicable() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::<i32>::NoClaim,
+                &GrammarAdmission::<i32>::NoClaim
+            ),
+            ProjectRoute::SingleFile
+        );
+    }
+
+    #[test]
+    fn project_mechanism_shared_vs_no_claim_is_project() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Shared(synth_ok(1)),
+                &GrammarAdmission::<i32>::NoClaim
+            ),
+            ProjectRoute::Project
+        );
+    }
+
+    #[test]
+    fn project_mechanism_exclusive_vs_no_claim_is_project() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Exclusive(synth_ok(1)),
+                &GrammarAdmission::<i32>::NoClaim
+            ),
+            ProjectRoute::Project
+        );
+    }
+
+    #[test]
+    fn project_mechanism_exclusive_err_vs_no_claim_is_project() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Exclusive(synth_err("exclusive failure")),
+                &GrammarAdmission::<i32>::NoClaim
+            ),
+            ProjectRoute::Project
+        );
+    }
+
+    // Cross-grammar case that fixed the first regression: Logos `Shared`
+    // loses outright to RustLike `Exclusive` - exactly the
+    // `Import "helper.sm"` + `fn main() {...}` shape.
+    #[test]
+    fn project_mechanism_shared_loses_to_rustlike_exclusive() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Shared(synth_ok(1)),
+                &GrammarAdmission::Exclusive(synth_ok(1))
+            ),
+            ProjectRoute::SingleFile
+        );
+    }
+
+    // Symmetric confirmation: Logos `Exclusive` beats RustLike `NoClaim`
+    // or `Shared`, but ties (not "beats") RustLike `Exclusive` - see
+    // `project_mechanism_exclusive_vs_exclusive_is_ambiguous` below.
+    #[test]
+    fn project_mechanism_exclusive_beats_weaker_rustlike_claims() {
+        for rustlike in [
+            GrammarAdmission::<i32>::NoClaim,
+            GrammarAdmission::Shared(synth_ok(1)),
+        ] {
+            assert_eq!(
+                resolve_project_route(&GrammarAdmission::Exclusive(synth_ok(1)), &rustlike),
+                ProjectRoute::Project
+            );
+        }
+    }
+
+    // Owner-flagged regression (round 3): `Exclusive`/`Exclusive` is a
+    // genuine tie in `resolve_surface_authority` (Decision E), not a
+    // Logos win - collapsing it to `Project` would make Logos's own
+    // `Err` wrongly authoritative over a case Decision E calls
+    // `Ambiguous`.
+    #[test]
+    fn project_mechanism_exclusive_vs_exclusive_is_ambiguous() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Exclusive(synth_ok(1)),
+                &GrammarAdmission::Exclusive(synth_ok(2))
+            ),
+            ProjectRoute::Ambiguous
+        );
+    }
+
+    // Owner-flagged regression (round 3), required case 3: `Shared`/
+    // `Shared` with both sides `Ok` is a tie (Decision E Stage 2),
+    // never `Project`.
+    #[test]
+    fn project_mechanism_shared_ok_vs_shared_ok_is_ambiguous() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Shared(synth_ok(1)),
+                &GrammarAdmission::Shared(synth_ok(2))
+            ),
+            ProjectRoute::Ambiguous
+        );
+    }
+
+    // Owner-flagged regression (round 3), required case 2: `Shared(Ok)`
+    // vs `Shared(Err)` - Logos wins Stage 2, `Project` must run.
+    #[test]
+    fn project_mechanism_shared_ok_vs_shared_err_is_project() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Shared(synth_ok(1)),
+                &GrammarAdmission::Shared(synth_err("rustlike shared failure"))
+            ),
+            ProjectRoute::Project
+        );
+    }
+
+    // Owner-flagged regression (round 3), required case 1 - the actual
+    // defect that triggered this correction round: `Shared(Err)` vs
+    // `Shared(Ok)` must route to RustLike/single-file, matching
+    // `resolve_surface_authority`'s own
+    // `resolver_shared_vs_shared_err_ok_rustlike_owns` regression. The
+    // evidence-strength-only version of this function got this case
+    // wrong (routed to `Project`, making Logos's `Err` wrongly
+    // authoritative).
+    #[test]
+    fn project_mechanism_shared_err_vs_shared_ok_is_single_file() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Shared(synth_err("logos shared failure")),
+                &GrammarAdmission::Shared(synth_ok(1))
+            ),
+            ProjectRoute::SingleFile
+        );
+    }
+
+    // Owner-flagged regression (round 3), required case 4: `Shared`/
+    // `Shared` with both sides `Err` is also a tie (Decision E
+    // "evidence preservation" - neither outcome may be silently
+    // dropped by picking one side as authoritative).
+    #[test]
+    fn project_mechanism_shared_err_vs_shared_err_is_ambiguous() {
+        assert_eq!(
+            resolve_project_route(
+                &GrammarAdmission::Shared(synth_err("logos failure")),
+                &GrammarAdmission::Shared(synth_err("rustlike failure"))
+            ),
+            ProjectRoute::Ambiguous
+        );
+    }
+
+    // M9 guard, direct form: a mutation that collapses every
+    // `Shared`/`Shared` pairing to `Project` regardless of outcome must
+    // be caught by at least one of the four `Shared`/`Shared` tests
+    // above disagreeing with `Project`. This test pins the specific
+    // combination the owner's M9 mutation targets, so the mutation's
+    // failure mode is visible in one place rather than only inferred
+    // from the four cases individually.
+    #[test]
+    fn project_mechanism_shared_shared_outcome_matrix_is_not_uniformly_project() {
+        let cases = [
+            (synth_ok(1), synth_ok(2), ProjectRoute::Ambiguous),
+            (synth_ok(1), synth_err("r"), ProjectRoute::Project),
+            (synth_err("l"), synth_ok(2), ProjectRoute::SingleFile),
+            (synth_err("l"), synth_err("r"), ProjectRoute::Ambiguous),
+        ];
+        for (logos_outcome, rustlike_outcome, expected) in cases {
+            let route = resolve_project_route(
+                &GrammarAdmission::Shared(logos_outcome),
+                &GrammarAdmission::Shared(rustlike_outcome),
+            );
+            assert_eq!(route, expected);
+        }
+    }
+
+    // Real-source adversarial regression, per the owner's exact
+    // requirement: root establishes genuine positive Logos evidence
+    // (`Entity`, Exclusive) + the root's own Logos parse fails (missing
+    // ':' after the Entity name) + the single-file path, if incorrectly
+    // taken, would produce a *different* result - `load_module_recursive`
+    // wraps a root parse failure as `"failed to parse module '<path>':
+    // <msg>"` (E0239), while `check_source_with_profile` alone returns
+    // the raw, unwrapped message with no such prefix. Proves the
+    // corrected seam takes the Applied path (and its E0239-wrapped,
+    // project-identified message) even though the root's own parse
+    // fails - never the single-file path's differently-shaped result.
+    #[test]
+    fn project_authority_exclusive_evidence_with_parse_failure_stays_applied() {
+        let dir = mk_temp_dir("proj_authority_exclusive_err_applied");
+        let root = dir.join("root.sm");
+        // Missing ':' after the Entity name - genuine Exclusive evidence
+        // (`KwEntity` dispatches immediately), genuine parse failure.
+        let src = "Entity A\n";
+        std::fs::write(&root, src).expect("write root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+
+        // Control: prove the admission itself really is Exclusive(Err),
+        // not NoClaim - or this fixture would not test what it claims.
+        let tokens = lex(src).expect("lex");
+        let admission = admit_logos_program_with_profile(src, &tokens, &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Exclusive(Err(_))),
+            "control check: fixture must produce Exclusive(Err), got: {admission:?}"
+        );
+
+        // Control: prove the single-file path really would give a
+        // *differently shaped* result (no "failed to parse module"
+        // wrapping, no E0239), so the two paths are genuinely
+        // distinguishable and this is not a vacuous check.
+        let single_file_err = check_source_with_profile(src, &profile)
+            .expect_err("malformed Entity must fail on the single-file path too");
+        assert!(
+            !single_file_err
+                .diag
+                .message
+                .contains("failed to parse module"),
+            "control check: single-file path must not use the project mechanism's own \
+             wrapping, got: {}",
+            single_file_err.diag.message
+        );
+
+        let via_helper = check_root_with_project_authority(&root, src, &provider, &profile)
+            .expect_err("must still fail");
+        assert!(
+            via_helper.diag.message.contains("failed to parse module"),
+            "the project mechanism's own E0239-wrapped, module-identified error must be used - \
+             not the single-file path's differently-shaped result: {}",
+            via_helper.diag.message
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 1. NotApplicable may fall back: a root with no Logos evidence at
+    // all must be handled by the narrower single-file check, and must
+    // match what that check alone would produce.
+    #[test]
+    fn project_authority_not_applicable_falls_back_to_single_file() {
+        let dir = mk_temp_dir("proj_authority_not_applicable");
+        let root = dir.join("main.sm");
+        let src = "fn main() {\n    return;\n}\n";
+        std::fs::write(&root, src).expect("write root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+        let via_helper = check_root_with_project_authority(&root, src, &provider, &profile);
+        let via_single_file = check_source_with_profile(src, &profile);
+        assert_eq!(
+            via_helper.is_ok(),
+            via_single_file.is_ok(),
+            "NotApplicable must defer entirely to the single-file check"
+        );
+        assert!(
+            via_helper.is_ok(),
+            "ordinary RustLike source must be admitted"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 2. Applied(Ok) never falls back: proven not merely by "it
+    // succeeds" (a single-file check of the root alone might also
+    // succeed) but by showing the *imported module's own* warning is
+    // present in the result - something only the real project mechanism
+    // could have produced, since the single-file check never looks at
+    // import targets at all.
+    #[test]
+    fn project_authority_applied_ok_uses_real_project_result_not_root_alone() {
+        let dir = mk_temp_dir("proj_authority_applied_ok");
+        let root = dir.join("root.sm");
+        let dep = dir.join("dep.sm");
+        std::fs::write(
+            &root,
+            "\nImport \"dep.sm\"\nLaw \"R\" [priority 1]:\n    When true -> System.recovery()\n",
+        )
+        .expect("write root");
+        std::fs::write(
+            &dep,
+            "\nEntity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When N ->\n        Pulse.emit(\"x\")\n",
+        )
+        .expect("write dep");
+
+        let root_src = std::fs::read_to_string(&root).expect("read root");
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+        let report = check_root_with_project_authority(&root, &root_src, &provider, &profile)
+            .expect("valid project must succeed");
+        assert!(
+            report.warnings.iter().any(|w| w.code == "W0240"),
+            "the imported module's own dead-When warning must be present - proof the real \
+             project mechanism ran, not a single-file check of the root's text alone"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 3. Applied(Err) never falls back: a root that is a real Logos
+    // project entry, whose import target does not exist, must fail with
+    // the project mechanism's own error - never silently retried as a
+    // single-file check (which would ignore the missing import
+    // entirely and succeed, since it never resolves import targets).
+    #[test]
+    fn project_authority_applied_err_is_never_replaced_by_fallback_success() {
+        let dir = mk_temp_dir("proj_authority_applied_err");
+        let root = dir.join("root.sm");
+        std::fs::write(
+            &root,
+            "\nImport \"missing.sm\"\nEntity A:\n    state x: quad\n",
+        )
+        .expect("write root");
+        let root_src = std::fs::read_to_string(&root).expect("read root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+
+        // Adversarial control: prove the single-file check of the root
+        // text ALONE would have silently succeeded, ignoring the
+        // missing import entirely - the exact false-positive #1919
+        // exists to prevent.
+        let single_file_result = check_source_with_profile(&root_src, &profile);
+        assert!(
+            single_file_result.is_ok(),
+            "control check: the single-file path must be the one that would silently \
+             succeed here, or this fixture does not test what it claims to"
+        );
+
+        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile);
+        let err = via_helper.expect_err(
+            "a project entry with a missing import must fail, never silently succeed via fallback",
+        );
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("failed to resolve import") || rendered.contains("missing.sm"),
+            "expected the project mechanism's own missing-dependency error, got: {rendered}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 4. The Applied(Err) payload survives unchanged: the message
+    // reaching the caller through the new seam must be byte-identical
+    // to calling the project mechanism directly.
+    #[test]
+    fn project_authority_applied_err_message_exactly_matches_direct_call() {
+        let dir = mk_temp_dir("proj_authority_exact_message");
+        let root = dir.join("root.sm");
+        let a = dir.join("a.sm");
+        std::fs::write(&root, "\nImport \"a.sm\"\nEntity A:\n    state x: quad\n")
+            .expect("write root");
+        std::fs::write(&a, "\nImport \"root.sm\"\nEntity B:\n    state y: quad\n")
+            .expect("write a (completes the cycle)");
+        let root_src = std::fs::read_to_string(&root).expect("read root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+        let direct = check_file_with_provider_and_profile(&root, &provider, &profile)
+            .expect_err("cyclic import must fail directly");
+        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile)
+            .expect_err("cyclic import must fail through the new seam too");
+        assert_eq!(via_helper.diag.message, direct.diag.message);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 5. Error-identity divergence check: a fixture engineered so the
+    // project mechanism and the single-file fallback would each fail
+    // for a *different* reason, with a *different* message - the
+    // project mechanism fails early at import resolution (the target
+    // does not exist), before it ever reaches per-module semantic
+    // analysis; the fallback, having no concept of import resolution at
+    // all, happily parses the root's own (invalid) duplicate-Entity
+    // content and fails there instead. Proves the seam preserves the
+    // *specific* project error, not merely "some" error - the previous
+    // test alone cannot distinguish this, since its fixture's fallback
+    // path happens to succeed, so a mutation that only swaps the error
+    // on fallback-failure would go unnoticed there.
+    #[test]
+    fn project_authority_preserves_specific_project_error_not_a_different_fallback_error() {
+        let dir = mk_temp_dir("proj_authority_error_identity");
+        let root = dir.join("root.sm");
+        std::fs::write(
+            &root,
+            "\nImport \"missing.sm\"\nEntity A:\n    state x: quad\nEntity A:\n    prop y: bool\n",
+        )
+        .expect("write root");
+        let root_src = std::fs::read_to_string(&root).expect("read root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+
+        // Control: prove the two paths really do disagree on *why* this
+        // fails, so the test is not vacuous.
+        let fallback_err = check_source_with_profile(&root_src, &profile)
+            .expect_err("root alone has a genuine duplicate Entity");
+        assert!(
+            fallback_err.diag.message.contains("duplicate Entity"),
+            "control check: fallback must fail on the duplicate Entity, got: {}",
+            fallback_err.diag.message
+        );
+
+        let direct = check_file_with_provider_and_profile(&root, &provider, &profile)
+            .expect_err("project mechanism must fail on the missing import");
+        assert!(
+            direct.diag.message.contains("missing.sm"),
+            "control check: project mechanism must fail on the missing import first, got: {}",
+            direct.diag.message
+        );
+
+        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile)
+            .expect_err("must still fail");
+        assert_eq!(
+            via_helper.diag.message, direct.diag.message,
+            "the project mechanism's own (earlier, more specific) error must survive - not be \
+             silently swapped for the fallback's different, later error"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 6. Owner-flagged regression (round 3), required case 7: a bare
+    // `Import "a.sm"` with *no other top-level content at all* is
+    // `Shared` evidence for *both* grammars (Decision A) - and if that
+    // shared evidence happens to admit successfully on both sides
+    // (`Shared(Ok)`/`Shared(Ok)`), Decision E Stage 2 calls this a tie
+    // (`Ambiguous`), not a Logos project. The adversarial sharpness
+    // here: `a.sm` genuinely exists and is a valid Logos module, so the
+    // *wrong* (evidence-strength-only) routing would not merely produce
+    // a different error - it would silently `Project`-route this into
+    // the real multi-module loader and let it fully succeed, masking
+    // the ambiguity entirely rather than surfacing it.
+    #[test]
+    fn project_authority_bare_import_with_resolvable_dependency_is_ambiguous_not_project() {
+        let dir = mk_temp_dir("proj_authority_bare_import_ambiguous");
+        let root = dir.join("root.sm");
+        let a = dir.join("a.sm");
+        let src = "Import \"a.sm\"\n";
+        std::fs::write(&root, src).expect("write root");
+        std::fs::write(&a, "\nEntity A:\n    state x: quad\n").expect("write a");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+
+        // Control: prove both grammars really do admit this text as
+        // `Shared`, so this fixture tests the Stage-2 tie-break path
+        // and not some other cell of the table.
+        let tokens = lex(src).expect("lex");
+        let logos = admit_logos_program_with_profile(src, &tokens, &profile);
+        let rustlike = admit_program_with_profile(src, &tokens, &profile);
+        assert!(
+            matches!(logos, GrammarAdmission::Shared(_))
+                && matches!(rustlike, GrammarAdmission::Shared(_)),
+            "control check: a bare Import must be Shared evidence for both grammars, \
+             got logos={logos:?}, rustlike={rustlike:?}"
+        );
+
+        // Control: prove the project mechanism really would fully
+        // succeed if wrongly routed here - so a failure alone would not
+        // prove ambiguity was detected, only that something went wrong.
+        let direct = check_file_with_provider_and_profile(&root, &provider, &profile);
+        assert!(
+            direct.is_ok(),
+            "control check: the project mechanism must be able to fully succeed on this \
+             fixture, or a wrong `Project` route would be caught for the wrong reason"
+        );
+
+        let via_helper = check_root_with_project_authority(&root, src, &provider, &profile)
+            .expect_err(
+                "a Shared/Shared tie must surface Decision E's ambiguity, not silently \
+                         succeed as a Logos project",
+            );
+        assert!(
+            via_helper.diag.message.contains("AMBIGUOUS"),
+            "expected Decision E's own ambiguity diagnostic, got: {}",
+            via_helper.diag.message
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
