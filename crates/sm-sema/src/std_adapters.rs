@@ -11,8 +11,9 @@ use crate::alloc_core::{
     SemanticType, Symbol, SymbolTable, TypeRegistry,
 };
 use crate::frontend::{
-    parse_logos_program_with_profile, parse_program_with_profile, type_check_program, LogosEntity,
-    LogosEntityFieldKind, LogosProgram, ParserProfile, SourceMark, Type,
+    admit_logos_program_with_profile, admit_program_with_profile, lex,
+    parse_logos_program_with_profile, type_check_program, FrontendError, GrammarAdmission,
+    LogosEntity, LogosEntityFieldKind, LogosProgram, ParserProfile, SourceMark, Type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -89,16 +90,125 @@ pub fn check_source(input: &str) -> Result<SemanticReport, SemanticError> {
     check_source_with_profile(input, &profile)
 }
 
+/// SSF-09 Decision E, cross-grammar evidence resolver (FROZEN by owner
+/// ruling, round 4 -
+/// `docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`).
+/// Generic over each grammar's own program type `L`/`R` - this function
+/// owns none of the grammar-specific knowledge (which forms are
+/// exclusive vs. shared, declaration-boundary lexical signals, parser
+/// scan mechanics); it only implements the two-stage, grammar-agnostic
+/// resolution law over a pair of already-computed [`GrammarAdmission`]
+/// values. Stage 1 resolves by evidence strength
+/// (`Exclusive` > `Shared` > `NoClaim`); Stage 2 resolves a `Shared` vs
+/// `Shared` tie by parse outcome. A grammar-local `Err` is never itself
+/// authoritative - it becomes the verdict's `Err` only after that
+/// grammar has won ownership resolution (the fail-closed invariant this
+/// whole decision exists to establish).
+enum SurfaceVerdict<L, R> {
+    LogosOwns(Result<L, FrontendError>),
+    RustLikeOwns(Result<R, FrontendError>),
+    /// Both `Exclusive`-vs-`Exclusive` (a tie regardless of either side's
+    /// own `Ok`/`Err`) and `Shared`-`Err`-vs-`Shared`-`Err` land here -
+    /// neither underlying outcome may be silently dropped (Decision E,
+    /// "Evidence preservation").
+    Ambiguous {
+        logos: Result<L, FrontendError>,
+        rustlike: Result<R, FrontendError>,
+    },
+    /// `NoClaim`/`NoClaim` - neither grammar established any top-level
+    /// evidence (e.g. a genuinely blank or comment-only input).
+    NoSurfaceClaim,
+}
+
+fn resolve_surface_authority<L, R>(
+    logos: GrammarAdmission<L>,
+    rustlike: GrammarAdmission<R>,
+) -> SurfaceVerdict<L, R> {
+    match (logos, rustlike) {
+        (GrammarAdmission::NoClaim, GrammarAdmission::NoClaim) => SurfaceVerdict::NoSurfaceClaim,
+        (GrammarAdmission::Exclusive(o), GrammarAdmission::NoClaim) => SurfaceVerdict::LogosOwns(o),
+        (GrammarAdmission::NoClaim, GrammarAdmission::Exclusive(o)) => {
+            SurfaceVerdict::RustLikeOwns(o)
+        }
+        (GrammarAdmission::Exclusive(o), GrammarAdmission::Shared(_)) => {
+            SurfaceVerdict::LogosOwns(o)
+        }
+        (GrammarAdmission::Shared(_), GrammarAdmission::Exclusive(o)) => {
+            SurfaceVerdict::RustLikeOwns(o)
+        }
+        (GrammarAdmission::Exclusive(logos), GrammarAdmission::Exclusive(rustlike)) => {
+            SurfaceVerdict::Ambiguous { logos, rustlike }
+        }
+        (GrammarAdmission::Shared(o), GrammarAdmission::NoClaim) => SurfaceVerdict::LogosOwns(o),
+        (GrammarAdmission::NoClaim, GrammarAdmission::Shared(o)) => SurfaceVerdict::RustLikeOwns(o),
+        (GrammarAdmission::Shared(logos), GrammarAdmission::Shared(rustlike)) => {
+            match (logos, rustlike) {
+                (logos @ Ok(_), rustlike @ Ok(_)) => SurfaceVerdict::Ambiguous { logos, rustlike },
+                (logos @ Ok(_), Err(_)) => SurfaceVerdict::LogosOwns(logos),
+                (Err(_), rustlike @ Ok(_)) => SurfaceVerdict::RustLikeOwns(rustlike),
+                (logos @ Err(_), rustlike @ Err(_)) => {
+                    SurfaceVerdict::Ambiguous { logos, rustlike }
+                }
+            }
+        }
+    }
+}
+
+fn describe_outcome<T>(outcome: &Result<T, FrontendError>) -> String {
+    match outcome {
+        Ok(_) => "accepted".to_string(),
+        Err(e) => e.message.clone(),
+    }
+}
+
+/// Decision E, "Evidence preservation": the message shape below is the
+/// one sketched verbatim in the frozen decision text - not a new
+/// diagnostic-carrier design (deferred, per the decision's own exit
+/// gate).
+fn ambiguous_surface_error<L, R>(
+    input: &str,
+    logos: &Result<L, FrontendError>,
+    rustlike: &Result<R, FrontendError>,
+) -> SemanticError {
+    let message = format!(
+        "AMBIGUOUS / CONFLICTING SOURCE SURFACE\n\nEvidence:\nLogos     -> {}\nRustLike  -> {}",
+        describe_outcome(logos),
+        describe_outcome(rustlike),
+    );
+    SemanticError {
+        diag: render_diag(
+            DiagLevel::Error,
+            "E0000",
+            message,
+            SourceMark::default(),
+            input,
+        ),
+    }
+}
+
+fn no_surface_claim_error(input: &str) -> SemanticError {
+    SemanticError {
+        diag: render_diag(
+            DiagLevel::Error,
+            "E0000",
+            "NO SURFACE CLAIM: this input establishes no top-level evidence for either the Logos or RustLike grammar".to_string(),
+            SourceMark::default(),
+            input,
+        ),
+    }
+}
+
 pub fn check_source_with_profile(
     input: &str,
     profile: &ParserProfile,
 ) -> Result<SemanticReport, SemanticError> {
-    if let Ok(logos) = parse_logos_program_with_profile(input, profile) {
-        if logos.system.is_some() || !logos.entities.is_empty() || !logos.laws.is_empty() {
-            return analyze_logos_program(&logos, input);
-        }
-    }
-    let parsed = parse_program_with_profile(input, profile).map_err(|e| SemanticError {
+    // Owner-review correction (SSF09-E2 round 1, still valid under
+    // Decision E): a lexer failure means admission evidence could not be
+    // obtained at all - it does not prove the source is blank, and is
+    // not a surface-admission outcome for either grammar. Preserve the
+    // lexer's own deterministic failure instead of feeding either
+    // `admit_*` function anything.
+    let tokens = lex(input).map_err(|e| SemanticError {
         diag: render_diag(
             DiagLevel::Error,
             "E0000",
@@ -107,20 +217,49 @@ pub fn check_source_with_profile(
             input,
         ),
     })?;
-    type_check_program(&parsed).map_err(|e| SemanticError {
-        diag: render_diag(
-            DiagLevel::Error,
-            "E0201",
-            e.message,
-            SourceMark::default(),
-            input,
-        ),
-    })?;
-    Ok(SemanticReport {
-        warnings: Vec::new(),
-        scheduled_laws: Vec::new(),
-        arena_nodes: 0,
-    })
+    let logos = admit_logos_program_with_profile(input, &tokens, profile);
+    let rustlike = admit_program_with_profile(input, &tokens, profile);
+    match resolve_surface_authority(logos, rustlike) {
+        SurfaceVerdict::LogosOwns(Ok(program)) => analyze_logos_program(&program, input),
+        SurfaceVerdict::LogosOwns(Err(e)) => Err(SemanticError {
+            diag: render_diag(
+                DiagLevel::Error,
+                "E0000",
+                e.message,
+                SourceMark::default(),
+                input,
+            ),
+        }),
+        SurfaceVerdict::RustLikeOwns(Ok(parsed)) => {
+            type_check_program(&parsed).map_err(|e| SemanticError {
+                diag: render_diag(
+                    DiagLevel::Error,
+                    "E0201",
+                    e.message,
+                    SourceMark::default(),
+                    input,
+                ),
+            })?;
+            Ok(SemanticReport {
+                warnings: Vec::new(),
+                scheduled_laws: Vec::new(),
+                arena_nodes: 0,
+            })
+        }
+        SurfaceVerdict::RustLikeOwns(Err(e)) => Err(SemanticError {
+            diag: render_diag(
+                DiagLevel::Error,
+                "E0000",
+                e.message,
+                SourceMark::default(),
+                input,
+            ),
+        }),
+        SurfaceVerdict::Ambiguous { logos, rustlike } => {
+            Err(ambiguous_surface_error(input, &logos, &rustlike))
+        }
+        SurfaceVerdict::NoSurfaceClaim => Err(no_surface_claim_error(input)),
+    }
 }
 
 pub fn check_file_with_provider(
@@ -848,7 +987,7 @@ fn to_core_diag_level(level: DiagLevel) -> ton618_core::DiagLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::parse_logos_program;
+    use crate::frontend::{parse_logos_program, parse_program_with_profile};
     use std::collections::{BTreeMap, HashMap};
     use std::fs;
     use std::path::PathBuf;
@@ -1471,5 +1610,405 @@ Law "Alpha" [priority 7]:
             .map(|l| l.name)
             .collect();
         assert_eq!(names, vec!["Zeta".to_string(), "Alpha".to_string()]);
+    }
+
+    // ------------------------------------------------------------------
+    // SSF-09 Decision E / #1670 Stage 2A: `resolve_surface_authority`
+    // and `check_source_with_profile` regressions.
+    //
+    // Tier A (below): direct unit tests of `resolve_surface_authority`
+    // with synthetic `GrammarAdmission` values. This is the only
+    // reliable way to exercise every cell of the frozen two-stage table
+    // deterministically - several combinations (`Exclusive(Err)` vs
+    // `Shared(Ok)`, `Shared(Err)` vs `Shared(Err)`) are difficult or
+    // impossible to reliably reconstruct from real source text given the
+    // two grammars' own non-symmetric scan mechanics (see the discovery
+    // evidence note for #1670 Stage 2A).
+    //
+    // Tier B (further below): end-to-end `check_source_with_profile`
+    // regressions using real source text, covering the combinations
+    // naturally reachable through the actual admission/resolution
+    // pipeline, plus exact-`FrontendError`-preservation checks.
+
+    fn synth_err(msg: &str) -> Result<i32, FrontendError> {
+        Err(FrontendError::syntax(0, msg))
+    }
+    fn synth_ok(v: i32) -> Result<i32, FrontendError> {
+        Ok(v)
+    }
+
+    #[test]
+    fn resolver_exclusive_beats_noclaim_both_orders() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Exclusive(synth_ok(1)),
+                GrammarAdmission::<i32>::NoClaim
+            ),
+            SurfaceVerdict::LogosOwns(Ok(1))
+        ));
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::<i32>::NoClaim,
+                GrammarAdmission::Exclusive(synth_ok(2))
+            ),
+            SurfaceVerdict::RustLikeOwns(Ok(2))
+        ));
+    }
+
+    #[test]
+    fn resolver_exclusive_beats_shared_both_orders() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Exclusive(synth_ok(1)),
+                GrammarAdmission::Shared(synth_ok(9))
+            ),
+            SurfaceVerdict::LogosOwns(Ok(1))
+        ));
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_ok(9)),
+                GrammarAdmission::Exclusive(synth_ok(2))
+            ),
+            SurfaceVerdict::RustLikeOwns(Ok(2))
+        ));
+    }
+
+    #[test]
+    fn resolver_exclusive_err_beats_shared_ok_both_orders() {
+        // The fail-closed invariant this whole decision exists to
+        // establish: a stronger grammar's Err is authoritative even
+        // against the weaker grammar's Ok - never discarded in favor of
+        // the weaker side succeeding.
+        match resolve_surface_authority(
+            GrammarAdmission::Exclusive(synth_err("logos exclusive failure")),
+            GrammarAdmission::Shared(synth_ok(9)),
+        ) {
+            SurfaceVerdict::LogosOwns(Err(e)) => assert_eq!(e.message, "logos exclusive failure"),
+            _ => panic!("Exclusive(Err) must beat Shared(Ok) and stay authoritative"),
+        }
+        match resolve_surface_authority(
+            GrammarAdmission::Shared(synth_ok(9)),
+            GrammarAdmission::Exclusive(synth_err("rustlike exclusive failure")),
+        ) {
+            SurfaceVerdict::RustLikeOwns(Err(e)) => {
+                assert_eq!(e.message, "rustlike exclusive failure")
+            }
+            _ => panic!("Exclusive(Err) must beat Shared(Ok) and stay authoritative"),
+        }
+    }
+
+    #[test]
+    fn resolver_exclusive_vs_exclusive_is_always_ambiguous_regardless_of_ok_err() {
+        for (logos, rustlike) in [
+            (synth_ok(1), synth_ok(2)),
+            (synth_ok(1), synth_err("r")),
+            (synth_err("l"), synth_ok(2)),
+            (synth_err("l"), synth_err("r")),
+        ] {
+            assert!(
+                matches!(
+                    resolve_surface_authority(
+                        GrammarAdmission::Exclusive(logos),
+                        GrammarAdmission::Exclusive(rustlike)
+                    ),
+                    SurfaceVerdict::Ambiguous { .. }
+                ),
+                "Exclusive vs Exclusive must always be ambiguous, regardless of Ok/Err"
+            );
+        }
+    }
+
+    #[test]
+    fn resolver_shared_beats_noclaim_both_orders() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_ok(1)),
+                GrammarAdmission::<i32>::NoClaim
+            ),
+            SurfaceVerdict::LogosOwns(Ok(1))
+        ));
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::<i32>::NoClaim,
+                GrammarAdmission::Shared(synth_ok(2))
+            ),
+            SurfaceVerdict::RustLikeOwns(Ok(2))
+        ));
+    }
+
+    #[test]
+    fn resolver_noclaim_vs_noclaim_is_no_surface_claim() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::<i32>::NoClaim,
+                GrammarAdmission::<i32>::NoClaim
+            ),
+            SurfaceVerdict::NoSurfaceClaim
+        ));
+    }
+
+    #[test]
+    fn resolver_shared_vs_shared_ok_ok_is_ambiguous() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_ok(1)),
+                GrammarAdmission::Shared(synth_ok(2))
+            ),
+            SurfaceVerdict::Ambiguous { .. }
+        ));
+    }
+
+    #[test]
+    fn resolver_shared_vs_shared_ok_err_logos_owns() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_ok(1)),
+                GrammarAdmission::Shared(synth_err("r"))
+            ),
+            SurfaceVerdict::LogosOwns(Ok(1))
+        ));
+    }
+
+    #[test]
+    fn resolver_shared_vs_shared_err_ok_rustlike_owns() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_err("l")),
+                GrammarAdmission::Shared(synth_ok(2))
+            ),
+            SurfaceVerdict::RustLikeOwns(Ok(2))
+        ));
+    }
+
+    #[test]
+    fn resolver_shared_vs_shared_err_err_is_ambiguous() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_err("l")),
+                GrammarAdmission::Shared(synth_err("r"))
+            ),
+            SurfaceVerdict::Ambiguous { .. }
+        ));
+    }
+
+    // T1 - authoritative malformed Logos: clear Logos-exclusive evidence
+    // (Entity) followed by a genuine Logos syntax failure (empty When
+    // condition, E0231). Must fail with the originating Logos error,
+    // never reinterpreted as RustLike.
+    #[test]
+    fn malformed_logos_authoritative_failure_not_retried_as_rustlike() {
+        let src = "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When -> System.recovery()\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile).expect_err("must fail");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("E0231") || rendered.contains("empty When condition"),
+            "expected the originating Logos failure, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("expected top-level"),
+            "must not be reinterpreted as a RustLike parse failure: {rendered}"
+        );
+    }
+
+    // Logos policy rejection: genuine Logos-exclusive evidence under a
+    // profile with the Logos surface disabled. Exercises the
+    // policy-vs-syntax finalization law's first branch
+    // (`require_logos_surface` outranks everything). Uses the existing
+    // `FeaturePolicy::allow_logos_surface` knob - no new profile knob.
+    #[test]
+    fn logos_policy_rejection_is_preserved_not_reinterpreted() {
+        let src = "Entity A:\n    state x: quad\n";
+        let mut profile = ParserProfile::foundation_default();
+        profile.features.allow_logos_surface = false;
+        let err = check_source_with_profile(src, &profile).expect_err("must fail");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("disabled by profile policy"),
+            "expected the Logos policy rejection, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("expected top-level"),
+            "must not be reinterpreted as a RustLike parse failure: {rendered}"
+        );
+    }
+
+    // T2 - malformed RustLike: must never be reinterpreted through Logos.
+    #[test]
+    fn malformed_rustlike_never_reinterpreted_through_logos() {
+        let src = "fn main(\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile).expect_err("must fail");
+        let rendered = err.to_string();
+        assert!(
+            !rendered.contains("expected Logos declaration"),
+            "must not be reinterpreted as a Logos error: {rendered}"
+        );
+    }
+
+    // T3 - exact FrontendError preservation for the authoritative Logos
+    // failure: `check_source_with_profile`'s diagnostic message must be
+    // byte-identical to the direct parser's own message, not a
+    // regenerated or flattened one.
+    #[test]
+    fn logos_exclusive_failure_message_exactly_matches_direct_parse() {
+        let src = "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When -> System.recovery()\n";
+        let profile = ParserProfile::foundation_default();
+        let direct = parse_logos_program_with_profile(src, &profile)
+            .expect_err("direct logos parse must fail");
+        let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
+        assert_eq!(via_sema.diag.message, direct.message);
+    }
+
+    // T4 - exact FrontendError preservation for the authoritative
+    // RustLike failure, mirroring T3.
+    #[test]
+    fn rustlike_exclusive_failure_message_exactly_matches_direct_parse() {
+        let src = "fn main(\n";
+        let profile = ParserProfile::foundation_default();
+        let direct =
+            parse_program_with_profile(src, &profile).expect_err("direct rustlike parse must fail");
+        let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
+        assert_eq!(via_sema.diag.message, direct.message);
+    }
+
+    // T5 - confirmed shared Import collision: `Import "a.sm"` alone
+    // parses to completion under both grammars. Must be rejected with a
+    // deterministic ambiguity outcome, never silently resolved to
+    // either side.
+    #[test]
+    fn quoted_import_alone_is_ambiguous() {
+        let src = "Import \"a.sm\"\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile).expect_err(
+            "Import \"a.sm\" is independently valid under both grammars and must not silently succeed",
+        );
+        let rendered = err.to_string().to_lowercase();
+        assert!(
+            rendered.contains("ambiguous") || rendered.contains("conflict"),
+            "expected a deterministic ambiguity/conflict diagnosis, got: {}",
+            err
+        );
+    }
+
+    // T6 - shared vocabulary is not automatic ambiguity: `Import a.sm`
+    // (no string literal) is accepted by Logos's permissive legacy
+    // handling but rejected by RustLike's own `parse_import_decl`, which
+    // requires a string literal specifically. Must resolve to unique
+    // Logos ownership (accepted), never manufactured ambiguity from the
+    // shared `Import` keyword alone.
+    #[test]
+    fn unquoted_legacy_import_is_accepted_as_logos() {
+        let src = "Import a.sm\n";
+        let profile = ParserProfile::foundation_default();
+        assert!(
+            check_source_with_profile(src, &profile).is_ok(),
+            "an Import line RustLike's own parser rejects (no string literal) must be unique \
+             Logos ownership, not ambiguity"
+        );
+    }
+
+    // Bare Pulse/Profile: unconditional Logos-exclusive evidence: no
+    // System/Entity/Law companion required, no RustLike fallback even
+    // when the Logos surface is policy-disabled.
+    #[test]
+    fn bare_pulse_is_unconditional_logos_exclusive_evidence() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Pulse \"x\"\n";
+        assert!(
+            check_source_with_profile(src, &profile).is_ok(),
+            "a bare Pulse directive is unconditional Logos-exclusive evidence"
+        );
+
+        let mut policy_profile = ParserProfile::foundation_default();
+        policy_profile.features.allow_logos_surface = false;
+        let err = check_source_with_profile(src, &policy_profile)
+            .expect_err("Logos surface disabled must fail, never silently pass to RustLike");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("disabled by profile policy"),
+            "must fail via the Logos-authoritative policy path, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("expected top-level"),
+            "must not fall through to RustLike's own rejection of `Pulse`: {rendered}"
+        );
+    }
+
+    // T7 - Logos-exclusive evidence alongside shared Import still
+    // reaches unique Logos ownership: `Exclusive(Ok)` vs `Shared(Err)` ->
+    // Logos owns, accepted.
+    #[test]
+    fn logos_exclusive_with_shared_import_is_accepted_as_logos() {
+        let src = "Import \"a.sm\"\nEntity Player:\n    state hp: quad\n";
+        let profile = ParserProfile::foundation_default();
+        check_source_with_profile(src, &profile).expect(
+            "Logos-exclusive evidence alongside shared import must still reach Logos, accepted",
+        );
+    }
+
+    // T8 - symmetric case: RustLike-exclusive evidence alongside shared
+    // Import still reaches unique RustLike ownership: `Shared(Err)` vs
+    // `Exclusive(Ok)` -> RustLike owns, accepted. Also doubles as the
+    // "ordinary RustLike program must keep working" regression.
+    #[test]
+    fn rustlike_exclusive_with_shared_import_is_accepted_as_rustlike() {
+        let src = "Import \"a.sm\"\nfn main() {}\n";
+        let profile = ParserProfile::foundation_default();
+        check_source_with_profile(src, &profile).expect(
+            "RustLike-exclusive evidence alongside shared import must still reach RustLike, accepted",
+        );
+    }
+
+    #[test]
+    fn ordinary_rustlike_program_is_still_admitted() {
+        let src = "fn main() {\n    return;\n}\n";
+        let profile = ParserProfile::foundation_default();
+        assert!(
+            check_source_with_profile(src, &profile).is_ok(),
+            "an ordinary RustLike program must still be admitted"
+        );
+    }
+
+    // T9 - Decision E's own worked "side effect" example: RustLike
+    // commits at the string literal then fails on the malformed alias
+    // (`Shared(Err)`); Logos has no further content requirement for
+    // Import (`Shared(Ok)`). Stage 2: Ok+Err -> Logos owns, accepted.
+    #[test]
+    fn shared_ok_err_resolves_to_logos_via_malformed_alias() {
+        let src = "Import \"a.sm\" as 123\n";
+        let profile = ParserProfile::foundation_default();
+        check_source_with_profile(src, &profile)
+            .expect("Logos Shared(Ok) must win over RustLike Shared(Err) on this shape");
+    }
+
+    // T13 - no-evidence case: genuinely blank/comment-free input
+    // establishes no top-level evidence for either grammar
+    // (`NoClaim`/`NoClaim`). Deliberately different from the pre-#1670
+    // behavior of silently succeeding as a trivially-empty RustLike
+    // program - see the discovery evidence note.
+    #[test]
+    fn blank_input_is_no_surface_claim() {
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile("\n\n   \n", &profile)
+            .expect_err("genuinely blank input establishes no evidence for either grammar");
+        assert!(err.to_string().contains("NO SURFACE CLAIM"), "got: {}", err);
+    }
+
+    // A lex failure is not a surface-admission outcome for either
+    // grammar (Decision E) - it must short-circuit before either
+    // `admit_*` function is ever called, and must never be reported as
+    // an ambiguity between the two grammars.
+    #[test]
+    fn lex_failure_short_circuits_before_admission() {
+        let src = "Import \"unterminated\n";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile)
+            .expect_err("unterminated string literal must fail to lex");
+        assert!(
+            !err.to_string().to_lowercase().contains("ambiguous"),
+            "a lex failure must not be reported as cross-grammar ambiguity: {}",
+            err
+        );
     }
 }

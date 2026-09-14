@@ -28,12 +28,13 @@ pub use alloc_core::{
 
 #[cfg(feature = "std")]
 mod frontend {
-    #[cfg(test)]
-    pub use sm_front::parse_logos_program;
     pub use sm_front::{
-        parse_logos_program_with_profile, parse_program_with_profile, type_check_program,
+        admit_logos_program_with_profile, admit_program_with_profile, lex,
+        parse_logos_program_with_profile, type_check_program, FrontendError, GrammarAdmission,
         LogosEntity, LogosEntityFieldKind, LogosProgram, Type,
     };
+    #[cfg(test)]
+    pub use sm_front::{parse_logos_program, parse_program_with_profile};
     pub use sm_profile::ParserProfile;
     pub use ton618_core::SourceMark;
 }
