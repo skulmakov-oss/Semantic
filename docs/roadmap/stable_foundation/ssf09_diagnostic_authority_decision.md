@@ -2684,4 +2684,6 @@ directly). `smc-cli`'s `resolve_project_route` (`#1919`) and `sm-ir`'s
 rebase of PR #1929 (`#1920`) are each separate, explicitly deferred
 follow-up checkpoints - not folded into the Decision F freeze itself.
 
-**Wait for owner review and a separate implementation GO.**
+**Implementation status**: Decision F foundation is implemented by
+PR #1930. Further consumer migrations (`smc-cli`, `sm-ir`/`#1920`)
+require their own separate checkpoints and owner GO.
