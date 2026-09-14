@@ -3264,18 +3264,28 @@ impl<'a> Parser<'a> {
     ///
     /// Both `require_logos_surface` (whole-surface policy) and
     /// `require_legacy_compatibility` (per-directive policy, gating
-    /// `Import`/`Pulse`/`Profile`) are evaluated as *outcome* modifiers on
-    /// whatever evidence basis the syntax-only scan already found, never
-    /// as a basis modifier and never by early-returning before the scan
-    /// can see evidence elsewhere in the input: a `require_legacy_
-    /// compatibility` failure is pushed into `errors` and recovered from
-    /// like any other per-declaration failure (so a policy-disabled
-    /// `Import`/`Pulse`/`Profile` line does not prevent later genuine
-    /// exclusive evidence, e.g. a subsequent `Entity`, from being seen and
-    /// promoting basis to `Exclusive`), and `require_logos_surface` is
-    /// checked once, after the whole scan, only when `basis != None`
-    /// (if no evidence exists anywhere, a disabled surface has nothing to
-    /// have blocked, and the result stays `NoClaim` regardless of policy).
+    /// `Import`/`Pulse`/`Profile`) affect **outcome only, never evidence
+    /// basis** - neither early-returns before the scan can see evidence
+    /// elsewhere in the input:
+    ///
+    /// - `require_logos_surface` is *evaluated* at scan-start, before any
+    ///   token is consumed, solely to capture the same `FrontendError`
+    ///   (including `pos`) that `parse_logos_program`'s own unconditional
+    ///   pre-loop check would produce - but its result is not *applied*
+    ///   to the outcome until after the complete evidence scan below, and
+    ///   evaluating it early never gates or skips any part of the scan.
+    /// - `require_legacy_compatibility` failures are recorded **separately
+    ///   from ordinary syntax `errors`**, never pushed into that vector
+    ///   and never merged through `merge_logos_errors`: the first such
+    ///   policy error encountered is preserved verbatim while the scan
+    ///   keeps going, so a policy-disabled `Import`/`Pulse`/`Profile` line
+    ///   does not prevent later genuine exclusive evidence (e.g. a
+    ///   subsequent `Entity`) from being seen and strengthening basis to
+    ///   `Exclusive`.
+    ///
+    /// If no evidence exists anywhere (`basis == None`), neither policy
+    /// result is applied at all - a disabled surface has nothing to have
+    /// blocked, and the result stays `NoClaim` regardless of policy.
     fn admit_logos_program(&mut self) -> GrammarAdmission<LogosProgram> {
         // Evaluated here, at the same call site (before any token is
         // consumed, `self.idx == 0`) as `parse_logos_program`'s own
@@ -3400,10 +3410,13 @@ impl<'a> Parser<'a> {
         }
         // SSF-09 Decision E, round 5 policy-vs-syntax finalization law -
         // exact precedence, evaluated only once `basis != None`:
-        //   1. the global `require_logos_surface` gate (checked below,
-        //      after this block) outranks everything else, matching
-        //      today's parser calling it unconditionally before its loop
-        //      even runs;
+        //   1. the previously captured global `require_logos_surface`
+        //      outcome (`surface_check`, evaluated at scan-start above -
+        //      see the doc comment on this function - purely so its
+        //      `FrontendError.pos` matches today's parser) is applied
+        //      here, after evidence discovery, and outranks everything
+        //      else, matching today's parser calling it unconditionally
+        //      before its loop even runs;
         //   2. otherwise, a recorded `legacy_policy_error` (the FIRST one
         //      encountered) is returned verbatim - never merged with
         //      ordinary syntax errors, so `FrontendError::kind()`
