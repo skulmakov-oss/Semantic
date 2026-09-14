@@ -244,3 +244,34 @@ fn t8_project_failure_wins_over_fallback_success() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// T9 - regression fixture for the cross-grammar correction: a genuine
+// RustLike program using the pre-existing "executable helper import"
+// convention (`Import "helper.sm"` followed by real RustLike content)
+// must still be admitted. `Import` alone is Shared evidence for Logos
+// too, so a Logos-admission-only applicability probe misclassifies this
+// as a Logos project entry and routes it into the strict Logos-only
+// project loader, which then fails on ordinary RustLike syntax. This is
+// exactly the shape of `examples/canonical/wave2_local_helper_import/
+// src/main.sm`, which surfaced the regression via the workspace's own
+// `canonical_examples` test before this dedicated regression existed.
+#[test]
+fn t9_executable_helper_import_convention_still_admitted() {
+    let dir = mk_temp_dir("p1919_t9_helper_import");
+    let root = dir.join("main.sm");
+    let helper = dir.join("helper.sm");
+    std::fs::write(
+        &root,
+        "Import \"helper.sm\"\n\nfn main() {\n    let value: i32 = score(1);\n    assert(value == 1);\n    return;\n}\n",
+    )
+    .expect("write root");
+    std::fs::write(
+        &helper,
+        "fn score(value: i32) -> i32 {\n    return value;\n}\n",
+    )
+    .expect("write helper");
+
+    cli_ok("check", &root);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -26,7 +26,10 @@ use sm_emit::{
     compile_program_to_semcode, compile_program_to_semcode_with_options_debug, CompileProfile,
     OptLevel,
 };
-use sm_front::{lex, parse_logos_program_with_profile, parse_program_with_profile, ParserProfile};
+use sm_front::{
+    admit_logos_program_with_profile, admit_program_with_profile, lex,
+    parse_logos_program_with_profile, parse_program_with_profile, GrammarAdmission, ParserProfile,
+};
 use sm_ir::{compile_program_to_ir_with_options_and_profile, lower_logos_laws_to_ir};
 use sm_runtime_core::hello_observation_sink::HelloObservationClass;
 use sm_runtime_core::{ExecutionConfig, ExecutionContext};
@@ -92,37 +95,98 @@ fn cli_profile() -> ParserProfile {
 /// not the same fact as the project mechanism positively recognizing a
 /// Logos entry, attempting real multi-module work, and failing.
 ///
-/// The applicability signal reuses the exact same deterministic call
-/// `load_module_recursive` itself makes for the root module
-/// (`parse_logos_program_with_profile`, `sm-sema`'s only Logos entry
-/// point) - not a heuristic, not error-text inspection. It can never
-/// disagree with what the project mechanism itself decides, because it
-/// computes the same fact the mechanism computes internally, before the
-/// mechanism does:
+/// **Owner correction (2026-09-14)**: applicability is decided by
+/// `GrammarAdmission`'s *evidence basis*, never by parse *outcome*. An
+/// earlier version of this function probed with
+/// `parse_logos_program_with_profile(...).is_err()` - the flat,
+/// single-`Result` parser - which conflates "no evidence of Logos
+/// ownership at all" with "evidence of Logos ownership, but this
+/// particular parse attempt failed." A root with genuine
+/// Logos-exclusive or Logos-shared evidence whose own parse then fails
+/// is still `Applied`: the project mechanism DID recognize this input
+/// as a Logos entry, and its own failure - whatever it is - is
+/// authoritative.
 ///
-/// - the root does not parse as a Logos program at all -> the project
-///   mechanism was never a candidate for this input; the narrower
-///   single-file check is a legitimate, distinct mechanism, not a
-///   fallback from a failed attempt;
-/// - the root parses as a Logos program -> the project mechanism applies
-///   from here on, and whatever it returns - `Ok` or `Err` - is
-///   authoritative and returned verbatim, with no narrower retry of any
-///   kind.
+/// **Correction to the correction, found by testing against real
+/// fixtures**: evidence basis from Logos *alone* is still not enough,
+/// because `Import "x.sm"` is `Shared` evidence for *both* grammars
+/// (Decision A). A genuine RustLike program using the pre-existing
+/// "executable helper import" convention
+/// (`crates/smc-cli/src/executable_bundle.rs`, e.g.
+/// `examples/canonical/wave2_local_helper_import/src/main.sm`:
+/// `Import "helper.sm"` followed by `fn main() {...}`) therefore shows
+/// up as Logos-`Shared`, even though it is unambiguously a RustLike
+/// program with zero Logos multi-module intent. Probing Logos's
+/// admission in isolation misclassified this file as `Applied`,
+/// routing it into the strict Logos-only project loader, which then
+/// failed to parse ordinary RustLike syntax: a real regression, caught
+/// by the existing `canonical_positive_examples_...` workspace test,
+/// not by this PR's own regression suite (which had no fixture
+/// combining `Import` with genuine RustLike-exclusive content).
+///
+/// The corrected signal computes *both* grammars' admissions (the same
+/// two calls `sm-sema`'s `resolve_surface_authority`, `#1670`, uses)
+/// and asks whether Logos's evidence is at least as strong as
+/// RustLike's - i.e. whether Decision E's frozen Stage-1 table would
+/// give Logos ownership or a tie, never whether RustLike would win
+/// outright:
+///
+/// | Logos       | RustLike    | Applicable? |
+/// |-------------|-------------|-------------|
+/// | `NoClaim`   | (any)       | no          |
+/// | `Shared`    | `Exclusive` | no          |
+/// | `Shared`    | `Shared`/`NoClaim` | yes  |
+/// | `Exclusive` | (any)       | yes         |
+///
+/// The two tied rows (`Exclusive`/`Exclusive`, `Shared`/`Shared`)
+/// default to applicable, matching `check_file_with_provider_and_profile`'s
+/// own pre-existing behavior: it only ever consults Logos's side (via
+/// the flat `parse_logos_program_with_profile`) and has never checked
+/// RustLike's competing claim at all, so a tie changes nothing this fix
+/// is responsible for. Only the strictly-losing case (`Shared` losing
+/// outright to `Exclusive`) is the one this correction adds.
 fn check_root_with_project_authority(
     root_canon: &Path,
     root_src: &str,
     provider: &CliFsModuleProvider,
     parser_profile: &ParserProfile,
 ) -> Result<sm_sema::SemanticReport, sm_sema::SemanticError> {
-    if parse_logos_program_with_profile(root_src, parser_profile).is_err() {
-        // Not applicable: the root was never a Logos project entry to
-        // begin with - nothing for the project mechanism to have
-        // recognized or failed at.
+    let applies = match lex(root_src) {
+        Ok(tokens) => {
+            let logos = admit_logos_program_with_profile(root_src, &tokens, parser_profile);
+            let rustlike = admit_program_with_profile(root_src, &tokens, parser_profile);
+            project_mechanism_applies(&logos, &rustlike)
+        }
+        // A lex failure carries no admission evidence for either grammar
+        // (Decision E) - `check_source_with_profile` below will lex the
+        // identical text and surface the identical lex error itself.
+        Err(_) => false,
+    };
+    if !applies {
+        // Not applicable: no Logos evidence at all, or RustLike's
+        // evidence is strictly stronger - nothing for the project
+        // mechanism to have recognized or failed at.
         return check_source_with_profile(root_src, parser_profile);
     }
-    // Applied: the root is a real Logos project entry. Authoritative
-    // from here - never replaced by the single-file check.
+    // Applied: Logos's evidence is at least as strong as RustLike's.
+    // Authoritative from here - never replaced by the single-file check.
     check_file_with_provider_and_profile(root_canon, provider, parser_profile)
+}
+
+/// The evidence-basis-only applicability law itself, isolated as a pure
+/// function so it can be tested directly against every `GrammarAdmission`
+/// pairing without needing real source text or a filesystem. See the
+/// table in `check_root_with_project_authority`'s doc comment.
+fn project_mechanism_applies<L, R>(
+    logos: &GrammarAdmission<L>,
+    rustlike: &GrammarAdmission<R>,
+) -> bool {
+    use GrammarAdmission::{Exclusive, NoClaim, Shared};
+    match (logos, rustlike) {
+        (NoClaim, _) => false,
+        (Shared(_), Exclusive(_)) => false,
+        (Shared(_), _) | (Exclusive(_), _) => true,
+    }
 }
 
 fn reject_leading_unknown_flag(input: &str) -> Result<(), String> {
@@ -2112,6 +2176,7 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sm_front::FrontendError;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn mk_temp_dir(prefix: &str) -> PathBuf {
@@ -2131,6 +2196,163 @@ mod tests {
     // ------------------------------------------------------------------
     // #1919 Stage 2B: `check_root_with_project_authority` regressions.
     // Tier A - direct unit tests of the applicability seam itself.
+
+    // Owner correction (2026-09-14): applicability must be decided by
+    // GrammarAdmission's evidence basis, never by parse outcome. These
+    // exercise `project_mechanism_applies` directly against every
+    // GrammarAdmission shape, with synthetic values - no real source
+    // text or filesystem needed.
+    //
+    // The owner's own five required mappings (NoClaim -> NotApplicable;
+    // every Shared/Exclusive variant, regardless of its own Ok/Err, ->
+    // Applied) are exactly what holds when RustLike offers no competing
+    // claim (`NoClaim`) - the first five tests below pair each Logos
+    // admission against RustLike `NoClaim` for exactly this reason.
+    //
+    // Testing against real fixtures then surfaced a real regression the
+    // single-admission model could not see: `Import "x.sm"` is `Shared`
+    // evidence for *both* grammars, so a genuine RustLike program using
+    // the pre-existing "executable helper import" convention
+    // (`Import "helper.sm"` + `fn main() {...}`) is Logos-`Shared` too,
+    // even though it has zero Logos intent. The corrected law compares
+    // *both* grammars' evidence; the last two tests below prove the
+    // specific cross-grammar cases that distinguish it from the
+    // single-admission model - see `check_root_with_project_authority`'s
+    // doc comment for the full table.
+
+    fn synth_err(msg: &str) -> Result<i32, FrontendError> {
+        Err(FrontendError::syntax(0, msg))
+    }
+    fn synth_ok(v: i32) -> Result<i32, FrontendError> {
+        Ok(v)
+    }
+
+    #[test]
+    fn project_mechanism_no_claim_is_not_applicable() {
+        assert!(!project_mechanism_applies(
+            &GrammarAdmission::<i32>::NoClaim,
+            &GrammarAdmission::<i32>::NoClaim
+        ));
+    }
+
+    #[test]
+    fn project_mechanism_shared_ok_is_applied() {
+        assert!(project_mechanism_applies(
+            &GrammarAdmission::Shared(synth_ok(1)),
+            &GrammarAdmission::<i32>::NoClaim
+        ));
+    }
+
+    #[test]
+    fn project_mechanism_shared_err_is_applied() {
+        assert!(project_mechanism_applies(
+            &GrammarAdmission::Shared(synth_err("shared failure")),
+            &GrammarAdmission::<i32>::NoClaim
+        ));
+    }
+
+    #[test]
+    fn project_mechanism_exclusive_ok_is_applied() {
+        assert!(project_mechanism_applies(
+            &GrammarAdmission::Exclusive(synth_ok(1)),
+            &GrammarAdmission::<i32>::NoClaim
+        ));
+    }
+
+    #[test]
+    fn project_mechanism_exclusive_err_is_applied() {
+        assert!(project_mechanism_applies(
+            &GrammarAdmission::Exclusive(synth_err("exclusive failure")),
+            &GrammarAdmission::<i32>::NoClaim
+        ));
+    }
+
+    // Cross-grammar case that fixes the regression: Logos `Shared`
+    // loses outright to RustLike `Exclusive` - exactly the
+    // `Import "helper.sm"` + `fn main() {...}` shape.
+    #[test]
+    fn project_mechanism_shared_loses_to_rustlike_exclusive() {
+        assert!(!project_mechanism_applies(
+            &GrammarAdmission::Shared(synth_ok(1)),
+            &GrammarAdmission::Exclusive(synth_ok(1))
+        ));
+    }
+
+    // Symmetric confirmation: Logos `Exclusive` is never weaker than
+    // RustLike, regardless of RustLike's own admission.
+    #[test]
+    fn project_mechanism_exclusive_beats_any_rustlike_claim() {
+        for rustlike in [
+            GrammarAdmission::<i32>::NoClaim,
+            GrammarAdmission::Shared(synth_ok(1)),
+            GrammarAdmission::Exclusive(synth_ok(1)),
+        ] {
+            assert!(project_mechanism_applies(
+                &GrammarAdmission::Exclusive(synth_ok(1)),
+                &rustlike
+            ));
+        }
+    }
+
+    // Real-source adversarial regression, per the owner's exact
+    // requirement: root establishes genuine positive Logos evidence
+    // (`Entity`, Exclusive) + the root's own Logos parse fails (missing
+    // ':' after the Entity name) + the single-file path, if incorrectly
+    // taken, would produce a *different* result - `load_module_recursive`
+    // wraps a root parse failure as `"failed to parse module '<path>':
+    // <msg>"` (E0239), while `check_source_with_profile` alone returns
+    // the raw, unwrapped message with no such prefix. Proves the
+    // corrected seam takes the Applied path (and its E0239-wrapped,
+    // project-identified message) even though the root's own parse
+    // fails - never the single-file path's differently-shaped result.
+    #[test]
+    fn project_authority_exclusive_evidence_with_parse_failure_stays_applied() {
+        let dir = mk_temp_dir("proj_authority_exclusive_err_applied");
+        let root = dir.join("root.sm");
+        // Missing ':' after the Entity name - genuine Exclusive evidence
+        // (`KwEntity` dispatches immediately), genuine parse failure.
+        let src = "Entity A\n";
+        std::fs::write(&root, src).expect("write root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+
+        // Control: prove the admission itself really is Exclusive(Err),
+        // not NoClaim - or this fixture would not test what it claims.
+        let tokens = lex(src).expect("lex");
+        let admission = admit_logos_program_with_profile(src, &tokens, &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Exclusive(Err(_))),
+            "control check: fixture must produce Exclusive(Err), got: {admission:?}"
+        );
+
+        // Control: prove the single-file path really would give a
+        // *differently shaped* result (no "failed to parse module"
+        // wrapping, no E0239), so the two paths are genuinely
+        // distinguishable and this is not a vacuous check.
+        let single_file_err = check_source_with_profile(src, &profile)
+            .expect_err("malformed Entity must fail on the single-file path too");
+        assert!(
+            !single_file_err
+                .diag
+                .message
+                .contains("failed to parse module"),
+            "control check: single-file path must not use the project mechanism's own \
+             wrapping, got: {}",
+            single_file_err.diag.message
+        );
+
+        let via_helper = check_root_with_project_authority(&root, src, &provider, &profile)
+            .expect_err("must still fail");
+        assert!(
+            via_helper.diag.message.contains("failed to parse module"),
+            "the project mechanism's own E0239-wrapped, module-identified error must be used - \
+             not the single-file path's differently-shaped result: {}",
+            via_helper.diag.message
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // 1. NotApplicable may fall back: a root with no Logos evidence at
     // all must be handled by the narrower single-file check, and must
