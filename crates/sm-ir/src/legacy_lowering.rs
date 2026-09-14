@@ -1173,6 +1173,125 @@ pub fn compile_program_to_ir_with_profile(
     )
 }
 
+/// #1920: which mechanism Decision E's frozen two-stage authority law
+/// (`sm-sema::std_adapters::resolve_surface_authority`, `#1670`; the same
+/// adapter pattern was already applied once at a different call site by
+/// `smc-cli`'s `resolve_project_route`, `#1919`) gives *outright* ownership
+/// to, answering the one question this function needs: does Logos own this
+/// input so unambiguously that this function - whose only lowering target is
+/// RustLike-shaped SemCode function IR - must refuse and point the caller at
+/// the separate LogosIrLaw lowering path instead?
+///
+/// Unlike `#1919`'s `ProjectRoute` (which needed a distinct `Ambiguous` state
+/// because its non-Logos branch deferred to `check_source_with_profile`, a
+/// downstream authority able to render Decision E's own ambiguity
+/// diagnostic), this function has no such downstream authority to defer an
+/// ambiguous verdict to - its only alternative to "Logos owns" is "attempt
+/// RustLike lowering," whose own success or failure is authoritative from
+/// there. So every non-`LogosOwns` outcome - RustLike ownership, a genuine
+/// tie (`Ambiguous`), or no claim at all (`NoClaim`/`NoClaim`) - collapses to
+/// `false` here, and this function proceeds to `parse_program_with_profile`.
+///
+/// | Logos       | RustLike    | Outright Logos ownership? |
+/// |-------------|-------------|----------------------------|
+/// | `NoClaim`   | (any)       | no                          |
+/// | `Shared`/`Exclusive` | `NoClaim` | yes                 |
+/// | `Exclusive` | `Shared`    | yes                         |
+/// | `Shared`    | `Exclusive` | no (RustLike owns)          |
+/// | `Exclusive` | `Exclusive` | no (tie - `Ambiguous`)      |
+/// | `Shared(Ok)` | `Shared(Ok)`  | no (tie - `Ambiguous`)   |
+/// | `Shared(Ok)` | `Shared(Err)` | yes                      |
+/// | `Shared(Err)` | `Shared(Ok)` | no (RustLike owns)       |
+/// | `Shared(Err)` | `Shared(Err)` | no (tie - `Ambiguous`)  |
+///
+/// Uses only the already-public `sm_front::{admit_logos_program_with_profile,
+/// admit_program_with_profile}` - no new dependency, no new public API, and
+/// no independently-designed third authority law (this mirrors the frozen
+/// table exactly; it does not invent one).
+fn logos_owns_outright<L, R>(logos: &GrammarAdmission<L>, rustlike: &GrammarAdmission<R>) -> bool {
+    use GrammarAdmission::{Exclusive, NoClaim, Shared};
+    match (logos, rustlike) {
+        (NoClaim, _) => false,
+        (Shared(_) | Exclusive(_), NoClaim) => true,
+        (Exclusive(_), Shared(_)) => true,
+        (Shared(_), Exclusive(_)) => false,
+        (Exclusive(_), Exclusive(_)) => false,
+        (Shared(logos_outcome), Shared(rustlike_outcome)) => {
+            matches!(
+                (logos_outcome.is_ok(), rustlike_outcome.is_ok()),
+                (true, false)
+            )
+        }
+    }
+}
+
+// Test-only invocation-counting seam for `admit_logos_program_with_profile`.
+// Output equivalence alone cannot prove explicit RustLike invokes zero Logos
+// machinery - the original #1920 defect called Logos unconditionally and
+// merely discarded the result, which output-only tests cannot distinguish
+// from never calling it at all. `#[cfg(not(test))]` compiles this down to a
+// plain, zero-overhead forward; `thread_local!` keeps counts isolated across
+// `cargo test`'s one-thread-per-test default.
+#[cfg(test)]
+thread_local! {
+    static LOGOS_ADMISSION_PROBE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static RUSTLIKE_PARSE_PROBE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+fn admit_logos_program_with_profile_probe(
+    input: &str,
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> GrammarAdmission<LogosProgram> {
+    admit_logos_program_with_profile(input, tokens, profile)
+}
+
+#[cfg(test)]
+fn admit_logos_program_with_profile_probe(
+    input: &str,
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> GrammarAdmission<LogosProgram> {
+    LOGOS_ADMISSION_PROBE_CALLS.with(|c| c.set(c.get() + 1));
+    admit_logos_program_with_profile(input, tokens, profile)
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+fn parse_program_with_profile_probe(
+    input: &str,
+    profile: &ParserProfile,
+) -> Result<Program, FrontendError> {
+    parse_program_with_profile(input, profile)
+}
+
+#[cfg(test)]
+fn parse_program_with_profile_probe(
+    input: &str,
+    profile: &ParserProfile,
+) -> Result<Program, FrontendError> {
+    RUSTLIKE_PARSE_PROBE_CALLS.with(|c| c.set(c.get() + 1));
+    parse_program_with_profile(input, profile)
+}
+
+#[cfg(test)]
+fn reset_authority_probes() {
+    LOGOS_ADMISSION_PROBE_CALLS.with(|c| c.set(0));
+    RUSTLIKE_PARSE_PROBE_CALLS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+fn logos_admission_probe_calls() -> usize {
+    LOGOS_ADMISSION_PROBE_CALLS.with(|c| c.get())
+}
+
+#[cfg(test)]
+fn rustlike_parse_probe_calls() -> usize {
+    RUSTLIKE_PARSE_PROBE_CALLS.with(|c| c.get())
+}
+
 pub fn compile_program_to_ir_with_options_and_profile(
     input: &str,
     profile: CompileProfile,
@@ -1198,20 +1317,39 @@ pub fn compile_program_to_ir_with_options_and_profile(
         }
         _ => {}
     }
-    let logos_detected = parse_logos_program_with_profile(input, parser_profile)
-        .map(|p| p.system.is_some() || !p.entities.is_empty() || !p.laws.is_empty())
-        .unwrap_or(false);
-    if (matches!(profile, CompileProfile::Logos)
-        || (matches!(profile, CompileProfile::Auto) && logos_detected))
-        && cfg!(feature = "profile-logos")
-    {
+    // #1920: source authority must be decided before any Logos invocation,
+    // and never collapsed from "positive evidence + Err" into "no evidence".
+    let logos_owns = match profile {
+        // Defect A: explicit RustLike invokes zero Logos machinery - not
+        // merely "ignores its result." The old code called
+        // `parse_logos_program_with_profile` unconditionally before this
+        // dispatch even for RustLike; here the Auto-only admission calls
+        // below are structurally unreachable for this arm.
+        CompileProfile::RustLike => false,
+        // Explicit Logos already always reaches the LogosIrLaw-redirect
+        // branch below regardless of any evidence check (this function never
+        // lowers Logos to SemCode-function IR at all) - `true` preserves
+        // that exact existing, unchanged behavior.
+        CompileProfile::Logos => true,
+        CompileProfile::Auto => match lex(input) {
+            Ok(tokens) => {
+                let logos = admit_logos_program_with_profile_probe(input, &tokens, parser_profile);
+                let rustlike = admit_program_with_profile(input, &tokens, parser_profile);
+                logos_owns_outright(&logos, &rustlike)
+            }
+            // A lex failure carries no admission evidence for either
+            // grammar; `parse_program_with_profile` below will re-lex the
+            // identical text and surface the identical lex error itself.
+            Err(_) => false,
+        },
+    };
+    if logos_owns && cfg!(feature = "profile-logos") {
         return Err(FrontendError {
             pos: 0,
             message: "Logos input lowers to LogosIrLaw stream; SemCode function IR requires RustLike frontend".to_string(),
         });
     }
-    if matches!(profile, CompileProfile::Auto) && logos_detected && !cfg!(feature = "profile-logos")
-    {
+    if logos_owns && !cfg!(feature = "profile-logos") {
         return Err(FrontendError {
             pos: 0,
             message: "Logos input detected, but Logos profile is disabled at compile time"
@@ -1224,7 +1362,7 @@ pub fn compile_program_to_ir_with_options_and_profile(
             message: "RustLike lowering is disabled at compile time".to_string(),
         });
     }
-    let mut program = parse_program_with_profile(input, parser_profile)?;
+    let mut program = parse_program_with_profile_probe(input, parser_profile)?;
     let fn_table = build_fn_table(&program)?;
     let record_table = build_record_table(&program)?;
     let adt_table = build_adt_table(&program)?;
@@ -17551,6 +17689,458 @@ mod opt_tests {
             func.ownership_events,
             vec![],
             "no Borrow-mode ADT payload capture exists anywhere in this program, so no ownership event should be produced"
+        );
+    }
+
+    // ============================================================
+    // #1920 — source authority before IR lowering
+    // ============================================================
+    //
+    // Regression matrix per the Stage 2C brief: explicit RustLike must
+    // invoke zero Logos machinery (R1-R4); explicit Logos's existing
+    // isolation from RustLike is regression-pinned (B); Auto must obey
+    // Decision E's frozen authority law, never collapsing positive Logos
+    // evidence + `Err` into "no evidence" (A1-A8).
+
+    fn foundation_profile() -> ParserProfile {
+        ParserProfile::foundation_default()
+    }
+
+    fn synth_ok(v: i32) -> Result<i32, FrontendError> {
+        Ok(v)
+    }
+
+    fn synth_err(msg: &str) -> Result<i32, FrontendError> {
+        Err(FrontendError {
+            pos: 0,
+            message: msg.to_string(),
+        })
+    }
+
+    // Which message a Logos-owned input gets is itself feature-gated (a
+    // pre-existing, unchanged distinction - "feature disabled != surface
+    // did not claim input" means the *ownership* is always the same, but
+    // the *wording* differs based on whether `profile-logos` is compiled
+    // in at all).
+    fn expected_logos_owned_message() -> &'static str {
+        if cfg!(feature = "profile-logos") {
+            "Logos input lowers to LogosIrLaw stream; SemCode function IR requires RustLike frontend"
+        } else {
+            "Logos input detected, but Logos profile is disabled at compile time"
+        }
+    }
+
+    // --- explicit RustLike (Defect A) ---
+
+    // Requires `profile-rust` (asserts the lowering actually succeeds) -
+    // the non-invocation claim itself holds unconditionally (a `profile-rust`-
+    // disabled build returns even earlier, before ever reaching the
+    // `logos_owns` dispatch), but this test also checks the ok/success case.
+    #[cfg(feature = "profile-rust")]
+    #[test]
+    fn r1_explicit_rustlike_invokes_zero_logos_machinery() {
+        reset_authority_probes();
+        let src = "fn main() {\n    return;\n}\n";
+        let result = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::RustLike,
+            OptLevel::O0,
+            &foundation_profile(),
+        );
+        assert!(result.is_ok(), "valid RustLike source must still lower");
+        assert_eq!(
+            logos_admission_probe_calls(),
+            0,
+            "explicit RustLike must invoke zero Logos admission/parsing machinery"
+        );
+    }
+
+    #[cfg(feature = "profile-rust")]
+    #[test]
+    fn r2_explicit_rustlike_valid_program_still_lowers() {
+        let src = "fn main() {\n    let x: i32 = 1;\n    return;\n}\n";
+        let result = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::RustLike,
+            OptLevel::O0,
+            &foundation_profile(),
+        );
+        assert!(
+            result.is_ok(),
+            "valid RustLike program must lower: {result:?}"
+        );
+    }
+
+    #[test]
+    fn r3_explicit_rustlike_malformed_error_stays_authoritative() {
+        let src = "fn main() {\n    return;\n"; // missing closing brace
+        let err = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::RustLike,
+            OptLevel::O0,
+            &foundation_profile(),
+        )
+        .expect_err("malformed RustLike source must fail");
+        assert!(
+            !err.message.contains("Logos"),
+            "the RustLike error must not be replaced by any Logos-flavored diagnostic, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn r4_logos_looking_input_under_explicit_rustlike_is_never_probed_or_switched() {
+        reset_authority_probes();
+        // Genuine Logos-exclusive syntax (`Entity` dispatches immediately
+        // in the Logos grammar) - explicit RustLike must still own this
+        // attempt outright, never probing or switching surface.
+        let src = "\nEntity A:\n    state x: quad\n";
+        let result = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::RustLike,
+            OptLevel::O0,
+            &foundation_profile(),
+        );
+        assert_eq!(
+            logos_admission_probe_calls(),
+            0,
+            "explicit RustLike must not probe Logos even when the input has Logos-exclusive evidence"
+        );
+        assert!(
+            result.is_err(),
+            "Entity syntax is not valid RustLike, so the RustLike attempt must fail on its own terms"
+        );
+    }
+
+    // --- explicit Logos (regression pin only - already correct) ---
+
+    #[test]
+    fn b_explicit_logos_never_probes_rustlike() {
+        reset_authority_probes();
+        let src = "fn main() {\n    return;\n}\n"; // ordinary RustLike text
+        let _ = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Logos,
+            OptLevel::O0,
+            &foundation_profile(),
+        );
+        assert_eq!(
+            rustlike_parse_probe_calls(),
+            0,
+            "explicit Logos must never invoke RustLike's own parser"
+        );
+    }
+
+    // Only meaningful when `profile-logos` is compiled in - when it is not,
+    // explicit Logos short-circuits at the very first feature-gate check
+    // instead (a different, pre-existing message, unconditionally, before
+    // this function's `logos_owns` logic is ever reached at all).
+    #[cfg(feature = "profile-logos")]
+    #[test]
+    fn b_explicit_logos_always_redirects_to_logos_ir_law_stream() {
+        let src = "fn main() {\n    return;\n}\n";
+        let err = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Logos,
+            OptLevel::O0,
+            &foundation_profile(),
+        )
+        .expect_err("explicit Logos never lowers to SemCode function IR");
+        assert_eq!(
+            err.message,
+            "Logos input lowers to LogosIrLaw stream; SemCode function IR requires RustLike frontend"
+        );
+    }
+
+    // --- the frozen authority law itself (`logos_owns_outright`) ---
+
+    #[test]
+    fn logos_owns_no_claim_is_not_ownership() {
+        assert!(!logos_owns_outright(
+            &GrammarAdmission::<i32>::NoClaim,
+            &GrammarAdmission::<i32>::NoClaim
+        ));
+    }
+
+    #[test]
+    fn logos_owns_shared_vs_no_claim_is_ownership() {
+        assert!(logos_owns_outright(
+            &GrammarAdmission::Shared(synth_ok(1)),
+            &GrammarAdmission::<i32>::NoClaim
+        ));
+    }
+
+    #[test]
+    fn logos_owns_exclusive_vs_no_claim_is_ownership() {
+        assert!(logos_owns_outright(
+            &GrammarAdmission::Exclusive(synth_ok(1)),
+            &GrammarAdmission::<i32>::NoClaim
+        ));
+    }
+
+    #[test]
+    fn logos_owns_exclusive_vs_shared_is_ownership() {
+        assert!(logos_owns_outright(
+            &GrammarAdmission::Exclusive(synth_ok(1)),
+            &GrammarAdmission::Shared(synth_ok(1))
+        ));
+    }
+
+    #[test]
+    fn a5_shared_loses_to_rustlike_exclusive() {
+        assert!(!logos_owns_outright(
+            &GrammarAdmission::Shared(synth_ok(1)),
+            &GrammarAdmission::Exclusive(synth_ok(1))
+        ));
+    }
+
+    #[test]
+    fn a7_exclusive_vs_exclusive_is_not_evaluation_order_tie_broken() {
+        assert!(!logos_owns_outright(
+            &GrammarAdmission::Exclusive(synth_ok(1)),
+            &GrammarAdmission::Exclusive(synth_ok(2))
+        ));
+    }
+
+    #[test]
+    fn a6_shared_ok_vs_shared_ok_is_ambiguous_not_ownership() {
+        assert!(!logos_owns_outright(
+            &GrammarAdmission::Shared(synth_ok(1)),
+            &GrammarAdmission::Shared(synth_ok(2))
+        ));
+    }
+
+    #[test]
+    fn a6_shared_ok_vs_shared_err_is_ownership() {
+        assert!(logos_owns_outright(
+            &GrammarAdmission::Shared(synth_ok(1)),
+            &GrammarAdmission::Shared(synth_err("rustlike shared failure"))
+        ));
+    }
+
+    #[test]
+    fn a6_shared_err_vs_shared_ok_is_not_ownership() {
+        assert!(!logos_owns_outright(
+            &GrammarAdmission::Shared(synth_err("logos shared failure")),
+            &GrammarAdmission::Shared(synth_ok(1))
+        ));
+    }
+
+    #[test]
+    fn a6_shared_err_vs_shared_err_is_ambiguous_not_ownership() {
+        assert!(!logos_owns_outright(
+            &GrammarAdmission::Shared(synth_err("logos failure")),
+            &GrammarAdmission::Shared(synth_err("rustlike failure"))
+        ));
+    }
+
+    // --- Auto end-to-end (real fixtures) ---
+
+    #[cfg(feature = "profile-rust")]
+    #[test]
+    fn a1_auto_genuine_rustlike_ownership_lowers_normally() {
+        let src = "fn main() {\n    let x: i32 = 1;\n    return;\n}\n";
+        let result = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Auto,
+            OptLevel::O0,
+            &foundation_profile(),
+        );
+        assert!(
+            result.is_ok(),
+            "ordinary RustLike input must lower under Auto: {result:?}"
+        );
+    }
+
+    #[test]
+    fn a2_auto_logos_ownership_never_proceeds_through_rustlike_ir() {
+        reset_authority_probes();
+        let src = "\nEntity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When true -> System.recovery()\n";
+        let err = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Auto,
+            OptLevel::O0,
+            &foundation_profile(),
+        )
+        .expect_err("a genuine Logos program must not lower through this RustLike-only IR path");
+        assert_eq!(
+            err.message,
+            expected_logos_owned_message(),
+            "the existing intended redirect message must be preserved exactly"
+        );
+        assert_eq!(
+            rustlike_parse_probe_calls(),
+            0,
+            "a Logos-owned Auto input must never reach RustLike's own full parse"
+        );
+    }
+
+    #[test]
+    fn a3_auto_positive_logos_evidence_with_parse_failure_stays_owned() {
+        // #1920's central regression: genuine positive Logos evidence
+        // (`Entity` dispatches immediately - Exclusive) whose own parse
+        // then fails (missing ':') must stay Logos-owned - never silently
+        // re-attempted as RustLike, even though RustLike's own parse of
+        // this exact text produces a genuinely different result.
+        let src = "Entity A\n";
+        let profile = foundation_profile();
+
+        // Control: the admission really is Exclusive(Err), not NoClaim.
+        let tokens = lex(src).expect("lex");
+        let admission = admit_logos_program_with_profile(src, &tokens, &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Exclusive(Err(_))),
+            "control check: fixture must produce Exclusive(Err), got: {admission:?}"
+        );
+
+        // Control: RustLike's own parse of this text is genuinely
+        // different (fails on its own, RustLike-shaped terms) - or this
+        // fixture would not test what it claims.
+        let rustlike_result = parse_program_with_profile(src, &profile);
+        assert!(
+            rustlike_result.is_err(),
+            "control check: RustLike's own parse of this text must also fail, on different terms"
+        );
+
+        reset_authority_probes();
+        let err = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Auto,
+            OptLevel::O0,
+            &profile,
+        )
+        .expect_err("positive Logos evidence + parse failure must stay Logos-owned");
+        assert_eq!(err.message, expected_logos_owned_message());
+        assert_eq!(
+            rustlike_parse_probe_calls(),
+            0,
+            "the RustLike fallback must never run once Logos owns this input outright"
+        );
+    }
+
+    #[test]
+    fn a4_error_identity_is_never_replaced_by_a_rustlike_shaped_message() {
+        // Same fixture as A3, viewed from the error-identity angle: the
+        // message that reaches the caller must be the fixed, existing
+        // Logos-redirect string - never a RustLike parse error, a
+        // "missing main" error, or any other unrelated lowering error.
+        let src = "Entity A\n";
+        let err = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Auto,
+            OptLevel::O0,
+            &foundation_profile(),
+        )
+        .expect_err("must still fail");
+        assert_eq!(
+            err.message,
+            expected_logos_owned_message(),
+            "must not be replaced by a RustLike-parser-shaped or unrelated lowering error"
+        );
+    }
+
+    #[cfg(feature = "profile-rust")]
+    #[test]
+    fn a5_executable_helper_import_convention_stays_rustlike_under_auto() {
+        // The exact #1919 regression fixture: `Import` is Shared evidence
+        // for both grammars (Decision A), so a Logos-admission-only probe
+        // would misclassify this as Logos-owned. RustLike's own admission
+        // is Exclusive here (real `fn` content), so Decision E gives
+        // RustLike outright ownership - this must still lower as ordinary
+        // RustLike code under Auto.
+        let src = "Import \"helper.sm\"\n\nfn main() {\n    return;\n}\n";
+        let profile = foundation_profile();
+
+        let tokens = lex(src).expect("lex");
+        let logos = admit_logos_program_with_profile(src, &tokens, &profile);
+        let rustlike = admit_program_with_profile(src, &tokens, &profile);
+        assert!(
+            matches!(logos, GrammarAdmission::Shared(_)),
+            "control check: Import alone must be Shared evidence for Logos, got: {logos:?}"
+        );
+        assert!(
+            matches!(rustlike, GrammarAdmission::Exclusive(_)),
+            "control check: fn content must make RustLike's own admission Exclusive, got: {rustlike:?}"
+        );
+
+        let result = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Auto,
+            OptLevel::O0,
+            &profile,
+        );
+        assert!(
+            result.is_ok(),
+            "the executable-helper-import convention must still lower as RustLike under Auto: {result:?}"
+        );
+    }
+
+    #[test]
+    fn a8_blank_input_is_not_accidentally_treated_as_logos() {
+        let src = "// just a comment\n";
+        let profile = foundation_profile();
+
+        let tokens = lex(src).expect("lex");
+        let logos = admit_logos_program_with_profile(src, &tokens, &profile);
+        let rustlike = admit_program_with_profile(src, &tokens, &profile);
+        assert!(
+            matches!(logos, GrammarAdmission::NoClaim),
+            "control check: comment-only input must be Logos NoClaim, got: {logos:?}"
+        );
+        assert!(
+            matches!(rustlike, GrammarAdmission::NoClaim),
+            "control check: comment-only input must be RustLike NoClaim, got: {rustlike:?}"
+        );
+
+        let err = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Auto,
+            OptLevel::O0,
+            &profile,
+        )
+        .expect_err("blank/comment-only input has no callable entry point");
+        assert!(
+            !err.message.contains("Logos"),
+            "blank/comment-only input must never be misrouted through the Logos redirect, got: {}",
+            err.message
+        );
+    }
+
+    // --- feature-gate matrix: "feature disabled != surface did not claim" ---
+
+    #[cfg(not(feature = "profile-logos"))]
+    #[test]
+    fn feature_gate_auto_positive_logos_evidence_without_profile_logos_feature() {
+        let src = "\nEntity A:\n    state x: quad\n";
+        let err = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::Auto,
+            OptLevel::O0,
+            &foundation_profile(),
+        )
+        .expect_err("Logos-owned input must still fail when profile-logos is disabled");
+        assert_eq!(
+            err.message,
+            "Logos input detected, but Logos profile is disabled at compile time",
+            "the feature-off message must fire - evidence must still be recognized as Logos-owned, \
+             not silently treated as unclaimed and passed through to RustLike"
+        );
+    }
+
+    #[cfg(not(feature = "profile-rust"))]
+    #[test]
+    fn feature_gate_rustlike_lowering_disabled_still_correctly_gated() {
+        let src = "fn main() {\n    return;\n}\n";
+        let err = compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::RustLike,
+            OptLevel::O0,
+            &foundation_profile(),
+        )
+        .expect_err("RustLike lowering must be gated off");
+        assert_eq!(
+            err.message,
+            "RustLike profile is disabled at compile time (enable feature 'profile-rust')"
         );
     }
 }
