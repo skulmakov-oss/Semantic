@@ -902,6 +902,41 @@ impl ::core::fmt::Display for FrontendError {
 #[cfg(feature = "std")]
 impl std::error::Error for FrontendError {}
 
+/// One grammar's own local admission result for an input, per SSF-09
+/// Decision E ("Surface Admission Contract"). Reports two independent
+/// facts: which *kind* of evidence this grammar established ownership
+/// through (`NoClaim` / `Shared` / `Exclusive`), and, when it established
+/// any, its own parse outcome for the whole input.
+///
+/// `NoClaim` means this grammar established no sufficient positive
+/// evidence for ownership of this input. This is NOT the same as "this
+/// grammar's dispatch never recognized a candidate keyword" - a
+/// shared-vocabulary candidate (`Import`, the only current member) can be
+/// dispatched and still fail to cross this grammar's own sufficient-
+/// evidence threshold (e.g. an unquoted `Import` path under RustLike,
+/// which requires a string literal specifically), in which case the
+/// correct result is still `NoClaim`.
+///
+/// `Shared` means this grammar established sufficient evidence *only*
+/// through vocabulary shared with the other grammar. `Exclusive` means it
+/// established sufficient evidence through at least one declaration form
+/// exclusive to it, anywhere in the input - promotion to `Exclusive` is
+/// absorbing and monotonic: once reached, it is never downgraded back to
+/// `Shared` for the rest of the scan, regardless of what any individual
+/// declaration's own sub-parser does afterward.
+///
+/// This type does not itself decide cross-grammar ownership or
+/// authoritative failure - that is the separate, cross-grammar evidence
+/// resolver's job, operating on a pair of `GrammarAdmission` values (one
+/// per grammar). A grammar-local `Err` here is not, by itself, an
+/// authoritative failure.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GrammarAdmission<T> {
+    NoClaim,
+    Shared(Result<T, FrontendError>),
+    Exclusive(Result<T, FrontendError>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,

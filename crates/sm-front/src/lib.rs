@@ -47,6 +47,7 @@ pub use types::{
     FrontendError,
     FrontendErrorKind,
     Function,
+    GrammarAdmission,
     IfExpr,
     ImplDecl,
     IterableLoopDesugaring,
@@ -1623,6 +1624,31 @@ pub fn parse_logos_program_with_profile(
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn lex(input: &str) -> Result<Vec<Token>, FrontendError> {
     lexer::lex_tokens(input)
+}
+
+/// SSF-09 Decision E ("Surface Admission Contract"): RustLike's own
+/// admission for an already-lexed input - see [`GrammarAdmission`].
+/// Purely additive; does not change [`parse_program_with_profile`] or any
+/// other existing parsing function's signature or behavior. `source`
+/// (round 5) is diagnostic context only - see `sm-front::parser`'s
+/// doc comment on the underlying function for the exact contract.
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub fn admit_program_with_profile(
+    source: &str,
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> GrammarAdmission<Program> {
+    parser::admit_program_with_profile(source, tokens, profile)
+}
+
+/// Logos-grammar counterpart of [`admit_program_with_profile`].
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub fn admit_logos_program_with_profile(
+    source: &str,
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> GrammarAdmission<LogosProgram> {
+    parser::admit_logos_program_with_profile(source, tokens, profile)
 }
 
 #[cfg(any(feature = "alloc", feature = "std"))]

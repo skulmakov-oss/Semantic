@@ -2,15 +2,16 @@ use crate::lexer::lex_tokens;
 use crate::types::{
     AdtCtorExpr, AdtDecl, AdtMatchPattern, AdtPatternItem, AdtVariant, AstArena, BinaryOp,
     BlockExpr, CallArg, CaptureMode, ClosureCapturePolicy, ClosureLiteral, ClosureValueFamily,
-    ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, Function, IfExpr,
-    IfLetExpr, ImplDecl, IntRangePattern, IterableLoopDesugaring, LogosEntity, LogosEntityField,
-    LogosEntityFieldKind, LogosLaw, LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType,
-    MatchArm, MatchExpr, MatchExprArm, MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr,
-    RecordDecl, RecordField, RecordFieldExpr, RecordInitField, RecordLiteralExpr,
-    RecordPatternItem, RecordPatternTarget, RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole,
-    SchemaShape, SchemaVariant, SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr,
-    SequenceLiteral, SequenceType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token,
-    TokenKind, TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
+    ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, Function,
+    GrammarAdmission, IfExpr, IfLetExpr, ImplDecl, IntRangePattern, IterableLoopDesugaring,
+    LogosEntity, LogosEntityField, LogosEntityFieldKind, LogosLaw, LogosProgram, LogosSystem,
+    LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm, MatchPattern, NumericLiteral,
+    Program, QuadVal, RangeExpr, RecordDecl, RecordField, RecordFieldExpr, RecordInitField,
+    RecordLiteralExpr, RecordPatternItem, RecordPatternTarget, RecordUpdateExpr, SchemaDecl,
+    SchemaField, SchemaRole, SchemaShape, SchemaVariant, SchemaVersion, SequenceCollectionFamily,
+    SequenceIndexExpr, SequenceLiteral, SequenceType, Stmt, StmtId, SymbolId, TextLiteral,
+    TextLiteralFamily, Token, TokenKind, TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem,
+    Type, UnaryOp,
 };
 use crate::CompilePolicyView;
 use alloc::format;
@@ -55,6 +56,76 @@ pub fn parse_logos_with_profile(
         self_type_scope: None,
     };
     p.parse_logos_program()
+}
+
+/// SSF-09 Decision E ("Surface Admission Contract"): ask RustLike
+/// directly what it claims about this already-lexed input, instead of a
+/// caller re-deriving it from raw tokens. Purely additive - does not
+/// replace or change the behavior of [`parse_rustlike_with_profile`].
+///
+/// `tokens` (never re-lexed) is the sole syntactic/admission scan input,
+/// since a lex failure is not a surface-admission outcome for either
+/// grammar. This also lets a caller lex once and call both `admit_*`
+/// functions without re-lexing. `source` (SSF-09 Decision E, round 5) is
+/// diagnostic context only - it MUST be the exact text `tokens` was
+/// lexed from, MUST NOT be re-lexed, and MUST NOT influence
+/// classification in any way; it exists solely so the `FrontendError`
+/// nested inside a `Shared`/`Exclusive` result carries the same
+/// source-line/caret-bearing message [`parse_rustlike_with_profile`]
+/// already produces, instead of an empty one.
+pub fn admit_program_with_profile(
+    source: &str,
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> GrammarAdmission<Program> {
+    let mut p = Parser {
+        tokens: tokens.to_vec(),
+        idx: 0,
+        source: source.to_string(),
+        arena: AstArena::default(),
+        policy: CompilePolicyView::new(profile),
+        type_param_scope: Vec::new(),
+        self_type_scope: None,
+    };
+    p.admit_program()
+}
+
+/// Logos-grammar counterpart of [`admit_program_with_profile`]. See its
+/// doc comment for the shared `source`/`tokens` rationale.
+pub fn admit_logos_program_with_profile(
+    source: &str,
+    tokens: &[Token],
+    profile: &ParserProfile,
+) -> GrammarAdmission<LogosProgram> {
+    let mut p = Parser {
+        tokens: tokens.to_vec(),
+        idx: 0,
+        source: source.to_string(),
+        arena: AstArena::default(),
+        policy: CompilePolicyView::new(profile),
+        type_param_scope: Vec::new(),
+        self_type_scope: None,
+    };
+    p.admit_logos_program()
+}
+
+/// Which *kind* of evidence a grammar has established for ownership of an
+/// input so far during a single `admit_*` scan - see [`GrammarAdmission`]
+/// for the full rationale. Promotion is absorbing/monotonic: `max` never
+/// moves backward from `Exclusive` to `Shared`, or from either to `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum EvidenceBasis {
+    None,
+    Shared,
+    Exclusive,
+}
+
+impl EvidenceBasis {
+    fn promote(&mut self, other: EvidenceBasis) {
+        if other > *self {
+            *self = other;
+        }
+    }
 }
 
 struct Parser<'a> {
@@ -132,6 +203,153 @@ impl<'a> Parser<'a> {
             traits,
             impls,
         })
+    }
+
+    /// SSF-09 Decision E: RustLike's own admission scan. Mirrors
+    /// [`Self::parse_program`]'s loop exactly (same dispatch, same
+    /// abort-on-first-error `?` semantics, same collected declarations)
+    /// but additionally tracks which *kind* of evidence was established -
+    /// see [`GrammarAdmission`] and [`EvidenceBasis`].
+    ///
+    /// `enum`/`fn`/`record`/`schema`/`trait`/`impl`/role-marked-schema are
+    /// exclusive heads: recognizing the keyword itself is Decision A's own
+    /// already-frozen sufficient evidence, so evidence basis promotes to
+    /// `Exclusive` at dispatch, before the declaration's own sub-parser
+    /// runs. `Import` is RustLike's only shared head: dispatching on
+    /// `KwImport` alone is not evidence (Decision A: a shared keyword's
+    /// presence only means the grammar *could* apply) - evidence basis
+    /// promotes to `Shared` only once `expect_string_literal_text` would
+    /// succeed (checked via [`Self::import_crosses_shared_threshold`]
+    /// *before* calling `parse_import_decl`, so promotion happens even if
+    /// something later in the same import production - e.g. a malformed
+    /// `as`/`*`/`{...}` clause - fails).
+    fn admit_program(&mut self) -> GrammarAdmission<Program> {
+        let mut basis = EvidenceBasis::None;
+        let mut imports = Vec::new();
+        let mut adts = Vec::new();
+        let mut records = Vec::new();
+        let mut schemas = Vec::new();
+        let mut functions = Vec::new();
+        let mut traits = Vec::new();
+        let mut impls = Vec::new();
+        let outcome: Result<Program, FrontendError> = loop {
+            let i = self.next_non_layout_idx();
+            if i >= self.tokens.len() {
+                break Ok(());
+            }
+            self.idx = i;
+            if self.starts_role_marked_schema_decl() {
+                basis.promote(EvidenceBasis::Exclusive);
+                match self.parse_schema_decl() {
+                    Ok(decl) => schemas.push(decl),
+                    Err(e) => break Err(e),
+                }
+                continue;
+            }
+            match self.tokens[i].kind {
+                TokenKind::KwImport => {
+                    if self.import_crosses_shared_threshold() {
+                        basis.promote(EvidenceBasis::Shared);
+                    }
+                    match self.parse_import_decl() {
+                        Ok(decl) => imports.push(decl),
+                        Err(e) => break Err(e),
+                    }
+                }
+                TokenKind::KwEnum => {
+                    basis.promote(EvidenceBasis::Exclusive);
+                    match self.parse_adt_decl() {
+                        Ok(decl) => adts.push(decl),
+                        Err(e) => break Err(e),
+                    }
+                }
+                TokenKind::KwFn => {
+                    basis.promote(EvidenceBasis::Exclusive);
+                    match self.parse_function() {
+                        Ok(decl) => functions.push(decl),
+                        Err(e) => break Err(e),
+                    }
+                }
+                TokenKind::KwRecord => {
+                    basis.promote(EvidenceBasis::Exclusive);
+                    match self.parse_record_decl() {
+                        Ok(decl) => records.push(decl),
+                        Err(e) => break Err(e),
+                    }
+                }
+                TokenKind::KwSchema => {
+                    basis.promote(EvidenceBasis::Exclusive);
+                    match self.parse_schema_decl() {
+                        Ok(decl) => schemas.push(decl),
+                        Err(e) => break Err(e),
+                    }
+                }
+                TokenKind::KwTrait => {
+                    basis.promote(EvidenceBasis::Exclusive);
+                    match self.parse_trait_decl() {
+                        Ok(decl) => traits.push(decl),
+                        Err(e) => break Err(e),
+                    }
+                }
+                TokenKind::KwImpl => {
+                    basis.promote(EvidenceBasis::Exclusive);
+                    match self.parse_impl_decl() {
+                        Ok(decl) => impls.push(decl),
+                        Err(e) => break Err(e),
+                    }
+                }
+                _ => {
+                    break Err(FrontendError {
+                        pos: self.tokens[i].pos,
+                        message:
+                            "expected top-level 'Import', 'enum', 'fn', 'impl', 'record', 'schema', 'trait', or role-marked schema declaration"
+                                .to_string(),
+                    });
+                }
+            }
+        }
+        .map(|()| Program {
+            arena: ::core::mem::take(&mut self.arena),
+            imports,
+            adts,
+            records,
+            schemas,
+            functions,
+            traits,
+            impls,
+        });
+        match basis {
+            EvidenceBasis::None => GrammarAdmission::NoClaim,
+            EvidenceBasis::Shared => GrammarAdmission::Shared(outcome),
+            EvidenceBasis::Exclusive => GrammarAdmission::Exclusive(outcome),
+        }
+    }
+
+    /// Non-mutating lookahead mirroring `parse_import_decl`'s own head
+    /// sequence (`KwImport`, optional `pub`, then a string literal) far
+    /// enough to know whether `expect_string_literal_text` will succeed,
+    /// without actually consuming any tokens or triggering a failure.
+    /// Must be called with `self.idx` positioned at (or before, via
+    /// layout tokens) the `KwImport` token itself.
+    fn import_crosses_shared_threshold(&self) -> bool {
+        let mut i = self.next_non_layout_idx();
+        debug_assert!(matches!(
+            self.tokens.get(i).map(|t| t.kind),
+            Some(TokenKind::KwImport)
+        ));
+        i = self.next_non_layout_idx_from(i + 1);
+        if self
+            .tokens
+            .get(i)
+            .map(|t| t.kind == TokenKind::Ident && t.text == "pub")
+            .unwrap_or(false)
+        {
+            i = self.next_non_layout_idx_from(i + 1);
+        }
+        self.tokens
+            .get(i)
+            .map(|t| t.kind == TokenKind::String)
+            .unwrap_or(false)
     }
 
     fn parse_import_decl(&mut self) -> Result<ExecutableImport, FrontendError> {
@@ -3023,6 +3241,217 @@ impl<'a> Parser<'a> {
         }
         out.laws.sort_by_key(|law| core::cmp::Reverse(law.priority));
         Ok(out)
+    }
+
+    /// SSF-09 Decision E: Logos's own admission scan. Mirrors
+    /// [`Self::parse_logos_program`]'s loop and recovery mechanics (same
+    /// per-declaration accumulate-and-continue via
+    /// [`Self::recover_logos_anchor`]) but additionally tracks which
+    /// *kind* of evidence was established, and re-derives both policy
+    /// gates' outcomes from the corrected evidence-basis-first law instead
+    /// of the original's blind pre-loop/mid-loop `?` early returns - see
+    /// [`GrammarAdmission`] and the frozen Decision E policy-gate
+    /// semantics.
+    ///
+    /// `System`/`Entity`/`Law`/`Pulse`/`Profile` are Logos-exclusive heads
+    /// per Decision A's already-frozen evidence-status law: recognizing
+    /// the keyword is itself sufficient evidence, so basis promotes to
+    /// `Exclusive` at dispatch. `Import` is the one head shared with
+    /// RustLike, but Decision A imposes no further structural requirement
+    /// on Logos's own `Import` handling beyond the keyword and the legacy-
+    /// compatibility policy check - so, unlike RustLike, Logos's shared
+    /// threshold for `Import` *is* dispatch; basis promotes to `Shared`.
+    ///
+    /// Both `require_logos_surface` (whole-surface policy) and
+    /// `require_legacy_compatibility` (per-directive policy, gating
+    /// `Import`/`Pulse`/`Profile`) affect **outcome only, never evidence
+    /// basis** - neither early-returns before the scan can see evidence
+    /// elsewhere in the input:
+    ///
+    /// - `require_logos_surface` is *evaluated* at scan-start, before any
+    ///   token is consumed, solely to capture the same `FrontendError`
+    ///   (including `pos`) that `parse_logos_program`'s own unconditional
+    ///   pre-loop check would produce - but its result is not *applied*
+    ///   to the outcome until after the complete evidence scan below, and
+    ///   evaluating it early never gates or skips any part of the scan.
+    /// - `require_legacy_compatibility` failures are recorded **separately
+    ///   from ordinary syntax `errors`**, never pushed into that vector
+    ///   and never merged through `merge_logos_errors`: the first such
+    ///   policy error encountered is preserved verbatim while the scan
+    ///   keeps going, so a policy-disabled `Import`/`Pulse`/`Profile` line
+    ///   does not prevent later genuine exclusive evidence (e.g. a
+    ///   subsequent `Entity`) from being seen and strengthening basis to
+    ///   `Exclusive`.
+    ///
+    /// If no evidence exists anywhere (`basis == None`), neither policy
+    /// result is applied at all - a disabled surface has nothing to have
+    /// blocked, and the result stays `NoClaim` regardless of policy.
+    fn admit_logos_program(&mut self) -> GrammarAdmission<LogosProgram> {
+        // Evaluated here, at the same call site (before any token is
+        // consumed, `self.idx == 0`) as `parse_logos_program`'s own
+        // unconditional pre-loop `require_logos_surface(...)?`. This is
+        // NOT merely stylistic: evaluating it after the scan instead
+        // (where `self.idx` has moved to end-of-input on a clean scan)
+        // reads back `Parser::pos()`'s `unwrap_or(0)` fallback for the
+        // resulting `FrontendError.pos`, which only coincidentally
+        // matches `self.idx == 0`'s value (also 0) for input with no
+        // content before the first declaration - it genuinely diverges
+        // for any input with leading content that itself consumes bytes
+        // without producing a token before the first declaration (e.g. a
+        // leading `//` comment: `tokens[0].pos` is the comment's length,
+        // not 0). See the `parity_global_logos_surface_denial_with_
+        // actual_logos_evidence` test, which deliberately uses a leading
+        // comment for exactly this reason. `require_logos_surface` is a
+        // pure, side-effect-free predicate, so calling it here does not
+        // gate or abort anything - the SSF-09 Decision E, round 5
+        // requirement that evidence basis is determined "as if policy
+        // were not a factor" is about control flow (the scan is never
+        // skipped or aborted because of this check), not about which
+        // line of code happens to call it.
+        let surface_check =
+            self.require_logos_surface("Logos surface is disabled by profile policy");
+        let mut basis = EvidenceBasis::None;
+        let mut out = LogosProgram::default();
+        let mut errors: Vec<FrontendError> = Vec::new();
+        // SSF-09 Decision E, round 5 policy-vs-syntax finalization law:
+        // a legacy-compatibility policy failure is tracked separately
+        // from ordinary syntax `errors`, never merged with them, and
+        // never wrapped through `merge_logos_errors`. Only the FIRST one
+        // encountered is kept - it is what the finalized outcome reports
+        // if evidence basis is not `None` and the whole-surface policy
+        // gate below did not already fail.
+        let mut legacy_policy_error: Option<FrontendError> = None;
+        while self.idx < self.tokens.len() {
+            self.skip_newlines_raw();
+            if self.idx >= self.tokens.len() {
+                break;
+            }
+            if self.check_raw(TokenKind::KwSystem) {
+                basis.promote(EvidenceBasis::Exclusive);
+                match self.parse_logos_system() {
+                    Ok(system) => out.system = Some(system),
+                    Err(e) => {
+                        errors.push(e);
+                        self.recover_logos_anchor();
+                    }
+                }
+                continue;
+            }
+            if self.check_raw(TokenKind::KwEntity) {
+                basis.promote(EvidenceBasis::Exclusive);
+                match self.parse_logos_entity() {
+                    Ok(entity) => out.entities.push(entity),
+                    Err(e) => {
+                        errors.push(e);
+                        self.recover_logos_anchor();
+                    }
+                }
+                continue;
+            }
+            if self.check_raw(TokenKind::KwLaw) {
+                basis.promote(EvidenceBasis::Exclusive);
+                match self.parse_logos_law() {
+                    Ok(law) => out.laws.push(law),
+                    Err(e) => {
+                        errors.push(e);
+                        self.recover_logos_anchor();
+                    }
+                }
+                continue;
+            }
+            if self.check_raw(TokenKind::KwPulse) || self.check_raw(TokenKind::KwProfile) {
+                basis.promote(EvidenceBasis::Exclusive);
+                if let Err(e) = self.require_legacy_compatibility(
+                    "legacy Logos directives require legacy compatibility mode",
+                ) {
+                    if legacy_policy_error.is_none() {
+                        legacy_policy_error = Some(e);
+                    }
+                    self.recover_logos_anchor();
+                    continue;
+                }
+                while !self.check_raw(TokenKind::Newline) && self.idx < self.tokens.len() {
+                    self.idx += 1;
+                }
+                self.eat_raw(TokenKind::Newline);
+                continue;
+            }
+            if self.check_raw(TokenKind::KwImport) {
+                basis.promote(EvidenceBasis::Shared);
+                if let Err(e) = self.require_legacy_compatibility(
+                    "legacy Logos directives require legacy compatibility mode",
+                ) {
+                    if legacy_policy_error.is_none() {
+                        legacy_policy_error = Some(e);
+                    }
+                    self.recover_logos_anchor();
+                    continue;
+                }
+                while !self.check_raw(TokenKind::Newline) && self.idx < self.tokens.len() {
+                    self.idx += 1;
+                }
+                self.eat_raw(TokenKind::Newline);
+                continue;
+            }
+            let mut msg = "expected Logos declaration".to_string();
+            if let Some(tok) = self.tokens.get(self.idx) {
+                if tok.kind == TokenKind::Ident {
+                    if let Some(s) = suggest_closest_case_insensitive(
+                        &tok.text,
+                        &["System", "Entity", "Law", "Import", "Pulse", "Profile"],
+                        3,
+                    ) {
+                        msg.push_str(&format!("\nhelp: did you mean '{}'?", s));
+                    }
+                }
+            }
+            errors.push(self.error_at_current(&msg, "E0200"));
+            self.recover_logos_anchor();
+        }
+        // SSF-09 Decision E, round 5 policy-vs-syntax finalization law -
+        // exact precedence, evaluated only once `basis != None`:
+        //   1. the previously captured global `require_logos_surface`
+        //      outcome (`surface_check`, evaluated at scan-start above -
+        //      see the doc comment on this function - purely so its
+        //      `FrontendError.pos` matches today's parser) is applied
+        //      here, after evidence discovery, and outranks everything
+        //      else, matching today's parser calling it unconditionally
+        //      before its loop even runs;
+        //   2. otherwise, a recorded `legacy_policy_error` (the FIRST one
+        //      encountered) is returned verbatim - never merged with
+        //      ordinary syntax errors, so `FrontendError::kind()`
+        //      reliably reports `PolicyViolation` for it, and the
+        //      old parser's terminal-policy behavior is preserved for
+        //      the outcome even though this scan kept going past it to
+        //      let basis strengthen to `Exclusive` afterward;
+        //   3. otherwise, the ordinary ok/merge-on-error path, using
+        //      `parse_logos_program`'s exact existing aggregation with
+        //      no length-based special case - a single accumulated
+        //      syntax error is wrapped through `merge_logos_errors`
+        //      exactly as today, not returned unwrapped.
+        let ordinary_syntax_outcome: Result<LogosProgram, FrontendError> = if errors.is_empty() {
+            out.laws.sort_by_key(|law| core::cmp::Reverse(law.priority));
+            Ok(out)
+        } else {
+            Err(self.merge_logos_errors(errors))
+        };
+        match basis {
+            EvidenceBasis::None => GrammarAdmission::NoClaim,
+            EvidenceBasis::Shared | EvidenceBasis::Exclusive => {
+                let outcome = match surface_check {
+                    Err(surface_policy_err) => Err(surface_policy_err),
+                    Ok(()) => match legacy_policy_error {
+                        Some(policy_err) => Err(policy_err),
+                        None => ordinary_syntax_outcome,
+                    },
+                };
+                if basis == EvidenceBasis::Shared {
+                    GrammarAdmission::Shared(outcome)
+                } else {
+                    GrammarAdmission::Exclusive(outcome)
+                }
+            }
+        }
     }
 
     fn recover_logos_anchor(&mut self) {
@@ -7332,6 +7761,534 @@ fn main() -> i32 {
             err.message.contains("integer literal") || err.message.contains("range"),
             "unexpected error: {}",
             err.message
+        );
+    }
+}
+
+/// SSF-09 Decision E ("Surface Admission Contract") acceptance tests.
+/// Every case here is one the frozen decision document requires
+/// reachable/verified; see
+/// `docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`,
+/// "## Decision E", for the frozen rationale each assertion traces back
+/// to. sm-sema/#1670/#1923 are untouched by this checkpoint - these tests
+/// exercise `sm-front`'s own `admit_program_with_profile`/
+/// `admit_logos_program_with_profile` in isolation.
+#[cfg(test)]
+mod grammar_admission_tests {
+    use super::*;
+    use crate::FrontendErrorKind;
+    use sm_profile::{CompatibilityMode, FeaturePolicy, ParserProfile};
+
+    fn toks(src: &str) -> Vec<Token> {
+        crate::lex(src).expect("fixture must lex cleanly")
+    }
+
+    /// SSF-09 Decision E, round 5: `source` must be the exact text
+    /// `tokens` was lexed from. Routing every test through these two
+    /// helpers, rather than calling `admit_*_with_profile` directly,
+    /// makes that precondition structurally impossible to violate here.
+    fn admit_rustlike(src: &str, profile: &ParserProfile) -> GrammarAdmission<Program> {
+        admit_program_with_profile(src, &toks(src), profile)
+    }
+
+    fn admit_logos(src: &str, profile: &ParserProfile) -> GrammarAdmission<LogosProgram> {
+        admit_logos_program_with_profile(src, &toks(src), profile)
+    }
+
+    fn logos_surface_disabled() -> ParserProfile {
+        ParserProfile {
+            features: FeaturePolicy {
+                allow_logos_surface: false,
+                ..ParserProfile::foundation_default().features
+            },
+            ..ParserProfile::foundation_default()
+        }
+    }
+
+    fn legacy_compatibility_disabled() -> ParserProfile {
+        ParserProfile {
+            compatibility: CompatibilityMode::Strict,
+            ..ParserProfile::foundation_default()
+        }
+    }
+
+    fn both_policies_disabled() -> ParserProfile {
+        ParserProfile {
+            features: FeaturePolicy {
+                allow_logos_surface: false,
+                ..ParserProfile::foundation_default().features
+            },
+            compatibility: CompatibilityMode::Strict,
+            ..ParserProfile::foundation_default()
+        }
+    }
+
+    // --- Reachability: every GrammarAdmission variant, both grammars ---
+
+    #[test]
+    fn rustlike_no_claim_on_empty_input() {
+        let profile = ParserProfile::foundation_default();
+        assert_eq!(admit_rustlike("", &profile), GrammarAdmission::NoClaim);
+    }
+
+    #[test]
+    fn rustlike_shared_ok_on_bare_quoted_import() {
+        let profile = ParserProfile::foundation_default();
+        let admission = admit_rustlike("Import \"a.sm\"\n", &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Shared(Ok(_))),
+            "expected Shared(Ok), got {admission:?}"
+        );
+    }
+
+    #[test]
+    fn rustlike_shared_err_when_import_content_is_valid_but_later_content_is_not() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\nEntity Player:\n    state hp: quad\n";
+        let admission = admit_rustlike(src, &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Shared(Err(_))),
+            "expected Shared(Err) - Import's own string-literal threshold is \
+             crossed before RustLike fails on the unrecognized `Entity` \
+             token, so the claim must survive the failure, got {admission:?}"
+        );
+    }
+
+    #[test]
+    fn rustlike_exclusive_ok_on_well_formed_function() {
+        let profile = ParserProfile::foundation_default();
+        let admission = admit_rustlike("fn main() { return; }\n", &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Exclusive(Ok(_))),
+            "expected Exclusive(Ok), got {admission:?}"
+        );
+    }
+
+    #[test]
+    fn rustlike_exclusive_err_on_malformed_function() {
+        let profile = ParserProfile::foundation_default();
+        let admission = admit_rustlike("fn main(\n", &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Exclusive(Err(_))),
+            "expected Exclusive(Err) - `fn`'s head is recognized (exclusive \
+             evidence) before its own parameter list fails, got {admission:?}"
+        );
+    }
+
+    #[test]
+    fn logos_no_claim_on_pure_rustlike_input() {
+        let profile = ParserProfile::foundation_default();
+        let admission = admit_logos("fn main() { return; }\n", &profile);
+        assert_eq!(
+            admission,
+            GrammarAdmission::NoClaim,
+            "Logos never recognizes a single token of this input, so it has \
+             nothing to attribute a failure to, even though its scan does \
+             record an internal syntax error for `fn`"
+        );
+    }
+
+    #[test]
+    fn logos_shared_ok_on_unquoted_import() {
+        let profile = ParserProfile::foundation_default();
+        let admission = admit_logos("Import foo.bar\n", &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Shared(Ok(_))),
+            "expected Shared(Ok) - Logos's own Import handling performs no \
+             content validation at all, got {admission:?}"
+        );
+    }
+
+    #[test]
+    fn logos_shared_err_when_import_is_followed_by_unrecognized_content() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\nfn main() { return; }\n";
+        let admission = admit_logos(src, &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Shared(Err(_))),
+            "expected Shared(Err) - Import establishes Shared evidence at \
+             dispatch, then `fn` is unrecognized Logos syntax, got {admission:?}"
+        );
+    }
+
+    #[test]
+    fn logos_exclusive_ok_on_well_formed_entity() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Entity Player:\n    state hp: quad\n";
+        let admission = admit_logos(src, &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Exclusive(Ok(_))),
+            "expected Exclusive(Ok), got {admission:?}"
+        );
+    }
+
+    #[test]
+    fn logos_exclusive_err_on_malformed_entity() {
+        let profile = ParserProfile::foundation_default();
+        // Missing the required ':' + indented body entirely.
+        let admission = admit_logos("Entity Player\n", &profile);
+        assert!(
+            matches!(admission, GrammarAdmission::Exclusive(Err(_))),
+            "expected Exclusive(Err) - `Entity`'s head is recognized \
+             (exclusive evidence) before its own body fails, got {admission:?}"
+        );
+    }
+
+    // --- Frozen concrete examples from Decision E, both sides at once ---
+
+    #[test]
+    fn frozen_case_quoted_import_alone_is_shared_ok_on_both_sides() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Shared(Ok(_))
+        ));
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Shared(Ok(_))
+        ));
+    }
+
+    #[test]
+    fn frozen_case_unquoted_import_is_shared_ok_logos_no_claim_rustlike() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import foo.bar\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Shared(Ok(_))
+        ));
+        assert_eq!(admit_rustlike(src, &profile), GrammarAdmission::NoClaim);
+    }
+
+    #[test]
+    fn frozen_case_import_plus_entity_is_exclusive_ok_logos_shared_err_rustlike() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\nEntity Player:\n    state hp: quad\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Exclusive(Ok(_))
+        ));
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Shared(Err(_))
+        ));
+    }
+
+    #[test]
+    fn frozen_case_import_plus_fn_is_shared_err_logos_exclusive_ok_rustlike() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\nfn main() { return; }\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Shared(Err(_))
+        ));
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Exclusive(Ok(_))
+        ));
+    }
+
+    #[test]
+    fn frozen_case_malformed_fn_alone_is_rustlike_exclusive_err_logos_no_claim() {
+        let profile = ParserProfile::foundation_default();
+        let src = "fn main(\n";
+        assert_eq!(admit_logos(src, &profile), GrammarAdmission::NoClaim);
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Exclusive(Err(_))
+        ));
+    }
+
+    #[test]
+    fn frozen_case_malformed_entity_alone_is_logos_exclusive_err_rustlike_no_claim() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Entity Player\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Exclusive(Err(_))
+        ));
+        assert_eq!(admit_rustlike(src, &profile), GrammarAdmission::NoClaim);
+    }
+
+    // --- Absorbing Exclusive > Shared, both orderings ---
+
+    #[test]
+    fn exclusive_absorbs_shared_import_before_entity() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\nEntity Player:\n    state hp: quad\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Exclusive(Ok(_))
+        ));
+    }
+
+    #[test]
+    fn exclusive_absorbs_shared_entity_before_import() {
+        let profile = ParserProfile::foundation_default();
+        // Same two declarations, reversed order: absorption must not be
+        // order-dependent.
+        let src = "Entity Player:\n    state hp: quad\nImport \"a.sm\"\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Exclusive(Ok(_))
+        ));
+    }
+
+    #[test]
+    fn exclusive_absorbs_shared_import_before_fn_on_rustlike_side() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\nfn main() { return; }\n";
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Exclusive(Ok(_))
+        ));
+    }
+
+    #[test]
+    fn exclusive_absorbs_shared_fn_before_import_on_rustlike_side() {
+        let profile = ParserProfile::foundation_default();
+        let src = "fn main() { return; }\nImport \"a.sm\"\n";
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Exclusive(Ok(_))
+        ));
+    }
+
+    // --- Policy-gate semantics: basis is syntax-only, policy is an
+    // outcome modifier, never applied when basis == NoClaim ---
+
+    #[test]
+    fn policy_disabled_logos_surface_does_not_erase_exclusive_evidence() {
+        let src = "Entity Player:\n    state hp: quad\n";
+        let admission = admit_logos(src, &logos_surface_disabled());
+        match admission {
+            GrammarAdmission::Exclusive(Err(e)) => {
+                assert_eq!(
+                    e.kind(),
+                    FrontendErrorKind::PolicyViolation,
+                    "a disabled Logos surface must report a policy \
+                     violation, not a generic syntax error"
+                );
+            }
+            other => panic!(
+                "expected Exclusive(Err(PolicyViolation)) - a disabled surface \
+                 must not erase already-established exclusive evidence by \
+                 falling back to NoClaim, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn policy_disabled_logos_surface_with_no_evidence_is_still_no_claim() {
+        let src = "fn main() { return; }\n";
+        let admission = admit_logos(src, &logos_surface_disabled());
+        assert_eq!(
+            admission,
+            GrammarAdmission::NoClaim,
+            "a disabled surface has nothing to have blocked when no \
+             evidence exists anywhere in the input"
+        );
+    }
+
+    #[test]
+    fn policy_disabled_legacy_compatibility_reports_shared_policy_violation() {
+        let admission = admit_logos("Import \"a.sm\"\n", &legacy_compatibility_disabled());
+        match admission {
+            GrammarAdmission::Shared(Err(e)) => {
+                assert_eq!(e.kind(), FrontendErrorKind::PolicyViolation);
+            }
+            other => panic!(
+                "expected Shared(Err(PolicyViolation)) - Import's Logos-side \
+                 threshold (the keyword itself) is crossed before the \
+                 legacy-compatibility check runs, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn policy_disabled_legacy_compatibility_does_not_mask_later_exclusive_evidence() {
+        // The Import line's legacy-compatibility failure must not prevent
+        // the scan from continuing to observe the genuinely exclusive
+        // `Entity` declaration afterward.
+        let src = "Import \"a.sm\"\nEntity Player:\n    state hp: quad\n";
+        let admission = admit_logos(src, &legacy_compatibility_disabled());
+        assert!(
+            matches!(admission, GrammarAdmission::Exclusive(Err(_))),
+            "expected Exclusive(Err) - Entity's exclusive evidence must \
+             still be observed and absorb over the earlier Shared claim, \
+             even though the Import line itself failed policy, got \
+             {admission:?}"
+        );
+    }
+
+    // --- RustLike vs Logos scan-mechanics asymmetry, documented in
+    // Decision E: RustLike aborts on its first unrecognized token; Logos
+    // recovers and keeps scanning. Neither admit_* function pretends
+    // otherwise. ---
+
+    #[test]
+    fn rustlike_never_sees_evidence_past_its_first_unrecognized_token() {
+        let profile = ParserProfile::foundation_default();
+        // `Entity` is first and unrecognized by RustLike's dispatch, so
+        // parse_program-style `?` abort means RustLike's scan never
+        // reaches the later `fn` at all.
+        let src = "Entity Player:\n    state hp: quad\nfn main() { return; }\n";
+        assert_eq!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::NoClaim,
+            "RustLike must never claim evidence it structurally never reached"
+        );
+    }
+
+    // --- Diagnostic parity with the existing parse_* entry points (SSF-09
+    // Decision E, round 5). Each of these compares the COMPLETE
+    // FrontendError - not merely the same variant/kind/pos - against
+    // parse_logos_with_profile's error for the identical source, per the
+    // frozen Migration Plan's Stage 1 exit criteria. All four were
+    // #[ignore]d/probed under the round-4 contract because admit_* had no
+    // access to the original source text and no separate policy-error
+    // tracking; round 5's source-context parameter and policy-vs-syntax
+    // finalization law fix both, and these are now ordinary regressions.
+
+    #[test]
+    fn parity_ordinary_single_logos_syntax_failure() {
+        let profile = ParserProfile::foundation_default();
+        // Entity recognized (Exclusive evidence), then a single syntax
+        // error (missing ':' + body) - no policy failure anywhere.
+        let src = "Entity Player\n";
+        let expected = parse_logos_with_profile(src, &profile)
+            .expect_err("malformed Entity is a genuine Logos syntax error today");
+        let actual = match admit_logos(src, &profile) {
+            GrammarAdmission::Exclusive(Err(e)) => e,
+            other => panic!("unexpected admission: {other:?}"),
+        };
+        assert_eq!(
+            actual, expected,
+            "a single ordinary syntax failure must still be wrapped through \
+             merge_logos_errors exactly as parse_logos_program already does \
+             - no length-based special case"
+        );
+    }
+
+    #[test]
+    fn parity_ordinary_multiple_logos_syntax_failures() {
+        let profile = ParserProfile::foundation_default();
+        // Two independent, genuinely malformed Entity declarations - two
+        // accumulated syntax errors, no policy failure anywhere.
+        let src = "Entity Player\nEntity Foe\n";
+        let expected = parse_logos_with_profile(src, &profile)
+            .expect_err("two malformed Entity declarations are two genuine syntax errors today");
+        let actual = match admit_logos(src, &profile) {
+            GrammarAdmission::Exclusive(Err(e)) => e,
+            other => panic!("unexpected admission: {other:?}"),
+        };
+        assert_eq!(
+            actual, expected,
+            "multiple accumulated syntax errors must merge exactly as \
+             parse_logos_program already does"
+        );
+    }
+
+    #[test]
+    fn parity_legacy_policy_failure_followed_by_later_exclusive_evidence() {
+        let profile = legacy_compatibility_disabled();
+        // A well-formed Entity after the policy-failing Import: the
+        // finalized outcome must stay the preserved policy error even
+        // though the rest of the scan would otherwise have succeeded
+        // cleanly, and even though evidence basis promotes to Exclusive.
+        let src = "Import \"a.sm\"\nEntity Player:\n    state hp: quad\n";
+        let expected = parse_logos_with_profile(src, &profile).expect_err(
+            "today's parser aborts at Import's legacy-compatibility check \
+             before ever reaching Entity",
+        );
+        let actual = match admit_logos(src, &profile) {
+            GrammarAdmission::Exclusive(Err(e)) => e,
+            other => panic!(
+                "expected Exclusive(Err) - Entity's exclusive evidence still \
+                 promotes basis even though the policy error, not Entity's \
+                 own outcome, is what gets reported, got {other:?}"
+            ),
+        };
+        assert_eq!(
+            actual, expected,
+            "the preserved legacy-policy error must equal today's parser's \
+             terminal policy error exactly, not a merged or altered variant"
+        );
+    }
+
+    #[test]
+    fn parity_legacy_policy_failure_mixed_with_later_syntax_failure() {
+        // Same law, stress-tested against a case where the failure that
+        // comes after the policy failure is itself a genuine syntax
+        // error (not a success) - the policy error must still win, not
+        // be merged with it.
+        let profile = legacy_compatibility_disabled();
+        let src = "Import \"a.sm\"\nEntity Player\n";
+        let expected = parse_logos_with_profile(src, &profile)
+            .expect_err("today's parser aborts at Import's legacy-compatibility check");
+        let actual = match admit_logos(src, &profile) {
+            GrammarAdmission::Exclusive(Err(e)) => e,
+            other => panic!("unexpected admission: {other:?}"),
+        };
+        assert_eq!(actual.kind(), FrontendErrorKind::PolicyViolation);
+        assert_eq!(
+            actual, expected,
+            "a legacy-policy failure must never be merged with an \
+             unrelated later syntax failure into one combined message"
+        );
+    }
+
+    #[test]
+    fn parity_global_logos_surface_denial_with_actual_logos_evidence() {
+        let profile = logos_surface_disabled();
+        let src = "// leading comment\nEntity Player:\n    state hp: quad\n";
+        let expected = parse_logos_with_profile(src, &profile).expect_err(
+            "today's parser's unconditional pre-loop require_logos_surface \
+             check rejects every input when the surface is disabled",
+        );
+        let actual = match admit_logos(src, &profile) {
+            GrammarAdmission::Exclusive(Err(e)) => e,
+            other => panic!("unexpected admission: {other:?}"),
+        };
+        assert_eq!(
+            actual, expected,
+            "the global surface-denial error must equal today's parser's \
+             error exactly, including its position - the leading comment \
+             is deliberate: it is what actually distinguishes evaluating \
+             require_logos_surface at scan-start from evaluating it fresh \
+             after the scan completes (both otherwise happen to read back \
+             as pos: 0 for inputs with no content before the first real \
+             declaration, which would mask a regression here)"
+        );
+    }
+
+    #[test]
+    fn global_surface_denial_outranks_legacy_compatibility_denial() {
+        // Both policy gates fail for the same input - the law requires
+        // the global require_logos_surface gate to win, matching
+        // parse_logos_with_profile's own behavior (its unconditional
+        // pre-loop check means require_legacy_compatibility is never
+        // even reached when the surface is disabled).
+        let profile = both_policies_disabled();
+        let src = "Import \"a.sm\"\n";
+        let expected = parse_logos_with_profile(src, &profile)
+            .expect_err("a disabled surface rejects this input before Import is ever dispatched");
+        let actual = match admit_logos(src, &profile) {
+            GrammarAdmission::Shared(Err(e)) => e,
+            other => panic!("unexpected admission: {other:?}"),
+        };
+        assert!(
+            actual.message.contains("Logos surface is disabled"),
+            "expected the global surface-denial message to win over the \
+             legacy-compatibility one, got: {}",
+            actual.message
+        );
+        assert_eq!(
+            actual, expected,
+            "must equal today's parser's error exactly - today's code \
+             never reaches require_legacy_compatibility once the surface \
+             gate has already failed"
         );
     }
 }
