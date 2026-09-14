@@ -937,6 +937,98 @@ pub enum GrammarAdmission<T> {
     Exclusive(Result<T, FrontendError>),
 }
 
+/// The canonical cross-grammar verdict over a pair of already-computed
+/// [`GrammarAdmission`] values (one for Logos, one for RustLike), per
+/// SSF-09 Decision E's frozen two-stage law - Decision F (2026-09-14),
+/// freezing this as the sole owner of cross-grammar source-surface
+/// authority resolution, establishing the canonical replacement for:
+/// `sm-sema`'s former private `resolve_surface_authority`/
+/// `SurfaceVerdict` (deleted in the same PR that froze this decision -
+/// `sm-sema` now consumes this type directly); `smc-cli`'s still-pending
+/// legacy `resolve_project_route`/`ProjectRoute` (`#1919`, migration
+/// tracked as measured debt, not yet performed); and `sm-ir`'s blocked
+/// `logos_owns_outright` attempt (`#1920`, PR #1929, NO-GO - to be
+/// rebased onto this type in its own follow-up, not yet performed).
+///
+/// This type carries only the *classification*, never a rendered
+/// diagnostic: `sm-front` resolves authority, it does not lex, parse,
+/// type-check, lower to IR, or render `SemanticError`/CLI text/IR
+/// diagnostics - those stay consumer-owned representations built from
+/// the `Result<_, FrontendError>` payloads preserved here.
+///
+/// - `LogosOwns`/`RustLikeOwns` end classification outright - a
+///   `Result::Err` payload here is the *authoritative* failure and MUST
+///   reach the caller unmodified; it must never be discarded in favor of
+///   trying the other grammar.
+/// - `Ambiguous` is itself a terminal classification error, not a tie to
+///   be broken by evaluation order, first-match, or either side's own
+///   `Ok`/`Err` alone - both underlying outcomes are preserved so no
+///   evidence is silently dropped.
+/// - `NoSurfaceClaim` is terminal once both grammars (the only two
+///   candidate surfaces this system has) have already been evaluated -
+///   it is not an invitation to retry either grammar's parser. Decision
+///   A's "only `NO SURFACE CLAIM` permits evaluating another surface"
+///   refers to the classification process having a candidate left to
+///   try; with exactly two grammars already admitted into this pairing,
+///   none remains.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SurfaceAuthority<L, R> {
+    LogosOwns(Result<L, FrontendError>),
+    RustLikeOwns(Result<R, FrontendError>),
+    Ambiguous {
+        logos: Result<L, FrontendError>,
+        rustlike: Result<R, FrontendError>,
+    },
+    NoSurfaceClaim,
+}
+
+/// The canonical cross-grammar authority resolver - see
+/// [`SurfaceAuthority`] for the full contract this implements. Reproduces
+/// SSF-09 Decision E's frozen twelve-cell table exactly: Stage 1 resolves
+/// by evidence strength (`Exclusive` > `Shared` > `NoClaim`); Stage 2
+/// resolves a `Shared` vs `Shared` tie by parse outcome. A grammar-local
+/// `Err` is never itself authoritative - it becomes the verdict's `Err`
+/// only after that grammar has won ownership resolution.
+pub fn resolve_surface_authority<L, R>(
+    logos: GrammarAdmission<L>,
+    rustlike: GrammarAdmission<R>,
+) -> SurfaceAuthority<L, R> {
+    match (logos, rustlike) {
+        (GrammarAdmission::NoClaim, GrammarAdmission::NoClaim) => SurfaceAuthority::NoSurfaceClaim,
+        (GrammarAdmission::Exclusive(o), GrammarAdmission::NoClaim) => {
+            SurfaceAuthority::LogosOwns(o)
+        }
+        (GrammarAdmission::NoClaim, GrammarAdmission::Exclusive(o)) => {
+            SurfaceAuthority::RustLikeOwns(o)
+        }
+        (GrammarAdmission::Exclusive(o), GrammarAdmission::Shared(_)) => {
+            SurfaceAuthority::LogosOwns(o)
+        }
+        (GrammarAdmission::Shared(_), GrammarAdmission::Exclusive(o)) => {
+            SurfaceAuthority::RustLikeOwns(o)
+        }
+        (GrammarAdmission::Exclusive(logos), GrammarAdmission::Exclusive(rustlike)) => {
+            SurfaceAuthority::Ambiguous { logos, rustlike }
+        }
+        (GrammarAdmission::Shared(o), GrammarAdmission::NoClaim) => SurfaceAuthority::LogosOwns(o),
+        (GrammarAdmission::NoClaim, GrammarAdmission::Shared(o)) => {
+            SurfaceAuthority::RustLikeOwns(o)
+        }
+        (GrammarAdmission::Shared(logos), GrammarAdmission::Shared(rustlike)) => {
+            match (logos, rustlike) {
+                (logos @ Ok(_), rustlike @ Ok(_)) => {
+                    SurfaceAuthority::Ambiguous { logos, rustlike }
+                }
+                (logos @ Ok(_), Err(_)) => SurfaceAuthority::LogosOwns(logos),
+                (Err(_), rustlike @ Ok(_)) => SurfaceAuthority::RustLikeOwns(rustlike),
+                (logos @ Err(_), rustlike @ Err(_)) => {
+                    SurfaceAuthority::Ambiguous { logos, rustlike }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
@@ -1759,5 +1851,181 @@ mod tests {
                 crate::types::ScrutineeUse::Preserved
             }
         });
+    }
+
+    // ------------------------------------------------------------------
+    // Decision F (2026-09-14): canonical `resolve_surface_authority`
+    // direct unit tests, migrated verbatim from `sm-sema`'s former
+    // private copy (`#1670` Stage 2A) - this is the only reliable way to
+    // exercise every cell of the frozen two-stage table deterministically;
+    // several combinations (`Exclusive(Err)` vs `Shared(Ok)`,
+    // `Shared(Err)` vs `Shared(Err)`) are difficult or impossible to
+    // reliably reconstruct from real source text given the two grammars'
+    // own non-symmetric scan mechanics. End-to-end regressions using real
+    // source text remain in `sm-sema`'s `check_source_with_profile` tests
+    // and `smc-cli`'s own suites - this crate owns only the classification
+    // law itself, never diagnostic rendering.
+
+    fn synth_err(msg: &str) -> Result<i32, FrontendError> {
+        Err(FrontendError::syntax(0, msg))
+    }
+    fn synth_ok(v: i32) -> Result<i32, FrontendError> {
+        Ok(v)
+    }
+
+    #[test]
+    fn resolver_exclusive_beats_noclaim_both_orders() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Exclusive(synth_ok(1)),
+                GrammarAdmission::<i32>::NoClaim
+            ),
+            SurfaceAuthority::LogosOwns(Ok(1))
+        ));
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::<i32>::NoClaim,
+                GrammarAdmission::Exclusive(synth_ok(2))
+            ),
+            SurfaceAuthority::RustLikeOwns(Ok(2))
+        ));
+    }
+
+    #[test]
+    fn resolver_exclusive_beats_shared_both_orders() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Exclusive(synth_ok(1)),
+                GrammarAdmission::Shared(synth_ok(9))
+            ),
+            SurfaceAuthority::LogosOwns(Ok(1))
+        ));
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_ok(9)),
+                GrammarAdmission::Exclusive(synth_ok(2))
+            ),
+            SurfaceAuthority::RustLikeOwns(Ok(2))
+        ));
+    }
+
+    #[test]
+    fn resolver_exclusive_err_beats_shared_ok_both_orders() {
+        // The fail-closed invariant this whole decision exists to
+        // establish: a stronger grammar's Err is authoritative even
+        // against the weaker grammar's Ok - never discarded in favor of
+        // the weaker side succeeding.
+        match resolve_surface_authority(
+            GrammarAdmission::Exclusive(synth_err("logos exclusive failure")),
+            GrammarAdmission::Shared(synth_ok(9)),
+        ) {
+            SurfaceAuthority::LogosOwns(Err(e)) => {
+                assert_eq!(e.message, "logos exclusive failure")
+            }
+            _ => panic!("Exclusive(Err) must beat Shared(Ok) and stay authoritative"),
+        }
+        match resolve_surface_authority(
+            GrammarAdmission::Shared(synth_ok(9)),
+            GrammarAdmission::Exclusive(synth_err("rustlike exclusive failure")),
+        ) {
+            SurfaceAuthority::RustLikeOwns(Err(e)) => {
+                assert_eq!(e.message, "rustlike exclusive failure")
+            }
+            _ => panic!("Exclusive(Err) must beat Shared(Ok) and stay authoritative"),
+        }
+    }
+
+    #[test]
+    fn resolver_exclusive_vs_exclusive_is_always_ambiguous_regardless_of_ok_err() {
+        for (logos, rustlike) in [
+            (synth_ok(1), synth_ok(2)),
+            (synth_ok(1), synth_err("r")),
+            (synth_err("l"), synth_ok(2)),
+            (synth_err("l"), synth_err("r")),
+        ] {
+            assert!(
+                matches!(
+                    resolve_surface_authority(
+                        GrammarAdmission::Exclusive(logos),
+                        GrammarAdmission::Exclusive(rustlike)
+                    ),
+                    SurfaceAuthority::Ambiguous { .. }
+                ),
+                "Exclusive vs Exclusive must always be ambiguous, regardless of Ok/Err"
+            );
+        }
+    }
+
+    #[test]
+    fn resolver_shared_beats_noclaim_both_orders() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_ok(1)),
+                GrammarAdmission::<i32>::NoClaim
+            ),
+            SurfaceAuthority::LogosOwns(Ok(1))
+        ));
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::<i32>::NoClaim,
+                GrammarAdmission::Shared(synth_ok(2))
+            ),
+            SurfaceAuthority::RustLikeOwns(Ok(2))
+        ));
+    }
+
+    #[test]
+    fn resolver_noclaim_vs_noclaim_is_no_surface_claim() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::<i32>::NoClaim,
+                GrammarAdmission::<i32>::NoClaim
+            ),
+            SurfaceAuthority::NoSurfaceClaim
+        ));
+    }
+
+    #[test]
+    fn resolver_shared_vs_shared_ok_ok_is_ambiguous() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_ok(1)),
+                GrammarAdmission::Shared(synth_ok(2))
+            ),
+            SurfaceAuthority::Ambiguous { .. }
+        ));
+    }
+
+    #[test]
+    fn resolver_shared_vs_shared_ok_err_logos_owns() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_ok(1)),
+                GrammarAdmission::Shared(synth_err("r"))
+            ),
+            SurfaceAuthority::LogosOwns(Ok(1))
+        ));
+    }
+
+    #[test]
+    fn resolver_shared_vs_shared_err_ok_rustlike_owns() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_err("l")),
+                GrammarAdmission::Shared(synth_ok(2))
+            ),
+            SurfaceAuthority::RustLikeOwns(Ok(2))
+        ));
+    }
+
+    #[test]
+    fn resolver_shared_vs_shared_err_err_is_ambiguous() {
+        assert!(matches!(
+            resolve_surface_authority(
+                GrammarAdmission::Shared(synth_err("l")),
+                GrammarAdmission::Shared(synth_err("r"))
+            ),
+            SurfaceAuthority::Ambiguous { .. }
+        ));
     }
 }

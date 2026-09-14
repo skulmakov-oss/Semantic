@@ -31,6 +31,7 @@ pub mod types;
 pub use sm_profile::{CompatibilityMode, ParserProfile};
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use types::{
+    resolve_surface_authority,
     AdtCtorExpr,
     AdtDecl,
     AdtVariant,
@@ -86,6 +87,7 @@ pub use types::{
     SequenceType,
     Stmt,
     StmtId,
+    SurfaceAuthority,
     SymbolId,
     TextLiteral,
     TextLiteralFamily,

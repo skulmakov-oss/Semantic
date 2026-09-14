@@ -30,8 +30,8 @@ pub use alloc_core::{
 mod frontend {
     pub use sm_front::{
         admit_logos_program_with_profile, admit_program_with_profile, lex,
-        parse_logos_program_with_profile, type_check_program, FrontendError, GrammarAdmission,
-        LogosEntity, LogosEntityFieldKind, LogosProgram, Type,
+        parse_logos_program_with_profile, resolve_surface_authority, type_check_program,
+        FrontendError, LogosEntity, LogosEntityFieldKind, LogosProgram, SurfaceAuthority, Type,
     };
     #[cfg(test)]
     pub use sm_front::{parse_logos_program, parse_program_with_profile};
