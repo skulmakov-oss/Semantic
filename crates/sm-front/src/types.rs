@@ -941,10 +941,14 @@ pub enum GrammarAdmission<T> {
 /// [`GrammarAdmission`] values (one for Logos, one for RustLike), per
 /// SSF-09 Decision E's frozen two-stage law - Decision F (2026-09-14),
 /// freezing this as the sole owner of cross-grammar source-surface
-/// authority resolution, replacing three independently-maintained
-/// private copies (`sm-sema`'s `resolve_surface_authority`/
-/// `SurfaceVerdict`, `smc-cli`'s `resolve_project_route`/`ProjectRoute`,
-/// and `sm-ir`'s attempted `logos_owns_outright`).
+/// authority resolution, establishing the canonical replacement for:
+/// `sm-sema`'s former private `resolve_surface_authority`/
+/// `SurfaceVerdict` (deleted in the same PR that froze this decision -
+/// `sm-sema` now consumes this type directly); `smc-cli`'s still-pending
+/// legacy `resolve_project_route`/`ProjectRoute` (`#1919`, migration
+/// tracked as measured debt, not yet performed); and `sm-ir`'s blocked
+/// `logos_owns_outright` attempt (`#1920`, PR #1929, NO-GO - to be
+/// rebased onto this type in its own follow-up, not yet performed).
 ///
 /// This type carries only the *classification*, never a rendered
 /// diagnostic: `sm-front` resolves authority, it does not lex, parse,

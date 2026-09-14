@@ -6,6 +6,7 @@ Core ownership:
 
 - lexical model: `sm-front` (consolidated frontend crate owns lexer layer)
 - AST and syntax model: `sm-front` (consolidated frontend crate owns AST layer)
+- cross-grammar source-surface authority: `sm-front` (Decision F, 2026-09-14 — `SurfaceAuthority`/`resolve_surface_authority`; the sole resolver over a `GrammarAdmission` pair, downstream crates consume it and do not re-derive it)
 - parser profiles: `sm-profile`
 - compiler semantics: `sm-sema`
 - IR and lowering: `sm-ir`

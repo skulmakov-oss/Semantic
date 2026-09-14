@@ -27,6 +27,7 @@ Boundary rules:
 
 - construction crates must not depend on VM/runtime state or PROMETHEUS internals;
 - execution crates must not reach back into parser/sema internals;
+- downstream consumers (`sm-sema`, `sm-ir`, `smc-cli`) MUST consume `sm-front`'s canonical cross-grammar `SurfaceAuthority`/`resolve_surface_authority` (Decision F, 2026-09-14) for any decision that requires comparing a Logos `GrammarAdmission` against a RustLike `GrammarAdmission`; they do not own grammar selection and must not destructure/compare a `GrammarAdmission` pair independently — mechanically enforced by `tests/surface_authority_guard.rs`;
 - shared runtime vocabulary stays in `sm-runtime-core`; it must not become a
   second execution authority;
 - integration crates must not rewrite compiler or VM semantics;
@@ -44,3 +45,4 @@ Immediate debt markers:
 
 - `ParserProfile` outside `sm-profile` is architectural debt;
 - richer `fx` arithmetic beyond the current literal/value transport path is architectural debt;
+- `smc-cli`'s `resolve_project_route` (`#1919`) is one tracked, measured pre-Decision-F local cross-grammar resolver, pending its own migration PR to consume `sm-front::resolve_surface_authority` directly — tracked by exact count (not a path allowlist) in `tests/surface_authority_guard.rs`'s `EXPECTED_LEGACY_VIOLATION_COUNTS`;

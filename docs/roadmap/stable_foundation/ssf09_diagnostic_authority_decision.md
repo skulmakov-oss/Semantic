@@ -2596,4 +2596,92 @@ carrier implementation until the separate governance/ownership
 checkpoint above has run - that is a hard sequencing gate, not a
 recommendation.
 
+## Decision F - Canonical Cross-Grammar Authority Resolver
+
+**FROZEN (2026-09-14).**
+
+**Evidence**: three independent call sites each needed the exact same
+cross-grammar authority resolution over a `GrammarAdmission<L>`/
+`GrammarAdmission<R>` pair, and each implemented it privately -
+`sm-sema`'s `resolve_surface_authority`/`SurfaceVerdict` (`#1670`),
+`smc-cli`'s `resolve_project_route`/`ProjectRoute` (`#1919`, converged
+only after two wrong local interpretations), and `sm-ir`'s attempted
+`logos_owns_outright` (`#1920`, PR #1929 - a boolean-only projection
+that silently lost `Ambiguous` and authoritative `Err`, caught before
+merge and stopped as an architectural blocker rather than corrected a
+fourth time in place). Canonical law (Decision E) existed; a canonical
+*executable* resolver did not - leaving this to reviewer convention
+demonstrably drifts.
+
+**Owner**: `sm-front`. `GrammarAdmission`, `FrontendError`, and
+`CompileProfile` already live there; `sm-sema`, `sm-ir`, and `smc-cli`
+already depend on `sm-front`, so this adds no new dependency edge. A
+`sm-sema`-owned resolver (the runner-up candidate, since the first
+private copy happened to live there) was rejected specifically because
+it would require a new `sm-ir -> sm-sema` edge that does not otherwise
+exist, coupling source-surface selection to the semantic-analysis layer
+it logically precedes. A new dedicated crate was rejected as
+unnecessary fragmentation for one pure function already reachable
+through an existing, shared dependency.
+
+**Frozen contract** (`crates/sm-front/src/types.rs`):
+
+```rust
+pub enum SurfaceAuthority<L, R> {
+    LogosOwns(Result<L, FrontendError>),
+    RustLikeOwns(Result<R, FrontendError>),
+    Ambiguous {
+        logos: Result<L, FrontendError>,
+        rustlike: Result<R, FrontendError>,
+    },
+    NoSurfaceClaim,
+}
+
+pub fn resolve_surface_authority<L, R>(
+    logos: GrammarAdmission<L>,
+    rustlike: GrammarAdmission<R>,
+) -> SurfaceAuthority<L, R>;
+```
+
+Reproduces the frozen twelve-cell table (Decision E) exactly - moved
+verbatim from `sm-sema`'s former private implementation, not
+re-derived. Resolves classification only: no lexing, parsing,
+type-checking, IR-lowering, or diagnostic rendering - those stay
+consumer-owned, built from the `Result<_, FrontendError>` payloads
+preserved here.
+
+**`NoSurfaceClaim` is terminal**, not an invitation to retry: this
+decision's own "only `NO SURFACE CLAIM` permits evaluating another
+surface" (Decision A) refers to the classification process having a
+candidate left to try. `resolve_surface_authority` is called only after
+*both* of this system's two grammars have already been admitted into
+the pairing - there is no third candidate remaining, so
+`NoSurfaceClaim` ends classification exactly as `LogosOwns`/
+`RustLikeOwns`/`Ambiguous` do, never as a signal to attempt either
+grammar's parser again.
+
+**No shared diagnostic-message carrier** is introduced. `sm-front` owns
+authority structure only; `sm-sema` owns semantic diagnostic rendering,
+`sm-ir` owns its own lowering-facing error representation, `smc-cli`
+owns CLI presentation. `SurfaceAuthority::Ambiguous` already preserves
+both underlying outcomes in full, which is sufficient for each consumer
+to render according to its own contract without this decision
+prescribing a shared message format.
+
+**Anti-duplication enforcement**: production code outside `sm-front`
+must not destructure/compare multiple `GrammarAdmission` values to
+independently re-derive cross-grammar ownership - mechanically
+enforced by `tests/surface_authority_guard.rs`, not merely documented
+here. Pre-existing local resolvers are tracked as *measured* debt (an
+exact expected occurrence count per file, not a whole-file allowlist),
+so a second, unrelated local resolver added to an already-exempted file
+still fails the guard.
+
+**Consumer migration status**: `sm-sema` migrated in the same PR that
+froze this decision (private `SurfaceVerdict`/`resolve_surface_authority`
+deleted, `check_source_with_profile` consumes the canonical type
+directly). `smc-cli`'s `resolve_project_route` (`#1919`) and `sm-ir`'s
+rebase of PR #1929 (`#1920`) are each separate, explicitly deferred
+follow-up checkpoints - not folded into the Decision F freeze itself.
+
 **Wait for owner review and a separate implementation GO.**
