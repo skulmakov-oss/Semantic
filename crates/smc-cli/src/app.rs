@@ -82,6 +82,49 @@ fn cli_profile() -> ParserProfile {
     ParserProfile::foundation_default()
 }
 
+/// SSF-09 fail-closed project authority (#1919): decides whether the
+/// multi-module project mechanism (`check_file_with_provider_and_profile`)
+/// *applies* to `root_src` at all, before ever calling it, instead of
+/// calling it unconditionally and discarding whatever `Err` it returns
+/// via `.or_else`. The two states that pattern collapsed into one opaque
+/// `Err` are semantically different: the project mechanism never being a
+/// candidate for this input (no Logos entry to recurse imports from) is
+/// not the same fact as the project mechanism positively recognizing a
+/// Logos entry, attempting real multi-module work, and failing.
+///
+/// The applicability signal reuses the exact same deterministic call
+/// `load_module_recursive` itself makes for the root module
+/// (`parse_logos_program_with_profile`, `sm-sema`'s only Logos entry
+/// point) - not a heuristic, not error-text inspection. It can never
+/// disagree with what the project mechanism itself decides, because it
+/// computes the same fact the mechanism computes internally, before the
+/// mechanism does:
+///
+/// - the root does not parse as a Logos program at all -> the project
+///   mechanism was never a candidate for this input; the narrower
+///   single-file check is a legitimate, distinct mechanism, not a
+///   fallback from a failed attempt;
+/// - the root parses as a Logos program -> the project mechanism applies
+///   from here on, and whatever it returns - `Ok` or `Err` - is
+///   authoritative and returned verbatim, with no narrower retry of any
+///   kind.
+fn check_root_with_project_authority(
+    root_canon: &Path,
+    root_src: &str,
+    provider: &CliFsModuleProvider,
+    parser_profile: &ParserProfile,
+) -> Result<sm_sema::SemanticReport, sm_sema::SemanticError> {
+    if parse_logos_program_with_profile(root_src, parser_profile).is_err() {
+        // Not applicable: the root was never a Logos project entry to
+        // begin with - nothing for the project mechanism to have
+        // recognized or failed at.
+        return check_source_with_profile(root_src, parser_profile);
+    }
+    // Applied: the root is a real Logos project entry. Authoritative
+    // from here - never replaced by the single-file check.
+    check_file_with_provider_and_profile(root_canon, provider, parser_profile)
+}
+
 fn reject_leading_unknown_flag(input: &str) -> Result<(), String> {
     if input.starts_with('-') {
         Err(format!("unknown flag '{}'", input))
@@ -585,8 +628,7 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
     let root_canon = root
         .canonicalize()
         .map_err(|e| format!("failed to resolve '{}': {}", root.display(), e))?;
-    let report = check_file_with_provider_and_profile(&root_canon, &provider, &parser_profile)
-        .or_else(|_| check_source_with_profile(&src, &parser_profile))
+    let report = check_root_with_project_authority(&root_canon, &src, &provider, &parser_profile)
         .map_err(|e| e.to_string())?;
     let t_check = Instant::now();
     let color_enabled = resolve_color_mode(color);
@@ -716,32 +758,34 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
                     };
                     let provider = CliFsModuleProvider;
                     let parser_profile = cli_profile();
-                    let snapshot = match root
-                        .canonicalize()
-                        .map_err(|e| e.to_string())
-                        .and_then(|p| {
-                            check_file_with_provider_and_profile(&p, &provider, &parser_profile)
+                    let snapshot =
+                        match root
+                            .canonicalize()
+                            .map_err(|e| e.to_string())
+                            .and_then(|p| {
+                                check_root_with_project_authority(
+                                    &p,
+                                    &src,
+                                    &provider,
+                                    &parser_profile,
+                                )
                                 .map_err(|e| e.to_string())
-                        })
-                        .or_else(|_| {
-                            check_source_with_profile(&src, &parser_profile)
-                                .map_err(|e| e.to_string())
-                        }) {
-                        Ok(report) => {
-                            let mut out = String::new();
-                            for w in &report.warnings {
-                                out.push_str(w.rendered.trim_end());
-                                out.push('\n');
+                            }) {
+                            Ok(report) => {
+                                let mut out = String::new();
+                                for w in &report.warnings {
+                                    out.push_str(w.rendered.trim_end());
+                                    out.push('\n');
+                                }
+                                out.push_str(&format!(
+                                    "ok: {} warning(s), {} scheduled law(s)",
+                                    report.warnings.len(),
+                                    report.scheduled_laws.len()
+                                ));
+                                out
                             }
-                            out.push_str(&format!(
-                                "ok: {} warning(s), {} scheduled law(s)",
-                                report.warnings.len(),
-                                report.scheduled_laws.len()
-                            ));
-                            out
-                        }
-                        Err(e) => format!("{e}"),
-                    };
+                            Err(e) => format!("{e}"),
+                        };
                     let changed = last_snapshot
                         .as_ref()
                         .map(|prev| prev != &snapshot)
@@ -965,11 +1009,9 @@ fn cmd_lint(args: &[String]) -> Result<(), String> {
             .canonicalize()
             .map_err(|e| format!("failed to resolve '{}': {}", input, e))
             .and_then(|p| {
-                check_file_with_provider_and_profile(&p, &provider, &parser_profile)
+                check_root_with_project_authority(&p, &src, &provider, &parser_profile)
                     .map_err(|e| e.to_string())
-            })
-            .or_else(|_| check_source_with_profile(&src, &parser_profile))
-            .map_err(|e| e.to_string())?
+            })?
     } else {
         check_source_with_profile(&src, &parser_profile).map_err(|e| e.to_string())?
     };
@@ -2084,6 +2126,196 @@ mod tests {
         ));
         std::fs::create_dir_all(&base).expect("mkdir");
         base
+    }
+
+    // ------------------------------------------------------------------
+    // #1919 Stage 2B: `check_root_with_project_authority` regressions.
+    // Tier A - direct unit tests of the applicability seam itself.
+
+    // 1. NotApplicable may fall back: a root with no Logos evidence at
+    // all must be handled by the narrower single-file check, and must
+    // match what that check alone would produce.
+    #[test]
+    fn project_authority_not_applicable_falls_back_to_single_file() {
+        let dir = mk_temp_dir("proj_authority_not_applicable");
+        let root = dir.join("main.sm");
+        let src = "fn main() {\n    return;\n}\n";
+        std::fs::write(&root, src).expect("write root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+        let via_helper = check_root_with_project_authority(&root, src, &provider, &profile);
+        let via_single_file = check_source_with_profile(src, &profile);
+        assert_eq!(
+            via_helper.is_ok(),
+            via_single_file.is_ok(),
+            "NotApplicable must defer entirely to the single-file check"
+        );
+        assert!(
+            via_helper.is_ok(),
+            "ordinary RustLike source must be admitted"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 2. Applied(Ok) never falls back: proven not merely by "it
+    // succeeds" (a single-file check of the root alone might also
+    // succeed) but by showing the *imported module's own* warning is
+    // present in the result - something only the real project mechanism
+    // could have produced, since the single-file check never looks at
+    // import targets at all.
+    #[test]
+    fn project_authority_applied_ok_uses_real_project_result_not_root_alone() {
+        let dir = mk_temp_dir("proj_authority_applied_ok");
+        let root = dir.join("root.sm");
+        let dep = dir.join("dep.sm");
+        std::fs::write(
+            &root,
+            "\nImport \"dep.sm\"\nLaw \"R\" [priority 1]:\n    When true -> System.recovery()\n",
+        )
+        .expect("write root");
+        std::fs::write(
+            &dep,
+            "\nEntity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When N ->\n        Pulse.emit(\"x\")\n",
+        )
+        .expect("write dep");
+
+        let root_src = std::fs::read_to_string(&root).expect("read root");
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+        let report = check_root_with_project_authority(&root, &root_src, &provider, &profile)
+            .expect("valid project must succeed");
+        assert!(
+            report.warnings.iter().any(|w| w.code == "W0240"),
+            "the imported module's own dead-When warning must be present - proof the real \
+             project mechanism ran, not a single-file check of the root's text alone"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 3. Applied(Err) never falls back: a root that is a real Logos
+    // project entry, whose import target does not exist, must fail with
+    // the project mechanism's own error - never silently retried as a
+    // single-file check (which would ignore the missing import
+    // entirely and succeed, since it never resolves import targets).
+    #[test]
+    fn project_authority_applied_err_is_never_replaced_by_fallback_success() {
+        let dir = mk_temp_dir("proj_authority_applied_err");
+        let root = dir.join("root.sm");
+        std::fs::write(
+            &root,
+            "\nImport \"missing.sm\"\nEntity A:\n    state x: quad\n",
+        )
+        .expect("write root");
+        let root_src = std::fs::read_to_string(&root).expect("read root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+
+        // Adversarial control: prove the single-file check of the root
+        // text ALONE would have silently succeeded, ignoring the
+        // missing import entirely - the exact false-positive #1919
+        // exists to prevent.
+        let single_file_result = check_source_with_profile(&root_src, &profile);
+        assert!(
+            single_file_result.is_ok(),
+            "control check: the single-file path must be the one that would silently \
+             succeed here, or this fixture does not test what it claims to"
+        );
+
+        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile);
+        let err = via_helper.expect_err(
+            "a project entry with a missing import must fail, never silently succeed via fallback",
+        );
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("failed to resolve import") || rendered.contains("missing.sm"),
+            "expected the project mechanism's own missing-dependency error, got: {rendered}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 4. The Applied(Err) payload survives unchanged: the message
+    // reaching the caller through the new seam must be byte-identical
+    // to calling the project mechanism directly.
+    #[test]
+    fn project_authority_applied_err_message_exactly_matches_direct_call() {
+        let dir = mk_temp_dir("proj_authority_exact_message");
+        let root = dir.join("root.sm");
+        let a = dir.join("a.sm");
+        std::fs::write(&root, "\nImport \"a.sm\"\nEntity A:\n    state x: quad\n")
+            .expect("write root");
+        std::fs::write(&a, "\nImport \"root.sm\"\nEntity B:\n    state y: quad\n")
+            .expect("write a (completes the cycle)");
+        let root_src = std::fs::read_to_string(&root).expect("read root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+        let direct = check_file_with_provider_and_profile(&root, &provider, &profile)
+            .expect_err("cyclic import must fail directly");
+        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile)
+            .expect_err("cyclic import must fail through the new seam too");
+        assert_eq!(via_helper.diag.message, direct.diag.message);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 5. Error-identity divergence check: a fixture engineered so the
+    // project mechanism and the single-file fallback would each fail
+    // for a *different* reason, with a *different* message - the
+    // project mechanism fails early at import resolution (the target
+    // does not exist), before it ever reaches per-module semantic
+    // analysis; the fallback, having no concept of import resolution at
+    // all, happily parses the root's own (invalid) duplicate-Entity
+    // content and fails there instead. Proves the seam preserves the
+    // *specific* project error, not merely "some" error - the previous
+    // test alone cannot distinguish this, since its fixture's fallback
+    // path happens to succeed, so a mutation that only swaps the error
+    // on fallback-failure would go unnoticed there.
+    #[test]
+    fn project_authority_preserves_specific_project_error_not_a_different_fallback_error() {
+        let dir = mk_temp_dir("proj_authority_error_identity");
+        let root = dir.join("root.sm");
+        std::fs::write(
+            &root,
+            "\nImport \"missing.sm\"\nEntity A:\n    state x: quad\nEntity A:\n    prop y: bool\n",
+        )
+        .expect("write root");
+        let root_src = std::fs::read_to_string(&root).expect("read root");
+
+        let provider = CliFsModuleProvider;
+        let profile = cli_profile();
+
+        // Control: prove the two paths really do disagree on *why* this
+        // fails, so the test is not vacuous.
+        let fallback_err = check_source_with_profile(&root_src, &profile)
+            .expect_err("root alone has a genuine duplicate Entity");
+        assert!(
+            fallback_err.diag.message.contains("duplicate Entity"),
+            "control check: fallback must fail on the duplicate Entity, got: {}",
+            fallback_err.diag.message
+        );
+
+        let direct = check_file_with_provider_and_profile(&root, &provider, &profile)
+            .expect_err("project mechanism must fail on the missing import");
+        assert!(
+            direct.diag.message.contains("missing.sm"),
+            "control check: project mechanism must fail on the missing import first, got: {}",
+            direct.diag.message
+        );
+
+        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile)
+            .expect_err("must still fail");
+        assert_eq!(
+            via_helper.diag.message, direct.diag.message,
+            "the project mechanism's own (earlier, more specific) error must survive - not be \
+             silently swapped for the fallback's different, later error"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
