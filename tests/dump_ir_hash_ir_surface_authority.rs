@@ -58,11 +58,25 @@ fn cli_err(command: &str, path: &std::path::Path) -> String {
         .expect_err(&format!("smc {command} unexpectedly passed for {p}"))
 }
 
-// Asserts both `dump-ir` and `hash-ir` succeed on the same input - proof
-// the shared routing seam agrees, not just one command.
-fn both_ok(path: &std::path::Path) {
-    cli_ok("dump-ir", path);
-    cli_ok("hash-ir", path);
+// Asserts both `dump-ir` and `hash-ir` succeed on the same source content -
+// each against its own fresh path, so neither command's own execution can
+// be silently skipped by reading back the other's on-disk IR cache entry.
+//
+// `dump-ir`/`hash-ir` share one on-disk IR cache keyed by
+// (canonicalized path, content fingerprint, profile, opt) - see
+// `ir_pack_key` in `crates/smc-cli/src/app.rs`. Calling both commands
+// against the *same* path would give them the *same* cache key: the
+// first command populates the cache, and the second would be served
+// entirely from that cache entry, never reaching `render_ir_for_profile`
+// itself. Two distinct paths with identical content guarantee two
+// distinct cache keys, so each command's own cold path genuinely runs.
+fn both_ok(dir: &std::path::Path, src: &str) {
+    let dump_path = dir.join("dump_target.sm");
+    let hash_path = dir.join("hash_target.sm");
+    std::fs::write(&dump_path, src).expect("write dump-ir fixture");
+    std::fs::write(&hash_path, src).expect("write hash-ir fixture");
+    cli_ok("dump-ir", &dump_path);
+    cli_ok("hash-ir", &hash_path);
 }
 
 // Asserts both `dump-ir` and `hash-ir` fail on the same input and returns
@@ -76,10 +90,8 @@ fn both_err(path: &std::path::Path) -> (String, String) {
 #[test]
 fn ir_a1_rustlike_success_under_auto() {
     let dir = mk_temp_dir("ir1931_a1_rustlike_ok");
-    let root = dir.join("main.sm");
-    std::fs::write(&root, "fn main() {\n    return;\n}\n").expect("write root");
 
-    both_ok(&root);
+    both_ok(&dir, "fn main() {\n    return;\n}\n");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -91,14 +103,11 @@ fn ir_a1_rustlike_success_under_auto() {
 #[test]
 fn ir_a2_logos_success_under_auto() {
     let dir = mk_temp_dir("ir1931_a2_logos_ok");
-    let root = dir.join("main.sm");
-    std::fs::write(
-        &root,
-        "\nEntity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When true -> System.recovery()\n",
-    )
-    .expect("write root");
 
-    both_ok(&root);
+    both_ok(
+        &dir,
+        "\nEntity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When true -> System.recovery()\n",
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
