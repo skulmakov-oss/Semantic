@@ -14,9 +14,16 @@
 // asserts the same outcome shape for each - proving the two commands do
 // not (and structurally cannot easily) diverge, since they share one seam.
 
+use sm_front::{
+    admit_logos_program_with_profile, admit_program_with_profile, lex, GrammarAdmission,
+};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn foundation_profile() -> sm_profile::ParserProfile {
+    sm_profile::ParserProfile::foundation_default()
+}
 
 static DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -107,7 +114,19 @@ fn ir_a3_authoritative_logos_error_survives_on_both_commands() {
     // genuine parse failure (same control-checked shape as
     // `project_authority_exclusive_evidence_with_parse_failure_stays_applied`
     // in `crates/smc-cli/src/app.rs`).
-    std::fs::write(&root, "Entity A\n").expect("write root");
+    let src = "Entity A\n";
+    std::fs::write(&root, src).expect("write root");
+
+    // Control: prove the fixture really is Logos Exclusive(Err), not
+    // NoClaim or something else - or this test would not prove what it
+    // claims to.
+    let profile = foundation_profile();
+    let tokens = lex(src).expect("lex");
+    let logos = admit_logos_program_with_profile(src, &tokens, &profile);
+    assert!(
+        matches!(logos, GrammarAdmission::Exclusive(Err(_))),
+        "control check: fixture must produce Logos Exclusive(Err), got: {logos:?}"
+    );
 
     let (dump_err, hash_err) = both_err(&root);
     for (label, err) in [("dump-ir", &dump_err), ("hash-ir", &hash_err)] {
@@ -131,11 +150,24 @@ fn ir_a3_authoritative_logos_error_survives_on_both_commands() {
 fn ir_a4_real_exclusive_vs_exclusive_ambiguity_on_both_commands() {
     let dir = mk_temp_dir("ir1931_a4_ambiguous_exclusive");
     let root = dir.join("main.sm");
-    std::fs::write(
-        &root,
-        "fn main() {\n    return;\n}\n\nEntity A:\n    state x: quad\n",
-    )
-    .expect("write root");
+    let src = "fn main() {\n    return;\n}\n\nEntity A:\n    state x: quad\n";
+    std::fs::write(&root, src).expect("write root");
+
+    // Control: prove both grammars really do produce Exclusive(Err) for
+    // this exact fixture - or this fixture would not distinguish
+    // "ambiguity detected" from "RustLike fallback happened to also fail".
+    let profile = foundation_profile();
+    let tokens = lex(src).expect("lex");
+    let logos = admit_logos_program_with_profile(src, &tokens, &profile);
+    let rustlike = admit_program_with_profile(src, &tokens, &profile);
+    assert!(
+        matches!(logos, GrammarAdmission::Exclusive(Err(_))),
+        "control check: fixture must produce Logos Exclusive(Err), got: {logos:?}"
+    );
+    assert!(
+        matches!(rustlike, GrammarAdmission::Exclusive(Err(_))),
+        "control check: fixture must produce RustLike Exclusive(Err), got: {rustlike:?}"
+    );
 
     let (dump_err, hash_err) = both_err(&root);
     for (label, err) in [("dump-ir", &dump_err), ("hash-ir", &hash_err)] {
@@ -201,12 +233,34 @@ fn ir_a7_authoritative_rustlike_error_survives_on_both_commands() {
     // Missing closing brace - genuine RustLike-exclusive evidence,
     // genuine parse failure, zero Logos-exclusive evidence anywhere in
     // the text.
-    std::fs::write(&root, "fn main() {\n    return;\n").expect("write root");
+    let src = "fn main() {\n    return;\n";
+    std::fs::write(&root, src).expect("write root");
+
+    // Control: prove the fixture really is Logos NoClaim / RustLike
+    // Exclusive(Err) - not, say, an accidental ambiguity or no-claim
+    // cell - or the assertions below would not prove what they claim to.
+    let profile = foundation_profile();
+    let tokens = lex(src).expect("lex");
+    let logos = admit_logos_program_with_profile(src, &tokens, &profile);
+    let rustlike = admit_program_with_profile(src, &tokens, &profile);
+    assert!(
+        matches!(logos, GrammarAdmission::NoClaim),
+        "control check: fixture must be Logos NoClaim (no competing evidence), got: {logos:?}"
+    );
+    assert!(
+        matches!(rustlike, GrammarAdmission::Exclusive(Err(_))),
+        "control check: fixture must produce RustLike Exclusive(Err), got: {rustlike:?}"
+    );
 
     let (dump_err, hash_err) = both_err(&root);
     assert_eq!(
         dump_err, hash_err,
         "dump-ir and hash-ir must surface the identical authoritative RustLike error"
+    );
+    assert!(
+        !dump_err.contains("AMBIGUOUS") && !dump_err.contains("NO SURFACE CLAIM"),
+        "must be the authoritative RustLike parse error itself, not a misclassified \
+         ambiguity/no-claim diagnostic, got: {dump_err}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
