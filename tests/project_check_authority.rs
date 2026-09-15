@@ -275,3 +275,54 @@ fn t9_executable_helper_import_convention_still_admitted() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// P10 - Decision F final consumer migration (#1931): a real
+// `Exclusive`/`Exclusive` cross-grammar conflict must remain terminal
+// ambiguity, never an implicit project-mechanism win. Before this
+// checkpoint the routing table happened to get this right by
+// construction (it mirrored `resolve_surface_authority` by hand); this
+// is the forward-looking regression that would catch a future
+// projection defect now that routing consumes the canonical resolver
+// directly instead.
+#[test]
+fn p10_real_exclusive_vs_exclusive_ambiguity_is_not_routed_to_project_loader() {
+    let dir = mk_temp_dir("p1931_p10_ambiguous");
+    let root = dir.join("root.sm");
+    std::fs::write(
+        &root,
+        "fn main() {\n    return;\n}\n\nEntity A:\n    state x: quad\n",
+    )
+    .expect("write root");
+
+    let err = cli_err("check", &root);
+    assert!(
+        err.contains("AMBIGUOUS"),
+        "expected the canonical, sm-sema-owned ambiguity diagnostic, got: {err}"
+    );
+    assert!(
+        !err.contains("cyclic import") && !err.contains("failed to resolve import"),
+        "must not be misrouted through the project loader's own diagnostics: {err}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// P11 - Decision F final consumer migration (#1931): genuinely blank/
+// comment-only input (`NoClaim`/`NoClaim`) must remain a terminal
+// no-surface-claim result, never routed into the project loader (which
+// would fail closed for the wrong reason - "no Logos entry to recurse
+// imports from" - rather than surfacing the actual no-evidence outcome).
+#[test]
+fn p11_blank_input_no_surface_claim_is_not_routed_to_project_loader() {
+    let dir = mk_temp_dir("p1931_p11_no_claim");
+    let root = dir.join("root.sm");
+    std::fs::write(&root, "// just a comment\n").expect("write root");
+
+    let err = cli_err("check", &root);
+    assert!(
+        err.contains("NO SURFACE CLAIM"),
+        "expected the canonical, sm-sema-owned no-surface-claim diagnostic, got: {err}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
