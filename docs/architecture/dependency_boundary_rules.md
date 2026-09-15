@@ -45,4 +45,4 @@ Immediate debt markers:
 
 - `ParserProfile` outside `sm-profile` is architectural debt;
 - richer `fx` arithmetic beyond the current literal/value transport path is architectural debt;
-- `smc-cli`'s `resolve_project_route` (`#1919`) is one tracked, measured pre-Decision-F local cross-grammar resolver, pending its own migration PR to consume `sm-front::resolve_surface_authority` directly — tracked by exact count (not a path allowlist) in `tests/surface_authority_guard.rs`'s `EXPECTED_LEGACY_VIOLATION_COUNTS`;
+- `smc-cli`'s `resolve_project_route` (`#1919`) was the last tracked, measured pre-Decision-F local cross-grammar resolver in the repository — migrated (`#1931`) to consume `sm-front::resolve_surface_authority` directly; `tests/surface_authority_guard.rs`'s `EXPECTED_LEGACY_VIOLATION_COUNTS` is now empty, and any new local resolver anywhere outside `sm-front` fails the guard immediately as an unexpected violation;

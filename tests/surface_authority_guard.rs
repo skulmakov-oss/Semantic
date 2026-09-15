@@ -69,13 +69,13 @@ const SELF_EXEMPT_PATH: &str = "tests/surface_authority_guard.rs";
 /// updated in the same PR (the debt was paid down without being
 /// acknowledged here). Update the count only in the PR that actually
 /// changes the number of local resolvers in that file.
-const EXPECTED_LEGACY_VIOLATION_COUNTS: &[(&str, usize)] = &[
-    // `smc-cli`'s `resolve_project_route` (`#1919`) - exactly one known,
-    // pre-Decision-F local resolver, pending its own migration PR. Any
-    // second occurrence (a `_v2`, a new `some_auto_dispatch`, etc.) must
-    // fail this guard immediately, not hide behind a whole-file skip.
-    ("crates/smc-cli/src/app.rs", 1),
-];
+// `smc-cli`'s `resolve_project_route` (`#1919`) was the last tracked
+// entry here - migrated to consume `resolve_surface_authority` directly
+// (Decision F final consumer migration), so the tracked debt count is
+// now zero across the whole repository. Any new local resolver anywhere
+// outside `sm-front` must fail this guard immediately as an *unexpected*
+// violation, not hide behind a reintroduced entry here.
+const EXPECTED_LEGACY_VIOLATION_COUNTS: &[(&str, usize)] = &[];
 
 /// The two-tuple `match (a, b) { ... }` shape every one of the three
 /// historical local resolvers shared (`sm-sema`'s former

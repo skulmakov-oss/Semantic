@@ -2677,13 +2677,23 @@ exact expected occurrence count per file, not a whole-file allowlist),
 so a second, unrelated local resolver added to an already-exempted file
 still fails the guard.
 
-**Consumer migration status**: `sm-sema` migrated in the same PR that
-froze this decision (private `SurfaceVerdict`/`resolve_surface_authority`
-deleted, `check_source_with_profile` consumes the canonical type
-directly). `smc-cli`'s `resolve_project_route` (`#1919`) and `sm-ir`'s
-rebase of PR #1929 (`#1920`) are each separate, explicitly deferred
-follow-up checkpoints - not folded into the Decision F freeze itself.
+**Consumer migration status**: all three known pre-Decision-F consumers
+have migrated to consume `sm_front::resolve_surface_authority` directly,
+each its own separate checkpoint with its own owner GO. `sm-sema`
+migrated in the same PR that froze this decision (private
+`SurfaceVerdict`/`resolve_surface_authority` deleted,
+`check_source_with_profile` consumes the canonical type directly).
+`sm-ir`'s rebase of PR #1929 (`#1920`) migrated next - its private
+`logos_owns_outright` adapter deleted, `compile_program_to_ir_with_
+options_and_profile` consumes the canonical type directly (`#1920`
+CLOSED). `smc-cli`'s `resolve_project_route`/`ProjectRoute` (`#1919`)
+migrated last (`#1931`) - `check_root_with_project_authority` consumes
+the canonical type directly, and the same checkpoint repaired a sibling
+defect in `cmd_dump_ir`/`cmd_hash_ir` that independently equated an
+authoritative Logos parse failure with RustLike ownership.
 
 **Implementation status**: Decision F foundation is implemented by
-PR #1930. Further consumer migrations (`smc-cli`, `sm-ir`/`#1920`)
-require their own separate checkpoints and owner GO.
+PR #1930. Consumer-local `GrammarAdmission`-pair resolver debt is now
+zero repository-wide - `tests/surface_authority_guard.rs`'s
+`EXPECTED_LEGACY_VIOLATION_COUNTS` is empty, and any future local
+resolver anywhere outside `sm-front` fails the guard immediately.
