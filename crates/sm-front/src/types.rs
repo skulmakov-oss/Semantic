@@ -944,11 +944,14 @@ pub enum GrammarAdmission<T> {
 /// authority resolution, establishing the canonical replacement for:
 /// `sm-sema`'s former private `resolve_surface_authority`/
 /// `SurfaceVerdict` (deleted in the same PR that froze this decision -
-/// `sm-sema` now consumes this type directly); `smc-cli`'s still-pending
-/// legacy `resolve_project_route`/`ProjectRoute` (`#1919`, migration
-/// tracked as measured debt, not yet performed); and `sm-ir`'s blocked
-/// `logos_owns_outright` attempt (`#1920`, PR #1929, NO-GO - to be
-/// rebased onto this type in its own follow-up, not yet performed).
+/// `sm-sema` now consumes this type directly); `sm-ir`'s once-blocked
+/// `logos_owns_outright` attempt (`#1920`, PR #1929 - rebased onto this
+/// type and merged, deleting the private adapter); and `smc-cli`'s
+/// legacy `resolve_project_route`/`ProjectRoute` (`#1919`, migrated last
+/// as `#1931` - `check_root_with_project_authority` now consumes this
+/// type directly). All three known pre-Decision-F local resolvers are
+/// migrated; `tests/surface_authority_guard.rs`'s
+/// `EXPECTED_LEGACY_VIOLATION_COUNTS` is empty.
 ///
 /// This type carries only the *classification*, never a rendered
 /// diagnostic: `sm-front` resolves authority, it does not lex, parse,

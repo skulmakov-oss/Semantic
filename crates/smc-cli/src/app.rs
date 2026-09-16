@@ -28,7 +28,8 @@ use sm_emit::{
 };
 use sm_front::{
     admit_logos_program_with_profile, admit_program_with_profile, lex,
-    parse_logos_program_with_profile, parse_program_with_profile, GrammarAdmission, ParserProfile,
+    parse_logos_program_with_profile, parse_program_with_profile, resolve_surface_authority,
+    ParserProfile, SurfaceAuthority,
 };
 use sm_ir::{compile_program_to_ir_with_options_and_profile, lower_logos_laws_to_ir};
 use sm_runtime_core::hello_observation_sink::HelloObservationClass;
@@ -125,100 +126,59 @@ fn cli_profile() -> ParserProfile {
 /// Logos-only project loader instead, making Logos's `Err` incorrectly
 /// authoritative over a case Decision E gives to RustLike.
 ///
-/// The fix: reuse the exact same two-stage table `resolve_surface_authority`
-/// already implements, but only to answer one question - would Decision
-/// E give Logos *outright* ownership? Every other outcome (`RustLike`
-/// ownership, a tie, `NoClaim`/`NoClaim`) defers verbatim to
-/// `check_source_with_profile`, which independently re-derives both
-/// admissions and calls the real `resolve_surface_authority` itself -
-/// so this function never has to invent or duplicate any of that
-/// resolver's diagnostic text, only decide whether the *project*
-/// mechanism (multi-module import loading) is the right one to run at
-/// all. See `resolve_project_route`'s doc comment for the full table.
+/// **Decision F correction (2026-09-14)**: the fix above (reuse the
+/// exact same two-stage table `resolve_surface_authority` already
+/// implements, but only to answer one question - would Decision E give
+/// Logos *outright* ownership?) is unchanged. What changed is *how*:
+/// this function used to answer that question through a private local
+/// adapter (`resolve_project_route`/`ProjectRoute`) that mirrored
+/// `resolve_surface_authority`'s two-stage table by hand - the third
+/// independent reimplementation of the same table in this codebase,
+/// after `sm-sema` and (briefly, pre-Decision-F) `sm-ir`. Decision F
+/// froze `sm_front::resolve_surface_authority` as the sole canonical
+/// resolver; this function now calls it directly and only projects its
+/// four-variant result onto the two-mechanism question it actually
+/// owns (does the *project* mechanism apply, or not) - it does not
+/// re-derive, approximate, or duplicate the table itself. Every
+/// non-`LogosOwns` outcome (`RustLikeOwns`, a genuine `Ambiguous` tie,
+/// or `NoSurfaceClaim`) defers verbatim to `check_source_with_profile`,
+/// which independently re-derives both admissions and calls the real
+/// `resolve_surface_authority` itself - so this function never has to
+/// invent or duplicate any of that resolver's diagnostic text.
 fn check_root_with_project_authority(
     root_canon: &Path,
     root_src: &str,
     provider: &CliFsModuleProvider,
     parser_profile: &ParserProfile,
 ) -> Result<sm_sema::SemanticReport, sm_sema::SemanticError> {
-    let route = match lex(root_src) {
-        Ok(tokens) => {
-            let logos = admit_logos_program_with_profile(root_src, &tokens, parser_profile);
-            let rustlike = admit_program_with_profile(root_src, &tokens, parser_profile);
-            resolve_project_route(&logos, &rustlike)
-        }
-        // A lex failure carries no admission evidence for either grammar
-        // (Decision E) - `check_source_with_profile` below will lex the
-        // identical text and surface the identical lex error itself.
-        Err(_) => ProjectRoute::SingleFile,
-    };
-    match route {
+    let authority = lex(root_src).map(|tokens| {
+        let logos = admit_logos_program_with_profile(root_src, &tokens, parser_profile);
+        let rustlike = admit_program_with_profile(root_src, &tokens, parser_profile);
+        resolve_surface_authority(logos, rustlike)
+    });
+    match authority {
         // Logos owns outright (Decision E Stage 1 or Stage 2): the
         // project mechanism is authoritative from here, never replaced
         // by the single-file check.
-        ProjectRoute::Project => {
+        Ok(SurfaceAuthority::LogosOwns(_)) => {
             check_file_with_provider_and_profile(root_canon, provider, parser_profile)
         }
         // RustLike owns, or the two grammars tie (`Ambiguous`), or
-        // neither claims anything (`NoClaim`/`NoClaim`): the project
+        // neither claims anything (`NoSurfaceClaim`): the project
         // mechanism was never a candidate. `check_source_with_profile`
         // re-derives both admissions itself and calls the real
         // `resolve_surface_authority`, so it produces the identical
         // RustLike/ambiguous/no-claim result Decision E requires.
-        ProjectRoute::SingleFile | ProjectRoute::Ambiguous => {
-            check_source_with_profile(root_src, parser_profile)
-        }
-    }
-}
-
-/// Which mechanism Decision E's frozen two-stage law gives ownership to,
-/// for the purpose of deciding whether the *multi-module project*
-/// mechanism (Logos-only) is a candidate at all. Mirrors
-/// `sm-sema::std_adapters::resolve_surface_authority`'s `SurfaceVerdict`
-/// exactly - `Project` corresponds to `LogosOwns`, `SingleFile` covers
-/// both `RustLikeOwns` and `NoSurfaceClaim` (both defer to the same
-/// `check_source_with_profile` call), and `Ambiguous` corresponds to
-/// `SurfaceVerdict::Ambiguous`.
-///
-/// | Logos       | RustLike    | Route        |
-/// |-------------|-------------|--------------|
-/// | `NoClaim`   | `NoClaim`   | `SingleFile` (no surface claim)  |
-/// | `NoClaim`   | `Shared`/`Exclusive` | `SingleFile` (RustLike owns) |
-/// | `Shared`/`Exclusive` | `NoClaim` | `Project` (Logos owns) |
-/// | `Exclusive` | `Shared`    | `Project` (Logos owns)  |
-/// | `Shared`    | `Exclusive` | `SingleFile` (RustLike owns) |
-/// | `Exclusive` | `Exclusive` | `Ambiguous` (tie)       |
-/// | `Shared(Ok)` | `Shared(Ok)`  | `Ambiguous` (tie)    |
-/// | `Shared(Ok)` | `Shared(Err)` | `Project` (Logos owns) |
-/// | `Shared(Err)` | `Shared(Ok)` | `SingleFile` (RustLike owns) |
-/// | `Shared(Err)` | `Shared(Err)` | `Ambiguous` (tie)   |
-#[derive(Debug, PartialEq, Eq)]
-enum ProjectRoute {
-    Project,
-    SingleFile,
-    Ambiguous,
-}
-
-fn resolve_project_route<L, R>(
-    logos: &GrammarAdmission<L>,
-    rustlike: &GrammarAdmission<R>,
-) -> ProjectRoute {
-    use GrammarAdmission::{Exclusive, NoClaim, Shared};
-    match (logos, rustlike) {
-        (NoClaim, NoClaim) => ProjectRoute::SingleFile,
-        (NoClaim, Shared(_) | Exclusive(_)) => ProjectRoute::SingleFile,
-        (Shared(_) | Exclusive(_), NoClaim) => ProjectRoute::Project,
-        (Exclusive(_), Shared(_)) => ProjectRoute::Project,
-        (Shared(_), Exclusive(_)) => ProjectRoute::SingleFile,
-        (Exclusive(_), Exclusive(_)) => ProjectRoute::Ambiguous,
-        (Shared(logos_outcome), Shared(rustlike_outcome)) => {
-            match (logos_outcome.is_ok(), rustlike_outcome.is_ok()) {
-                (true, true) => ProjectRoute::Ambiguous,
-                (true, false) => ProjectRoute::Project,
-                (false, true) => ProjectRoute::SingleFile,
-                (false, false) => ProjectRoute::Ambiguous,
-            }
-        }
+        //
+        // A lex failure (`Err(_)`) carries no admission evidence for
+        // either grammar (Decision E) - `check_source_with_profile`
+        // below will lex the identical text and surface the identical
+        // lex error itself, rather than this function inventing a fake
+        // `NoSurfaceClaim` for what is actually a lex-stage failure.
+        Ok(SurfaceAuthority::RustLikeOwns(_))
+        | Ok(SurfaceAuthority::Ambiguous { .. })
+        | Ok(SurfaceAuthority::NoSurfaceClaim)
+        | Err(_) => check_source_with_profile(root_src, parser_profile),
     }
 }
 
@@ -1218,6 +1178,89 @@ fn cmd_dump_ast(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Decision F (2026-09-14): the sole private routing seam `cmd_dump_ir`
+/// and `cmd_hash_ir` both render IR through, so a future fix in one
+/// cannot silently leave the other divergent - the two used to carry
+/// independent copies of the same `Auto` routing logic, and that logic
+/// was the forbidden equivalence Decision F exists to rule out:
+///
+/// ```text
+/// if Logos parser succeeds { Logos IR } else { RustLike }
+/// ```
+///
+/// which silently collapsed an authoritative Logos parse *failure*, a
+/// genuine cross-grammar ambiguity, and a genuine no-surface-claim input
+/// into "try RustLike anyway" - the same shape of defect #1920 already
+/// repaired in `sm-ir`'s own `Auto` path (see
+/// `compile_program_to_ir_with_options_and_profile`). Explicit
+/// `RustLike`/`Logos` profiles are unchanged: neither classifies via
+/// `resolve_surface_authority` at all, since authority is already
+/// explicitly selected by the caller.
+fn render_ir_for_profile(
+    src: &str,
+    profile: CompileProfile,
+    opt: OptLevel,
+    parser_profile: &ParserProfile,
+) -> Result<String, String> {
+    match profile {
+        CompileProfile::Logos => {
+            let logos =
+                parse_logos_program_with_profile(src, parser_profile).map_err(|e| e.to_string())?;
+            Ok(format!("{:#?}", lower_logos_laws_to_ir(&logos)))
+        }
+        CompileProfile::RustLike => compile_program_to_ir_with_options_and_profile(
+            src,
+            CompileProfile::RustLike,
+            opt,
+            parser_profile,
+        )
+        .map(|ir| format!("{:#?}", ir))
+        .map_err(|e| e.to_string()),
+        CompileProfile::Auto => {
+            let tokens = lex(src).map_err(|e| e.to_string())?;
+            let logos = admit_logos_program_with_profile(src, &tokens, parser_profile);
+            let rustlike = admit_program_with_profile(src, &tokens, parser_profile);
+            match resolve_surface_authority(logos, rustlike) {
+                // Logos owns outright: `dump-ir`/`hash-ir`'s whole
+                // reason for existing over sm-ir's own RustLike-only
+                // `Auto` path is to be able to render/hash real Logos
+                // IR, instead of sm-ir's generic SemCode-function-IR
+                // redirect - so only this arm renders Logos IR directly.
+                SurfaceAuthority::LogosOwns(Ok(logos_program)) => {
+                    Ok(format!("{:#?}", lower_logos_laws_to_ir(&logos_program)))
+                }
+                // Authoritative, unconditional, zero RustLike fallback -
+                // never replaced by a generic redirect.
+                SurfaceAuthority::LogosOwns(Err(e)) => Err(e.to_string()),
+                // RustLike ownership, a genuine tie, or no surface claim
+                // at all: `smc-cli` does not own RustLike lowering
+                // internals, ambiguity diagnostics, or no-claim
+                // diagnostics - `sm-ir`'s own `Auto` path already
+                // consumes this exact same canonical resolver and owns
+                // all three outcomes' semantics. Re-deriving admissions
+                // a second time inside that call is acceptable (Decision
+                // F requires consuming the canonical resolver, not
+                // minimizing how many times it is called) - it is not a
+                // second, diverging implementation of the table, and it
+                // avoids inventing a new public "lower an already-parsed
+                // Program" API merely to skip a redundant classification.
+                SurfaceAuthority::RustLikeOwns(_)
+                | SurfaceAuthority::Ambiguous { .. }
+                | SurfaceAuthority::NoSurfaceClaim => {
+                    compile_program_to_ir_with_options_and_profile(
+                        src,
+                        CompileProfile::Auto,
+                        opt,
+                        parser_profile,
+                    )
+                    .map(|ir| format!("{:#?}", ir))
+                    .map_err(|e| e.to_string())
+                }
+            }
+        }
+    }
+}
+
 fn cmd_dump_ir(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
@@ -1264,39 +1307,7 @@ fn cmd_dump_ir(args: &[String]) -> Result<(), String> {
         println!("{}", cached);
         return Ok(());
     }
-    let rendered = match profile {
-        CompileProfile::Logos => {
-            let logos = parse_logos_program_with_profile(&src, &parser_profile)
-                .map_err(|e| e.to_string())?;
-            format!("{:#?}", lower_logos_laws_to_ir(&logos))
-        }
-        CompileProfile::RustLike => format!(
-            "{:#?}",
-            compile_program_to_ir_with_options_and_profile(
-                &src,
-                CompileProfile::RustLike,
-                opt,
-                &parser_profile,
-            )
-            .map_err(|e| e.to_string())?
-        ),
-        CompileProfile::Auto => {
-            if let Ok(logos) = parse_logos_program_with_profile(&src, &parser_profile) {
-                format!("{:#?}", lower_logos_laws_to_ir(&logos))
-            } else {
-                format!(
-                    "{:#?}",
-                    compile_program_to_ir_with_options_and_profile(
-                        &src,
-                        CompileProfile::RustLike,
-                        opt,
-                        &parser_profile,
-                    )
-                    .map_err(|e| e.to_string())?
-                )
-            }
-        }
-    };
+    let rendered = render_ir_for_profile(&src, profile, opt, &parser_profile)?;
     let _ = save_text_pack(&ir_pack, PACK_KIND_IR, &rendered);
     println!("{}", rendered);
     Ok(())
@@ -1537,7 +1548,12 @@ fn ir_pack_key(
         format!("{:016x}", downstream_pack_fingerprint(path, source)?).as_bytes(),
     );
     blob.push(0);
-    blob.extend_from_slice(format!("profile={:?};opt={:?};lowering=v1", profile, opt).as_bytes());
+    // v2: the `Auto` routing this key's cached payload depends on
+    // changed (Decision F - `render_ir_for_profile` no longer equates
+    // "Logos parse failed" with "RustLike owns"), so a v1 entry for the
+    // same (path, content, profile, opt) could otherwise silently keep
+    // serving a pre-fix result forever.
+    blob.extend_from_slice(format!("profile={:?};opt={:?};lowering=v2", profile, opt).as_bytes());
     Ok(fnv1a64(&blob))
 }
 
@@ -2071,39 +2087,7 @@ fn cmd_hash_ir(args: &[String]) -> Result<(), String> {
     let text = if let Some(cached) = load_text_pack(&ir_pack, PACK_KIND_IR)? {
         cached
     } else {
-        let rendered = match profile {
-            CompileProfile::Logos => {
-                let logos = parse_logos_program_with_profile(&src, &parser_profile)
-                    .map_err(|e| e.to_string())?;
-                format!("{:#?}", lower_logos_laws_to_ir(&logos))
-            }
-            CompileProfile::RustLike => format!(
-                "{:#?}",
-                compile_program_to_ir_with_options_and_profile(
-                    &src,
-                    CompileProfile::RustLike,
-                    opt,
-                    &parser_profile,
-                )
-                .map_err(|e| e.to_string())?
-            ),
-            CompileProfile::Auto => {
-                if let Ok(logos) = parse_logos_program_with_profile(&src, &parser_profile) {
-                    format!("{:#?}", lower_logos_laws_to_ir(&logos))
-                } else {
-                    format!(
-                        "{:#?}",
-                        compile_program_to_ir_with_options_and_profile(
-                            &src,
-                            CompileProfile::RustLike,
-                            opt,
-                            &parser_profile,
-                        )
-                        .map_err(|e| e.to_string())?
-                    )
-                }
-            }
-        };
+        let rendered = render_ir_for_profile(&src, profile, opt, &parser_profile)?;
         let _ = save_text_pack(&ir_pack, PACK_KIND_IR, &rendered);
         rendered
     };
@@ -2209,7 +2193,7 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sm_front::FrontendError;
+    use sm_front::GrammarAdmission;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn mk_temp_dir(prefix: &str) -> PathBuf {
@@ -2228,212 +2212,18 @@ mod tests {
 
     // ------------------------------------------------------------------
     // #1919 Stage 2B: `check_root_with_project_authority` regressions.
-    // Tier A - direct unit tests of the applicability seam itself.
-
-    // Owner correction (2026-09-14): applicability must be decided by
-    // GrammarAdmission's evidence basis, never by parse outcome. These
-    // exercise `project_mechanism_applies` directly against every
-    // GrammarAdmission shape, with synthetic values - no real source
-    // text or filesystem needed.
     //
-    // The owner's own five required mappings (NoClaim -> NotApplicable;
-    // every Shared/Exclusive variant, regardless of its own Ok/Err, ->
-    // Applied) are exactly what holds when RustLike offers no competing
-    // claim (`NoClaim`) - the first five tests below pair each Logos
-    // admission against RustLike `NoClaim` for exactly this reason.
-    //
-    // Testing against real fixtures then surfaced a real regression the
-    // single-admission model could not see: `Import "x.sm"` is `Shared`
-    // evidence for *both* grammars, so a genuine RustLike program using
-    // the pre-existing "executable helper import" convention
-    // (`Import "helper.sm"` + `fn main() {...}`) is Logos-`Shared` too,
-    // even though it has zero Logos intent. The corrected law compares
-    // *both* grammars' evidence; the last two tests below prove the
-    // specific cross-grammar cases that distinguish it from the
-    // single-admission model - see `check_root_with_project_authority`'s
-    // doc comment for the full table.
-
-    fn synth_err(msg: &str) -> Result<i32, FrontendError> {
-        Err(FrontendError::syntax(0, msg))
-    }
-    fn synth_ok(v: i32) -> Result<i32, FrontendError> {
-        Ok(v)
-    }
-
-    #[test]
-    fn project_mechanism_no_claim_is_not_applicable() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::<i32>::NoClaim,
-                &GrammarAdmission::<i32>::NoClaim
-            ),
-            ProjectRoute::SingleFile
-        );
-    }
-
-    #[test]
-    fn project_mechanism_shared_vs_no_claim_is_project() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Shared(synth_ok(1)),
-                &GrammarAdmission::<i32>::NoClaim
-            ),
-            ProjectRoute::Project
-        );
-    }
-
-    #[test]
-    fn project_mechanism_exclusive_vs_no_claim_is_project() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Exclusive(synth_ok(1)),
-                &GrammarAdmission::<i32>::NoClaim
-            ),
-            ProjectRoute::Project
-        );
-    }
-
-    #[test]
-    fn project_mechanism_exclusive_err_vs_no_claim_is_project() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Exclusive(synth_err("exclusive failure")),
-                &GrammarAdmission::<i32>::NoClaim
-            ),
-            ProjectRoute::Project
-        );
-    }
-
-    // Cross-grammar case that fixed the first regression: Logos `Shared`
-    // loses outright to RustLike `Exclusive` - exactly the
-    // `Import "helper.sm"` + `fn main() {...}` shape.
-    #[test]
-    fn project_mechanism_shared_loses_to_rustlike_exclusive() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Shared(synth_ok(1)),
-                &GrammarAdmission::Exclusive(synth_ok(1))
-            ),
-            ProjectRoute::SingleFile
-        );
-    }
-
-    // Symmetric confirmation: Logos `Exclusive` beats RustLike `NoClaim`
-    // or `Shared`, but ties (not "beats") RustLike `Exclusive` - see
-    // `project_mechanism_exclusive_vs_exclusive_is_ambiguous` below.
-    #[test]
-    fn project_mechanism_exclusive_beats_weaker_rustlike_claims() {
-        for rustlike in [
-            GrammarAdmission::<i32>::NoClaim,
-            GrammarAdmission::Shared(synth_ok(1)),
-        ] {
-            assert_eq!(
-                resolve_project_route(&GrammarAdmission::Exclusive(synth_ok(1)), &rustlike),
-                ProjectRoute::Project
-            );
-        }
-    }
-
-    // Owner-flagged regression (round 3): `Exclusive`/`Exclusive` is a
-    // genuine tie in `resolve_surface_authority` (Decision E), not a
-    // Logos win - collapsing it to `Project` would make Logos's own
-    // `Err` wrongly authoritative over a case Decision E calls
-    // `Ambiguous`.
-    #[test]
-    fn project_mechanism_exclusive_vs_exclusive_is_ambiguous() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Exclusive(synth_ok(1)),
-                &GrammarAdmission::Exclusive(synth_ok(2))
-            ),
-            ProjectRoute::Ambiguous
-        );
-    }
-
-    // Owner-flagged regression (round 3), required case 3: `Shared`/
-    // `Shared` with both sides `Ok` is a tie (Decision E Stage 2),
-    // never `Project`.
-    #[test]
-    fn project_mechanism_shared_ok_vs_shared_ok_is_ambiguous() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Shared(synth_ok(1)),
-                &GrammarAdmission::Shared(synth_ok(2))
-            ),
-            ProjectRoute::Ambiguous
-        );
-    }
-
-    // Owner-flagged regression (round 3), required case 2: `Shared(Ok)`
-    // vs `Shared(Err)` - Logos wins Stage 2, `Project` must run.
-    #[test]
-    fn project_mechanism_shared_ok_vs_shared_err_is_project() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Shared(synth_ok(1)),
-                &GrammarAdmission::Shared(synth_err("rustlike shared failure"))
-            ),
-            ProjectRoute::Project
-        );
-    }
-
-    // Owner-flagged regression (round 3), required case 1 - the actual
-    // defect that triggered this correction round: `Shared(Err)` vs
-    // `Shared(Ok)` must route to RustLike/single-file, matching
-    // `resolve_surface_authority`'s own
-    // `resolver_shared_vs_shared_err_ok_rustlike_owns` regression. The
-    // evidence-strength-only version of this function got this case
-    // wrong (routed to `Project`, making Logos's `Err` wrongly
-    // authoritative).
-    #[test]
-    fn project_mechanism_shared_err_vs_shared_ok_is_single_file() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Shared(synth_err("logos shared failure")),
-                &GrammarAdmission::Shared(synth_ok(1))
-            ),
-            ProjectRoute::SingleFile
-        );
-    }
-
-    // Owner-flagged regression (round 3), required case 4: `Shared`/
-    // `Shared` with both sides `Err` is also a tie (Decision E
-    // "evidence preservation" - neither outcome may be silently
-    // dropped by picking one side as authoritative).
-    #[test]
-    fn project_mechanism_shared_err_vs_shared_err_is_ambiguous() {
-        assert_eq!(
-            resolve_project_route(
-                &GrammarAdmission::Shared(synth_err("logos failure")),
-                &GrammarAdmission::Shared(synth_err("rustlike failure"))
-            ),
-            ProjectRoute::Ambiguous
-        );
-    }
-
-    // M9 guard, direct form: a mutation that collapses every
-    // `Shared`/`Shared` pairing to `Project` regardless of outcome must
-    // be caught by at least one of the four `Shared`/`Shared` tests
-    // above disagreeing with `Project`. This test pins the specific
-    // combination the owner's M9 mutation targets, so the mutation's
-    // failure mode is visible in one place rather than only inferred
-    // from the four cases individually.
-    #[test]
-    fn project_mechanism_shared_shared_outcome_matrix_is_not_uniformly_project() {
-        let cases = [
-            (synth_ok(1), synth_ok(2), ProjectRoute::Ambiguous),
-            (synth_ok(1), synth_err("r"), ProjectRoute::Project),
-            (synth_err("l"), synth_ok(2), ProjectRoute::SingleFile),
-            (synth_err("l"), synth_err("r"), ProjectRoute::Ambiguous),
-        ];
-        for (logos_outcome, rustlike_outcome, expected) in cases {
-            let route = resolve_project_route(
-                &GrammarAdmission::Shared(logos_outcome),
-                &GrammarAdmission::Shared(rustlike_outcome),
-            );
-            assert_eq!(route, expected);
-        }
-    }
+    // Decision F (2026-09-14): the direct predicate-table tests that
+    // used to live here (validating a private `resolve_project_route`
+    // adapter's own boolean/tri-state projection over every
+    // `GrammarAdmission` cell) are gone along with that adapter -
+    // `resolve_surface_authority`'s table is exhaustively tested once,
+    // in `sm-front`'s own test module. What remains this file's own
+    // responsibility, and what the real-source regressions below cover,
+    // is that `check_root_with_project_authority`'s *projection* of the
+    // canonical `SurfaceAuthority` result onto "does the project
+    // mechanism apply" is correct end-to-end - not the frozen table
+    // itself.
 
     // Real-source adversarial regression, per the owner's exact
     // requirement: root establishes genuine positive Logos evidence
@@ -2739,6 +2529,102 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ------------------------------------------------------------------
+    // #1931 Part B: `render_ir_for_profile` regressions (shared by
+    // `cmd_dump_ir`/`cmd_hash_ir`). IR-A5 (Shared/Shared ambiguity) is
+    // tested directly against the helper here, bypassing `read_source_
+    // with_package_admission`'s executable-bundle read step - a real
+    // `smc dump-ir`/`hash-ir` invocation on a bare `Import "a.sm"`
+    // fixture hits that unrelated, pre-existing bundling mechanism
+    // first (it eagerly treats every import as a RustLike helper module
+    // to inline), which is orthogonal to the Auto-routing defect this
+    // checkpoint fixes - see `tests/dump_ir_hash_ir_surface_authority.rs`
+    // for the full end-to-end IR-A1..A7 matrix and this constraint's
+    // fuller explanation.
+    #[test]
+    fn ir_a5_shared_vs_shared_ambiguity_via_render_ir_for_profile() {
+        let src = "Import \"a.sm\"\n";
+        let profile = cli_profile();
+
+        let tokens = lex(src).expect("lex");
+        let logos = admit_logos_program_with_profile(src, &tokens, &profile);
+        let rustlike = admit_program_with_profile(src, &tokens, &profile);
+        assert!(
+            matches!(logos, GrammarAdmission::Shared(_))
+                && matches!(rustlike, GrammarAdmission::Shared(_)),
+            "control check: a bare Import must be Shared evidence for both grammars, \
+             got logos={logos:?}, rustlike={rustlike:?}"
+        );
+
+        let err = render_ir_for_profile(src, CompileProfile::Auto, OptLevel::O0, &profile)
+            .expect_err("a Shared/Shared tie must be terminal ambiguity, not a silent pick");
+        assert!(
+            err.contains("AMBIGUOUS"),
+            "expected the canonical ambiguity diagnostic, got: {err}"
+        );
+    }
+
+    // Structural proof (#1931 Section 16): `cmd_dump_ir` and
+    // `cmd_hash_ir` must route IR through the exact same seam, so a
+    // future fix applied to one cannot silently leave the other
+    // divergent - the two used to carry independent copies of the same
+    // `Auto` routing logic (each with its own `if let Ok(logos) =
+    // parse_logos_program_with_profile(...) { .. } else { .. }`). This
+    // is a text-level check on this file's own source, analogous to
+    // `tests/surface_authority_guard.rs`'s own heuristic, deliberately
+    // scoped to this one file rather than a repository-wide guard.
+    #[test]
+    fn cmd_dump_ir_and_cmd_hash_ir_share_one_ir_routing_seam() {
+        const SOURCE: &str = include_str!("app.rs");
+        let dump_ir_body = function_body_source(SOURCE, "fn cmd_dump_ir(");
+        let hash_ir_body = function_body_source(SOURCE, "fn cmd_hash_ir(");
+
+        for (name, body) in [("cmd_dump_ir", dump_ir_body), ("cmd_hash_ir", hash_ir_body)] {
+            assert!(
+                body.contains("render_ir_for_profile("),
+                "{name} must route IR rendering through the shared render_ir_for_profile seam"
+            );
+            assert!(
+                !body.contains("parse_logos_program_with_profile"),
+                "{name} must not carry its own independent Logos-parse-first routing logic - \
+                 that is exactly the divergence this checkpoint removed, got body containing a \
+                 direct call in: {name}"
+            );
+        }
+    }
+
+    // Extracts the source text of a top-level function's body (from its
+    // signature line to the matching closing brace at column 0), by
+    // simple brace-depth counting - sufficient for this file's own
+    // consistently-formatted `fn name(...) -> ... {` shape, not a
+    // general-purpose Rust parser.
+    #[cfg(test)]
+    fn function_body_source(source: &str, signature_prefix: &str) -> String {
+        let start = source
+            .find(signature_prefix)
+            .unwrap_or_else(|| panic!("could not locate `{signature_prefix}` in app.rs"));
+        let mut depth = 0i32;
+        let mut opened = false;
+        let mut end = source.len();
+        for (offset, ch) in source[start..].char_indices() {
+            match ch {
+                '{' => {
+                    depth += 1;
+                    opened = true;
+                }
+                '}' => {
+                    depth -= 1;
+                    if opened && depth == 0 {
+                        end = start + offset + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        source[start..end].to_string()
     }
 
     #[test]
