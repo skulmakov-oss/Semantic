@@ -29,7 +29,7 @@ use sm_emit::{
 use sm_front::{
     admit_logos_program_with_profile, admit_program_with_profile, lex,
     parse_logos_program_with_profile, parse_program_with_profile, resolve_surface_authority,
-    ParserProfile, SurfaceAuthority,
+    FrontendError, ParserProfile, SurfaceAuthority,
 };
 use sm_ir::{compile_program_to_ir_with_options_and_profile, lower_logos_laws_to_ir};
 use sm_runtime_core::hello_observation_sink::HelloObservationClass;
@@ -1146,6 +1146,70 @@ fn edit_distance(a: &str, b: &str) -> usize {
     dp[bb.len()]
 }
 
+/// Decision F (2026-09-16): the sole private routing seam `cmd_dump_ast`
+/// and `cmd_hash_ast` both render AST through - see `render_ir_for_profile`
+/// for the sibling seam `dump-ir`/`hash-ir` already consume (#1932), and
+/// #1934 for the record of this file's own independent copy of the same
+/// forbidden equivalence:
+///
+/// ```text
+/// if Logos parser succeeds { Logos AST } else { RustLike }
+/// ```
+///
+/// Unlike `dump-ir`/`hash-ir`, `dump-ast`/`hash-ast` carry no `--profile`
+/// flag - they always classify via `resolve_surface_authority`, so this
+/// helper takes no `CompileProfile`. `LogosOwns`/`RustLikeOwns` already
+/// carry the exact `Program`/`LogosProgram` `resolve_surface_authority`
+/// produced (no separate re-parse needed, unlike IR rendering which needs
+/// a further lowering step). `Ambiguous`/`NoSurfaceClaim` each get their
+/// own local diagnostic text per Decision F's own established pattern -
+/// see `ambiguous_surface_error`/`no_surface_claim_error` in
+/// `crates/sm-ir/src/legacy_lowering.rs`: "each consumer renders
+/// according to its own contract; no shared diagnostic-message carrier is
+/// introduced by Decision F."
+fn render_ast_for_source(src: &str, parser_profile: &ParserProfile) -> Result<String, String> {
+    let tokens = lex(src).map_err(|e| e.to_string())?;
+    let logos = admit_logos_program_with_profile(src, &tokens, parser_profile);
+    let rustlike = admit_program_with_profile(src, &tokens, parser_profile);
+    match resolve_surface_authority(logos, rustlike) {
+        SurfaceAuthority::LogosOwns(Ok(logos_program)) => Ok(format!("{:#?}", logos_program)),
+        // Authoritative, unconditional, zero RustLike fallback - never
+        // replaced by a generic redirect.
+        SurfaceAuthority::LogosOwns(Err(e)) => Err(e.to_string()),
+        SurfaceAuthority::RustLikeOwns(Ok(program)) => Ok(format!("{:#?}", program)),
+        SurfaceAuthority::RustLikeOwns(Err(e)) => Err(e.to_string()),
+        SurfaceAuthority::Ambiguous { logos, rustlike } => {
+            Err(ambiguous_ast_surface_error(&logos, &rustlike))
+        }
+        SurfaceAuthority::NoSurfaceClaim => Err(no_ast_surface_claim_error()),
+    }
+}
+
+fn ambiguous_ast_surface_error<L, R>(
+    logos: &Result<L, FrontendError>,
+    rustlike: &Result<R, FrontendError>,
+) -> String {
+    fn describe<T>(outcome: &Result<T, FrontendError>) -> String {
+        match outcome {
+            Ok(_) => "accepted".to_string(),
+            Err(e) => e.message.clone(),
+        }
+    }
+    format!(
+        "AMBIGUOUS SOURCE SURFACE: this input satisfies both the Logos and RustLike \
+         grammar and cannot be rendered as AST without a definitive owner\n\nEvidence:\n\
+         Logos     -> {}\nRustLike  -> {}",
+        describe(logos),
+        describe(rustlike),
+    )
+}
+
+fn no_ast_surface_claim_error() -> String {
+    "NO SURFACE CLAIM: this input establishes no top-level evidence for either \
+     the Logos or RustLike grammar"
+        .to_string()
+}
+
 fn cmd_dump_ast(args: &[String]) -> Result<(), String> {
     if args.len() != 1 {
         return Err("usage: smc dump-ast <input.sm|project-root>".to_string());
@@ -1165,14 +1229,7 @@ fn cmd_dump_ast(args: &[String]) -> Result<(), String> {
         println!("{}", cached);
         return Ok(());
     }
-    let rendered = if let Ok(logos) = parse_logos_program_with_profile(&src, &parser_profile) {
-        format!("{:#?}", logos)
-    } else {
-        format!(
-            "{:#?}",
-            parse_program_with_profile(&src, &parser_profile).map_err(|e| e.to_string())?
-        )
-    };
+    let rendered = render_ast_for_source(&src, &parser_profile)?;
     let _ = save_text_pack(&ast_pack, PACK_KIND_AST, &rendered);
     println!("{}", rendered);
     Ok(())
@@ -1519,7 +1576,11 @@ fn ast_pack_key(path: &Path, source: &str) -> Result<u64, String> {
     blob.push(0);
     blob.extend_from_slice(format!("{:016x}", root_source_fingerprint(source)).as_bytes());
     blob.push(0);
-    blob.extend_from_slice(b"frontend-v1-auto");
+    // v2 (#1934): dump-ast/hash-ast's Auto routing changed - a pre-fix
+    // cached entry for the same (path, content) must not be served
+    // silently forever now that Ambiguous/NoSurfaceClaim/an authoritative
+    // Logos error are no longer collapsed into a RustLike retry.
+    blob.extend_from_slice(b"frontend-v2-auto");
     Ok(fnv1a64(&blob))
 }
 
@@ -2027,14 +2088,7 @@ fn cmd_hash_ast(args: &[String]) -> Result<(), String> {
     let text = if let Some(cached) = load_text_pack(&ast_pack, PACK_KIND_AST)? {
         cached
     } else {
-        let rendered = if let Ok(logos) = parse_logos_program_with_profile(&src, &parser_profile) {
-            format!("{:#?}", logos)
-        } else {
-            format!(
-                "{:#?}",
-                parse_program_with_profile(&src, &parser_profile).map_err(|e| e.to_string())?
-            )
-        };
+        let rendered = render_ast_for_source(&src, &parser_profile)?;
         let _ = save_text_pack(&ast_pack, PACK_KIND_AST, &rendered);
         rendered
     };
@@ -2566,6 +2620,39 @@ mod tests {
         );
     }
 
+    // #1934's Shared/Shared proof, same shape as `ir_a5` above: not
+    // exercised through the real CLI. `read_source_with_package_admission`
+    // (see #1933, out of this checkpoint's scope) eagerly bundles any
+    // `Import` as a required RustLike helper module before Auto authority
+    // classification ever runs, so a bare `Import "a.sm"` fixture cannot
+    // reach `render_ast_for_source` through `smc dump-ast`/`hash-ast`
+    // either - it hits the bundling step's own unrelated error first, the
+    // same way it did for `dump-ir`/`hash-ir` in #1932. This proves
+    // `render_ast_for_source`'s own Shared/Shared handling directly,
+    // bypassing that step.
+    #[test]
+    fn ast_shared_vs_shared_ambiguity_via_render_ast_for_source() {
+        let src = "Import \"a.sm\"\n";
+        let profile = cli_profile();
+
+        let tokens = lex(src).expect("lex");
+        let logos = admit_logos_program_with_profile(src, &tokens, &profile);
+        let rustlike = admit_program_with_profile(src, &tokens, &profile);
+        assert!(
+            matches!(logos, GrammarAdmission::Shared(_))
+                && matches!(rustlike, GrammarAdmission::Shared(_)),
+            "control check: a bare Import must be Shared evidence for both grammars, \
+             got logos={logos:?}, rustlike={rustlike:?}"
+        );
+
+        let err = render_ast_for_source(src, &profile)
+            .expect_err("a Shared/Shared tie must be terminal ambiguity, not a silent pick");
+        assert!(
+            err.contains("AMBIGUOUS"),
+            "expected the canonical ambiguity diagnostic, got: {err}"
+        );
+    }
+
     // Structural proof (#1931 Section 16): `cmd_dump_ir` and
     // `cmd_hash_ir` must route IR through the exact same seam, so a
     // future fix applied to one cannot silently leave the other
@@ -2585,6 +2672,34 @@ mod tests {
             assert!(
                 body.contains("render_ir_for_profile("),
                 "{name} must route IR rendering through the shared render_ir_for_profile seam"
+            );
+            assert!(
+                !body.contains("parse_logos_program_with_profile"),
+                "{name} must not carry its own independent Logos-parse-first routing logic - \
+                 that is exactly the divergence this checkpoint removed, got body containing a \
+                 direct call in: {name}"
+            );
+        }
+    }
+
+    // Structural proof (#1934), same shape as the IR seam test above:
+    // `cmd_dump_ast` and `cmd_hash_ast` must route AST through the exact
+    // same seam, so a future fix applied to one cannot silently leave the
+    // other divergent - the two used to carry independent copies of the
+    // same `Auto` routing logic.
+    #[test]
+    fn cmd_dump_ast_and_cmd_hash_ast_share_one_ast_routing_seam() {
+        const SOURCE: &str = include_str!("app.rs");
+        let dump_ast_body = function_body_source(SOURCE, "fn cmd_dump_ast(");
+        let hash_ast_body = function_body_source(SOURCE, "fn cmd_hash_ast(");
+
+        for (name, body) in [
+            ("cmd_dump_ast", dump_ast_body),
+            ("cmd_hash_ast", hash_ast_body),
+        ] {
+            assert!(
+                body.contains("render_ast_for_source("),
+                "{name} must route AST rendering through the shared render_ast_for_source seam"
             );
             assert!(
                 !body.contains("parse_logos_program_with_profile"),
