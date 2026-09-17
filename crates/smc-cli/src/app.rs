@@ -2535,14 +2535,6 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
                 // from sm-ir's own Auto path and returns immediately,
                 // exactly mirroring `cmd_dump_bytecode`'s own terminal-arm
                 // shape, which already bypasses the pack cache entirely.
-                // Owner-caught F02: a terminal Auto outcome must never
-                // reach `smc_pack_key`/`load_blob_pack_ex`/`save_blob_pack`
-                // at all - not even as a same-key lookup that could in
-                // principle hit a foreign/future entry. It gets its
-                // canonical terminal result (success or error) straight
-                // from sm-ir's own Auto path and returns immediately,
-                // exactly mirroring `cmd_dump_bytecode`'s own terminal-arm
-                // shape, which already bypasses the pack cache entirely.
                 PreparedSource::RustLikeOwned(Err(_))
                 | PreparedSource::Ambiguous { .. }
                 | PreparedSource::NoSurfaceClaim => {
