@@ -13,8 +13,8 @@ use crate::alloc_core::{
 use crate::frontend::{
     admit_logos_program_with_profile, admit_program_with_profile, lex,
     parse_logos_program_with_profile, resolve_surface_authority, type_check_program, FrontendError,
-    LogosEntity, LogosEntityFieldKind, LogosProgram, ParserProfile, SourceMark, SurfaceAuthority,
-    Type,
+    LogosEntity, LogosEntityFieldKind, LogosProgram, ParserProfile, Program, SourceMark,
+    SurfaceAuthority, Type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -135,6 +135,49 @@ fn no_surface_claim_error(input: &str) -> SemanticError {
     }
 }
 
+/// #1933: type-checks an already-authority-classified RustLike `Program`,
+/// without lexing, parsing, admitting, or resolving surface authority
+/// itself. Exists so a caller that has already established (via
+/// `resolve_surface_authority`) that RustLike owns a given source - and
+/// has possibly composed an executable bundle from it - can type-check
+/// the resulting `Program` without re-deriving admission from the
+/// composed text, which would be a second, illegitimate Auto
+/// classification of what is by then an internal RustLike composition
+/// artifact rather than a fresh source candidate (see the #1933 addendum
+/// in `docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`).
+///
+/// `source` is diagnostic-context only - passed straight to `render_diag`
+/// for caret-bearing error text - it is never lexed, parsed, or otherwise
+/// interpreted, and it MUST be the exact text `program` was parsed from
+/// (whether that is a raw root or a composed bundle) so the rendered
+/// diagnostic points at real source. This function performs zero
+/// lexing, zero parsing, zero `GrammarAdmission`, zero
+/// `resolve_surface_authority`, and zero fallback - a type-check failure
+/// here is unconditionally terminal, exactly as `check_source_with_profile`
+/// already treats it.
+///
+/// `check_source_with_profile`'s own `RustLikeOwns(Ok(_))` arm calls this
+/// function too, so the logic exists in exactly one place.
+pub fn check_rustlike_program(
+    program: &Program,
+    source: &str,
+) -> Result<SemanticReport, SemanticError> {
+    type_check_program(program).map_err(|e| SemanticError {
+        diag: render_diag(
+            DiagLevel::Error,
+            "E0201",
+            e.message,
+            SourceMark::default(),
+            source,
+        ),
+    })?;
+    Ok(SemanticReport {
+        warnings: Vec::new(),
+        scheduled_laws: Vec::new(),
+        arena_nodes: 0,
+    })
+}
+
 pub fn check_source_with_profile(
     input: &str,
     profile: &ParserProfile,
@@ -167,22 +210,7 @@ pub fn check_source_with_profile(
                 input,
             ),
         }),
-        SurfaceAuthority::RustLikeOwns(Ok(parsed)) => {
-            type_check_program(&parsed).map_err(|e| SemanticError {
-                diag: render_diag(
-                    DiagLevel::Error,
-                    "E0201",
-                    e.message,
-                    SourceMark::default(),
-                    input,
-                ),
-            })?;
-            Ok(SemanticReport {
-                warnings: Vec::new(),
-                scheduled_laws: Vec::new(),
-                arena_nodes: 0,
-            })
-        }
+        SurfaceAuthority::RustLikeOwns(Ok(parsed)) => check_rustlike_program(&parsed, input),
         SurfaceAuthority::RustLikeOwns(Err(e)) => Err(SemanticError {
             diag: render_diag(
                 DiagLevel::Error,

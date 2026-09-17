@@ -4,7 +4,11 @@ use crate::package_manifest::{
 use sm_front::types::{
     AstArena, ExecutableImport, Expr, ExprId, Function, Stmt, StmtId, SymbolId, TokenKind, Type,
 };
-use sm_front::{lex, parse_program_with_profile, ParserProfile};
+use sm_front::{
+    admit_logos_program_with_profile, admit_program_with_profile, lex, parse_program_with_profile,
+    resolve_surface_authority, FrontendError, LogosProgram, ParserProfile, Program,
+    SurfaceAuthority,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -12,30 +16,104 @@ pub(crate) fn executable_import_wave2_out_of_scope_message() -> &'static str {
     "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports; alias, wildcard, and re-export forms remain out of scope"
 }
 
-pub(crate) fn read_source_with_package_admission(path: &Path) -> Result<String, String> {
+/// #1933: reads and package-admits `path`'s raw source without any
+/// surface classification at all - for explicit-profile commands, which
+/// select RustLike or Logos directly and must never probe the other
+/// grammar (Section 3 of the #1933 addendum: an explicit selection is
+/// itself the authority, and consulting `resolve_surface_authority`
+/// would be exactly the ownership probe explicit profiles are meant to
+/// skip).
+pub(crate) fn read_raw_source(path: &Path) -> Result<String, String> {
     admit_package_entry_module(path)
         .map(|_| ())
         .map_err(|e| e.to_string())?;
     let canonical = path
         .canonicalize()
         .map_err(|e| format!("failed to resolve '{}': {}", path.display(), e))?;
-    let source = std::fs::read_to_string(&canonical)
-        .map_err(|e| format!("failed to read '{}': {}", canonical.display(), e))?;
+    std::fs::read_to_string(&canonical)
+        .map_err(|e| format!("failed to read '{}': {}", canonical.display(), e))
+}
+
+/// #1933: raw-root surface authority, frozen once and carried through
+/// downstream smc-cli execution. See the #1933 addendum in
+/// `docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`
+/// for the full frozen contract this type exists to enforce.
+///
+/// `RustLikeOwned(Ok(_))` is the *only* variant executable bundling
+/// (`compose_executable_bundle`/`rustlike_effective_program`) may ever
+/// run against - it never runs for any other variant, and the
+/// classification against the raw root text is never re-derived once
+/// made. A composed/bundled effective source string produced from it is
+/// an internal RustLike composition artifact, not a fresh Auto
+/// classification candidate - nothing in this module, or any of its
+/// callers, may feed one back into `resolve_surface_authority`.
+pub(crate) enum PreparedSource {
+    LogosOwned(Result<LogosProgram, FrontendError>),
+    RustLikeOwned(Result<Program, FrontendError>),
+    Ambiguous {
+        logos: Result<LogosProgram, FrontendError>,
+        rustlike: Result<Program, FrontendError>,
+    },
+    NoSurfaceClaim,
+}
+
+/// #1933: the sole authority-freezing seam every smc-cli source consumer
+/// must go through - classifies `path`'s raw root text exactly once via
+/// the canonical `sm_front::resolve_surface_authority`, before any
+/// executable bundling can occur. Returns the raw source text alongside
+/// the frozen classification. A lex failure carries no admission
+/// evidence for either grammar (Decision E) and is returned directly as
+/// the outer `Err`, matching how every Auto-mode consumer already
+/// surfaces a bare lex failure today.
+pub(crate) fn prepare_source(path: &Path) -> Result<(String, PreparedSource), String> {
+    let source = read_raw_source(path)?;
     let parser_profile = ParserProfile::foundation_default();
-    let program = match parse_program_with_profile(&source, &parser_profile) {
-        Ok(program) => program,
-        Err(_) => return Ok(source),
+    let tokens = lex(&source).map_err(|e| e.to_string())?;
+    let logos = admit_logos_program_with_profile(&source, &tokens, &parser_profile);
+    let rustlike = admit_program_with_profile(&source, &tokens, &parser_profile);
+    let prepared = match resolve_surface_authority(logos, rustlike) {
+        SurfaceAuthority::LogosOwns(r) => PreparedSource::LogosOwned(r),
+        SurfaceAuthority::RustLikeOwns(r) => PreparedSource::RustLikeOwned(r),
+        SurfaceAuthority::Ambiguous { logos, rustlike } => {
+            PreparedSource::Ambiguous { logos, rustlike }
+        }
+        SurfaceAuthority::NoSurfaceClaim => PreparedSource::NoSurfaceClaim,
     };
-    if program.imports.is_empty() {
-        return Ok(source);
+    Ok((source, prepared))
+}
+
+/// #1933: composes the executable bundle for a root already established
+/// as `PreparedSource::RustLikeOwned(Ok(_))` by `prepare_source`. Must
+/// only be called from that branch - `root_program` must be the exact
+/// value `prepare_source` produced for `path`, and `raw_source` the
+/// exact text it was parsed from. Performs no surface classification of
+/// its own, by construction: it never calls `lex`,
+/// `admit_logos_program_with_profile`, `admit_program_with_profile`, or
+/// `resolve_surface_authority` against `path`'s own root text - only
+/// (recursively, inside `collect_executable_bundle_plan`) RustLike
+/// parsing of import targets, a RustLike composition concern, not an
+/// authority decision. A composition failure here (missing helper,
+/// malformed helper, cycle, unsupported import form) is unconditionally
+/// terminal - never a Logos or Auto fallback.
+pub(crate) fn compose_executable_bundle(
+    path: &Path,
+    raw_source: &str,
+    root_program: &Program,
+    parser_profile: &ParserProfile,
+) -> Result<String, String> {
+    if root_program.imports.is_empty() {
+        return Ok(raw_source.to_string());
     }
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("failed to resolve '{}': {}", path.display(), e))?;
     let mut visiting = Vec::<PathBuf>::new();
     let mut planned = BTreeMap::<PathBuf, ExecutableBundleModule>::new();
     let mut order = Vec::<PathBuf>::new();
     collect_executable_bundle_plan(
         &canonical,
         ExecutableBundleMode::Full,
-        &parser_profile,
+        parser_profile,
         &mut visiting,
         &mut planned,
         &mut order,
@@ -58,6 +136,34 @@ pub(crate) fn read_source_with_package_admission(path: &Path) -> Result<String, 
         }
     }
     Ok(bundle)
+}
+
+/// #1933: given a `RustLikeOwned(Ok(program))` root, produces the
+/// effective `Program` an AST-rendering or semantic-check consumer must
+/// use downstream - the root's own program unchanged when there are no
+/// imports (no reparse needed, since composition is then the identity),
+/// or an explicit RustLike reparse of the composed bundle when there are
+/// (composition changed the visible program, so the admitted root
+/// `Program` no longer describes what will actually run). The reparse is
+/// legitimate RustLike-domain parsing of an already-authorized internal
+/// composition artifact, not a fresh Auto/Logos classification - it
+/// never calls `resolve_surface_authority` and never will, by
+/// construction. A reparse failure is a composition failure, not a new
+/// raw-root surface outcome, and is unconditionally terminal.
+pub(crate) fn rustlike_effective_program(
+    path: &Path,
+    raw_source: &str,
+    root_program: Program,
+    parser_profile: &ParserProfile,
+) -> Result<(String, Program), String> {
+    if root_program.imports.is_empty() {
+        return Ok((raw_source.to_string(), root_program));
+    }
+    let effective_source =
+        compose_executable_bundle(path, raw_source, &root_program, parser_profile)?;
+    let effective_program =
+        parse_program_with_profile(&effective_source, parser_profile).map_err(|e| e.to_string())?;
+    Ok((effective_source, effective_program))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
