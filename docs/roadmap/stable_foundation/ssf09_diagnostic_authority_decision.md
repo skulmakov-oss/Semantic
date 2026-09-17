@@ -2793,12 +2793,17 @@ addendum forbids). This is not a new authority API and does not touch
 **Implementation status**: implemented on
 `fix/1933-authority-gated-executable-bundling` from base
 `2a83b35106118c7c4b592c379db2a8b38fd17d5c`. All 14 known `smc-cli`
-source consumers route through `prepare_source`; the 11 Auto-capable
-callers (`work prove`, `compile`, `check`, `watch`, `lint`, `dump-ast`,
-`dump-ir`, `dump-bytecode`, `hash-ast`, `hash-ir`, `hash-smc`) consume
-its frozen `PreparedSource` result directly, and the 3 hard
-explicit-RustLike callers (`run`, `run-controlled-observation`,
-`verify`) never call `resolve_surface_authority` at all. See the PR
-closing [#1933](https://github.com/skulmakov-oss/Semantic/issues/1933)
-for the full regression matrix, mutation-testing results, and review
+source consumers were migrated off the removed
+`read_source_with_package_admission`: the 11 Auto-capable callers
+(`work prove`, `compile`, `check`, `watch`, `lint`, `dump-ast`,
+`dump-ir`, `dump-bytecode`, `hash-ast`, `hash-ir`, `hash-smc`) route
+through `prepare_source` and consume its frozen `PreparedSource` result
+directly, while the 3 hard explicit-RustLike callers (`run`,
+`run-controlled-observation`, `verify`) route through the separate
+`effective_rustlike_source`/`read_raw_source` path instead and so never
+call `prepare_source` or `resolve_surface_authority` at all - calling
+either would itself be the "explicit RustLike must not probe Logos"
+violation Decision F's INVARIANT already forbids. See the PR closing
+[#1933](https://github.com/skulmakov-oss/Semantic/issues/1933) for the
+full regression matrix, mutation-testing results, and review
 disposition.

@@ -205,6 +205,17 @@ fn e_logos_authoritative_root_failure_never_attempts_executable_bundling() {
     let root_p = path_str(&root);
 
     let err = cli_err(vec!["check", &root_p]);
+    // Positive check first (Level 3 review found the negative-only checks
+    // below insufficient on their own, same class of gap M4 mutation
+    // testing found in test D): the root's own Logos parse genuinely
+    // fails (`Entity A` with no trailing `:`), and that failure must
+    // reach the pre-existing, unrelated E0239 project-mechanism wrapper -
+    // never silently become an empty or wrong-domain error.
+    assert!(
+        err.contains("E0239") && err.contains("expected ':'"),
+        "expected the pre-existing E0239-wrapped Logos parse failure (missing ':' after \
+         'Entity A'), got: {err}"
+    );
     assert!(
         !err.contains("must parse on the Rust-like source path"),
         "a Logos-owned root must never trigger executable bundling's own error wording, \

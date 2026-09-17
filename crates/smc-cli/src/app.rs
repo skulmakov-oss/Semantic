@@ -1533,17 +1533,32 @@ fn cmd_dump_ir(args: &[String]) -> Result<(), String> {
 /// #1933: shared cache-then-render seam for a RustLike-owned root's
 /// SemCode bytecode - see `render_and_cache_ir_rustlike` for the
 /// IR-domain sibling and its shared rationale.
+///
+/// **Level 3 review fix**: the cache key is always tagged
+/// `CompileProfile::RustLike`, matching the profile this function always
+/// actually compiles under (below) - never whatever profile the caller
+/// happened to be dispatching from. Before this fix, `cmd_dump_bytecode`
+/// passed its own Auto-mode `profile` straight through here while
+/// `cmd_hash_smc` separately normalized to `CompileProfile::RustLike`
+/// before its own equivalent `smc_pack_key` call, so the two commands
+/// computed different cache keys for identical input and could never
+/// share a pack, defeating the cache for this exact paired-command case.
 fn render_and_cache_semcode_rustlike(
     root: &Path,
     raw_source: &str,
     program: &Program,
-    profile: CompileProfile,
     opt: OptLevel,
     debug_symbols: bool,
     parser_profile: &ParserProfile,
 ) -> Result<Vec<u8>, String> {
     let effective_source = compose_executable_bundle(root, raw_source, program, parser_profile)?;
-    let exb_key = smc_pack_key(root, &effective_source, profile, opt, debug_symbols)?;
+    let exb_key = smc_pack_key(
+        root,
+        &effective_source,
+        CompileProfile::RustLike,
+        opt,
+        debug_symbols,
+    )?;
     let exb_pack = cache_smc_file_for_key(exb_key)?;
     if let Some(cached) = load_blob_pack(&exb_pack, PACK_KIND_SMC)? {
         return Ok(cached);
@@ -1636,7 +1651,6 @@ fn cmd_dump_bytecode(args: &[String]) -> Result<(), String> {
                 &root,
                 &raw_source,
                 &program,
-                profile,
                 opt,
                 debug_symbols,
                 &parser_profile,
@@ -1653,7 +1667,6 @@ fn cmd_dump_bytecode(args: &[String]) -> Result<(), String> {
                     &root,
                     &raw_source,
                     &program,
-                    profile,
                     opt,
                     debug_symbols,
                     &parser_profile,
