@@ -647,6 +647,22 @@ fn print_diag_colored(enabled: bool, text: &str) {
     eprintln!("{}", out.trim_end());
 }
 
+/// #1933: the sole check/lint result-cache eligibility predicate - owner-
+/// caught F01: `LogosOwned(_)` alone wrongly includes `LogosOwned(Err(_))`,
+/// an authoritative Logos failure, letting a terminal outcome reach the
+/// SEMP result-cache lookup. Only a genuine `Ok(_)` outcome from either
+/// grammar can possibly produce a "passed" result worth caching -
+/// `LogosOwned(Err(_))`, `RustLikeOwned(Err(_))`, `Ambiguous`, and
+/// `NoSurfaceClaim` are always terminal errors and must never consult the
+/// cache at all. Shared by `cmd_check` and `cmd_lint` so the two gates
+/// cannot independently drift apart again.
+fn is_check_result_cache_eligible(prepared: &PreparedSource) -> bool {
+    matches!(
+        prepared,
+        PreparedSource::LogosOwned(Ok(_)) | PreparedSource::RustLikeOwned(Ok(_))
+    )
+}
+
 fn cmd_check(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
@@ -710,21 +726,7 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
     // classification once made.
     let (src, prepared) = prepare_source(&root)?;
     let t_read = Instant::now();
-    // #1933: only `LogosOwned`/`RustLikeOwned(Ok(_))` can possibly reach
-    // a genuine "passed" result worth caching - `RustLikeOwned(Err)`,
-    // `Ambiguous`, and `NoSurfaceClaim` are always terminal errors from
-    // `check_root_with_project_authority` below. Gating the check-result
-    // cache lookup behind this means a pre-#1933 cache entry that (under
-    // the old eager-bundling bug) wrongly recorded a "passed" result for
-    // a root that is actually terminal can never be replayed post-fix:
-    // the terminal branches structurally never call
-    // `module_graph_fingerprint`/`cache_file_for_root` at all, regardless
-    // of what stale entries remain on disk under the unchanged
-    // fingerprint scheme.
-    let is_cache_eligible = matches!(
-        prepared,
-        PreparedSource::LogosOwned(_) | PreparedSource::RustLikeOwned(Ok(_))
-    );
+    let is_cache_eligible = is_check_result_cache_eligible(&prepared);
     let prev_graph_hash = read_graph_hash(Path::new(CACHE_GRAPH_FILE));
     let mut graph_hash_now = None;
     if let Ok(snapshot) = ModuleGraphSnapshot::read_from_root(&root) {
@@ -1116,13 +1118,7 @@ fn cmd_lint(args: &[String]) -> Result<(), String> {
     if let Ok(snapshot) = ModuleGraphSnapshot::read_from_root(&root) {
         let _ = snapshot.write_to(Path::new(CACHE_GRAPH_FILE), CACHE_SCHEMA_VERSION);
     }
-    // #1933: only `LogosOwned`/`RustLikeOwned(Ok(_))` can possibly reach
-    // a genuine "passed" result worth caching - see `cmd_check`'s
-    // identical gating and its rationale.
-    let is_cache_eligible = matches!(
-        prepared,
-        PreparedSource::LogosOwned(_) | PreparedSource::RustLikeOwned(Ok(_))
-    );
+    let is_cache_eligible = is_check_result_cache_eligible(&prepared);
     if is_cache_eligible && !no_cache && deny.deny_all_warnings {
         if let Ok(fp) = module_graph_fingerprint(&root, CACHE_SCHEMA_VERSION) {
             let cache_path = cache_file_for_root(&root)?;
@@ -2531,9 +2527,35 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
                         compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
                     (effective, CompileProfile::RustLike)
                 }
+                // Owner-caught F02: a terminal Auto outcome must never
+                // reach `smc_pack_key`/`load_blob_pack_ex`/`save_blob_pack`
+                // at all - not even as a same-key lookup that could in
+                // principle hit a foreign/future entry. It gets its
+                // canonical terminal result (success or error) straight
+                // from sm-ir's own Auto path and returns immediately,
+                // exactly mirroring `cmd_dump_bytecode`'s own terminal-arm
+                // shape, which already bypasses the pack cache entirely.
+                // Owner-caught F02: a terminal Auto outcome must never
+                // reach `smc_pack_key`/`load_blob_pack_ex`/`save_blob_pack`
+                // at all - not even as a same-key lookup that could in
+                // principle hit a foreign/future entry. It gets its
+                // canonical terminal result (success or error) straight
+                // from sm-ir's own Auto path and returns immediately,
+                // exactly mirroring `cmd_dump_bytecode`'s own terminal-arm
+                // shape, which already bypasses the pack cache entirely.
                 PreparedSource::RustLikeOwned(Err(_))
                 | PreparedSource::Ambiguous { .. }
-                | PreparedSource::NoSurfaceClaim => (raw_source, CompileProfile::Auto),
+                | PreparedSource::NoSurfaceClaim => {
+                    let bytes = compile_program_to_semcode_with_options_debug(
+                        &raw_source,
+                        CompileProfile::Auto,
+                        opt,
+                        debug_symbols,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    println!("{:016x}", fnv1a64(&bytes));
+                    return Ok(());
+                }
             }
         }
     };
@@ -3249,6 +3271,124 @@ mod tests {
                  be silently reused"
             );
         }
+    }
+
+    // Owner-caught F01 regression: `is_check_result_cache_eligible` must
+    // exclude every terminal outcome, not just the ones that happen to be
+    // easy to name. `LogosOwned(Err(_))` was the specific miss - the
+    // original predicate used `LogosOwned(_)`, which also matches
+    // `LogosOwned(Err(_))`, an authoritative Logos failure, letting it
+    // reach the SEMP result-cache lookup.
+    #[test]
+    fn is_check_result_cache_eligible_excludes_every_terminal_outcome() {
+        use sm_front::FrontendError;
+        let err = || FrontendError {
+            message: "probe".to_string(),
+            pos: 0,
+        };
+        let rustlike_program =
+            parse_program_with_profile("fn main() {\n    return;\n}\n", &cli_profile())
+                .expect("trivial RustLike probe program must parse");
+        assert!(is_check_result_cache_eligible(&PreparedSource::LogosOwned(
+            Ok(LogosProgram::default())
+        )));
+        assert!(is_check_result_cache_eligible(
+            &PreparedSource::RustLikeOwned(Ok(rustlike_program))
+        ));
+        assert!(
+            !is_check_result_cache_eligible(&PreparedSource::LogosOwned(Err(err()))),
+            "an authoritative Logos failure must never be cache-eligible"
+        );
+        assert!(
+            !is_check_result_cache_eligible(&PreparedSource::RustLikeOwned(Err(err()))),
+            "an authoritative RustLike failure must never be cache-eligible"
+        );
+        assert!(
+            !is_check_result_cache_eligible(&PreparedSource::Ambiguous {
+                logos: Err(err()),
+                rustlike: Err(err()),
+            }),
+            "Ambiguous must never be cache-eligible"
+        );
+        assert!(
+            !is_check_result_cache_eligible(&PreparedSource::NoSurfaceClaim),
+            "NoSurfaceClaim must never be cache-eligible"
+        );
+    }
+
+    // Owner-caught F01 regression: `cmd_check` and `cmd_lint` must share
+    // the one `is_check_result_cache_eligible` predicate rather than each
+    // carrying their own `matches!` re-derivation - that duplication is
+    // exactly how the two gates drifted into disagreement before.
+    #[test]
+    fn cmd_check_and_cmd_lint_share_the_cache_eligibility_predicate() {
+        const SOURCE: &str = include_str!("app.rs");
+        for signature in ["fn cmd_check(", "fn cmd_lint("] {
+            let body = function_body_source(SOURCE, signature);
+            assert!(
+                body.contains("is_check_result_cache_eligible("),
+                "{signature} must gate its cache lookup through the shared \
+                 is_check_result_cache_eligible predicate, not a local re-derivation"
+            );
+            assert!(
+                !body.contains("matches!(\n") || !body.contains("PreparedSource::LogosOwned(_)"),
+                "{signature} must not carry its own local cache-eligibility matches! against \
+                 LogosOwned(_) - that re-derivation is exactly the F01 divergence risk"
+            );
+        }
+    }
+
+    // Owner-caught F02 regression: `cmd_hash_smc`'s terminal Auto arm
+    // (`RustLikeOwned(Err(_))` / `Ambiguous` / `NoSurfaceClaim`) must
+    // never reach `smc_pack_key`/the SMC pack cache at all - it must get
+    // its canonical terminal result straight from sm-ir's own Auto path
+    // and return immediately, exactly like `cmd_dump_bytecode`'s own
+    // terminal arm already does.
+    #[test]
+    fn cmd_hash_smc_terminal_auto_arm_never_reaches_smc_pack_key() {
+        const SOURCE: &str = include_str!("app.rs");
+        let body = function_body_source(SOURCE, "fn cmd_hash_smc(");
+        let pattern = "PreparedSource::RustLikeOwned(Err(_))";
+        let start = body
+            .find(pattern)
+            .expect("expected cmd_hash_smc's terminal Auto arm pattern");
+        let rest = &body[start..];
+        // The compound OR-pattern's own `Ambiguous { .. }` arm contains a
+        // `{` that is pattern syntax, not a block - the real block opens
+        // only after the arm's `=>`, so find that first.
+        let arrow_offset = rest
+            .find("=>")
+            .expect("expected `=>` after the terminal arm's OR-pattern");
+        let brace_offset = arrow_offset
+            + rest[arrow_offset..]
+                .find('{')
+                .expect("expected the terminal arm to open a block");
+        let mut depth = 0i32;
+        let mut end = rest.len();
+        for (offset, ch) in rest[brace_offset..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = brace_offset + offset + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let arm_span = &rest[..end];
+        assert!(
+            !arm_span.contains("smc_pack_key"),
+            "found smc_pack_key inside cmd_hash_smc's terminal Auto arm - a terminal outcome \
+             must never reach the SMC pack cache lookup:\n{arm_span}"
+        );
+        assert!(
+            arm_span.contains("return Ok(())"),
+            "expected cmd_hash_smc's terminal Auto arm to return immediately, bypassing the \
+             cache entirely:\n{arm_span}"
+        );
     }
 
     // #1933 structural guard: every Auto-capable caller of
