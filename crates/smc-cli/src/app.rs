@@ -1,5 +1,8 @@
 use crate::application_host::CliApplicationHost;
-use crate::executable_bundle::read_source_with_package_admission;
+use crate::executable_bundle::{
+    compose_executable_bundle, prepare_source, read_raw_source, rustlike_effective_program,
+    PrepareSourceError, PreparedSource,
+};
 use crate::incremental::{
     emit_trace, module_graph_fingerprint, module_graph_module_count, read_graph_hash,
     update_cache_index, CacheEvent, CacheReason, ModuleGraphSnapshot,
@@ -27,14 +30,16 @@ use sm_emit::{
     OptLevel,
 };
 use sm_front::{
-    admit_logos_program_with_profile, admit_program_with_profile, lex,
-    parse_logos_program_with_profile, parse_program_with_profile, resolve_surface_authority,
-    FrontendError, ParserProfile, SurfaceAuthority,
+    lex, parse_logos_program_with_profile, parse_program_with_profile, FrontendError, LogosProgram,
+    ParserProfile, Program,
 };
 use sm_ir::{compile_program_to_ir_with_options_and_profile, lower_logos_laws_to_ir};
 use sm_runtime_core::hello_observation_sink::HelloObservationClass;
 use sm_runtime_core::{ExecutionConfig, ExecutionContext};
-use sm_sema::{check_file_with_provider_and_profile, check_source_with_profile, ModuleProvider};
+use sm_sema::{
+    check_file_with_provider_and_profile, check_rustlike_program, check_source_with_profile,
+    DiagLevel, ModuleProvider, SemanticDiagnostic, SemanticError,
+};
 use sm_verify::{verify_semcode, verify_semcode_token, verify_semcode_token_with_quotas};
 use sm_vm::{
     disasm_semcode, run_semcode_collecting_hello_observations_with_config,
@@ -139,46 +144,104 @@ fn cli_profile() -> ParserProfile {
 /// resolver; this function now calls it directly and only projects its
 /// four-variant result onto the two-mechanism question it actually
 /// owns (does the *project* mechanism apply, or not) - it does not
-/// re-derive, approximate, or duplicate the table itself. Every
-/// non-`LogosOwns` outcome (`RustLikeOwns`, a genuine `Ambiguous` tie,
-/// or `NoSurfaceClaim`) defers verbatim to `check_source_with_profile`,
-/// which independently re-derives both admissions and calls the real
-/// `resolve_surface_authority` itself - so this function never has to
-/// invent or duplicate any of that resolver's diagnostic text.
+/// re-derive, approximate, or duplicate the table itself.
+///
+/// **#1933 correction (2026-09-17)**: this function used to classify
+/// `root_src` itself, from whatever `read_source_with_package_admission`
+/// had already returned - raw text, or (silently, indistinguishably)
+/// text an eager executable-bundling step had already rewritten before
+/// authority was ever resolved. It now receives a `PreparedSource` -
+/// authority already frozen against the true raw root text by
+/// `prepare_source`, before any bundling could run - and never
+/// classifies anything itself. `LogosOwned` still routes to the project
+/// mechanism unconditionally, exactly as `LogosOwns(_)` always did.
+/// `RustLikeOwned(Ok(program))` is the only outcome allowed to compose
+/// an executable bundle at all (`rustlike_effective_program`); the
+/// resulting effective program is type-checked directly via
+/// `sm_sema::check_rustlike_program`, never through
+/// `check_source_with_profile` - feeding a composed/bundled artifact
+/// into that function would be exactly the second, illegitimate Auto
+/// classification of an internal RustLike composition artifact the
+/// #1933 addendum forbids. `RustLikeOwned(Err(_))`, `Ambiguous`, and
+/// `NoSurfaceClaim` never touch bundling (raw_source is guaranteed
+/// unbundled for these) and still defer to `check_source_with_profile`
+/// on the raw text - re-deriving admissions on the *same* raw text a
+/// second time remains the accepted-cost pattern Decision F already
+/// established, since it is deterministic and never sees a
+/// transformed artifact.
 fn check_root_with_project_authority(
     root_canon: &Path,
-    root_src: &str,
+    raw_source: &str,
+    prepared: PreparedSource,
     provider: &CliFsModuleProvider,
     parser_profile: &ParserProfile,
 ) -> Result<sm_sema::SemanticReport, sm_sema::SemanticError> {
-    let authority = lex(root_src).map(|tokens| {
-        let logos = admit_logos_program_with_profile(root_src, &tokens, parser_profile);
-        let rustlike = admit_program_with_profile(root_src, &tokens, parser_profile);
-        resolve_surface_authority(logos, rustlike)
-    });
-    match authority {
-        // Logos owns outright (Decision E Stage 1 or Stage 2): the
-        // project mechanism is authoritative from here, never replaced
-        // by the single-file check.
-        Ok(SurfaceAuthority::LogosOwns(_)) => {
+    match prepared {
+        PreparedSource::LogosOwned(_) => {
             check_file_with_provider_and_profile(root_canon, provider, parser_profile)
         }
-        // RustLike owns, or the two grammars tie (`Ambiguous`), or
-        // neither claims anything (`NoSurfaceClaim`): the project
-        // mechanism was never a candidate. `check_source_with_profile`
-        // re-derives both admissions itself and calls the real
-        // `resolve_surface_authority`, so it produces the identical
-        // RustLike/ambiguous/no-claim result Decision E requires.
-        //
-        // A lex failure (`Err(_)`) carries no admission evidence for
-        // either grammar (Decision E) - `check_source_with_profile`
-        // below will lex the identical text and surface the identical
-        // lex error itself, rather than this function inventing a fake
-        // `NoSurfaceClaim` for what is actually a lex-stage failure.
-        Ok(SurfaceAuthority::RustLikeOwns(_))
-        | Ok(SurfaceAuthority::Ambiguous { .. })
-        | Ok(SurfaceAuthority::NoSurfaceClaim)
-        | Err(_) => check_source_with_profile(root_src, parser_profile),
+        PreparedSource::RustLikeOwned(Ok(program)) => {
+            let (effective_source, effective_program) =
+                rustlike_effective_program(root_canon, raw_source, program, parser_profile)
+                    .map_err(bundler_semantic_error)?;
+            check_rustlike_program(&effective_program, &effective_source)
+        }
+        PreparedSource::RustLikeOwned(Err(_))
+        | PreparedSource::Ambiguous { .. }
+        | PreparedSource::NoSurfaceClaim => check_source_with_profile(raw_source, parser_profile),
+    }
+}
+
+fn check_preparation_error(
+    error: PrepareSourceError,
+    parser_profile: &ParserProfile,
+) -> Result<sm_sema::SemanticReport, String> {
+    match error {
+        PrepareSourceError::Read(message) => Err(message),
+        PrepareSourceError::Lex { source, error: _ } => {
+            check_source_with_profile(&source, parser_profile).map_err(|e| e.to_string())
+        }
+    }
+}
+
+fn watch_snapshot(result: Result<sm_sema::SemanticReport, String>) -> String {
+    match result {
+        Ok(report) => {
+            let mut out = String::new();
+            for warning in &report.warnings {
+                out.push_str(warning.rendered.trim_end());
+                out.push('\n');
+            }
+            out.push_str(&format!(
+                "ok: {} warning(s), {} scheduled law(s)",
+                report.warnings.len(),
+                report.scheduled_laws.len()
+            ));
+            out
+        }
+        Err(error) => error,
+    }
+}
+
+/// #1933: wraps an executable-bundle composition failure (a RustLike
+/// composition-domain error - missing helper, malformed helper, cycle,
+/// unsupported import form) as a `SemanticError`, so
+/// `check_root_with_project_authority` can return one error type. This
+/// is deliberately *not* rendered through `render_diag`'s caret-pointing
+/// machinery - bundler errors were never source-mapped diagnostics
+/// before #1933 either (see `crates/smc-cli/src/executable_bundle.rs`'s
+/// own error taxonomy, all plain strings with no `SourceMark`) - so this
+/// stays a plain-message wrapper, not a new structured surface-error
+/// carrier.
+fn bundler_semantic_error(message: String) -> SemanticError {
+    SemanticError {
+        diag: SemanticDiagnostic {
+            level: DiagLevel::Error,
+            code: "E0000",
+            message: message.clone(),
+            mark: ton618_core::SourceMark::default(),
+            rendered: message,
+        },
     }
 }
 
@@ -344,10 +407,28 @@ fn cmd_work_prove(subject: &str, _profile: Option<&str>) -> Result<(), String> {
     }
 
     let root = work_subject_path(subject)?;
-    let src = read_source_with_package_admission(&root)?;
+    let parser_profile = cli_profile();
+    // #1933: `RustLikeOwned(Ok)` is the only outcome that ever composes
+    // an executable bundle; the other four are all safe to pass straight
+    // to sm-ir's own explicit/Auto handling on the raw (always
+    // unbundled, for these) source - reproducing exactly what it always
+    // produced for them before #1933. Logos itself never bundles.
+    let (raw_source, prepared) = prepare_source(&root)?;
+    let (effective_source, actual_profile) = match prepared {
+        PreparedSource::LogosOwned(Ok(_)) => (raw_source, CompileProfile::Logos),
+        PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
+        PreparedSource::RustLikeOwned(Ok(program)) => {
+            let effective =
+                compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+            (effective, CompileProfile::RustLike)
+        }
+        PreparedSource::RustLikeOwned(Err(_))
+        | PreparedSource::Ambiguous { .. }
+        | PreparedSource::NoSurfaceClaim => (raw_source, CompileProfile::Auto),
+    };
     let bytes = compile_program_to_semcode_with_options_debug(
-        &src,
-        CompileProfile::Auto,
+        &effective_source,
+        actual_profile,
         OptLevel::O0,
         false,
     )
@@ -451,11 +532,48 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
-    let t_read = Instant::now();
     let parser_profile = cli_profile();
-    let bytes = compile_program_to_semcode_with_options_debug(&src, profile, opt, debug_symbols)
-        .map_err(|e| e.to_string())?;
+    // #1933: `effective_source`/`actual_profile` are what genuinely gets
+    // compiled below - for Auto, `LogosOwned(Ok)`/`RustLikeOwned(Ok)`
+    // resolve to the same explicit profile the frozen authority already
+    // selected (never re-derived), and executable bundling only ever
+    // runs for `RustLikeOwned(Ok)`. The three terminal outcomes are safe
+    // to pass through to sm-ir's own Auto path on the (guaranteed
+    // unbundled) raw source - the same accepted-cost re-derivation
+    // Decision F already established.
+    let (src, actual_profile) = match profile {
+        CompileProfile::Logos | CompileProfile::RustLike => {
+            let raw_source = read_raw_source(&root)?;
+            if profile == CompileProfile::RustLike {
+                let program = parse_program_with_profile(&raw_source, &parser_profile)
+                    .map_err(|e| e.to_string())?;
+                let effective =
+                    compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+                (effective, CompileProfile::RustLike)
+            } else {
+                (raw_source, CompileProfile::Logos)
+            }
+        }
+        CompileProfile::Auto => {
+            let (raw_source, prepared) = prepare_source(&root)?;
+            match prepared {
+                PreparedSource::LogosOwned(Ok(_)) => (raw_source, CompileProfile::Logos),
+                PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
+                PreparedSource::RustLikeOwned(Ok(program)) => {
+                    let effective =
+                        compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+                    (effective, CompileProfile::RustLike)
+                }
+                PreparedSource::RustLikeOwned(Err(_))
+                | PreparedSource::Ambiguous { .. }
+                | PreparedSource::NoSurfaceClaim => (raw_source, CompileProfile::Auto),
+            }
+        }
+    };
+    let t_read = Instant::now();
+    let bytes =
+        compile_program_to_semcode_with_options_debug(&src, actual_profile, opt, debug_symbols)
+            .map_err(|e| e.to_string())?;
     let t_compile = Instant::now();
     std::fs::write(out, &bytes).map_err(|e| format!("failed to write '{}': {}", out, e))?;
     let t_write = Instant::now();
@@ -479,9 +597,12 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
         }
         let mut ir_func_count = 0usize;
         let mut ir_instr_count = 0usize;
-        if let Ok(ir) =
-            compile_program_to_ir_with_options_and_profile(&src, profile, opt, &parser_profile)
-        {
+        if let Ok(ir) = compile_program_to_ir_with_options_and_profile(
+            &src,
+            actual_profile,
+            opt,
+            &parser_profile,
+        ) {
             ir_func_count = ir.len();
             ir_instr_count = ir.iter().map(|f| f.instrs.len()).sum();
         }
@@ -557,6 +678,22 @@ fn print_diag_colored(enabled: bool, text: &str) {
     eprintln!("{}", out.trim_end());
 }
 
+/// #1933: the sole check/lint result-cache eligibility predicate - owner-
+/// caught F01: `LogosOwned(_)` alone wrongly includes `LogosOwned(Err(_))`,
+/// an authoritative Logos failure, letting a terminal outcome reach the
+/// SEMP result-cache lookup. Only a genuine `Ok(_)` outcome from either
+/// grammar can possibly produce a "passed" result worth caching -
+/// `LogosOwned(Err(_))`, `RustLikeOwned(Err(_))`, `Ambiguous`, and
+/// `NoSurfaceClaim` are always terminal errors and must never consult the
+/// cache at all. Shared by `cmd_check` and `cmd_lint` so the two gates
+/// cannot independently drift apart again.
+fn is_check_result_cache_eligible(prepared: &PreparedSource) -> bool {
+    matches!(
+        prepared,
+        PreparedSource::LogosOwned(Ok(_)) | PreparedSource::RustLikeOwned(Ok(_))
+    )
+}
+
 fn cmd_check(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
@@ -613,15 +750,25 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
         );
     }
     let t0 = Instant::now();
-    let src = read_source_with_package_admission(&root)?;
+    // #1933: authority is classified against the raw root text before
+    // anything else - executable bundling (inside
+    // `check_root_with_project_authority`) only ever runs from a
+    // `RustLikeOwned(Ok(_))` branch, and never re-derives this
+    // classification once made.
+    let parser_profile = cli_profile();
+    let (src, prepared) = match prepare_source(&root) {
+        Ok(value) => value,
+        Err(error) => return check_preparation_error(error, &parser_profile).map(|_| ()),
+    };
     let t_read = Instant::now();
+    let is_cache_eligible = is_check_result_cache_eligible(&prepared);
     let prev_graph_hash = read_graph_hash(Path::new(CACHE_GRAPH_FILE));
     let mut graph_hash_now = None;
     if let Ok(snapshot) = ModuleGraphSnapshot::read_from_root(&root) {
         graph_hash_now = Some(snapshot.hash(CACHE_SCHEMA_VERSION));
         let _ = snapshot.write_to(Path::new(CACHE_GRAPH_FILE), CACHE_SCHEMA_VERSION);
     }
-    if !no_cache {
+    if is_cache_eligible && !no_cache {
         if let Ok(fp) = module_graph_fingerprint(&root, CACHE_SCHEMA_VERSION) {
             let cache_path = cache_file_for_root(&root)?;
             match load_cache_entry_ex(&cache_path, fp) {
@@ -669,6 +816,9 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
                 Err(_) => {}
             }
         }
+    } else if !no_cache {
+        // Not cache-eligible (a terminal outcome): deliberately skip the
+        // cache mechanism entirely rather than tracing a Miss against it.
     } else {
         trace_cache(
             trace_cache_enabled,
@@ -681,12 +831,12 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
     }
 
     let provider = CliFsModuleProvider;
-    let parser_profile = cli_profile();
     let root_canon = root
         .canonicalize()
         .map_err(|e| format!("failed to resolve '{}': {}", root.display(), e))?;
-    let report = check_root_with_project_authority(&root_canon, &src, &provider, &parser_profile)
-        .map_err(|e| e.to_string())?;
+    let report =
+        check_root_with_project_authority(&root_canon, &src, prepared, &provider, &parser_profile)
+            .map_err(|e| e.to_string())?;
     let t_check = Instant::now();
     let color_enabled = resolve_color_mode(color);
     for w in &report.warnings {
@@ -795,10 +945,37 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
                     reset_pinned_dependency_fingerprint_cache();
                     reset_declared_dependency_graph_cache();
                     last_fp = Some(fp);
-                    let src = match read_source_with_package_admission(&root) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            let snap = format!("error: {}", e);
+                    let parser_profile = cli_profile();
+                    let (src, snapshot) = match prepare_source(&root) {
+                        Ok((src, prepared)) => {
+                            let provider = CliFsModuleProvider;
+                            let result =
+                                root.canonicalize()
+                                    .map_err(|e| e.to_string())
+                                    .and_then(|p| {
+                                        check_root_with_project_authority(
+                                            &p,
+                                            &src,
+                                            prepared,
+                                            &provider,
+                                            &parser_profile,
+                                        )
+                                        .map_err(|e| e.to_string())
+                                    });
+                            (src, watch_snapshot(result))
+                        }
+                        Err(PrepareSourceError::Lex { source, error }) => {
+                            let snapshot = watch_snapshot(check_preparation_error(
+                                PrepareSourceError::Lex {
+                                    source: source.clone(),
+                                    error,
+                                },
+                                &parser_profile,
+                            ));
+                            (source, snapshot)
+                        }
+                        Err(PrepareSourceError::Read(error)) => {
+                            let snap = format!("error: {error}");
                             let changed = last_snapshot
                                 .as_ref()
                                 .map(|prev| prev != &snap)
@@ -813,36 +990,6 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
                             continue;
                         }
                     };
-                    let provider = CliFsModuleProvider;
-                    let parser_profile = cli_profile();
-                    let snapshot =
-                        match root
-                            .canonicalize()
-                            .map_err(|e| e.to_string())
-                            .and_then(|p| {
-                                check_root_with_project_authority(
-                                    &p,
-                                    &src,
-                                    &provider,
-                                    &parser_profile,
-                                )
-                                .map_err(|e| e.to_string())
-                            }) {
-                            Ok(report) => {
-                                let mut out = String::new();
-                                for w in &report.warnings {
-                                    out.push_str(w.rendered.trim_end());
-                                    out.push('\n');
-                                }
-                                out.push_str(&format!(
-                                    "ok: {} warning(s), {} scheduled law(s)",
-                                    report.warnings.len(),
-                                    report.scheduled_laws.len()
-                                ));
-                                out
-                            }
-                            Err(e) => format!("{e}"),
-                        };
                     let changed = last_snapshot
                         .as_ref()
                         .map(|prev| prev != &snapshot)
@@ -997,11 +1144,16 @@ fn cmd_lint(args: &[String]) -> Result<(), String> {
         );
     }
     let root = PathBuf::from(input);
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let parser_profile = cli_profile();
+    let (src, prepared) = match prepare_source(Path::new(input)) {
+        Ok(value) => value,
+        Err(error) => return check_preparation_error(error, &parser_profile).map(|_| ()),
+    };
     if let Ok(snapshot) = ModuleGraphSnapshot::read_from_root(&root) {
         let _ = snapshot.write_to(Path::new(CACHE_GRAPH_FILE), CACHE_SCHEMA_VERSION);
     }
-    if !no_cache && deny.deny_all_warnings {
+    let is_cache_eligible = is_check_result_cache_eligible(&prepared);
+    if is_cache_eligible && !no_cache && deny.deny_all_warnings {
         if let Ok(fp) = module_graph_fingerprint(&root, CACHE_SCHEMA_VERSION) {
             let cache_path = cache_file_for_root(&root)?;
             match load_cache_entry_ex(&cache_path, fp) {
@@ -1060,18 +1212,20 @@ fn cmd_lint(args: &[String]) -> Result<(), String> {
     }
 
     let provider = CliFsModuleProvider;
-    let parser_profile = cli_profile();
-    let report = if !no_cache {
-        Path::new(input)
-            .canonicalize()
-            .map_err(|e| format!("failed to resolve '{}': {}", input, e))
-            .and_then(|p| {
-                check_root_with_project_authority(&p, &src, &provider, &parser_profile)
-                    .map_err(|e| e.to_string())
-            })?
-    } else {
-        check_source_with_profile(&src, &parser_profile).map_err(|e| e.to_string())?
-    };
+    // #1933: always routes through the same authority-respecting seam
+    // `cmd_check` uses, regardless of `--no-cache` - `no_cache` only
+    // ever meant "don't consult the SEMP result cache," never "use a
+    // different authority mechanism," and preserving the old
+    // `else` branch here would have meant calling
+    // `check_source_with_profile` directly on `src`, which is unsafe
+    // once `src` can be a `RustLikeOwned(Ok)` bundle.
+    let report = Path::new(input)
+        .canonicalize()
+        .map_err(|e| format!("failed to resolve '{}': {}", input, e))
+        .and_then(|p| {
+            check_root_with_project_authority(&p, &src, prepared, &provider, &parser_profile)
+                .map_err(|e| e.to_string())
+        })?;
 
     let color_enabled = resolve_color_mode(color);
     for w in &report.warnings {
@@ -1146,43 +1300,47 @@ fn edit_distance(a: &str, b: &str) -> usize {
     dp[bb.len()]
 }
 
-/// Decision F (2026-09-16): the sole private routing seam `cmd_dump_ast`
-/// and `cmd_hash_ast` both render AST through - see `render_ir_for_profile`
-/// for the sibling seam `dump-ir`/`hash-ir` already consume (#1932), and
-/// #1934 for the record of this file's own independent copy of the same
-/// forbidden equivalence:
-///
-/// ```text
-/// if Logos parser succeeds { Logos AST } else { RustLike }
-/// ```
-///
-/// Unlike `dump-ir`/`hash-ir`, `dump-ast`/`hash-ast` carry no `--profile`
-/// flag - they always classify via `resolve_surface_authority`, so this
-/// helper takes no `CompileProfile`. `LogosOwns`/`RustLikeOwns` already
-/// carry the exact `Program`/`LogosProgram` `resolve_surface_authority`
-/// produced (no separate re-parse needed, unlike IR rendering which needs
-/// a further lowering step). `Ambiguous`/`NoSurfaceClaim` each get their
-/// own local diagnostic text per Decision F's own established pattern -
-/// see `ambiguous_surface_error`/`no_surface_claim_error` in
-/// `crates/sm-ir/src/legacy_lowering.rs`: "each consumer renders
-/// according to its own contract; no shared diagnostic-message carrier is
-/// introduced by Decision F."
-fn render_ast_for_source(src: &str, parser_profile: &ParserProfile) -> Result<String, String> {
-    let tokens = lex(src).map_err(|e| e.to_string())?;
-    let logos = admit_logos_program_with_profile(src, &tokens, parser_profile);
-    let rustlike = admit_program_with_profile(src, &tokens, parser_profile);
-    match resolve_surface_authority(logos, rustlike) {
-        SurfaceAuthority::LogosOwns(Ok(logos_program)) => Ok(format!("{:#?}", logos_program)),
-        // Authoritative, unconditional, zero RustLike fallback - never
-        // replaced by a generic redirect.
-        SurfaceAuthority::LogosOwns(Err(e)) => Err(e.to_string()),
-        SurfaceAuthority::RustLikeOwns(Ok(program)) => Ok(format!("{:#?}", program)),
-        SurfaceAuthority::RustLikeOwns(Err(e)) => Err(e.to_string()),
-        SurfaceAuthority::Ambiguous { logos, rustlike } => {
-            Err(ambiguous_ast_surface_error(&logos, &rustlike))
-        }
-        SurfaceAuthority::NoSurfaceClaim => Err(no_ast_surface_claim_error()),
+/// #1933: shared cache-then-render seam for a RustLike-owned root's AST -
+/// see `render_and_cache_ir_rustlike` for the IR-domain sibling and its
+/// shared rationale. `dump-ast`/`hash-ast` carry no `--profile` flag, so
+/// this is Auto-only and `ast_pack_key` has no `profile` field either.
+/// Uses `rustlike_effective_program` so a bundled root's AST reflects
+/// the full composition (matching this file's pre-#1933 behavior for
+/// the legitimate helper-import case), never a second Auto
+/// classification of the effective source.
+fn render_and_cache_ast_rustlike(
+    root: &Path,
+    raw_source: &str,
+    program: Program,
+    parser_profile: &ParserProfile,
+) -> Result<String, String> {
+    let (effective_source, effective_program) =
+        rustlike_effective_program(root, raw_source, program, parser_profile)?;
+    let ast_key = ast_pack_key(root, &effective_source)?;
+    let ast_pack = cache_ast_file_for_key(ast_key)?;
+    if let Some(cached) = load_text_pack(&ast_pack, PACK_KIND_AST)? {
+        return Ok(cached);
     }
+    let rendered = format!("{:#?}", effective_program);
+    let _ = save_text_pack(&ast_pack, PACK_KIND_AST, &rendered);
+    Ok(rendered)
+}
+
+/// #1933: shared cache-then-render seam for a Logos-owned root's AST -
+/// Logos never bundles, so `raw_source` is always the key material.
+fn render_and_cache_ast_logos(
+    root: &Path,
+    raw_source: &str,
+    logos_program: &LogosProgram,
+) -> Result<String, String> {
+    let ast_key = ast_pack_key(root, raw_source)?;
+    let ast_pack = cache_ast_file_for_key(ast_key)?;
+    if let Some(cached) = load_text_pack(&ast_pack, PACK_KIND_AST)? {
+        return Ok(cached);
+    }
+    let rendered = format!("{:#?}", logos_program);
+    let _ = save_text_pack(&ast_pack, PACK_KIND_AST, &rendered);
+    Ok(rendered)
 }
 
 fn ambiguous_ast_surface_error<L, R>(
@@ -1221,101 +1379,85 @@ fn cmd_dump_ast(args: &[String]) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
     let parser_profile = cli_profile();
-    let ast_key = ast_pack_key(&root, &src)?;
-    let ast_pack = cache_ast_file_for_key(ast_key)?;
-    if let Some(cached) = load_text_pack(&ast_pack, PACK_KIND_AST)? {
-        println!("{}", cached);
-        return Ok(());
-    }
-    let rendered = render_ast_for_source(&src, &parser_profile)?;
-    let _ = save_text_pack(&ast_pack, PACK_KIND_AST, &rendered);
+    let (raw_source, prepared) = prepare_source(&root)?;
+    let rendered = match prepared {
+        PreparedSource::LogosOwned(Ok(logos_program)) => {
+            render_and_cache_ast_logos(&root, &raw_source, &logos_program)?
+        }
+        PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
+        PreparedSource::RustLikeOwned(Ok(program)) => {
+            render_and_cache_ast_rustlike(&root, &raw_source, program, &parser_profile)?
+        }
+        PreparedSource::RustLikeOwned(Err(e)) => return Err(e.to_string()),
+        PreparedSource::Ambiguous { logos, rustlike } => {
+            return Err(ambiguous_ast_surface_error(&logos, &rustlike))
+        }
+        PreparedSource::NoSurfaceClaim => return Err(no_ast_surface_claim_error()),
+    };
     println!("{}", rendered);
     Ok(())
 }
 
-/// Decision F (2026-09-14): the sole private routing seam `cmd_dump_ir`
-/// and `cmd_hash_ir` both render IR through, so a future fix in one
-/// cannot silently leave the other divergent - the two used to carry
-/// independent copies of the same `Auto` routing logic, and that logic
-/// was the forbidden equivalence Decision F exists to rule out:
-///
-/// ```text
-/// if Logos parser succeeds { Logos IR } else { RustLike }
-/// ```
-///
-/// which silently collapsed an authoritative Logos parse *failure*, a
-/// genuine cross-grammar ambiguity, and a genuine no-surface-claim input
-/// into "try RustLike anyway" - the same shape of defect #1920 already
-/// repaired in `sm-ir`'s own `Auto` path (see
-/// `compile_program_to_ir_with_options_and_profile`). Explicit
-/// `RustLike`/`Logos` profiles are unchanged: neither classifies via
-/// `resolve_surface_authority` at all, since authority is already
-/// explicitly selected by the caller.
-fn render_ir_for_profile(
-    src: &str,
+/// #1933: shared cache-then-render seam for a RustLike root already
+/// known to admit successfully (`program`) - whether reached via Auto
+/// classification (`PreparedSource::RustLikeOwned(Ok(program))`) or an
+/// explicit `--profile rust` selection, both of which permit executable
+/// bundling per the frozen contract (see the #1933 addendum in
+/// `docs/roadmap/stable_foundation/ssf09_diagnostic_authority_decision.md`).
+/// Composes the executable bundle, cache-keys and looks up on the
+/// effective (possibly-bundled) source - never the raw root text alone,
+/// so a helper-content change is reflected in the key exactly as it was
+/// before #1933 - and renders/saves on a miss via the **explicit**
+/// `CompileProfile::RustLike` path, which never calls
+/// `resolve_surface_authority`.
+fn render_and_cache_ir_rustlike(
+    root: &Path,
+    raw_source: &str,
+    program: &Program,
     profile: CompileProfile,
     opt: OptLevel,
     parser_profile: &ParserProfile,
 ) -> Result<String, String> {
-    match profile {
-        CompileProfile::Logos => {
-            let logos =
-                parse_logos_program_with_profile(src, parser_profile).map_err(|e| e.to_string())?;
-            Ok(format!("{:#?}", lower_logos_laws_to_ir(&logos)))
-        }
-        CompileProfile::RustLike => compile_program_to_ir_with_options_and_profile(
-            src,
-            CompileProfile::RustLike,
-            opt,
-            parser_profile,
-        )
-        .map(|ir| format!("{:#?}", ir))
-        .map_err(|e| e.to_string()),
-        CompileProfile::Auto => {
-            let tokens = lex(src).map_err(|e| e.to_string())?;
-            let logos = admit_logos_program_with_profile(src, &tokens, parser_profile);
-            let rustlike = admit_program_with_profile(src, &tokens, parser_profile);
-            match resolve_surface_authority(logos, rustlike) {
-                // Logos owns outright: `dump-ir`/`hash-ir`'s whole
-                // reason for existing over sm-ir's own RustLike-only
-                // `Auto` path is to be able to render/hash real Logos
-                // IR, instead of sm-ir's generic SemCode-function-IR
-                // redirect - so only this arm renders Logos IR directly.
-                SurfaceAuthority::LogosOwns(Ok(logos_program)) => {
-                    Ok(format!("{:#?}", lower_logos_laws_to_ir(&logos_program)))
-                }
-                // Authoritative, unconditional, zero RustLike fallback -
-                // never replaced by a generic redirect.
-                SurfaceAuthority::LogosOwns(Err(e)) => Err(e.to_string()),
-                // RustLike ownership, a genuine tie, or no surface claim
-                // at all: `smc-cli` does not own RustLike lowering
-                // internals, ambiguity diagnostics, or no-claim
-                // diagnostics - `sm-ir`'s own `Auto` path already
-                // consumes this exact same canonical resolver and owns
-                // all three outcomes' semantics. Re-deriving admissions
-                // a second time inside that call is acceptable (Decision
-                // F requires consuming the canonical resolver, not
-                // minimizing how many times it is called) - it is not a
-                // second, diverging implementation of the table, and it
-                // avoids inventing a new public "lower an already-parsed
-                // Program" API merely to skip a redundant classification.
-                SurfaceAuthority::RustLikeOwns(_)
-                | SurfaceAuthority::Ambiguous { .. }
-                | SurfaceAuthority::NoSurfaceClaim => {
-                    compile_program_to_ir_with_options_and_profile(
-                        src,
-                        CompileProfile::Auto,
-                        opt,
-                        parser_profile,
-                    )
-                    .map(|ir| format!("{:#?}", ir))
-                    .map_err(|e| e.to_string())
-                }
-            }
-        }
+    let effective_source = compose_executable_bundle(root, raw_source, program, parser_profile)?;
+    let ir_key = ir_pack_key(root, &effective_source, profile, opt)?;
+    let ir_pack = cache_ir_file_for_key(ir_key)?;
+    if let Some(cached) = load_text_pack(&ir_pack, PACK_KIND_IR)? {
+        return Ok(cached);
     }
+    let rendered = compile_program_to_ir_with_options_and_profile(
+        &effective_source,
+        CompileProfile::RustLike,
+        opt,
+        parser_profile,
+    )
+    .map(|ir| format!("{:#?}", ir))
+    .map_err(|e| e.to_string())?;
+    let _ = save_text_pack(&ir_pack, PACK_KIND_IR, &rendered);
+    Ok(rendered)
+}
+
+/// #1933: shared cache-then-render seam for a Logos root already known
+/// to admit successfully (`logos_program`) - Logos never bundles, so
+/// `key_source` is always the raw root text, whether reached via Auto
+/// classification or an explicit `--profile logos` selection (both
+/// already cached under the same `ir_pack_key` scheme before #1933,
+/// distinguished by `profile` in the key material).
+fn render_and_cache_ir_logos(
+    root: &Path,
+    key_source: &str,
+    logos_program: &LogosProgram,
+    profile: CompileProfile,
+    opt: OptLevel,
+) -> Result<String, String> {
+    let ir_key = ir_pack_key(root, key_source, profile, opt)?;
+    let ir_pack = cache_ir_file_for_key(ir_key)?;
+    if let Some(cached) = load_text_pack(&ir_pack, PACK_KIND_IR)? {
+        return Ok(cached);
+    }
+    let rendered = format!("{:#?}", lower_logos_laws_to_ir(logos_program));
+    let _ = save_text_pack(&ir_pack, PACK_KIND_IR, &rendered);
+    Ok(rendered)
 }
 
 fn cmd_dump_ir(args: &[String]) -> Result<(), String> {
@@ -1356,18 +1498,132 @@ fn cmd_dump_ir(args: &[String]) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
     let parser_profile = cli_profile();
-    let ir_key = ir_pack_key(&root, &src, profile, opt)?;
-    let ir_pack = cache_ir_file_for_key(ir_key)?;
-    if let Some(cached) = load_text_pack(&ir_pack, PACK_KIND_IR)? {
-        println!("{}", cached);
-        return Ok(());
-    }
-    let rendered = render_ir_for_profile(&src, profile, opt, &parser_profile)?;
-    let _ = save_text_pack(&ir_pack, PACK_KIND_IR, &rendered);
+    // #1933: explicit RustLike/Logos never probe the other grammar or
+    // `resolve_surface_authority` at all - only Auto classifies, once,
+    // via `prepare_source`, before executable bundling can run.
+    let rendered = match profile {
+        CompileProfile::Logos => {
+            let raw_source = read_raw_source(&root)?;
+            let logos_program = parse_logos_program_with_profile(&raw_source, &parser_profile)
+                .map_err(|e| e.to_string())?;
+            render_and_cache_ir_logos(&root, &raw_source, &logos_program, profile, opt)?
+        }
+        CompileProfile::RustLike => {
+            let raw_source = read_raw_source(&root)?;
+            let program = parse_program_with_profile(&raw_source, &parser_profile)
+                .map_err(|e| e.to_string())?;
+            render_and_cache_ir_rustlike(
+                &root,
+                &raw_source,
+                &program,
+                profile,
+                opt,
+                &parser_profile,
+            )?
+        }
+        CompileProfile::Auto => {
+            let (raw_source, prepared) = prepare_source(&root)?;
+            match prepared {
+                PreparedSource::LogosOwned(Ok(logos_program)) => {
+                    render_and_cache_ir_logos(&root, &raw_source, &logos_program, profile, opt)?
+                }
+                PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
+                PreparedSource::RustLikeOwned(Ok(program)) => render_and_cache_ir_rustlike(
+                    &root,
+                    &raw_source,
+                    &program,
+                    profile,
+                    opt,
+                    &parser_profile,
+                )?,
+                // Terminal: never reaches the IR pack cache.
+                // `raw_source` is guaranteed unbundled for these three
+                // outcomes, so re-deriving admissions on it a second
+                // time via sm-ir's own Auto path remains the
+                // accepted-cost pattern Decision F already established.
+                PreparedSource::RustLikeOwned(Err(_))
+                | PreparedSource::Ambiguous { .. }
+                | PreparedSource::NoSurfaceClaim => compile_program_to_ir_with_options_and_profile(
+                    &raw_source,
+                    CompileProfile::Auto,
+                    opt,
+                    &parser_profile,
+                )
+                .map(|ir| format!("{:#?}", ir))
+                .map_err(|e| e.to_string())?,
+            }
+        }
+    };
     println!("{}", rendered);
     Ok(())
+}
+
+/// #1933: shared cache-then-render seam for a RustLike-owned root's
+/// SemCode bytecode - see `render_and_cache_ir_rustlike` for the
+/// IR-domain sibling and its shared rationale.
+///
+/// **Level 3 review fix**: the cache key is always tagged
+/// `CompileProfile::RustLike`, matching the profile this function always
+/// actually compiles under (below) - never whatever profile the caller
+/// happened to be dispatching from. Before this fix, `cmd_dump_bytecode`
+/// passed its own Auto-mode `profile` straight through here while
+/// `cmd_hash_smc` separately normalized to `CompileProfile::RustLike`
+/// before its own equivalent `smc_pack_key` call, so the two commands
+/// computed different cache keys for identical input and could never
+/// share a pack, defeating the cache for this exact paired-command case.
+fn render_and_cache_semcode_rustlike(
+    root: &Path,
+    raw_source: &str,
+    program: &Program,
+    opt: OptLevel,
+    debug_symbols: bool,
+    parser_profile: &ParserProfile,
+) -> Result<Vec<u8>, String> {
+    let effective_source = compose_executable_bundle(root, raw_source, program, parser_profile)?;
+    let exb_key = smc_pack_key(
+        root,
+        &effective_source,
+        CompileProfile::RustLike,
+        opt,
+        debug_symbols,
+    )?;
+    let exb_pack = cache_smc_file_for_key(exb_key)?;
+    if let Some(cached) = load_blob_pack(&exb_pack, PACK_KIND_SMC)? {
+        return Ok(cached);
+    }
+    let built = compile_program_to_semcode_with_options_debug(
+        &effective_source,
+        CompileProfile::RustLike,
+        opt,
+        debug_symbols,
+    )
+    .map_err(|e| e.to_string())?;
+    let _ = save_blob_pack(&exb_pack, PACK_KIND_SMC, &built);
+    Ok(built)
+}
+
+/// #1933: shared cache-then-render seam for a Logos root's SemCode
+/// bytecode - Logos never bundles, so `key_source` is always the raw
+/// root text, whether reached via Auto or an explicit `--profile logos`
+/// selection.
+fn render_and_cache_semcode_logos(
+    root: &Path,
+    key_source: &str,
+    profile: CompileProfile,
+    opt: OptLevel,
+    debug_symbols: bool,
+) -> Result<Vec<u8>, String> {
+    let exb_key = smc_pack_key(root, key_source, profile, opt, debug_symbols)?;
+    let exb_pack = cache_smc_file_for_key(exb_key)?;
+    if let Some(cached) = load_blob_pack(&exb_pack, PACK_KIND_SMC)? {
+        return Ok(cached);
+    }
+    let built =
+        compile_program_to_semcode_with_options_debug(key_source, profile, opt, debug_symbols)
+            .map_err(|e| e.to_string())?;
+    let _ = save_blob_pack(&exb_pack, PACK_KIND_SMC, &built);
+    Ok(built)
 }
 
 fn cmd_dump_bytecode(args: &[String]) -> Result<(), String> {
@@ -1410,18 +1666,54 @@ fn cmd_dump_bytecode(args: &[String]) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
-    let _parser_profile = cli_profile();
-    let exb_key = smc_pack_key(&root, &src, profile, opt, debug_symbols)?;
-    let exb_pack = cache_smc_file_for_key(exb_key)?;
-    let bytes = if let Some(cached) = load_blob_pack(&exb_pack, PACK_KIND_SMC)? {
-        cached
-    } else {
-        let built =
-            compile_program_to_semcode_with_options_debug(&src, profile, opt, debug_symbols)
+    let parser_profile = cli_profile();
+    let bytes = match profile {
+        CompileProfile::Logos => {
+            let raw_source = read_raw_source(&root)?;
+            render_and_cache_semcode_logos(&root, &raw_source, profile, opt, debug_symbols)?
+        }
+        CompileProfile::RustLike => {
+            let raw_source = read_raw_source(&root)?;
+            let program = parse_program_with_profile(&raw_source, &parser_profile)
                 .map_err(|e| e.to_string())?;
-        let _ = save_blob_pack(&exb_pack, PACK_KIND_SMC, &built);
-        built
+            render_and_cache_semcode_rustlike(
+                &root,
+                &raw_source,
+                &program,
+                opt,
+                debug_symbols,
+                &parser_profile,
+            )?
+        }
+        CompileProfile::Auto => {
+            let (raw_source, prepared) = prepare_source(&root)?;
+            match prepared {
+                PreparedSource::LogosOwned(Ok(_)) => {
+                    render_and_cache_semcode_logos(&root, &raw_source, profile, opt, debug_symbols)?
+                }
+                PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
+                PreparedSource::RustLikeOwned(Ok(program)) => render_and_cache_semcode_rustlike(
+                    &root,
+                    &raw_source,
+                    &program,
+                    opt,
+                    debug_symbols,
+                    &parser_profile,
+                )?,
+                // Terminal: never reaches the SemCode pack cache.
+                // `raw_source` is guaranteed unbundled for these three
+                // outcomes.
+                PreparedSource::RustLikeOwned(Err(_))
+                | PreparedSource::Ambiguous { .. }
+                | PreparedSource::NoSurfaceClaim => compile_program_to_semcode_with_options_debug(
+                    &raw_source,
+                    CompileProfile::Auto,
+                    opt,
+                    debug_symbols,
+                )
+                .map_err(|e| e.to_string())?,
+            }
+        }
     };
     for (i, chunk) in bytes.chunks(16).enumerate() {
         print!("{:04x}: ", i * 16);
@@ -1576,11 +1868,12 @@ fn ast_pack_key(path: &Path, source: &str) -> Result<u64, String> {
     blob.push(0);
     blob.extend_from_slice(format!("{:016x}", root_source_fingerprint(source)).as_bytes());
     blob.push(0);
-    // v2 (#1934): dump-ast/hash-ast's Auto routing changed - a pre-fix
-    // cached entry for the same (path, content) must not be served
-    // silently forever now that Ambiguous/NoSurfaceClaim/an authoritative
-    // Logos error are no longer collapsed into a RustLike retry.
-    blob.extend_from_slice(b"frontend-v2-auto");
+    // v3 (#1933): executable bundling is now gated on raw-root
+    // `RustLikeOwns(Ok(_))` authority instead of running unconditionally
+    // - a v2 entry for the same (path, content) could encode an AST
+    // rendered from a root that should have been terminal but was
+    // previously silently bundled and admitted as RustLike anyway.
+    blob.extend_from_slice(b"frontend-v3-auto");
     Ok(fnv1a64(&blob))
 }
 
@@ -1609,12 +1902,14 @@ fn ir_pack_key(
         format!("{:016x}", downstream_pack_fingerprint(path, source)?).as_bytes(),
     );
     blob.push(0);
-    // v2: the `Auto` routing this key's cached payload depends on
-    // changed (Decision F - `render_ir_for_profile` no longer equates
-    // "Logos parse failed" with "RustLike owns"), so a v1 entry for the
-    // same (path, content, profile, opt) could otherwise silently keep
-    // serving a pre-fix result forever.
-    blob.extend_from_slice(format!("profile={:?};opt={:?};lowering=v2", profile, opt).as_bytes());
+    // v3 (#1933): executable bundling is now gated on raw-root
+    // `RustLikeOwns(Ok(_))` authority instead of running unconditionally
+    // whenever the root happened to parse as RustLike with imports - a
+    // v2 entry for the same (path, content, profile, opt) could
+    // encode IR computed from a root that should have been terminal
+    // (Ambiguous/NoSurfaceClaim/a Logos-owned root) but was previously
+    // silently bundled and compiled as RustLike anyway.
+    blob.extend_from_slice(format!("profile={:?};opt={:?};lowering=v3", profile, opt).as_bytes());
     Ok(fnv1a64(&blob))
 }
 
@@ -1635,9 +1930,12 @@ fn smc_pack_key(
         format!("{:016x}", downstream_pack_fingerprint(path, source)?).as_bytes(),
     );
     blob.push(0);
+    // v2 (#1933): same routing-correctness rationale as `ir_pack_key`'s
+    // v3 bump - executable bundling is now authority-gated instead of
+    // running unconditionally.
     blob.extend_from_slice(
         format!(
-            "profile={:?};opt={:?};debug={};emit=v1",
+            "profile={:?};opt={:?};debug={};emit=v2",
             profile, opt, debug_symbols
         )
         .as_bytes(),
@@ -2081,16 +2379,21 @@ fn cmd_hash_ast(args: &[String]) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
     let parser_profile = cli_profile();
-    let ast_key = ast_pack_key(&root, &src)?;
-    let ast_pack = cache_ast_file_for_key(ast_key)?;
-    let text = if let Some(cached) = load_text_pack(&ast_pack, PACK_KIND_AST)? {
-        cached
-    } else {
-        let rendered = render_ast_for_source(&src, &parser_profile)?;
-        let _ = save_text_pack(&ast_pack, PACK_KIND_AST, &rendered);
-        rendered
+    let (raw_source, prepared) = prepare_source(&root)?;
+    let text = match prepared {
+        PreparedSource::LogosOwned(Ok(logos_program)) => {
+            render_and_cache_ast_logos(&root, &raw_source, &logos_program)?
+        }
+        PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
+        PreparedSource::RustLikeOwned(Ok(program)) => {
+            render_and_cache_ast_rustlike(&root, &raw_source, program, &parser_profile)?
+        }
+        PreparedSource::RustLikeOwned(Err(e)) => return Err(e.to_string()),
+        PreparedSource::Ambiguous { logos, rustlike } => {
+            return Err(ambiguous_ast_surface_error(&logos, &rustlike))
+        }
+        PreparedSource::NoSurfaceClaim => return Err(no_ast_surface_claim_error()),
     };
     println!("{:016x}", fnv1a64(text.as_bytes()));
     Ok(())
@@ -2134,16 +2437,56 @@ fn cmd_hash_ir(args: &[String]) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
     let parser_profile = cli_profile();
-    let ir_key = ir_pack_key(&root, &src, profile, opt)?;
-    let ir_pack = cache_ir_file_for_key(ir_key)?;
-    let text = if let Some(cached) = load_text_pack(&ir_pack, PACK_KIND_IR)? {
-        cached
-    } else {
-        let rendered = render_ir_for_profile(&src, profile, opt, &parser_profile)?;
-        let _ = save_text_pack(&ir_pack, PACK_KIND_IR, &rendered);
-        rendered
+    // #1933: see `cmd_dump_ir` - identical routing, hashed instead of
+    // printed.
+    let text = match profile {
+        CompileProfile::Logos => {
+            let raw_source = read_raw_source(&root)?;
+            let logos_program = parse_logos_program_with_profile(&raw_source, &parser_profile)
+                .map_err(|e| e.to_string())?;
+            render_and_cache_ir_logos(&root, &raw_source, &logos_program, profile, opt)?
+        }
+        CompileProfile::RustLike => {
+            let raw_source = read_raw_source(&root)?;
+            let program = parse_program_with_profile(&raw_source, &parser_profile)
+                .map_err(|e| e.to_string())?;
+            render_and_cache_ir_rustlike(
+                &root,
+                &raw_source,
+                &program,
+                profile,
+                opt,
+                &parser_profile,
+            )?
+        }
+        CompileProfile::Auto => {
+            let (raw_source, prepared) = prepare_source(&root)?;
+            match prepared {
+                PreparedSource::LogosOwned(Ok(logos_program)) => {
+                    render_and_cache_ir_logos(&root, &raw_source, &logos_program, profile, opt)?
+                }
+                PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
+                PreparedSource::RustLikeOwned(Ok(program)) => render_and_cache_ir_rustlike(
+                    &root,
+                    &raw_source,
+                    &program,
+                    profile,
+                    opt,
+                    &parser_profile,
+                )?,
+                PreparedSource::RustLikeOwned(Err(_))
+                | PreparedSource::Ambiguous { .. }
+                | PreparedSource::NoSurfaceClaim => compile_program_to_ir_with_options_and_profile(
+                    &raw_source,
+                    CompileProfile::Auto,
+                    opt,
+                    &parser_profile,
+                )
+                .map(|ir| format!("{:#?}", ir))
+                .map_err(|e| e.to_string())?,
+            }
+        }
     };
     println!("{:016x}", fnv1a64(text.as_bytes()));
     Ok(())
@@ -2191,7 +2534,56 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
+    let parser_profile = cli_profile();
+    // #1933: `effective_source`/`actual_profile` mirror `cmd_compile`'s
+    // pattern - Auto's `LogosOwned(Ok)`/`RustLikeOwned(Ok)` resolve to
+    // the explicit profile authority already selected (never
+    // re-derived); the three terminal outcomes pass the guaranteed
+    // unbundled raw source through to sm-ir's own Auto path unchanged.
+    let (effective_source, actual_profile) = match profile {
+        CompileProfile::Logos => (read_raw_source(&root)?, CompileProfile::Logos),
+        CompileProfile::RustLike => {
+            let raw_source = read_raw_source(&root)?;
+            let program = parse_program_with_profile(&raw_source, &parser_profile)
+                .map_err(|e| e.to_string())?;
+            let effective =
+                compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+            (effective, CompileProfile::RustLike)
+        }
+        CompileProfile::Auto => {
+            let (raw_source, prepared) = prepare_source(&root)?;
+            match prepared {
+                PreparedSource::LogosOwned(Ok(_)) => (raw_source, CompileProfile::Logos),
+                PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
+                PreparedSource::RustLikeOwned(Ok(program)) => {
+                    let effective =
+                        compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+                    (effective, CompileProfile::RustLike)
+                }
+                // Owner-caught F02: a terminal Auto outcome must never
+                // reach `smc_pack_key`/`load_blob_pack_ex`/`save_blob_pack`
+                // at all - not even as a same-key lookup that could in
+                // principle hit a foreign/future entry. It gets its
+                // canonical terminal result (success or error) straight
+                // from sm-ir's own Auto path and returns immediately,
+                // exactly mirroring `cmd_dump_bytecode`'s own terminal-arm
+                // shape, which already bypasses the pack cache entirely.
+                PreparedSource::RustLikeOwned(Err(_))
+                | PreparedSource::Ambiguous { .. }
+                | PreparedSource::NoSurfaceClaim => {
+                    let bytes = compile_program_to_semcode_with_options_debug(
+                        &raw_source,
+                        CompileProfile::Auto,
+                        opt,
+                        debug_symbols,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    println!("{:016x}", fnv1a64(&bytes));
+                    return Ok(());
+                }
+            }
+        }
+    };
     let prev_graph_hash = read_graph_hash(Path::new(CACHE_GRAPH_FILE));
     let graph_hash_now = if let Ok(snapshot) = ModuleGraphSnapshot::read_from_root(&root) {
         let hash = snapshot.hash(CACHE_SCHEMA_VERSION);
@@ -2200,7 +2592,7 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
     } else {
         None
     };
-    let exb_key = smc_pack_key(&root, &src, profile, opt, debug_symbols)?;
+    let exb_key = smc_pack_key(&root, &effective_source, actual_profile, opt, debug_symbols)?;
     if trace_cache_enabled && prev_graph_hash.is_some() && prev_graph_hash != graph_hash_now {
         trace_cache(
             true,
@@ -2233,9 +2625,13 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
                 "SMCP",
                 &format!("{:016x}", exb_key),
             );
-            let built =
-                compile_program_to_semcode_with_options_debug(&src, profile, opt, debug_symbols)
-                    .map_err(|e| e.to_string())?;
+            let built = compile_program_to_semcode_with_options_debug(
+                &effective_source,
+                actual_profile,
+                opt,
+                debug_symbols,
+            )
+            .map_err(|e| e.to_string())?;
             let _ = save_blob_pack(&exb_pack, PACK_KIND_SMC, &built);
             built
         }
@@ -2247,7 +2643,9 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sm_front::GrammarAdmission;
+    use sm_front::{
+        admit_logos_program_with_profile, admit_program_with_profile, GrammarAdmission,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn mk_temp_dir(prefix: &str) -> PathBuf {
@@ -2262,6 +2660,58 @@ mod tests {
         ));
         std::fs::create_dir_all(&base).expect("mkdir");
         base
+    }
+
+    #[test]
+    fn prepare_source_keeps_lex_failure_structured_outside_authority() {
+        let dir = mk_temp_dir("prepare_source_lex_failure");
+        let root = dir.join("root.sm");
+        let src = "fn main() {\n    let message: text = \"line one\nline two\";\n}\n";
+        std::fs::write(&root, src).expect("write root");
+
+        let error = match prepare_source(&root) {
+            Ok(_) => panic!("unterminated text must fail lexing"),
+            Err(error) => error,
+        };
+        match error {
+            PrepareSourceError::Lex { source, error } => {
+                assert_eq!(source, src);
+                assert!(error.to_string().contains("E0004"));
+            }
+            PrepareSourceError::Read(message) => panic!("unexpected read failure: {message}"),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lex_failure_keeps_check_e0000_and_direct_e0004_contracts() {
+        let src = "fn main() {\n    let message: text = \"line one\nline two\";\n}\n";
+        let parser_profile = cli_profile();
+
+        let check_error = lex(src).expect_err("fixture must fail lexing");
+        let check_rendered = check_preparation_error(
+            PrepareSourceError::Lex {
+                source: src.to_string(),
+                error: check_error,
+            },
+            &parser_profile,
+        )
+        .expect_err("check rendering must preserve the semantic failure");
+        assert!(check_rendered.contains("Error [E0000]"));
+        assert!(
+            check_rendered.find("Error [E0000]") < check_rendered.find("error[E0004]"),
+            "semantic E0000 must be the outer diagnostic code: {check_rendered}"
+        );
+
+        let direct_error = lex(src).expect_err("fixture must fail lexing");
+        let direct_rendered: String = PrepareSourceError::Lex {
+            source: src.to_string(),
+            error: direct_error,
+        }
+        .into();
+        assert!(direct_rendered.contains("E0004"));
+        assert!(!direct_rendered.contains("E0000"));
     }
 
     // ------------------------------------------------------------------
@@ -2327,8 +2777,10 @@ mod tests {
             single_file_err.diag.message
         );
 
-        let via_helper = check_root_with_project_authority(&root, src, &provider, &profile)
-            .expect_err("must still fail");
+        let (_, prepared) = prepare_source(&root).expect("prepare");
+        let via_helper =
+            check_root_with_project_authority(&root, src, prepared, &provider, &profile)
+                .expect_err("must still fail");
         assert!(
             via_helper.diag.message.contains("failed to parse module"),
             "the project mechanism's own E0239-wrapped, module-identified error must be used - \
@@ -2351,7 +2803,9 @@ mod tests {
 
         let provider = CliFsModuleProvider;
         let profile = cli_profile();
-        let via_helper = check_root_with_project_authority(&root, src, &provider, &profile);
+        let (_, prepared) = prepare_source(&root).expect("prepare");
+        let via_helper =
+            check_root_with_project_authority(&root, src, prepared, &provider, &profile);
         let via_single_file = check_source_with_profile(src, &profile);
         assert_eq!(
             via_helper.is_ok(),
@@ -2391,8 +2845,10 @@ mod tests {
         let root_src = std::fs::read_to_string(&root).expect("read root");
         let provider = CliFsModuleProvider;
         let profile = cli_profile();
-        let report = check_root_with_project_authority(&root, &root_src, &provider, &profile)
-            .expect("valid project must succeed");
+        let (_, prepared) = prepare_source(&root).expect("prepare");
+        let report =
+            check_root_with_project_authority(&root, &root_src, prepared, &provider, &profile)
+                .expect("valid project must succeed");
         assert!(
             report.warnings.iter().any(|w| w.code == "W0240"),
             "the imported module's own dead-When warning must be present - proof the real \
@@ -2432,7 +2888,9 @@ mod tests {
              succeed here, or this fixture does not test what it claims to"
         );
 
-        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile);
+        let (_, prepared) = prepare_source(&root).expect("prepare");
+        let via_helper =
+            check_root_with_project_authority(&root, &root_src, prepared, &provider, &profile);
         let err = via_helper.expect_err(
             "a project entry with a missing import must fail, never silently succeed via fallback",
         );
@@ -2463,8 +2921,10 @@ mod tests {
         let profile = cli_profile();
         let direct = check_file_with_provider_and_profile(&root, &provider, &profile)
             .expect_err("cyclic import must fail directly");
-        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile)
-            .expect_err("cyclic import must fail through the new seam too");
+        let (_, prepared) = prepare_source(&root).expect("prepare");
+        let via_helper =
+            check_root_with_project_authority(&root, &root_src, prepared, &provider, &profile)
+                .expect_err("cyclic import must fail through the new seam too");
         assert_eq!(via_helper.diag.message, direct.diag.message);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -2514,8 +2974,10 @@ mod tests {
             direct.diag.message
         );
 
-        let via_helper = check_root_with_project_authority(&root, &root_src, &provider, &profile)
-            .expect_err("must still fail");
+        let (_, prepared) = prepare_source(&root).expect("prepare");
+        let via_helper =
+            check_root_with_project_authority(&root, &root_src, prepared, &provider, &profile)
+                .expect_err("must still fail");
         assert_eq!(
             via_helper.diag.message, direct.diag.message,
             "the project mechanism's own (earlier, more specific) error must survive - not be \
@@ -2571,11 +3033,13 @@ mod tests {
              fixture, or a wrong `Project` route would be caught for the wrong reason"
         );
 
-        let via_helper = check_root_with_project_authority(&root, src, &provider, &profile)
-            .expect_err(
-                "a Shared/Shared tie must surface Decision E's ambiguity, not silently \
+        let (_, prepared) = prepare_source(&root).expect("prepare");
+        let via_helper =
+            check_root_with_project_authority(&root, src, prepared, &provider, &profile)
+                .expect_err(
+                    "a Shared/Shared tie must surface Decision E's ambiguity, not silently \
                          succeed as a Logos project",
-            );
+                );
         assert!(
             via_helper.diag.message.contains("AMBIGUOUS"),
             "expected Decision E's own ambiguity diagnostic, got: {}",
@@ -2586,22 +3050,27 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // #1931 Part B: `render_ir_for_profile` regressions (shared by
-    // `cmd_dump_ir`/`cmd_hash_ir`). IR-A5 (Shared/Shared ambiguity) is
-    // tested directly against the helper here, bypassing `read_source_
-    // with_package_admission`'s executable-bundle read step - a real
-    // `smc dump-ir`/`hash-ir` invocation on a bare `Import "a.sm"`
-    // fixture hits that unrelated, pre-existing bundling mechanism
-    // first (it eagerly treats every import as a RustLike helper module
-    // to inline), which is orthogonal to the Auto-routing defect this
-    // checkpoint fixes - see `tests/dump_ir_hash_ir_surface_authority.rs`
-    // for the full end-to-end IR-A1..A7 matrix and this constraint's
-    // fuller explanation.
+    // #1933: `prepare_source` is now the sole authority-freezing seam,
+    // and it classifies the raw root BEFORE any executable bundling can
+    // run - unlike the pre-#1933 `read_source_with_package_admission`,
+    // which eagerly treated any `Import` as a RustLike helper module to
+    // inline before Auto authority was ever resolved. A bare
+    // `Import "a.sm"` fixture now reaches its real, canonical Ambiguous
+    // classification directly through the real seam - no bypass needed,
+    // unlike the #1931/#1934-era versions of this test.
     #[test]
-    fn ir_a5_shared_vs_shared_ambiguity_via_render_ir_for_profile() {
+    fn prepare_source_shared_vs_shared_ambiguity_never_inspects_helper() {
+        let dir = mk_temp_dir("p1933_shared_ambiguous_no_helper");
+        let root = dir.join("root.sm");
         let src = "Import \"a.sm\"\n";
-        let profile = cli_profile();
+        std::fs::write(&root, src).expect("write root");
+        // Deliberately never write a.sm at all: if authority classification
+        // ever touched the import target (even just to check it exists),
+        // this test would fail with an I/O error instead of reaching
+        // Ambiguous - proving the helper is never inspected before
+        // authority terminates.
 
+        let profile = cli_profile();
         let tokens = lex(src).expect("lex");
         let logos = admit_logos_program_with_profile(src, &tokens, &profile);
         let rustlike = admit_program_with_profile(src, &tokens, &profile);
@@ -2612,45 +3081,57 @@ mod tests {
              got logos={logos:?}, rustlike={rustlike:?}"
         );
 
-        let err = render_ir_for_profile(src, CompileProfile::Auto, OptLevel::O0, &profile)
-            .expect_err("a Shared/Shared tie must be terminal ambiguity, not a silent pick");
+        let (_, prepared) =
+            prepare_source(&root).expect("prepare_source must not fail on a.sm's absence");
         assert!(
-            err.contains("AMBIGUOUS"),
-            "expected the canonical ambiguity diagnostic, got: {err}"
+            matches!(prepared, PreparedSource::Ambiguous { .. }),
+            "a Shared/Shared tie on the raw root must classify as Ambiguous without ever \
+             reading the (nonexistent) import target"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // #1934's Shared/Shared proof, same shape as `ir_a5` above: not
-    // exercised through the real CLI. `read_source_with_package_admission`
-    // (see #1933, out of this checkpoint's scope) eagerly bundles any
-    // `Import` as a required RustLike helper module before Auto authority
-    // classification ever runs, so a bare `Import "a.sm"` fixture cannot
-    // reach `render_ast_for_source` through `smc dump-ast`/`hash-ast`
-    // either - it hits the bundling step's own unrelated error first, the
-    // same way it did for `dump-ir`/`hash-ir` in #1932. This proves
-    // `render_ast_for_source`'s own Shared/Shared handling directly,
-    // bypassing that step.
+    // #1933's central regression, found during DISCOVER: a genuinely
+    // Ambiguous raw root must stay Ambiguous even when the import target
+    // *would* successfully bundle as RustLike - helper content must
+    // never retroactively decide root ownership. Before this checkpoint,
+    // `read_source_with_package_admission` would eagerly bundle this
+    // exact fixture (RustLike parse of the root succeeds trivially, and
+    // its one import is present), silently producing a "program must
+    // define fn main()" RustLike-domain error instead of ever surfacing
+    // the canonical ambiguity - the single most dangerous shape this
+    // checkpoint's DISCOVER phase found.
     #[test]
-    fn ast_shared_vs_shared_ambiguity_via_render_ast_for_source() {
+    fn prepare_source_ambiguous_root_stays_ambiguous_even_with_rustlike_valid_helper() {
+        let dir = mk_temp_dir("p1933_ambiguous_root_rustlike_valid_helper");
+        let root = dir.join("root.sm");
+        let helper = dir.join("a.sm");
         let src = "Import \"a.sm\"\n";
-        let profile = cli_profile();
+        std::fs::write(&root, src).expect("write root");
+        std::fs::write(&helper, "fn helper_fn() -> i32 {\n    return 1;\n}\n")
+            .expect("write helper");
 
+        let profile = cli_profile();
         let tokens = lex(src).expect("lex");
         let logos = admit_logos_program_with_profile(src, &tokens, &profile);
         let rustlike = admit_program_with_profile(src, &tokens, &profile);
         assert!(
-            matches!(logos, GrammarAdmission::Shared(_))
-                && matches!(rustlike, GrammarAdmission::Shared(_)),
-            "control check: a bare Import must be Shared evidence for both grammars, \
+            matches!(logos, GrammarAdmission::Shared(Ok(_)))
+                && matches!(rustlike, GrammarAdmission::Shared(Ok(_))),
+            "control check: fixture must be genuinely Shared(Ok)/Shared(Ok) - the real tie - \
              got logos={logos:?}, rustlike={rustlike:?}"
         );
 
-        let err = render_ast_for_source(src, &profile)
-            .expect_err("a Shared/Shared tie must be terminal ambiguity, not a silent pick");
+        let (_, prepared) = prepare_source(&root).expect("prepare");
         assert!(
-            err.contains("AMBIGUOUS"),
-            "expected the canonical ambiguity diagnostic, got: {err}"
+            matches!(prepared, PreparedSource::Ambiguous { .. }),
+            "a genuinely ambiguous root must classify as Ambiguous regardless of whether its \
+             import target happens to be valid RustLike - helper content must never decide \
+             root ownership"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // Structural proof (#1931 Section 16): `cmd_dump_ir` and
@@ -2670,14 +3151,13 @@ mod tests {
 
         for (name, body) in [("cmd_dump_ir", dump_ir_body), ("cmd_hash_ir", hash_ir_body)] {
             assert!(
-                body.contains("render_ir_for_profile("),
-                "{name} must route IR rendering through the shared render_ir_for_profile seam"
+                body.contains("prepare_source("),
+                "{name} must route Auto-mode authority through the shared prepare_source seam"
             );
             assert!(
-                !body.contains("parse_logos_program_with_profile"),
-                "{name} must not carry its own independent Logos-parse-first routing logic - \
-                 that is exactly the divergence this checkpoint removed, got body containing a \
-                 direct call in: {name}"
+                body.contains("render_and_cache_ir_rustlike(")
+                    && body.contains("render_and_cache_ir_logos("),
+                "{name} must route rendering through the shared render_and_cache_ir_* seams"
             );
         }
     }
@@ -2698,14 +3178,323 @@ mod tests {
             ("cmd_hash_ast", hash_ast_body),
         ] {
             assert!(
-                body.contains("render_ast_for_source("),
-                "{name} must route AST rendering through the shared render_ast_for_source seam"
+                body.contains("prepare_source("),
+                "{name} must route authority through the shared prepare_source seam"
+            );
+            assert!(
+                body.contains("render_and_cache_ast_rustlike(")
+                    && body.contains("render_and_cache_ast_logos("),
+                "{name} must route rendering through the shared render_and_cache_ast_* seams"
             );
             assert!(
                 !body.contains("parse_logos_program_with_profile"),
                 "{name} must not carry its own independent Logos-parse-first routing logic - \
                  that is exactly the divergence this checkpoint removed, got body containing a \
                  direct call in: {name}"
+            );
+        }
+    }
+
+    // #1933 structural guard: executable bundling
+    // (`compose_executable_bundle`) must never be reachable from an
+    // explicit `CompileProfile::Logos` match arm anywhere in this file -
+    // a text-level backstop for Section 3's "explicit Logos forbids
+    // executable bundling" rule. This cannot prove full data flow (the
+    // `PreparedSource` type itself is the primary enforcement - see its
+    // own doc comment), but it catches the textually-obvious regression
+    // of a `Logos =>` arm gaining a `compose_executable_bundle(` call.
+    //
+    // Extracts exactly the matched arm's own span: if it's a one-line
+    // `Logos => expr,` arm, only that line is checked (a fixed line
+    // window here would spill into the *next* arm's own unrelated,
+    // legitimate bundling call - confirmed the hard way while building
+    // this guard); if it opens a `{` block, brace-depth counts to the
+    // matching close, mirroring `function_body_source`'s approach.
+    //
+    // Only lines whose *trimmed* text starts with the pattern count as
+    // a real arm - this is what keeps the scan from matching this very
+    // test's own source, where the pattern also appears, but only as a
+    // quoted string argument never at the start of a trimmed line.
+    #[test]
+    fn explicit_logos_arms_never_call_compose_executable_bundle() {
+        const PATTERN: &str = "CompileProfile::Logos =>";
+        const SOURCE: &str = include_str!("app.rs");
+        let mut line_start = 0usize;
+        for line in SOURCE.split_inclusive('\n') {
+            let start = line_start;
+            line_start += line.len();
+            if !line.trim_start().starts_with(PATTERN) {
+                continue;
+            }
+            let pattern_offset = start + line.find(PATTERN).unwrap();
+            let rest = &SOURCE[pattern_offset..];
+            let arm_span = if let Some(brace_offset) = rest.find('{') {
+                let comma_offset = rest.find(',');
+                if comma_offset.is_some_and(|c| c < brace_offset) {
+                    // One-line tuple/expr arm ending before any `{` - the
+                    // arm itself ends at the first top-level comma.
+                    &rest[..comma_offset.unwrap()]
+                } else {
+                    let mut depth = 0i32;
+                    let mut end = rest.len();
+                    for (offset, ch) in rest[brace_offset..].char_indices() {
+                        match ch {
+                            '{' => depth += 1,
+                            '}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    end = brace_offset + offset + 1;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    &rest[..end]
+                }
+            } else {
+                rest.lines().next().unwrap_or(rest)
+            };
+            assert!(
+                !arm_span.contains("compose_executable_bundle"),
+                "found compose_executable_bundle inside a CompileProfile::Logos arm - explicit \
+                 Logos must never bundle:\n{arm_span}"
+            );
+        }
+    }
+
+    // #1933 structural guard: `prepare_source`'s `SurfaceAuthority::LogosOwns`
+    // arm must stay the trivial passthrough Hard Law A requires - a
+    // Logos-owned raw root must never be re-routed into `RustLikeOwned`.
+    // Mutation testing (M3) found no fixture can behaviorally falsify this:
+    // Logos and RustLike surface grammars are disjoint enough that
+    // Logos-owned text essentially never reparses as RustLike, so this
+    // guard is the only backstop for that specific arm.
+    #[test]
+    fn logos_owns_arm_in_prepare_source_never_constructs_rustlike_owned() {
+        const PATTERN: &str = "SurfaceAuthority::LogosOwns(r) =>";
+        const SOURCE: &str = include_str!("executable_bundle.rs");
+        let mut line_start = 0usize;
+        let mut found = false;
+        for line in SOURCE.split_inclusive('\n') {
+            let start = line_start;
+            line_start += line.len();
+            if !line.trim_start().starts_with(PATTERN) {
+                continue;
+            }
+            found = true;
+            let pattern_offset = start + line.find(PATTERN).unwrap();
+            let rest = &SOURCE[pattern_offset..];
+            let arm_span = if let Some(brace_offset) = rest.find('{') {
+                let comma_offset = rest.find(',');
+                if comma_offset.is_some_and(|c| c < brace_offset) {
+                    &rest[..comma_offset.unwrap()]
+                } else {
+                    let mut depth = 0i32;
+                    let mut end = rest.len();
+                    for (offset, ch) in rest[brace_offset..].char_indices() {
+                        match ch {
+                            '{' => depth += 1,
+                            '}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    end = brace_offset + offset + 1;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    &rest[..end]
+                }
+            } else {
+                rest.lines().next().unwrap_or(rest)
+            };
+            assert!(
+                !arm_span.contains("RustLikeOwned")
+                    && !arm_span.contains("parse_program_with_profile"),
+                "found RustLikeOwned/parse_program_with_profile inside prepare_source's \
+                 SurfaceAuthority::LogosOwns arm - a Logos-owned root must never route into \
+                 RustLike executable bundling:\n{arm_span}"
+            );
+        }
+        assert!(
+            found,
+            "expected to find the SurfaceAuthority::LogosOwns arm in executable_bundle.rs"
+        );
+    }
+
+    // #1933 structural guard: a single test run can never observe a stale
+    // on-disk cache entry written by a pre-#1933 binary (there is no old
+    // entry to find), so the routing-sensitive cache version bumps
+    // (Section 8 of the #1933 addendum) are otherwise behaviorally
+    // unfalsifiable in-process - M8 mutation testing confirmed reverting
+    // any one of them passes every existing test. This guard is the only
+    // backstop proving the three bumped literal tags stay bumped.
+    #[test]
+    fn routing_sensitive_cache_version_tags_stay_bumped() {
+        const SOURCE: &str = include_str!("app.rs");
+        // Scan only the functional code preceding this test module - this
+        // test's own assertion literally names each tag, so scanning the
+        // whole file would always find a match regardless of mutation.
+        let functional_code = &SOURCE[..SOURCE
+            .find("mod tests {")
+            .expect("expected a `mod tests {` boundary in app.rs")];
+        for tag in ["lowering=v3", "emit=v2", "frontend-v3-auto"] {
+            assert!(
+                functional_code.contains(tag),
+                "expected the #1933 routing-sensitive cache version tag '{tag}' in app.rs's \
+                 functional code - a missing/reverted tag means a pre-#1933 cached pack could \
+                 be silently reused"
+            );
+        }
+    }
+
+    // Owner-caught F01 regression: `is_check_result_cache_eligible` must
+    // exclude every terminal outcome, not just the ones that happen to be
+    // easy to name. `LogosOwned(Err(_))` was the specific miss - the
+    // original predicate used `LogosOwned(_)`, which also matches
+    // `LogosOwned(Err(_))`, an authoritative Logos failure, letting it
+    // reach the SEMP result-cache lookup.
+    #[test]
+    fn is_check_result_cache_eligible_excludes_every_terminal_outcome() {
+        use sm_front::FrontendError;
+        let err = || FrontendError {
+            message: "probe".to_string(),
+            pos: 0,
+        };
+        let rustlike_program =
+            parse_program_with_profile("fn main() {\n    return;\n}\n", &cli_profile())
+                .expect("trivial RustLike probe program must parse");
+        assert!(is_check_result_cache_eligible(&PreparedSource::LogosOwned(
+            Ok(LogosProgram::default())
+        )));
+        assert!(is_check_result_cache_eligible(
+            &PreparedSource::RustLikeOwned(Ok(rustlike_program))
+        ));
+        assert!(
+            !is_check_result_cache_eligible(&PreparedSource::LogosOwned(Err(err()))),
+            "an authoritative Logos failure must never be cache-eligible"
+        );
+        assert!(
+            !is_check_result_cache_eligible(&PreparedSource::RustLikeOwned(Err(err()))),
+            "an authoritative RustLike failure must never be cache-eligible"
+        );
+        assert!(
+            !is_check_result_cache_eligible(&PreparedSource::Ambiguous {
+                logos: Err(err()),
+                rustlike: Err(err()),
+            }),
+            "Ambiguous must never be cache-eligible"
+        );
+        assert!(
+            !is_check_result_cache_eligible(&PreparedSource::NoSurfaceClaim),
+            "NoSurfaceClaim must never be cache-eligible"
+        );
+    }
+
+    // Owner-caught F01 regression: `cmd_check` and `cmd_lint` must share
+    // the one `is_check_result_cache_eligible` predicate rather than each
+    // carrying their own `matches!` re-derivation - that duplication is
+    // exactly how the two gates drifted into disagreement before.
+    #[test]
+    fn cmd_check_and_cmd_lint_share_the_cache_eligibility_predicate() {
+        const SOURCE: &str = include_str!("app.rs");
+        for signature in ["fn cmd_check(", "fn cmd_lint("] {
+            let body = function_body_source(SOURCE, signature);
+            assert!(
+                body.contains("is_check_result_cache_eligible("),
+                "{signature} must gate its cache lookup through the shared \
+                 is_check_result_cache_eligible predicate, not a local re-derivation"
+            );
+            assert!(
+                !body.contains("matches!(\n") || !body.contains("PreparedSource::LogosOwned(_)"),
+                "{signature} must not carry its own local cache-eligibility matches! against \
+                 LogosOwned(_) - that re-derivation is exactly the F01 divergence risk"
+            );
+        }
+    }
+
+    // Owner-caught F02 regression: `cmd_hash_smc`'s terminal Auto arm
+    // (`RustLikeOwned(Err(_))` / `Ambiguous` / `NoSurfaceClaim`) must
+    // never reach `smc_pack_key`/the SMC pack cache at all - it must get
+    // its canonical terminal result straight from sm-ir's own Auto path
+    // and return immediately, exactly like `cmd_dump_bytecode`'s own
+    // terminal arm already does.
+    #[test]
+    fn cmd_hash_smc_terminal_auto_arm_never_reaches_smc_pack_key() {
+        const SOURCE: &str = include_str!("app.rs");
+        let body = function_body_source(SOURCE, "fn cmd_hash_smc(");
+        let pattern = "PreparedSource::RustLikeOwned(Err(_))";
+        let start = body
+            .find(pattern)
+            .expect("expected cmd_hash_smc's terminal Auto arm pattern");
+        let rest = &body[start..];
+        // The compound OR-pattern's own `Ambiguous { .. }` arm contains a
+        // `{` that is pattern syntax, not a block - the real block opens
+        // only after the arm's `=>`, so find that first.
+        let arrow_offset = rest
+            .find("=>")
+            .expect("expected `=>` after the terminal arm's OR-pattern");
+        let brace_offset = arrow_offset
+            + rest[arrow_offset..]
+                .find('{')
+                .expect("expected the terminal arm to open a block");
+        let mut depth = 0i32;
+        let mut end = rest.len();
+        for (offset, ch) in rest[brace_offset..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = brace_offset + offset + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let arm_span = &rest[..end];
+        assert!(
+            !arm_span.contains("smc_pack_key"),
+            "found smc_pack_key inside cmd_hash_smc's terminal Auto arm - a terminal outcome \
+             must never reach the SMC pack cache lookup:\n{arm_span}"
+        );
+        assert!(
+            arm_span.contains("return Ok(())"),
+            "expected cmd_hash_smc's terminal Auto arm to return immediately, bypassing the \
+             cache entirely:\n{arm_span}"
+        );
+    }
+
+    // #1933 structural guard: every Auto-capable caller of
+    // `prepare_source` must be one of the eleven names the frozen
+    // contract enumerates - if a new caller is added without updating
+    // this list, that is exactly the kind of silent caller-closure gap
+    // the CONTRACT addendum's Section 4 required closing completely.
+    #[test]
+    fn all_prepare_source_callers_are_the_frozen_eleven() {
+        const SOURCE: &str = include_str!("app.rs");
+        const KNOWN_AUTO_CAPABLE: &[&str] = &[
+            "fn cmd_work_prove(",
+            "fn cmd_compile(",
+            "fn cmd_check(",
+            "fn cmd_watch(",
+            "fn cmd_lint(",
+            "fn cmd_dump_ast(",
+            "fn cmd_dump_ir(",
+            "fn cmd_dump_bytecode(",
+            "fn cmd_hash_ast(",
+            "fn cmd_hash_ir(",
+            "fn cmd_hash_smc(",
+        ];
+        for signature in KNOWN_AUTO_CAPABLE {
+            let body = function_body_source(SOURCE, signature);
+            assert!(
+                body.contains("prepare_source("),
+                "{signature} is declared Auto-capable by the #1933 contract but its body does \
+                 not call prepare_source - caller closure regression"
             );
         }
     }
@@ -2807,7 +3596,14 @@ fn score(value: i32) -> i32 {
         )
         .expect("write helper");
 
-        let bundled = read_source_with_package_admission(&root).expect("bundle");
+        let (raw_source, prepared) = prepare_source(&root).expect("prepare");
+        let program = match prepared {
+            PreparedSource::RustLikeOwned(Ok(program)) => program,
+            _ => panic!("expected RustLikeOwned(Ok), fixture must be genuinely RustLikeOwns"),
+        };
+        let parser_profile = cli_profile();
+        let bundled = compose_executable_bundle(&root, &raw_source, &program, &parser_profile)
+            .expect("bundle");
         assert!(bundled.contains("Import \"helper.sm\""));
         assert!(bundled.contains("fn score(value: i32) -> i32"));
         assert!(bundled.contains("fn main()"));
@@ -2842,7 +3638,14 @@ fn score(value: i32) -> i32 {
         )
         .expect("write helper");
 
-        let bundled = read_source_with_package_admission(&root).expect("bundle selected import");
+        let (raw_source, prepared) = prepare_source(&root).expect("prepare");
+        let program = match prepared {
+            PreparedSource::RustLikeOwned(Ok(program)) => program,
+            _ => panic!("expected RustLikeOwned(Ok), fixture must be genuinely RustLikeOwns"),
+        };
+        let parser_profile = cli_profile();
+        let bundled = compose_executable_bundle(&root, &raw_source, &program, &parser_profile)
+            .expect("bundle selected import");
         assert!(bundled.contains("Import \"helper.sm\" { score }"));
         assert!(bundled.contains("fn execsel_"));
         assert!(bundled.contains("fn score(value: i32) -> i32"));
@@ -3574,6 +4377,22 @@ fn render_controlled_observation_envelope(
     })
 }
 
+/// #1933: hardcoded-explicit-RustLike source preparation for `run`/
+/// `run-controlled-observation`/`verify` (directory input) - none of
+/// these ever had an Auto or Logos path (`compile_program_to_semcode`'s
+/// no-arg default is `CompileProfile::RustLike`), so this never probes
+/// Logos or consults `resolve_surface_authority` - the explicit
+/// selection is itself the authority.
+fn effective_rustlike_source(
+    root: &Path,
+    parser_profile: &ParserProfile,
+) -> Result<String, String> {
+    let raw_source = read_raw_source(root)?;
+    let program =
+        parse_program_with_profile(&raw_source, parser_profile).map_err(|e| e.to_string())?;
+    compose_executable_bundle(root, &raw_source, &program, parser_profile)
+}
+
 fn cmd_run(args: &[String]) -> Result<(), String> {
     if args.len() == 1 {
         return cmd_run_controlled_observation(&args[0]);
@@ -3587,7 +4406,8 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
+    let parser_profile = cli_profile();
+    let src = effective_rustlike_source(&root, &parser_profile)?;
     let bytes = compile_program_to_semcode(&src).map_err(|e| e.to_string())?;
     let token = verify_semcode_token(&bytes).map_err(|error| error.to_string())?;
     let entry = token
@@ -3628,7 +4448,8 @@ fn cmd_run_controlled_observation(input: &str) -> Result<(), String> {
     } else {
         input_path.to_path_buf()
     };
-    let src = read_source_with_package_admission(&root)?;
+    let parser_profile = cli_profile();
+    let src = effective_rustlike_source(&root, &parser_profile)?;
     let bytes = compile_program_to_semcode(&src).map_err(|e| e.to_string())?;
     let envelope = render_controlled_observation_envelope(&bytes)?;
     for line in envelope.rendered_lines {
@@ -3722,7 +4543,8 @@ fn cmd_verify(args: &[String]) -> Result<(), String> {
     let input_path = Path::new(input);
     let bytes = if input_path.is_dir() {
         let entry = resolve_project_root_check_entry(input_path)?;
-        let source = read_source_with_package_admission(&entry)?;
+        let parser_profile = cli_profile();
+        let source = effective_rustlike_source(&entry, &parser_profile)?;
         compile_program_to_semcode(&source).map_err(|error| error.to_string())?
     } else {
         std::fs::read(input).map_err(|e| format!("failed to read '{}': {}", input, e))?

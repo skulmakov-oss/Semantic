@@ -2697,3 +2697,113 @@ PR #1930. Consumer-local `GrammarAdmission`-pair resolver debt is now
 zero repository-wide - `tests/surface_authority_guard.rs`'s
 `EXPECTED_LEGACY_VIOLATION_COUNTS` is empty, and any future local
 resolver anywhere outside `sm-front` fails the guard immediately.
+
+## #1933 Addendum - Authority-Gated Executable Bundling
+
+**FROZEN (2026-09-17). Narrow implementation consequence of Decision F,
+not a new decision.** Does not change Decision F's frozen semantic table
+(`SurfaceAuthority`/`resolve_surface_authority` above are unchanged).
+
+**Problem**: `smc-cli`'s pre-existing executable-bundling step
+(`crates/smc-cli/src/executable_bundle.rs`'s former
+`read_source_with_package_admission`) decided whether to bundle a root's
+`Import` targets by asking "does the root parse as RustLike and does it
+have imports?" - a *re-derivation* of ownership from the root's own parse
+result, run independently of, and prior to, `resolve_surface_authority`.
+For a genuinely `Ambiguous` root (Decision E/F's confirmed concrete
+instance, `Import "a.sm"` and nothing else) whose import target happened
+to be valid RustLike, this let helper content silently decide the root
+was RustLike-owned and bundle it - the ambiguity was never surfaced. This
+is a distinct defect from anything Decision F's consumer-migration
+status (above) already covers: it is not a second local
+`GrammarAdmission`-pair resolver (the guard's own enforcement scope), it
+is bundling itself running before authority is asked at all.
+
+**Decision**: raw-root authority, from `resolve_surface_authority`
+alone, precedes executable bundling unconditionally, and is sticky
+afterward:
+
+- **Raw-root authority precedes bundling.** `prepare_source`
+  (`executable_bundle.rs`) is the sole seam every `smc-cli` source
+  consumer goes through: it classifies the raw root text exactly once,
+  before any bundling can run, and returns a `PreparedSource` carrying
+  that frozen classification. Only `PreparedSource::RustLikeOwned(Ok(_))`
+  may ever authorize `compose_executable_bundle`/
+  `rustlike_effective_program`; `LogosOwned`, `RustLikeOwned(Err(_))`,
+  `Ambiguous`, and `NoSurfaceClaim` never do, regardless of what an
+  import target's own content looks like.
+- **Authority is sticky after composition.** A composed/bundled
+  effective source produced from a `RustLikeOwned(Ok(_))` root is an
+  internal RustLike composition artifact, not a fresh classification
+  candidate - it is never fed back into `resolve_surface_authority`, and
+  no consumer re-opens Auto classification on it. `check_rustlike_program`
+  (new, see below) type-checks the effective program directly, bypassing
+  `check_source_with_profile`'s own Auto dispatch specifically to avoid
+  this.
+- **Helper contents cannot influence root ownership.** Bundling only
+  ever runs *after* the root's own authority is already frozen; a
+  helper's grammar, validity, or content has no path back into the
+  ownership decision. The worst confirmed counterexample (an `Ambiguous`
+  root whose import target happens to be valid RustLike) stays
+  `Ambiguous`.
+- **A synthetic bundle is not a new Auto source candidate.** The
+  composed text exists only to be RustLike-reparsed
+  (`rustlike_effective_program`) or type-checked
+  (`check_rustlike_program`) under the authority the raw root already
+  established - never reclassified.
+- **Explicit RustLike/Logos rules unchanged, now enforced at the
+  seam too.** Explicit RustLike may bundle unconditionally once its own
+  root parse succeeds, with no Logos probe; explicit Logos never bundles
+  and never probes RustLike. `read_raw_source` (the explicit-profile
+  entry point) performs no classification at all, matching this.
+- **Surface errors remain structured; bundler errors are a separate
+  domain.** `PreparedSource` preserves `FrontendError` structurally in
+  every variant (`RustLikeOwned(Result<Program, FrontendError>)`,
+  `Ambiguous { logos: Result<..>, rustlike: Result<..> }`) - the
+  preparation seam never collapses a surface classification failure into
+  a `String`, matching Decision F's "no shared diagnostic-message
+  carrier." Once a root is authorized to bundle, composition-domain
+  failures (missing helper, malformed helper, cycle, unsupported import
+  form) remain their own, separately-owned bundler error representation
+  - the two domains are never merged into one carrier.
+- **Terminal authority precedes result-cache reuse.** `LogosOwned(Err)`,
+  `RustLikeOwned(Err)`, `Ambiguous`, and `NoSurfaceClaim` are gated before
+  any AST/IR/SMC pack cache lookup or `check`/`lint` result-cache reuse
+  (`is_cache_eligible`), so a pre-#1933 cached artifact can never mask a
+  newly-correct terminal outcome. The three routing-sensitive pack-cache
+  version tags were bumped accordingly: `ast_pack_key`
+  (`frontend-v2-auto` -> `frontend-v3-auto`), `ir_pack_key`
+  (`lowering=v2` -> `lowering=v3`), `smc_pack_key` (`emit=v1` ->
+  `emit=v2`).
+
+**New narrow `sm-sema` public API**: `check_rustlike_program(program:
+&Program, source: &str) -> Result<SemanticReport, SemanticError>`
+(`crates/sm-sema/src/std_adapters.rs`), extracted verbatim from
+`check_source_with_profile`'s existing `RustLikeOwns(Ok(parsed))` arm -
+zero lexing/parsing/admission/authority-resolution of its own.
+`check_source_with_profile` now delegates to it internally, so this is a
+refactor-with-new-entry-point, not new semantic behavior. It exists
+because `smc-cli` needed a type-checking entry point for an
+already-classified, already-composed RustLike `Program` without
+re-opening `check_source_with_profile`'s own Auto dispatch on the
+composed text (which would itself be the sticky-authority violation this
+addendum forbids). This is not a new authority API and does not touch
+`SurfaceAuthority`/`resolve_surface_authority`.
+
+**Implementation status**: implemented on
+`fix/1933-authority-gated-executable-bundling` from base
+`2a83b35106118c7c4b592c379db2a8b38fd17d5c`. All 14 known `smc-cli`
+source consumers were migrated off the removed
+`read_source_with_package_admission`: the 11 Auto-capable callers
+(`work prove`, `compile`, `check`, `watch`, `lint`, `dump-ast`,
+`dump-ir`, `dump-bytecode`, `hash-ast`, `hash-ir`, `hash-smc`) route
+through `prepare_source` and consume its frozen `PreparedSource` result
+directly, while the 3 hard explicit-RustLike callers (`run`,
+`run-controlled-observation`, `verify`) route through the separate
+`effective_rustlike_source`/`read_raw_source` path instead and so never
+call `prepare_source` or `resolve_surface_authority` at all - calling
+either would itself be the "explicit RustLike must not probe Logos"
+violation Decision F's INVARIANT already forbids. See the PR closing
+[#1933](https://github.com/skulmakov-oss/Semantic/issues/1933) for the
+full regression matrix, mutation-testing results, and review
+disposition.
