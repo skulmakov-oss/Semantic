@@ -37,6 +37,9 @@ pub fn parse_rustlike_with_profile(
         policy: CompilePolicyView::new(profile),
         type_param_scope: Vec::new(),
         self_type_scope: None,
+        logos_recovery: LogosRecoveryState::default(),
+        #[cfg(test)]
+        recovery_token_visits: 0,
     };
     p.parse_program()
 }
@@ -54,6 +57,9 @@ pub fn parse_logos_with_profile(
         policy: CompilePolicyView::new(profile),
         type_param_scope: Vec::new(),
         self_type_scope: None,
+        logos_recovery: LogosRecoveryState::default(),
+        #[cfg(test)]
+        recovery_token_visits: 0,
     };
     p.parse_logos_program()
 }
@@ -86,6 +92,9 @@ pub fn admit_program_with_profile(
         policy: CompilePolicyView::new(profile),
         type_param_scope: Vec::new(),
         self_type_scope: None,
+        logos_recovery: LogosRecoveryState::default(),
+        #[cfg(test)]
+        recovery_token_visits: 0,
     };
     p.admit_program()
 }
@@ -105,6 +114,9 @@ pub fn admit_logos_program_with_profile(
         policy: CompilePolicyView::new(profile),
         type_param_scope: Vec::new(),
         self_type_scope: None,
+        logos_recovery: LogosRecoveryState::default(),
+        #[cfg(test)]
+        recovery_token_visits: 0,
     };
     p.admit_logos_program()
 }
@@ -143,6 +155,24 @@ struct Parser<'a> {
     /// Narrow owner-layer `Self` marker available only while parsing trait
     /// method signatures or impl methods.
     self_type_scope: Option<Type>,
+    /// Incremental structural state for Logos error recovery.
+    ///
+    /// The Logos parse/admission paths only advance `idx`; recovery therefore
+    /// needs to inspect each token once, rather than reconstructing the whole
+    /// prefix after every error.
+    logos_recovery: LogosRecoveryState,
+    #[cfg(test)]
+    recovery_token_visits: usize,
+}
+
+#[derive(Default)]
+struct LogosRecoveryState {
+    scanned_to: usize,
+    delimiter_stack: Vec<TokenKind>,
+    indent_depth: usize,
+    /// Whether the token at `scanned_to` begins a fresh physical line.
+    at_line_start: bool,
+    structurally_poisoned: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -3455,83 +3485,95 @@ impl<'a> Parser<'a> {
     }
 
     fn recover_logos_anchor(&mut self) {
-        let mut delimiter_stack = Vec::new();
-        let mut indent_depth = 0usize;
-        for token in &self.tokens[..self.idx] {
-            match token.kind {
-                TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket => {
-                    delimiter_stack.push(token.kind);
-                }
-                TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket => {
-                    let Some(open) = delimiter_stack.pop() else {
-                        self.idx = self.tokens.len();
-                        return;
-                    };
-                    if !matches!(
-                        (open, token.kind),
-                        (TokenKind::LBrace, TokenKind::RBrace)
-                            | (TokenKind::LParen, TokenKind::RParen)
-                            | (TokenKind::LBracket, TokenKind::RBracket)
-                    ) {
-                        self.idx = self.tokens.len();
-                        return;
-                    }
-                }
-                TokenKind::Indent => indent_depth += 1,
-                TokenKind::Dedent => indent_depth = indent_depth.saturating_sub(1),
-                _ => {}
+        // `recover_logos_anchor` is called only from the two Logos loops
+        // above, whose raw parser helpers advance `idx` monotonically. The
+        // recovery cursor can therefore catch up by scanning only tokens
+        // newly consumed since the previous recovery call.
+        debug_assert!(
+            self.idx >= self.logos_recovery.scanned_to,
+            "Logos recovery cursor cannot move backwards"
+        );
+        while self.logos_recovery.scanned_to < self.idx {
+            if self.advance_logos_recovery_state() {
+                self.idx = self.tokens.len();
+                self.logos_recovery.scanned_to = self.idx;
+                return;
             }
         }
+        if self.logos_recovery.structurally_poisoned {
+            self.idx = self.tokens.len();
+            self.logos_recovery.scanned_to = self.idx;
+            return;
+        }
 
-        let mut at_line_start = false;
         while self.idx < self.tokens.len() {
             let k = self.tokens[self.idx].kind;
             match k {
-                TokenKind::Newline => {
-                    self.idx += 1;
-                    at_line_start = true;
-                }
-                TokenKind::Indent => {
-                    self.idx += 1;
-                    indent_depth += 1;
-                }
-                TokenKind::Dedent => {
-                    self.idx += 1;
-                    indent_depth = indent_depth.saturating_sub(1);
-                }
-                TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket => {
-                    self.idx += 1;
-                    delimiter_stack.push(k);
-                    at_line_start = false;
-                }
-                TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket => {
-                    let Some(open) = delimiter_stack.pop() else {
-                        self.idx = self.tokens.len();
-                        return;
-                    };
-                    if !matches!(
-                        (open, k),
-                        (TokenKind::LBrace, TokenKind::RBrace)
-                            | (TokenKind::LParen, TokenKind::RParen)
-                            | (TokenKind::LBracket, TokenKind::RBracket)
-                    ) {
-                        self.idx = self.tokens.len();
-                        return;
-                    }
-                    self.idx += 1;
-                    at_line_start = false;
-                }
                 TokenKind::KwSystem | TokenKind::KwEntity | TokenKind::KwLaw
-                    if at_line_start && delimiter_stack.is_empty() && indent_depth == 0 =>
+                    if self.logos_recovery.at_line_start
+                        && self.logos_recovery.delimiter_stack.is_empty()
+                        && self.logos_recovery.indent_depth == 0 =>
                 {
                     break;
                 }
                 _ => {
+                    let poisoned = self.advance_logos_recovery_state();
                     self.idx += 1;
-                    at_line_start = false;
+                    if poisoned {
+                        self.idx = self.tokens.len();
+                        self.logos_recovery.scanned_to = self.idx;
+                        return;
+                    }
                 }
             }
         }
+    }
+
+    /// Advance the incremental Logos recovery state over the token at its
+    /// cursor and return whether structural corruption was observed.
+    fn advance_logos_recovery_state(&mut self) -> bool {
+        let token = self.tokens[self.logos_recovery.scanned_to].kind;
+        self.logos_recovery.scanned_to += 1;
+        #[cfg(test)]
+        {
+            self.recovery_token_visits += 1;
+        }
+
+        match token {
+            TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket => {
+                self.logos_recovery.delimiter_stack.push(token);
+            }
+            TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket => {
+                let Some(open) = self.logos_recovery.delimiter_stack.pop() else {
+                    self.logos_recovery.structurally_poisoned = true;
+                    return true;
+                };
+                if !matches!(
+                    (open, token),
+                    (TokenKind::LBrace, TokenKind::RBrace)
+                        | (TokenKind::LParen, TokenKind::RParen)
+                        | (TokenKind::LBracket, TokenKind::RBracket)
+                ) {
+                    self.logos_recovery.structurally_poisoned = true;
+                    return true;
+                }
+            }
+            TokenKind::Newline => self.logos_recovery.at_line_start = true,
+            TokenKind::Indent => self.logos_recovery.indent_depth += 1,
+            TokenKind::Dedent => {
+                self.logos_recovery.indent_depth =
+                    self.logos_recovery.indent_depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+
+        if !matches!(
+            token,
+            TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent
+        ) {
+            self.logos_recovery.at_line_start = false;
+        }
+        false
     }
 
     fn merge_logos_errors(&self, errors: Vec<FrontendError>) -> FrontendError {
@@ -7654,6 +7696,8 @@ fn apply<T: Eq, U>(x: T, y: U) -> i32 {
             policy: CompilePolicyView::new(&profile),
             type_param_scope: vec![sentinel],
             self_type_scope: None,
+            logos_recovery: LogosRecoveryState::default(),
+            recovery_token_visits: 0,
         };
         assert_eq!(p.type_param_scope, vec![sentinel], "scope before the call");
         let result = p.parse_program();
@@ -7689,6 +7733,8 @@ fn apply<T: Eq, U>(x: T, y: U) -> i32 {
             policy: CompilePolicyView::new(&profile),
             type_param_scope: Vec::new(),
             self_type_scope: None,
+            logos_recovery: LogosRecoveryState::default(),
+            recovery_token_visits: 0,
         };
         assert_eq!(p.self_type_scope, None, "scope before the call");
         let result = p.parse_program();
@@ -7853,6 +7899,27 @@ mod grammar_admission_tests {
 
     fn admit_logos(src: &str, profile: &ParserProfile) -> GrammarAdmission<LogosProgram> {
         admit_logos_program_with_profile(src, &toks(src), profile)
+    }
+
+    fn admit_logos_with_recovery_visits(
+        src: &str,
+        profile: &ParserProfile,
+    ) -> (GrammarAdmission<LogosProgram>, usize, usize) {
+        let tokens = toks(src);
+        let token_count = tokens.len();
+        let mut parser = Parser {
+            tokens,
+            idx: 0,
+            source: src.to_string(),
+            arena: AstArena::default(),
+            policy: CompilePolicyView::new(profile),
+            type_param_scope: Vec::new(),
+            self_type_scope: None,
+            logos_recovery: LogosRecoveryState::default(),
+            recovery_token_visits: 0,
+        };
+        let admission = parser.admit_logos_program();
+        (admission, parser.recovery_token_visits, token_count)
     }
 
     fn resolve_fixture(
@@ -8085,16 +8152,22 @@ mod grammar_admission_tests {
     #[test]
     fn unmatched_closing_delimiter_does_not_promote_later_logos_keyword() {
         let profile = ParserProfile::foundation_default();
-        let src = "fn foo() {}}\nEntity\n";
-        assert_eq!(admit_logos(src, &profile), GrammarAdmission::NoClaim);
-        assert!(matches!(
-            admit_rustlike(src, &profile),
-            GrammarAdmission::Exclusive(Err(_))
-        ));
-        assert!(matches!(
-            resolve_fixture(src, &profile),
-            SurfaceAuthority::RustLikeOwns(Err(_))
-        ));
+        let fixtures = [
+            "fn foo() {}}\nEntity\n",
+            "fn foo() {]\nEntity\n",
+            "fn foo() ([}\nEntity\n",
+        ];
+        for src in fixtures {
+            assert_eq!(admit_logos(src, &profile), GrammarAdmission::NoClaim);
+            assert!(matches!(
+                admit_rustlike(src, &profile),
+                GrammarAdmission::Exclusive(Err(_))
+            ));
+            assert!(matches!(
+                resolve_fixture(src, &profile),
+                SurfaceAuthority::RustLikeOwns(Err(_))
+            ));
+        }
     }
 
     #[test]
@@ -8110,6 +8183,52 @@ mod grammar_admission_tests {
                 );
             }
             other => panic!("expected recovered Exclusive(Err), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn logos_recovery_state_work_is_linear_in_token_count() {
+        fn malformed_declarations(count: usize) -> String {
+            (0..count).map(|i| format!("Entity E{i:04}\n")).collect()
+        }
+
+        let profile = ParserProfile::foundation_default();
+        let (_, visits_n, tokens_n) =
+            admit_logos_with_recovery_visits(&malformed_declarations(64), &profile);
+        let (_, visits_2n, tokens_2n) =
+            admit_logos_with_recovery_visits(&malformed_declarations(128), &profile);
+
+        assert!(
+            visits_n <= tokens_n * 2,
+            "recovery state must inspect each token a bounded number of times: {visits_n} visits for {tokens_n} tokens"
+        );
+        assert!(
+            visits_2n <= tokens_2n * 2,
+            "recovery state must inspect each token a bounded number of times: {visits_2n} visits for {tokens_2n} tokens"
+        );
+        assert!(
+            visits_2n <= visits_n * 3,
+            "doubling malformed declarations must remain approximately linear: {visits_n} -> {visits_2n} visits"
+        );
+    }
+
+    #[test]
+    fn logos_recovery_recognizes_current_anchor_after_consumed_newline() {
+        let profile = ParserProfile::foundation_default();
+        let fixtures = [
+            "Entity Broken:\nEntity AlsoBroken\n",
+            "Entity Broken:\nSystem\n",
+            "Entity Broken:\nLaw\n",
+        ];
+
+        for src in fixtures {
+            match admit_logos(src, &profile) {
+                GrammarAdmission::Exclusive(Err(error)) => assert!(
+                    error.message.contains("multiple parser errors (2)"),
+                    "recovery must retain the current top-level anchor's error: {error}"
+                ),
+                other => panic!("expected two recovered Logos errors, got {other:?}"),
+            }
         }
     }
 
