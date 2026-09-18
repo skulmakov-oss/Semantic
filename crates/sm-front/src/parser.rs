@@ -3455,22 +3455,82 @@ impl<'a> Parser<'a> {
     }
 
     fn recover_logos_anchor(&mut self) {
+        let mut delimiter_stack = Vec::new();
+        let mut indent_depth = 0usize;
+        for token in &self.tokens[..self.idx] {
+            match token.kind {
+                TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket => {
+                    delimiter_stack.push(token.kind);
+                }
+                TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket => {
+                    let Some(open) = delimiter_stack.pop() else {
+                        self.idx = self.tokens.len();
+                        return;
+                    };
+                    if !matches!(
+                        (open, token.kind),
+                        (TokenKind::LBrace, TokenKind::RBrace)
+                            | (TokenKind::LParen, TokenKind::RParen)
+                            | (TokenKind::LBracket, TokenKind::RBracket)
+                    ) {
+                        self.idx = self.tokens.len();
+                        return;
+                    }
+                }
+                TokenKind::Indent => indent_depth += 1,
+                TokenKind::Dedent => indent_depth = indent_depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+
+        let mut at_line_start = false;
         while self.idx < self.tokens.len() {
             let k = self.tokens[self.idx].kind;
-            if matches!(
-                k,
-                TokenKind::Newline
-                    | TokenKind::Dedent
-                    | TokenKind::KwSystem
-                    | TokenKind::KwEntity
-                    | TokenKind::KwLaw
-            ) {
-                if matches!(k, TokenKind::Newline | TokenKind::Dedent) {
+            match k {
+                TokenKind::Newline => {
                     self.idx += 1;
+                    at_line_start = true;
                 }
-                break;
+                TokenKind::Indent => {
+                    self.idx += 1;
+                    indent_depth += 1;
+                }
+                TokenKind::Dedent => {
+                    self.idx += 1;
+                    indent_depth = indent_depth.saturating_sub(1);
+                }
+                TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket => {
+                    self.idx += 1;
+                    delimiter_stack.push(k);
+                    at_line_start = false;
+                }
+                TokenKind::RBrace | TokenKind::RParen | TokenKind::RBracket => {
+                    let Some(open) = delimiter_stack.pop() else {
+                        self.idx = self.tokens.len();
+                        return;
+                    };
+                    if !matches!(
+                        (open, k),
+                        (TokenKind::LBrace, TokenKind::RBrace)
+                            | (TokenKind::LParen, TokenKind::RParen)
+                            | (TokenKind::LBracket, TokenKind::RBracket)
+                    ) {
+                        self.idx = self.tokens.len();
+                        return;
+                    }
+                    self.idx += 1;
+                    at_line_start = false;
+                }
+                TokenKind::KwSystem | TokenKind::KwEntity | TokenKind::KwLaw
+                    if at_line_start && delimiter_stack.is_empty() && indent_depth == 0 =>
+                {
+                    break;
+                }
+                _ => {
+                    self.idx += 1;
+                    at_line_start = false;
+                }
             }
-            self.idx += 1;
         }
     }
 
@@ -7776,7 +7836,7 @@ fn main() -> i32 {
 #[cfg(test)]
 mod grammar_admission_tests {
     use super::*;
-    use crate::FrontendErrorKind;
+    use crate::{resolve_surface_authority, FrontendErrorKind, SurfaceAuthority};
     use sm_profile::{CompatibilityMode, FeaturePolicy, ParserProfile};
 
     fn toks(src: &str) -> Vec<Token> {
@@ -7793,6 +7853,17 @@ mod grammar_admission_tests {
 
     fn admit_logos(src: &str, profile: &ParserProfile) -> GrammarAdmission<LogosProgram> {
         admit_logos_program_with_profile(src, &toks(src), profile)
+    }
+
+    fn resolve_fixture(
+        src: &str,
+        profile: &ParserProfile,
+    ) -> SurfaceAuthority<LogosProgram, Program> {
+        let tokens = toks(src);
+        resolve_surface_authority(
+            admit_logos_program_with_profile(src, &tokens, profile),
+            admit_program_with_profile(src, &tokens, profile),
+        )
     }
 
     fn logos_surface_disabled() -> ParserProfile {
@@ -7932,6 +8003,172 @@ mod grammar_admission_tests {
             "expected Exclusive(Err) - `Entity`'s head is recognized \
              (exclusive evidence) before its own body fails, got {admission:?}"
         );
+    }
+
+    #[test]
+    fn nested_logos_keywords_do_not_establish_logos_authority() {
+        let profile = ParserProfile::foundation_default();
+        let fixtures = [
+            ("brace nesting", "fn main() {\n    Entity\n}\n"),
+            ("paren nesting", "fn main() {\n    (Entity)\n}\n"),
+            ("bracket nesting", "fn main() {\n    [Entity]\n}\n"),
+        ];
+
+        for (label, src) in fixtures {
+            assert_eq!(
+                admit_logos(src, &profile),
+                GrammarAdmission::NoClaim,
+                "nested Logos token must not establish authority in {label}"
+            );
+            assert!(
+                matches!(
+                    admit_rustlike(src, &profile),
+                    GrammarAdmission::Exclusive(Err(_))
+                ),
+                "RustLike must retain its own failure in {label}"
+            );
+            assert!(
+                matches!(
+                    resolve_fixture(src, &profile),
+                    SurfaceAuthority::RustLikeOwns(Err(_))
+                ),
+                "nested Logos token must not manufacture ambiguity in {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_rustlike_keyword_does_not_establish_rustlike_authority() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Entity A:\n    state fn: quad\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Exclusive(Err(_))
+        ));
+        assert_eq!(admit_rustlike(src, &profile), GrammarAdmission::NoClaim);
+        assert!(matches!(
+            resolve_fixture(src, &profile),
+            SurfaceAuthority::LogosOwns(Err(_))
+        ));
+    }
+
+    #[test]
+    fn non_head_keyword_in_rustlike_declaration_does_not_create_logos_claim() {
+        let profile = ParserProfile::foundation_default();
+        let src = "fn Entity() {\n    return;\n}\n";
+        assert_eq!(admit_logos(src, &profile), GrammarAdmission::NoClaim);
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Exclusive(Err(_))
+        ));
+        assert!(matches!(
+            resolve_fixture(src, &profile),
+            SurfaceAuthority::RustLikeOwns(Err(_))
+        ));
+    }
+
+    #[test]
+    fn non_head_keyword_in_logos_declaration_does_not_create_rustlike_claim() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Entity fn:\n    state x: quad\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Exclusive(Err(_))
+        ));
+        assert_eq!(admit_rustlike(src, &profile), GrammarAdmission::NoClaim);
+        assert!(matches!(
+            resolve_fixture(src, &profile),
+            SurfaceAuthority::LogosOwns(Err(_))
+        ));
+    }
+
+    #[test]
+    fn unmatched_closing_delimiter_does_not_promote_later_logos_keyword() {
+        let profile = ParserProfile::foundation_default();
+        let src = "fn foo() {}}\nEntity\n";
+        assert_eq!(admit_logos(src, &profile), GrammarAdmission::NoClaim);
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Exclusive(Err(_))
+        ));
+        assert!(matches!(
+            resolve_fixture(src, &profile),
+            SurfaceAuthority::RustLikeOwns(Err(_))
+        ));
+    }
+
+    #[test]
+    fn logos_recovery_preserves_later_top_level_declaration_evidence() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Entity Broken\nEntity AlsoBroken\nEntity Good:\n    state hp: quad\n";
+        match admit_logos(src, &profile) {
+            GrammarAdmission::Exclusive(Err(error)) => {
+                assert!(
+                    error.message.contains("multiple parser errors (2)"),
+                    "recovery must retain both malformed top-level declarations: {}",
+                    error.message
+                );
+            }
+            other => panic!("expected recovered Exclusive(Err), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bare_profile_remains_logos_exclusive() {
+        let profile = ParserProfile::foundation_default();
+        assert!(matches!(
+            admit_logos("Profile \"x\"\n", &profile),
+            GrammarAdmission::Exclusive(Ok(_))
+        ));
+    }
+
+    #[test]
+    fn disabled_logos_surface_keeps_profile_failure_authoritative() {
+        let src = "Profile \"x\"\n";
+        match admit_logos(src, &logos_surface_disabled()) {
+            GrammarAdmission::Exclusive(Err(error)) => {
+                assert_eq!(error.kind(), FrontendErrorKind::PolicyViolation);
+            }
+            other => panic!("expected Logos-authoritative policy failure, got {other:?}"),
+        }
+        assert!(matches!(
+            resolve_fixture(src, &logos_surface_disabled()),
+            SurfaceAuthority::LogosOwns(Err(_))
+        ));
+    }
+
+    #[test]
+    fn quoted_import_remains_shared_ambiguous() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Import \"a.sm\"\n";
+        assert!(matches!(
+            admit_logos(src, &profile),
+            GrammarAdmission::Shared(Ok(_))
+        ));
+        assert!(matches!(
+            admit_rustlike(src, &profile),
+            GrammarAdmission::Shared(Ok(_))
+        ));
+        assert!(matches!(
+            resolve_fixture(src, &profile),
+            SurfaceAuthority::Ambiguous { .. }
+        ));
+    }
+
+    #[test]
+    fn ordinary_rustlike_and_logos_happy_paths_remain_owned() {
+        let profile = ParserProfile::foundation_default();
+        let rustlike = "fn main() { return; }\n";
+        assert!(matches!(
+            resolve_fixture(rustlike, &profile),
+            SurfaceAuthority::RustLikeOwns(Ok(_))
+        ));
+
+        let logos = "Entity Player:\n    state hp: quad\n";
+        assert!(matches!(
+            resolve_fixture(logos, &profile),
+            SurfaceAuthority::LogosOwns(Ok(_))
+        ));
     }
 
     // --- Frozen concrete examples from Decision E, both sides at once ---
