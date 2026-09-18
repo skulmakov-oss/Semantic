@@ -1,7 +1,7 @@
 use crate::application_host::CliApplicationHost;
 use crate::executable_bundle::{
     compose_executable_bundle, prepare_source, read_raw_source, rustlike_effective_program,
-    PreparedSource,
+    PrepareSourceError, PreparedSource,
 };
 use crate::incremental::{
     emit_trace, module_graph_fingerprint, module_graph_module_count, read_graph_hash,
@@ -189,6 +189,37 @@ fn check_root_with_project_authority(
         PreparedSource::RustLikeOwned(Err(_))
         | PreparedSource::Ambiguous { .. }
         | PreparedSource::NoSurfaceClaim => check_source_with_profile(raw_source, parser_profile),
+    }
+}
+
+fn check_preparation_error(
+    error: PrepareSourceError,
+    parser_profile: &ParserProfile,
+) -> Result<sm_sema::SemanticReport, String> {
+    match error {
+        PrepareSourceError::Read(message) => Err(message),
+        PrepareSourceError::Lex { source, error: _ } => {
+            check_source_with_profile(&source, parser_profile).map_err(|e| e.to_string())
+        }
+    }
+}
+
+fn watch_snapshot(result: Result<sm_sema::SemanticReport, String>) -> String {
+    match result {
+        Ok(report) => {
+            let mut out = String::new();
+            for warning in &report.warnings {
+                out.push_str(warning.rendered.trim_end());
+                out.push('\n');
+            }
+            out.push_str(&format!(
+                "ok: {} warning(s), {} scheduled law(s)",
+                report.warnings.len(),
+                report.scheduled_laws.len()
+            ));
+            out
+        }
+        Err(error) => error,
     }
 }
 
@@ -724,7 +755,11 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
     // `check_root_with_project_authority`) only ever runs from a
     // `RustLikeOwned(Ok(_))` branch, and never re-derives this
     // classification once made.
-    let (src, prepared) = prepare_source(&root)?;
+    let parser_profile = cli_profile();
+    let (src, prepared) = match prepare_source(&root) {
+        Ok(value) => value,
+        Err(error) => return check_preparation_error(error, &parser_profile).map(|_| ()),
+    };
     let t_read = Instant::now();
     let is_cache_eligible = is_check_result_cache_eligible(&prepared);
     let prev_graph_hash = read_graph_hash(Path::new(CACHE_GRAPH_FILE));
@@ -796,7 +831,6 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
     }
 
     let provider = CliFsModuleProvider;
-    let parser_profile = cli_profile();
     let root_canon = root
         .canonicalize()
         .map_err(|e| format!("failed to resolve '{}': {}", root.display(), e))?;
@@ -911,10 +945,37 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
                     reset_pinned_dependency_fingerprint_cache();
                     reset_declared_dependency_graph_cache();
                     last_fp = Some(fp);
-                    let (src, prepared) = match prepare_source(&root) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            let snap = format!("error: {}", e);
+                    let parser_profile = cli_profile();
+                    let (src, snapshot) = match prepare_source(&root) {
+                        Ok((src, prepared)) => {
+                            let provider = CliFsModuleProvider;
+                            let result =
+                                root.canonicalize()
+                                    .map_err(|e| e.to_string())
+                                    .and_then(|p| {
+                                        check_root_with_project_authority(
+                                            &p,
+                                            &src,
+                                            prepared,
+                                            &provider,
+                                            &parser_profile,
+                                        )
+                                        .map_err(|e| e.to_string())
+                                    });
+                            (src, watch_snapshot(result))
+                        }
+                        Err(PrepareSourceError::Lex { source, error }) => {
+                            let snapshot = watch_snapshot(check_preparation_error(
+                                PrepareSourceError::Lex {
+                                    source: source.clone(),
+                                    error,
+                                },
+                                &parser_profile,
+                            ));
+                            (source, snapshot)
+                        }
+                        Err(PrepareSourceError::Read(error)) => {
+                            let snap = format!("error: {error}");
                             let changed = last_snapshot
                                 .as_ref()
                                 .map(|prev| prev != &snap)
@@ -929,37 +990,6 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
                             continue;
                         }
                     };
-                    let provider = CliFsModuleProvider;
-                    let parser_profile = cli_profile();
-                    let snapshot =
-                        match root
-                            .canonicalize()
-                            .map_err(|e| e.to_string())
-                            .and_then(|p| {
-                                check_root_with_project_authority(
-                                    &p,
-                                    &src,
-                                    prepared,
-                                    &provider,
-                                    &parser_profile,
-                                )
-                                .map_err(|e| e.to_string())
-                            }) {
-                            Ok(report) => {
-                                let mut out = String::new();
-                                for w in &report.warnings {
-                                    out.push_str(w.rendered.trim_end());
-                                    out.push('\n');
-                                }
-                                out.push_str(&format!(
-                                    "ok: {} warning(s), {} scheduled law(s)",
-                                    report.warnings.len(),
-                                    report.scheduled_laws.len()
-                                ));
-                                out
-                            }
-                            Err(e) => format!("{e}"),
-                        };
                     let changed = last_snapshot
                         .as_ref()
                         .map(|prev| prev != &snapshot)
@@ -1114,7 +1144,11 @@ fn cmd_lint(args: &[String]) -> Result<(), String> {
         );
     }
     let root = PathBuf::from(input);
-    let (src, prepared) = prepare_source(Path::new(input))?;
+    let parser_profile = cli_profile();
+    let (src, prepared) = match prepare_source(Path::new(input)) {
+        Ok(value) => value,
+        Err(error) => return check_preparation_error(error, &parser_profile).map(|_| ()),
+    };
     if let Ok(snapshot) = ModuleGraphSnapshot::read_from_root(&root) {
         let _ = snapshot.write_to(Path::new(CACHE_GRAPH_FILE), CACHE_SCHEMA_VERSION);
     }
@@ -1178,7 +1212,6 @@ fn cmd_lint(args: &[String]) -> Result<(), String> {
     }
 
     let provider = CliFsModuleProvider;
-    let parser_profile = cli_profile();
     // #1933: always routes through the same authority-respecting seam
     // `cmd_check` uses, regardless of `--no-cache` - `no_cache` only
     // ever meant "don't consult the SEMP result cache," never "use a
@@ -2627,6 +2660,58 @@ mod tests {
         ));
         std::fs::create_dir_all(&base).expect("mkdir");
         base
+    }
+
+    #[test]
+    fn prepare_source_keeps_lex_failure_structured_outside_authority() {
+        let dir = mk_temp_dir("prepare_source_lex_failure");
+        let root = dir.join("root.sm");
+        let src = "fn main() {\n    let message: text = \"line one\nline two\";\n}\n";
+        std::fs::write(&root, src).expect("write root");
+
+        let error = match prepare_source(&root) {
+            Ok(_) => panic!("unterminated text must fail lexing"),
+            Err(error) => error,
+        };
+        match error {
+            PrepareSourceError::Lex { source, error } => {
+                assert_eq!(source, src);
+                assert!(error.to_string().contains("E0004"));
+            }
+            PrepareSourceError::Read(message) => panic!("unexpected read failure: {message}"),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lex_failure_keeps_check_e0000_and_direct_e0004_contracts() {
+        let src = "fn main() {\n    let message: text = \"line one\nline two\";\n}\n";
+        let parser_profile = cli_profile();
+
+        let check_error = lex(src).expect_err("fixture must fail lexing");
+        let check_rendered = check_preparation_error(
+            PrepareSourceError::Lex {
+                source: src.to_string(),
+                error: check_error,
+            },
+            &parser_profile,
+        )
+        .expect_err("check rendering must preserve the semantic failure");
+        assert!(check_rendered.contains("Error [E0000]"));
+        assert!(
+            check_rendered.find("Error [E0000]") < check_rendered.find("error[E0004]"),
+            "semantic E0000 must be the outer diagnostic code: {check_rendered}"
+        );
+
+        let direct_error = lex(src).expect_err("fixture must fail lexing");
+        let direct_rendered: String = PrepareSourceError::Lex {
+            source: src.to_string(),
+            error: direct_error,
+        }
+        .into();
+        assert!(direct_rendered.contains("E0004"));
+        assert!(!direct_rendered.contains("E0000"));
     }
 
     // ------------------------------------------------------------------

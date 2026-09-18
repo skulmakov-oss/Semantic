@@ -57,18 +57,39 @@ pub(crate) enum PreparedSource {
     NoSurfaceClaim,
 }
 
+#[derive(Debug)]
+pub(crate) enum PrepareSourceError {
+    Read(String),
+    Lex {
+        source: String,
+        error: FrontendError,
+    },
+}
+
+impl From<PrepareSourceError> for String {
+    fn from(error: PrepareSourceError) -> Self {
+        match error {
+            PrepareSourceError::Read(message) => message,
+            PrepareSourceError::Lex { error, .. } => error.to_string(),
+        }
+    }
+}
+
 /// #1933: the sole authority-freezing seam every smc-cli source consumer
 /// must go through - classifies `path`'s raw root text exactly once via
 /// the canonical `sm_front::resolve_surface_authority`, before any
 /// executable bundling can occur. Returns the raw source text alongside
 /// the frozen classification. A lex failure carries no admission
-/// evidence for either grammar (Decision E) and is returned directly as
-/// the outer `Err`, matching how every Auto-mode consumer already
-/// surfaces a bare lex failure today.
-pub(crate) fn prepare_source(path: &Path) -> Result<(String, PreparedSource), String> {
-    let source = read_raw_source(path)?;
+/// evidence for either grammar (Decision E) and remains a structured
+/// preparation error so each consumer can retain its pre-#1933 diagnostic
+/// rendering contract.
+pub(crate) fn prepare_source(path: &Path) -> Result<(String, PreparedSource), PrepareSourceError> {
+    let source = read_raw_source(path).map_err(PrepareSourceError::Read)?;
     let parser_profile = ParserProfile::foundation_default();
-    let tokens = lex(&source).map_err(|e| e.to_string())?;
+    let tokens = lex(&source).map_err(|error| PrepareSourceError::Lex {
+        source: source.clone(),
+        error,
+    })?;
     let logos = admit_logos_program_with_profile(&source, &tokens, &parser_profile);
     let rustlike = admit_program_with_profile(&source, &tokens, &parser_profile);
     let prepared = match resolve_surface_authority(logos, rustlike) {
