@@ -1,7 +1,6 @@
 use std::fs;
 
 use sm_sema::{DiagLevel, SemanticDiagnostic};
-use ton618_core::SourceMark;
 
 const PROM_REF_WRAPPERS: &[&str] = &[
     "CapabilityRef",
@@ -18,11 +17,7 @@ fn semantic_diagnostic_public_shape_is_explicitly_qualified() {
         level: DiagLevel::Warning,
         code: "W0240",
         message: "message".to_string(),
-        mark: SourceMark {
-            file_id: 0,
-            line: 1,
-            col: 1,
-        },
+        mark: Default::default(),
         rendered: "rendered".to_string(),
         provider_module_id: Some("/virtual/module.sm".to_string()),
     };
