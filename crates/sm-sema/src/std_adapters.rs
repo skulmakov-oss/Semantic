@@ -1246,7 +1246,14 @@ Law "L" [priority 1]:
                 })
                 .collect::<Vec<_>>()
         };
-        assert_eq!(key(&first), key(&second));
+        let expected = vec![
+            (Some(helper_a.to_string()), "W0240", 4, 5),
+            (Some(helper_a.to_string()), "W0252", 2, 5),
+            (Some(helper_b.to_string()), "W0240", 4, 5),
+            (Some(helper_b.to_string()), "W0252", 2, 5),
+        ];
+        assert_eq!(key(&first), expected);
+        assert_eq!(key(&second), expected);
     }
 
     #[test]

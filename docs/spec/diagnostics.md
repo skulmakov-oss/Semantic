@@ -327,6 +327,17 @@ Current rule:
 - warnings are part of the source contract, but they do not currently block
   execution in the same way as source errors
 
+Module warning provenance:
+
+- `provider_module_id` is optional provider-graph provenance only
+- it is populated only when module/provider authority is established, currently
+  for successful warnings aggregated through the module/provider pipeline
+- direct `check_source` diagnostics leave it as `None`
+- it is not canonical `FileIdentity`, filesystem identity, or a replacement
+  for `SourceMark.file_id`
+- it is not an external serialization, JSON, or LSP schema contract
+- existing error provenance behavior is unchanged
+
 ## Diagnostic Stability Rules
 
 Current stability expectations:
