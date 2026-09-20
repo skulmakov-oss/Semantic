@@ -1139,7 +1139,10 @@ Law "L" [priority 1]:
     fn provider_warning_attaches_root_module_key() {
         let root = "/virtual/root.sm";
         let mut modules = BTreeMap::new();
-        modules.insert(root.to_string(), warning_fixture_source().as_bytes().to_vec());
+        modules.insert(
+            root.to_string(),
+            warning_fixture_source().as_bytes().to_vec(),
+        );
         let provider = MapProvider { modules };
 
         let report =
@@ -1158,7 +1161,10 @@ Law "L" [priority 1]:
         let root_src = warning_project_root("Import \"a::warn.sm\"\n");
         let mut modules = BTreeMap::new();
         modules.insert(root.to_string(), root_src.into_bytes());
-        modules.insert(helper.to_string(), warning_fixture_source().as_bytes().to_vec());
+        modules.insert(
+            helper.to_string(),
+            warning_fixture_source().as_bytes().to_vec(),
+        );
         let provider = MapProvider { modules };
 
         let report =
@@ -1175,8 +1181,7 @@ Law "L" [priority 1]:
         let root = "/virtual/root.sm";
         let helper_a = "/virtual/deps/a/warn.sm";
         let helper_b = "/virtual/deps/b/warn.sm";
-        let root_src =
-            warning_project_root("Import \"a::warn.sm\"\nImport \"b::warn.sm\"\n");
+        let root_src = warning_project_root("Import \"a::warn.sm\"\nImport \"b::warn.sm\"\n");
         let mut modules = BTreeMap::new();
         modules.insert(root.to_string(), root_src.into_bytes());
         modules.insert(
@@ -1209,8 +1214,7 @@ Law "L" [priority 1]:
         let root = "/virtual/root.sm";
         let helper_a = "/virtual/deps/a/warn.sm";
         let helper_b = "/virtual/deps/b/warn.sm";
-        let root_src =
-            warning_project_root("Import \"b::warn.sm\"\nImport \"a::warn.sm\"\n");
+        let root_src = warning_project_root("Import \"b::warn.sm\"\nImport \"a::warn.sm\"\n");
         let mut modules = BTreeMap::new();
         modules.insert(root.to_string(), root_src.into_bytes());
         modules.insert(
@@ -1278,7 +1282,10 @@ Law "L" [priority 1]:
         let root_src = warning_project_root("Import \"a::warn.sm\"\n");
         let mut modules = BTreeMap::new();
         modules.insert(root.to_string(), root_src.into_bytes());
-        modules.insert(helper.to_string(), warning_fixture_source().as_bytes().to_vec());
+        modules.insert(
+            helper.to_string(),
+            warning_fixture_source().as_bytes().to_vec(),
+        );
         let provider = MapProvider { modules };
 
         let project =
@@ -1299,10 +1306,7 @@ Law "L" [priority 1]:
             assert_eq!(project_warning.code, direct_warning.code);
             assert_eq!(project_warning.message, direct_warning.message);
             assert_eq!(project_warning.mark, direct_warning.mark);
-            assert_eq!(
-                project_warning.provider_module_id.as_deref(),
-                Some(helper)
-            );
+            assert_eq!(project_warning.provider_module_id.as_deref(), Some(helper));
             assert!(direct_warning.provider_module_id.is_none());
         }
     }
@@ -1314,7 +1318,10 @@ Law "L" [priority 1]:
         let root_src = warning_project_root("Import \"a::warn.sm\"\n");
         let mut modules = BTreeMap::new();
         modules.insert(root.to_string(), root_src.into_bytes());
-        modules.insert(helper.to_string(), warning_fixture_source().as_bytes().to_vec());
+        modules.insert(
+            helper.to_string(),
+            warning_fixture_source().as_bytes().to_vec(),
+        );
         let provider = MapProvider { modules };
 
         let project =
