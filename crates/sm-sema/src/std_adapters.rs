@@ -64,6 +64,11 @@ pub struct SemanticDiagnostic {
     pub message: String,
     pub mark: SourceMark,
     pub rendered: String,
+    /// Provider-graph module key attached only when a project/module
+    /// aggregation path has authoritative provider context. This is
+    /// transitional provenance for SSF-09/#1697, not the future canonical
+    /// external FileIdentity.
+    pub provider_module_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,13 +260,16 @@ pub fn check_file_with_provider_and_profile(
         let (src, logos) = loaded
             .get(&module_path)
             .expect("module key from loaded.keys()");
-        let report = analyze_logos_program(logos, src).map_err(|mut e| {
+        let mut report = analyze_logos_program(logos, src).map_err(|mut e| {
             e.diag.message = format!("{}: {}", module_path.display(), e.diag.message);
             e.diag.rendered = format!("in module '{}'\n{}", module_path.display(), e.diag.rendered);
             e
         })?;
-        warnings.extend(report.warnings);
         let module_key = path_contract_key(&module_path);
+        for warning in &mut report.warnings {
+            warning.provider_module_id = Some(module_key.clone());
+        }
+        warnings.extend(report.warnings);
         for law in report.scheduled_laws {
             scheduled_laws.push(format!("{}::{}", module_key, law));
         }
@@ -939,6 +947,7 @@ fn render_diag(
         message,
         mark,
         rendered,
+        provider_module_id: None,
     }
 }
 
