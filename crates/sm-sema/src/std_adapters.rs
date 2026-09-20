@@ -1278,7 +1278,13 @@ Law "L" [priority 1]:
 
         let err = check_file_with_provider(std::path::Path::new(root), &provider)
             .expect_err("malformed imported module must fail");
-        assert!(err.diag.message.contains(helper));
+        let expected_helper = normalize_lexical(std::path::Path::new(helper));
+        let expected_helper = expected_helper.to_string_lossy();
+        assert!(
+            err.diag.message.contains(expected_helper.as_ref()),
+            "expected imported-module error to contain module path; got: {}",
+            err.diag.message
+        );
         assert!(err.diag.provider_module_id.is_none());
     }
 
