@@ -1111,6 +1111,222 @@ Law "CheckSignal" [priority 10]:
             .any(|name| name.contains("/virtual/deps/math/core.sm::Core")));
     }
 
+    fn warning_fixture_source() -> &'static str {
+        r#"Entity A:
+    state x: quad
+Law "L" [priority 1]:
+    When N ->
+        Pulse.emit("x")
+"#
+    }
+
+    fn warning_project_root(imports: &str) -> String {
+        format!(
+            "{imports}Law \"Root\" [priority 1]:\n    When true ->\n        System.recovery()\n"
+        )
+    }
+
+    #[test]
+    fn provider_warning_attaches_root_module_key() {
+        let root = "/virtual/root.sm";
+        let mut modules = BTreeMap::new();
+        modules.insert(root.to_string(), warning_fixture_source().as_bytes().to_vec());
+        let provider = MapProvider { modules };
+
+        let report =
+            check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
+        assert!(!report.warnings.is_empty());
+        assert!(report
+            .warnings
+            .iter()
+            .all(|warning| warning.provider_module_id.as_deref() == Some(root)));
+    }
+
+    #[test]
+    fn provider_warning_attaches_imported_module_key() {
+        let root = "/virtual/root.sm";
+        let helper = "/virtual/deps/a/warn.sm";
+        let root_src = warning_project_root("Import \"a::warn.sm\"\n");
+        let mut modules = BTreeMap::new();
+        modules.insert(root.to_string(), root_src.into_bytes());
+        modules.insert(helper.to_string(), warning_fixture_source().as_bytes().to_vec());
+        let provider = MapProvider { modules };
+
+        let report =
+            check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
+        assert!(!report.warnings.is_empty());
+        assert!(report
+            .warnings
+            .iter()
+            .all(|warning| warning.provider_module_id.as_deref() == Some(helper)));
+    }
+
+    #[test]
+    fn provider_warnings_distinguish_same_basename_modules() {
+        let root = "/virtual/root.sm";
+        let helper_a = "/virtual/deps/a/warn.sm";
+        let helper_b = "/virtual/deps/b/warn.sm";
+        let root_src =
+            warning_project_root("Import \"a::warn.sm\"\nImport \"b::warn.sm\"\n");
+        let mut modules = BTreeMap::new();
+        modules.insert(root.to_string(), root_src.into_bytes());
+        modules.insert(
+            helper_a.to_string(),
+            warning_fixture_source().as_bytes().to_vec(),
+        );
+        modules.insert(
+            helper_b.to_string(),
+            warning_fixture_source().as_bytes().to_vec(),
+        );
+        let provider = MapProvider { modules };
+
+        let report =
+            check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
+        let mut w0240_modules = report
+            .warnings
+            .iter()
+            .filter(|warning| warning.code == "W0240")
+            .map(|warning| warning.provider_module_id.clone())
+            .collect::<Vec<_>>();
+        w0240_modules.sort();
+        assert_eq!(
+            w0240_modules,
+            vec![Some(helper_a.to_string()), Some(helper_b.to_string())]
+        );
+    }
+
+    #[test]
+    fn provider_warning_order_is_deterministic() {
+        let root = "/virtual/root.sm";
+        let helper_a = "/virtual/deps/a/warn.sm";
+        let helper_b = "/virtual/deps/b/warn.sm";
+        let root_src =
+            warning_project_root("Import \"b::warn.sm\"\nImport \"a::warn.sm\"\n");
+        let mut modules = BTreeMap::new();
+        modules.insert(root.to_string(), root_src.into_bytes());
+        modules.insert(
+            helper_a.to_string(),
+            warning_fixture_source().as_bytes().to_vec(),
+        );
+        modules.insert(
+            helper_b.to_string(),
+            warning_fixture_source().as_bytes().to_vec(),
+        );
+        let provider = MapProvider { modules };
+
+        let first =
+            check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
+        let second =
+            check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
+
+        let key = |report: &SemanticReport| {
+            report
+                .warnings
+                .iter()
+                .map(|warning| {
+                    (
+                        warning.provider_module_id.clone(),
+                        warning.code,
+                        warning.mark.line,
+                        warning.mark.col,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(key(&first), key(&second));
+    }
+
+    #[test]
+    fn direct_check_source_does_not_invent_provider_module_id() {
+        let report = check_source(warning_fixture_source()).expect("direct check");
+        assert!(!report.warnings.is_empty());
+        assert!(report
+            .warnings
+            .iter()
+            .all(|warning| warning.provider_module_id.is_none()));
+    }
+
+    #[test]
+    fn provider_error_path_does_not_attach_warning_provenance() {
+        let root = "/virtual/root.sm";
+        let helper = "/virtual/a.sm";
+        let root_src = warning_project_root("Import \"a.sm\"\n");
+        let mut modules = BTreeMap::new();
+        modules.insert(root.to_string(), root_src.into_bytes());
+        modules.insert(helper.to_string(), b"Entity".to_vec());
+        let provider = MapProvider { modules };
+
+        let err = check_file_with_provider(std::path::Path::new(root), &provider)
+            .expect_err("malformed imported module must fail");
+        assert!(err.diag.message.contains(helper));
+        assert!(err.diag.provider_module_id.is_none());
+    }
+
+    #[test]
+    fn provider_warning_preserves_code_message_and_mark() {
+        let root = "/virtual/root.sm";
+        let helper = "/virtual/deps/a/warn.sm";
+        let root_src = warning_project_root("Import \"a::warn.sm\"\n");
+        let mut modules = BTreeMap::new();
+        modules.insert(root.to_string(), root_src.into_bytes());
+        modules.insert(helper.to_string(), warning_fixture_source().as_bytes().to_vec());
+        let provider = MapProvider { modules };
+
+        let project =
+            check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
+        let direct = check_source(warning_fixture_source()).expect("direct");
+
+        for code in ["W0240", "W0252"] {
+            let project_warning = project
+                .warnings
+                .iter()
+                .find(|warning| warning.code == code)
+                .expect("project warning");
+            let direct_warning = direct
+                .warnings
+                .iter()
+                .find(|warning| warning.code == code)
+                .expect("direct warning");
+            assert_eq!(project_warning.code, direct_warning.code);
+            assert_eq!(project_warning.message, direct_warning.message);
+            assert_eq!(project_warning.mark, direct_warning.mark);
+            assert_eq!(
+                project_warning.provider_module_id.as_deref(),
+                Some(helper)
+            );
+            assert!(direct_warning.provider_module_id.is_none());
+        }
+    }
+
+    #[test]
+    fn provider_warning_rendered_output_is_unchanged() {
+        let root = "/virtual/root.sm";
+        let helper = "/virtual/deps/a/warn.sm";
+        let root_src = warning_project_root("Import \"a::warn.sm\"\n");
+        let mut modules = BTreeMap::new();
+        modules.insert(root.to_string(), root_src.into_bytes());
+        modules.insert(helper.to_string(), warning_fixture_source().as_bytes().to_vec());
+        let provider = MapProvider { modules };
+
+        let project =
+            check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
+        let direct = check_source(warning_fixture_source()).expect("direct");
+
+        for code in ["W0240", "W0252"] {
+            let project_warning = project
+                .warnings
+                .iter()
+                .find(|warning| warning.code == code)
+                .expect("project warning");
+            let direct_warning = direct
+                .warnings
+                .iter()
+                .find(|warning| warning.code == code)
+                .expect("direct warning");
+            assert_eq!(project_warning.rendered, direct_warning.rendered);
+        }
+    }
+
     #[test]
     fn type_registry_is_canonical() {
         let mut reg = TypeRegistry::new();
