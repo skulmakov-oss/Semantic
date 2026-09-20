@@ -241,6 +241,7 @@ fn bundler_semantic_error(message: String) -> SemanticError {
             message: message.clone(),
             mark: ton618_core::SourceMark::default(),
             rendered: message,
+            provider_module_id: None,
         },
     }
 }
