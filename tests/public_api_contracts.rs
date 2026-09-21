@@ -40,6 +40,18 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/sm_front_lib.txt",
     ),
     (
+        "crates/sm-sema/src/lib.rs",
+        "tests/golden_snapshots/public_api/sm_sema_lib.txt",
+    ),
+    (
+        "crates/sm-sema/src/std_adapters.rs",
+        "tests/golden_snapshots/public_api/sm_sema_std_adapters.txt",
+    ),
+    (
+        "crates/sm-sema/src/alloc_core.rs",
+        "tests/golden_snapshots/public_api/sm_sema_alloc_core.txt",
+    ),
+    (
         "crates/sm-emit/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_emit_lib.txt",
     ),

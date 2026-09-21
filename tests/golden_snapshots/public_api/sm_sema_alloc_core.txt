@@ -1,0 +1,168 @@
+source: crates/sm-sema/src/alloc_core.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SemanticType {
+Int,
+Fx,
+QVec(usize),
+Mask,
+Str,
+Bool,
+Quad,
+Unit,
+Unknown,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TypeId(pub u16);
+#[derive(Debug, Clone, Default)]
+pub struct TypeRegistry {
+pub fn new() -> Self {
+pub fn intern(&mut self, ty: SemanticType) -> TypeId {
+pub fn get(&self, id: TypeId) -> Option<SemanticType> {
+pub fn equals_fast(&self, a: TypeId, b: TypeId) -> bool {
+pub fn len(&self) -> usize {
+pub fn pretty(&self, id: TypeId) -> &'static str {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScopeKind {
+Global,
+Module,
+Entity,
+Law,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Symbol {
+pub name: String,
+pub ty: SemanticType,
+pub scope: ScopeKind,
+#[derive(Debug, Clone)]
+pub struct SymbolTable {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolError {
+pub message: String,
+pub fn new() -> Self {
+pub fn push(&mut self, kind: ScopeKind) {
+pub fn pop(&mut self) {
+pub fn insert(&mut self, sym: Symbol) -> Result<(), SymbolError> {
+pub fn resolve(&self, name: &str) -> Option<&Symbol> {
+pub fn scope_kind(&self) -> ScopeKind {
+pub trait ModuleProvider {
+fn read_module(&self, module_id: &str) -> Result<Vec<u8>, String>;
+fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateInstr {
+GateRead { device_id: u16, port: u16 },
+GateWrite { device_id: u16, port: u16 },
+PulseEmit { signal: String },
+#[derive(Debug, Clone)]
+pub struct ImmutableIr<T>();
+pub fn from_vec(v: Vec<T>) -> Self {
+pub fn as_slice(&self) -> &[T] {
+pub struct LawScheduler;
+pub fn schedule_by_priority_desc<T, F>(items: &[T], mut priority: F) -> Vec<T> where T: Clone, F: FnMut(&T) -> u32, {
+pub fn is_assignment_compatible(dst: SemanticType, src: SemanticType) -> bool {
+pub fn collect_duplicates<'a, I>(items: I) -> BTreeSet<String> where I: IntoIterator<Item = &'a str>, {
+pub fn is_dead_when_condition(condition: &str) -> bool {
+pub fn parse_law_local_decl(effect: &str) -> Option<String> {
+pub fn is_law_name_style_ok(name: &str) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConditionInferError {
+MismatchedTypes { left: SemanticType, right: SemanticType },
+pub fn is_compatible_cmp(left: SemanticType, right: SemanticType) -> bool {
+pub fn infer_atom_type_core<FS, FF>( token: &str, resolve_symbol: FS, resolve_field: FF, ) -> SemanticType where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(&str, &str) -> Option<SemanticType>, {
+pub fn infer_when_condition_type_core<FS, FF>( expr: &str, resolve_symbol: FS, resolve_field: FF, ) -> Result<SemanticType, ConditionInferError> where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(&str, &str) -> Option<SemanticType>, {
+pub fn track_entity_field_usage_core<F>(text: &str, mut on_field: F) where F: FnMut(&str, &str), {
+pub fn has_magic_number_core(text: &str) -> bool {
+pub fn fold_fx_const_call_core(effect: &str) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhenValidationError {
+pub code: &'static str,
+pub message: String,
+pub fn validate_when_non_empty_core( condition: &str, effect: &str, ) -> Result<(), WhenValidationError> {
+pub fn infer_law_entity_core<F>(first_when_condition: Option<&str>, has_entity: F) -> Option<String> where F: Fn(&str) -> bool, {
+pub fn is_large_law_core(when_count: usize) -> bool {
+pub fn diagnostic_help_core(code: &str) -> Option<&'static str> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LawHeaderPolicy {
+pub non_idiomatic_name: bool,
+pub large_law: bool,
+pub fn evaluate_law_header_policy_core(law_name: &str, when_count: usize) -> LawHeaderPolicy {
+pub fn is_valid_when_result_type_core(ty: SemanticType) -> bool {
+pub fn insert_scoped_name_core( scopes: &mut BTreeMap<String, BTreeSet<String>>, scope: &str, name: &str, ) -> bool {
+pub fn insert_name_core(names: &mut BTreeSet<String>, name: &str) -> bool {
+#[derive(Debug, Clone)]
+pub struct ImportDirective {
+pub spec: String,
+pub alias: Option<String>,
+pub reexport: bool,
+pub select_items: Vec<(String, Option<String>)>,
+pub wildcard: bool,
+pub line: u32,
+pub col: u32,
+pub decl_order: u32,
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ImportResolutionPlan {
+pub selected_bindings: Vec<String>,
+pub namespace_aliases: Vec<String>,
+pub wildcard_imports: Vec<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportKind {
+System,
+Entity,
+Law,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportOrigin {
+Local { module: String },
+Imported { module: String, symbol: String },
+ReExport { chain: Vec<String> },
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportItem {
+pub public_name: String,
+pub kind: ExportKind,
+pub origin: ExportOrigin,
+pub span: SourceMark,
+pub decl_order: u32,
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ExportSet {
+pub items: Vec<ExportItem>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalExportDecl {
+pub public_name: String,
+pub kind: ExportKind,
+pub span: SourceMark,
+pub fn collect_local_exports_core(module_key: &str, locals: &[LocalExportDecl]) -> ExportSet {
+pub fn parse_select_items(inside: &str) -> Vec<(String, Option<String>)> {
+pub fn default_import_alias(spec: &str) -> String {
+pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportPolicyError {
+pub code: &'static str,
+pub message: String,
+pub line: u32,
+pub col: u32,
+pub fn validate_import_namespace_rules( imports: &[ImportDirective], ) -> Result<(), ImportPolicyError> {
+pub fn validate_import_bindings_core( imports: &[ImportDirective], local_names: &BTreeSet<String>, ) -> Result<(), ImportPolicyError> {
+pub fn build_import_resolution_plan_core(imports: &[ImportDirective]) -> ImportResolutionPlan {
+#[derive(Debug, Clone)]
+pub struct SelectImportModule {
+pub module_key: String,
+pub source: String,
+pub imports: Vec<ImportDirective>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectImportPolicyError {
+pub code: &'static str,
+pub message: String,
+pub module_key: String,
+pub line: u32,
+pub col: u32,
+#[derive(Debug, Clone)]
+pub struct ExportBuildModule {
+pub module_key: String,
+pub source: String,
+pub local_exports: ExportSet,
+pub imports: Vec<ImportDirective>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportBuildError {
+pub code: &'static str,
+pub message: String,
+pub module_key: String,
+pub line: u32,
+pub col: u32,
+pub fn validate_select_imports_core( modules: &[SelectImportModule], dep_lookup: &BTreeMap<(String, String), String>, export_symbols: &BTreeMap<String, BTreeSet<String>>, export_kinds: &BTreeMap<String, BTreeMap<String, ExportKind>>, ) -> Result<(), SelectImportPolicyError> {
+pub fn build_export_sets_core( modules: &[ExportBuildModule], dep_lookup: &BTreeMap<(String, String), String>, ) -> Result<BTreeMap<String, ExportSet>, ExportBuildError> {

@@ -1,0 +1,28 @@
+source: crates/sm-sema/src/std_adapters.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagLevel {
+Error,
+Warning,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticDiagnostic {
+pub level: DiagLevel,
+pub code: &'static str,
+pub message: String,
+pub mark: SourceMark,
+pub rendered: String,
+pub provider_module_id: Option<String>,
+pub frontend_error_kind: Option<FrontendErrorKind>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticError {
+pub diag: SemanticDiagnostic,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticReport {
+pub warnings: Vec<SemanticDiagnostic>,
+pub scheduled_laws: Vec<String>,
+pub arena_nodes: usize,
+pub fn check_source(input: &str) -> Result<SemanticReport, SemanticError> {
+pub fn check_rustlike_program( program: &Program, source: &str, ) -> Result<SemanticReport, SemanticError> {
+pub fn check_source_with_profile( input: &str, profile: &ParserProfile, ) -> Result<SemanticReport, SemanticError> {
+pub fn check_file_with_provider( root: &Path, provider: &dyn crate::alloc_core::ModuleProvider, ) -> Result<SemanticReport, SemanticError> {
+pub fn check_file_with_provider_and_profile( root: &Path, provider: &dyn crate::alloc_core::ModuleProvider, profile: &ParserProfile, ) -> Result<SemanticReport, SemanticError> {
+pub fn analyze_logos_program( program: &LogosProgram, source: &str, ) -> Result<SemanticReport, SemanticError> {
