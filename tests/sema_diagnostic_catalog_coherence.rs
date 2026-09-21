@@ -7,6 +7,7 @@
 
 use std::{collections::BTreeSet, fs, path::Path};
 
+use sm_sema::{check_source, diagnostic_help_core};
 use smc_cli::CliPipeline;
 use ton618_core::diagnostics::diagnostic_catalog;
 
@@ -22,8 +23,10 @@ const BOUNDED_CODES: [&str; 14] = [
 const FORMERLY_MISSING_CODES: [&str; 4] = ["E0242", "E0243", "E0244", "E0245"];
 
 fn read(relative: &str) -> String {
+    // Normalize line endings: Windows checkouts may materialize CRLF.
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(relative))
         .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"))
+        .replace("\r\n", "\n")
 }
 
 #[test]
@@ -80,4 +83,69 @@ fn error_codes_mirror_lists_every_catalog_code() {
         !mirror.contains("src/bin/smc.rs"),
         "the mirror must not point maintainers at the stale catalog location"
     );
+}
+
+#[test]
+fn dead_when_and_constant_fold_warnings_have_help() {
+    assert!(diagnostic_help_core("W0240").is_some());
+    assert!(diagnostic_help_core("W0241").is_some());
+
+    // Neighbouring help entries are unchanged.
+    assert_eq!(
+        diagnostic_help_core("E0242"),
+        Some("Rename with 'as' or export symbols selectively to avoid collisions.")
+    );
+    assert_eq!(
+        diagnostic_help_core("W0250"),
+        Some("Use UpperCamelCase names for laws to keep style consistent.")
+    );
+    assert_eq!(diagnostic_help_core("W9999"), None);
+}
+
+#[test]
+fn rendered_dead_when_and_constant_fold_warnings_carry_help() {
+    let cases = [
+        (
+            "W0240",
+            "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When N ->\n        Pulse.emit(\"x\")\n",
+        ),
+        (
+            "W0241",
+            "Law \"L\" [priority 1]:\n    When true -> fx.add(1.0, 2.0)\n",
+        ),
+    ];
+    for (code, src) in cases {
+        let report = check_source(src).unwrap_or_else(|e| panic!("{code} fixture failed: {e}"));
+        let warning = report
+            .warnings
+            .iter()
+            .find(|w| w.code == code)
+            .unwrap_or_else(|| panic!("fixture did not emit {code}"));
+        let help = diagnostic_help_core(code).expect("help entry");
+        assert!(
+            warning.rendered.contains(&format!("help: {help}")),
+            "{code} rendered text must carry its help line: {}",
+            warning.rendered
+        );
+    }
+}
+
+#[test]
+fn spec_warning_families_list_every_bounded_warning() {
+    let spec = read("docs/spec/diagnostics.md");
+    let intro = spec
+        .find("Current warning families include:")
+        .expect("spec must have a warning families list");
+    // The bullet list starts after the intro sentence's blank line and ends
+    // at the next blank line.
+    let after_intro = &spec[intro..];
+    let bullets_at = after_intro.find("\n\n").expect("blank line after intro") + 2;
+    let bullets = &after_intro[bullets_at..];
+    let list = &bullets[..bullets.find("\n\n").unwrap_or(bullets.len())];
+    for code in ["W0240", "W0241", "W0250", "W0251", "W0252", "W0253"] {
+        assert!(
+            list.contains(&format!("- `{code}`")),
+            "spec warning families list must include {code}:\n{list}"
+        );
+    }
 }
