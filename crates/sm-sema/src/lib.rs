@@ -31,8 +31,8 @@ mod frontend {
     pub use sm_front::{
         admit_logos_program_with_profile, admit_program_with_profile, lex,
         parse_logos_program_with_profile, resolve_surface_authority, type_check_program,
-        FrontendError, LogosEntity, LogosEntityFieldKind, LogosProgram, Program, SurfaceAuthority,
-        Type,
+        FrontendError, FrontendErrorKind, LogosEntity, LogosEntityFieldKind, LogosProgram, Program,
+        SurfaceAuthority, Token, Type,
     };
     #[cfg(test)]
     pub use sm_front::{parse_logos_program, parse_program_with_profile};

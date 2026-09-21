@@ -242,6 +242,7 @@ fn bundler_semantic_error(message: String) -> SemanticError {
             mark: ton618_core::SourceMark::default(),
             rendered: message,
             provider_module_id: None,
+            frontend_error_kind: None,
         },
     }
 }

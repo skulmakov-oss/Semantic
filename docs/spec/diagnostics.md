@@ -78,6 +78,21 @@ Current honest limit:
 - exact parse/type wording for closure-surface gaps is not yet a long-term
   frozen compatibility promise
 
+RustLike admission-boundary provenance:
+
+- direct authoritative RustLike admission failures preserve the frontend byte
+  position into the `sm-sema` diagnostic location
+- their optional `frontend_error_kind` preserves whether the frontend
+  classified the failure as `Syntax` or `PolicyViolation`
+- this is transitional frontend-boundary provenance, not a complete diagnostic
+  taxonomy or an external JSON/LSP schema
+- `E0000` remains the current `sm-sema` facade code for these failures; parser
+  numeric-code compatibility is not frozen
+- direct-source `provider_module_id` remains `None`
+- RustLike type-check location quality is unchanged: current type-check
+  producers do not yet provide meaningful source positions
+- imported-module diagnostic behavior remains owned by #1699
+
 ## Policy Diagnostics
 
 The frontend distinguishes ordinary syntax failures from policy rejections.

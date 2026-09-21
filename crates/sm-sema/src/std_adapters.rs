@@ -13,8 +13,8 @@ use crate::alloc_core::{
 use crate::frontend::{
     admit_logos_program_with_profile, admit_program_with_profile, lex,
     parse_logos_program_with_profile, resolve_surface_authority, type_check_program, FrontendError,
-    LogosEntity, LogosEntityFieldKind, LogosProgram, ParserProfile, Program, SourceMark,
-    SurfaceAuthority, Type,
+    FrontendErrorKind, LogosEntity, LogosEntityFieldKind, LogosProgram, ParserProfile, Program,
+    SourceMark, SurfaceAuthority, Token, Type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -69,6 +69,9 @@ pub struct SemanticDiagnostic {
     /// transitional provenance for SSF-09/#1697, not the future canonical
     /// external FileIdentity.
     pub provider_module_id: Option<String>,
+    /// Optional frontend-boundary provenance for a direct RustLike admission
+    /// error. This is not a complete diagnostic taxonomy or external schema.
+    pub frontend_error_kind: Option<FrontendErrorKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,20 +219,46 @@ pub fn check_source_with_profile(
             ),
         }),
         SurfaceAuthority::RustLikeOwns(Ok(parsed)) => check_rustlike_program(&parsed, input),
-        SurfaceAuthority::RustLikeOwns(Err(e)) => Err(SemanticError {
-            diag: render_diag(
-                DiagLevel::Error,
-                "E0000",
-                e.message,
-                SourceMark::default(),
-                input,
-            ),
-        }),
+        SurfaceAuthority::RustLikeOwns(Err(e)) => Err(rustlike_frontend_error(input, &tokens, e)),
         SurfaceAuthority::Ambiguous { logos, rustlike } => {
             Err(ambiguous_surface_error(input, &logos, &rustlike))
         }
         SurfaceAuthority::NoSurfaceClaim => Err(no_surface_claim_error(input)),
     }
+}
+
+fn rustlike_frontend_error(input: &str, tokens: &[Token], error: FrontendError) -> SemanticError {
+    let kind = error.kind();
+    let mut diag = render_diag(
+        DiagLevel::Error,
+        "E0000",
+        error.message,
+        frontend_error_mark(tokens, input, error.pos),
+        input,
+    );
+    diag.frontend_error_kind = Some(kind);
+    SemanticError { diag }
+}
+
+fn frontend_error_mark(tokens: &[Token], source: &str, pos: usize) -> SourceMark {
+    if let Some(token) = tokens.iter().find(|token| token.pos == pos) {
+        return token.mark;
+    }
+
+    let mut mark = SourceMark {
+        line: 1,
+        col: 1,
+        file_id: 0,
+    };
+    for byte in source.as_bytes().iter().take(pos.min(source.len())) {
+        if *byte == b'\n' {
+            mark.line += 1;
+            mark.col = 1;
+        } else {
+            mark.col += 1;
+        }
+    }
+    mark
 }
 
 pub fn check_file_with_provider(
@@ -948,6 +977,7 @@ fn render_diag(
         mark,
         rendered,
         provider_module_id: None,
+        frontend_error_kind: None,
     }
 }
 
@@ -1913,6 +1943,99 @@ Law "Alpha" [priority 7]:
             parse_program_with_profile(src, &profile).expect_err("direct rustlike parse must fail");
         let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
         assert_eq!(via_sema.diag.message, direct.message);
+    }
+
+    #[test]
+    fn rustlike_syntax_error_preserves_frontend_source_mark() {
+        let src = "fn main() {\n    let value: i32 =\n}\n";
+        let profile = ParserProfile::foundation_default();
+        let direct =
+            parse_program_with_profile(src, &profile).expect_err("direct RustLike parse must fail");
+        let expected_mark = lex(src)
+            .expect("fixture must lex")
+            .iter()
+            .find(|token| token.pos == direct.pos)
+            .expect("parser failure must point at a token")
+            .mark;
+        assert_ne!(expected_mark, SourceMark::default());
+
+        let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
+        assert_eq!(via_sema.diag.code, "E0000");
+        assert_eq!(via_sema.diag.message, direct.message);
+        assert_eq!(via_sema.diag.mark, expected_mark);
+        assert_eq!(via_sema.diag.provider_module_id, None);
+        assert_eq!(
+            via_sema.diag.frontend_error_kind,
+            Some(FrontendErrorKind::Syntax)
+        );
+        assert!(via_sema.diag.rendered.contains("2:21"));
+    }
+
+    #[test]
+    fn rustlike_policy_error_preserves_frontend_mark_and_kind() {
+        let src = "fn main() {\n    let value: f64 = 1.5;\n    return;\n}\n";
+        let profile = ParserProfile::default();
+        let direct =
+            parse_program_with_profile(src, &profile).expect_err("strict profile must reject f64");
+        let expected_mark = lex(src)
+            .expect("fixture must lex")
+            .iter()
+            .find(|token| token.pos == direct.pos)
+            .expect("policy rejection must point at a token")
+            .mark;
+        assert_eq!(direct.kind(), FrontendErrorKind::PolicyViolation);
+        assert_eq!(expected_mark.line, 2);
+        assert!(expected_mark.col > 1);
+
+        let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
+        assert_eq!(via_sema.diag.code, "E0000");
+        assert_eq!(via_sema.diag.message, direct.message);
+        assert_eq!(via_sema.diag.mark, expected_mark);
+        assert_eq!(
+            via_sema.diag.frontend_error_kind,
+            Some(FrontendErrorKind::PolicyViolation)
+        );
+        assert_eq!(via_sema.diag.provider_module_id, None);
+        assert!(via_sema
+            .diag
+            .rendered
+            .contains(&format!("{}:{}", expected_mark.line, expected_mark.col)));
+    }
+
+    #[test]
+    fn frontend_error_mark_uses_token_marks_and_byte_offset_fallback() {
+        let source = "x\n\tz";
+        let tokens = lex(source).expect("fixture must lex");
+        let token = tokens
+            .iter()
+            .find(|token| token.pos == 3)
+            .expect("symbol token must start at byte offset 3");
+        assert_eq!(frontend_error_mark(&tokens, source, 3), token.mark);
+        assert_eq!(
+            frontend_error_mark(&tokens, source, source.len()),
+            SourceMark {
+                line: 2,
+                col: 3,
+                file_id: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn unrelated_direct_diagnostic_has_no_frontend_error_kind() {
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile("\n", &profile).expect_err("blank source must fail");
+        assert_eq!(err.diag.frontend_error_kind, None);
+    }
+
+    #[test]
+    fn rustlike_typecheck_path_remains_unannotated() {
+        let src = "fn main() { let value: i32 = true; return; }";
+        let profile = ParserProfile::foundation_default();
+        let err = check_source_with_profile(src, &profile).expect_err("type check must fail");
+        assert_eq!(err.diag.code, "E0201");
+        assert_eq!(err.diag.mark, SourceMark::default());
+        assert_eq!(err.diag.frontend_error_kind, None);
     }
 
     // T5 - confirmed shared Import collision: `Import "a.sm"` alone

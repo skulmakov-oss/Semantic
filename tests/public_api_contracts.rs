@@ -1,5 +1,6 @@
 use std::fs;
 
+use sm_front::FrontendErrorKind;
 use sm_sema::{DiagLevel, SemanticDiagnostic};
 
 const PROM_REF_WRAPPERS: &[&str] = &[
@@ -20,11 +21,16 @@ fn semantic_diagnostic_public_shape_is_explicitly_qualified() {
         mark: Default::default(),
         rendered: "rendered".to_string(),
         provider_module_id: Some("/virtual/module.sm".to_string()),
+        frontend_error_kind: Some(FrontendErrorKind::Syntax),
     };
 
     assert_eq!(
         diagnostic.provider_module_id.as_deref(),
         Some("/virtual/module.sm")
+    );
+    assert_eq!(
+        diagnostic.frontend_error_kind,
+        Some(FrontendErrorKind::Syntax)
     );
 }
 
