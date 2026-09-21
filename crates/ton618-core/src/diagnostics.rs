@@ -46,6 +46,16 @@ pub fn diagnostic_catalog() -> &'static [(&'static str, &'static str)] {
         ("E0239", "Import resolution/read/parse failure."),
         ("E0240", "Import re-export is not supported in v0.1."),
         ("E0241", "Duplicate import alias within one module."),
+        ("E0242", "Public re-export collision."),
+        ("E0243", "Symbol re-export cycle detected."),
+        (
+            "E0244",
+            "Selected import symbol not found in the dependency exports.",
+        ),
+        (
+            "E0245",
+            "Invalid selected import: duplicate alias, wildcard/select conflict, or kind mismatch.",
+        ),
         (
             "W0240",
             "Dead law branch detected: When condition is always false.",
