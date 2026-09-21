@@ -39,8 +39,12 @@ CLI source: `smc explain <code>` and `smc explain --list`.
 - `E0239`: Import resolution/read/parse failure.
 - `E0240`: Import re-export is not supported in v0.1.
 - `E0241`: Duplicate import alias within one module.
+- `E0242`: Public re-export collision.
+- `E0243`: Symbol re-export cycle detected.
+- `E0244`: Selected import symbol not found in the dependency exports.
+- `E0245`: Invalid selected import: duplicate alias, wildcard/select conflict, or kind mismatch.
 - `W0240`: Dead law branch detected: When condition is always false.
-- `W0241`: Constant folding candidate detected for `fx.*` call with literal args.
+- `W0241`: Constant folding candidate detected for `fx.*` call with literals.
 - `W0250`: Law name style warning (expected `UpperCamelCase`).
 - `W0251`: Large Law block warning (too many `When` clauses).
 - `W0252`: Unused Entity field warning (`state/prop` not referenced).
@@ -50,5 +54,5 @@ CLI source: `smc explain <code>` and `smc explain --list`.
 
 When adding new codes:
 
-1. Update the catalog in `src/bin/smc.rs` (`diagnostic_catalog`).
+1. Update the catalog in `crates/ton618-core/src/diagnostics.rs` (`diagnostic_catalog`).
 2. Update this document.

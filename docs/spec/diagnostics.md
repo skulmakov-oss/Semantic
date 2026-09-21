@@ -348,6 +348,8 @@ The Logos path also emits semantic warnings and errors.
 
 Current warning families include:
 
+- `W0240` dead law branch (a `When` condition that is always false)
+- `W0241` constant-folding candidate for a literal-only `fx.*` call
 - `W0250` non-idiomatic law naming
 - `W0251` large law
 - `W0252` unused entity field

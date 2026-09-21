@@ -519,6 +519,10 @@ pub fn diagnostic_help_core(code: &str) -> Option<&'static str> {
         "E0243" => Some("Break re-export chain cycle by exporting local symbol directly."),
         "E0244" => Some("Check selected symbol name or export it in dependency module."),
         "E0245" => Some("Use unique aliases inside import select list."),
+        "W0240" => Some("Remove or revise the branch whose When condition is always false."),
+        "W0241" => {
+            Some("Consider replacing the literal-only fx.* call with its precomputed constant.")
+        }
         "W0250" => Some("Use UpperCamelCase names for laws to keep style consistent."),
         "W0251" => Some("Split large laws into smaller focused laws."),
         "W0252" => Some("Remove unused fields or reference them from at least one law."),
