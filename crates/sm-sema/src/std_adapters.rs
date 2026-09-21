@@ -2207,6 +2207,89 @@ Law "Alpha" [priority 7]:
         );
     }
 
+    // #1943: the corrected `FrontendError.pos` flows through the #1698
+    // exact-token mapping without any sema change.
+    fn assert_numeric_diag_maps_to_token(src: &str, bad: &str) {
+        let profile = ParserProfile::foundation_default();
+        let direct = parse_program_with_profile(src, &profile).expect_err("must fail to parse");
+        let expected_pos = src.find(bad).expect("bad spelling must occur");
+        assert_eq!(direct.pos, expected_pos);
+        let expected_mark = lex(src)
+            .expect("fixture must lex")
+            .iter()
+            .find(|token| token.pos == expected_pos)
+            .expect("numeric token must exist at its byte offset")
+            .mark;
+        assert_ne!(
+            expected_mark.line, 1,
+            "fixture keeps the literal off line 1"
+        );
+
+        let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
+        assert_eq!(via_sema.diag.code, "E0000");
+        assert_eq!(via_sema.diag.message, direct.message);
+        assert_eq!(via_sema.diag.mark, expected_mark);
+        assert_eq!(
+            via_sema.diag.frontend_error_kind,
+            Some(FrontendErrorKind::Syntax)
+        );
+        assert!(via_sema
+            .diag
+            .rendered
+            .contains(&format!("{}:{}", expected_mark.line, expected_mark.col)));
+    }
+
+    #[test]
+    fn numeric_literal_errors_map_to_the_numeric_token_not_line_one() {
+        for (src, bad) in [
+            (
+                "fn main() {\n    let q: i32 = 1;\n    let a: i32 = 99999999999;\n    return;\n}\n",
+                "99999999999",
+            ),
+            (
+                "fn main() {\n    let q: i32 = 1;\n    let a: u32 = 1.5u32;\n    return;\n}\n",
+                "1.5u32",
+            ),
+            (
+                "fn main() {\n    let q: i32 = 1;\n    let a: f64 = 0x10f64;\n    return;\n}\n",
+                "0x10f64",
+            ),
+        ] {
+            assert_numeric_diag_maps_to_token(src, bad);
+        }
+    }
+
+    #[test]
+    fn range_pattern_end_bound_error_maps_to_the_end_token() {
+        let src = "fn main() {\n    let q: i32 = 1;\n    match x { 1..0x => { return; } _ => { return; } }\n    return;\n}\n";
+        assert_numeric_diag_maps_to_token(src, "0x");
+    }
+
+    #[test]
+    fn numeric_error_mapping_holds_under_crlf_and_utf8_prefix() {
+        let base =
+            "fn main() {\n    let q: i32 = 1;\n    let a: i32 = 99999999999;\n    return;\n}\n";
+        assert_numeric_diag_maps_to_token(&base.replace('\n', "\r\n"), "99999999999");
+        assert_numeric_diag_maps_to_token(&format!("// \u{e9}\u{4e2d}\n{base}"), "99999999999");
+    }
+
+    #[test]
+    fn genuine_byte_zero_rustlike_error_still_maps_to_line_one_column_one() {
+        // A RustLike-owned error whose real failing token is at byte zero:
+        // the strict profile rejects the leading `schema` token itself.
+        let src = "schema S { a: i32 }\nfn main() { return; }\n";
+        let profile = ParserProfile::default();
+        let direct = parse_program_with_profile(src, &profile).expect_err("must fail");
+        assert_eq!(direct.pos, 0);
+        let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
+        assert_eq!((via_sema.diag.mark.line, via_sema.diag.mark.col), (1, 1));
+        assert_eq!(via_sema.diag.message, direct.message);
+        assert_eq!(
+            via_sema.diag.frontend_error_kind,
+            Some(FrontendErrorKind::PolicyViolation)
+        );
+    }
+
     #[test]
     fn unrelated_direct_diagnostic_has_no_frontend_error_kind() {
         let profile = ParserProfile::foundation_default();
