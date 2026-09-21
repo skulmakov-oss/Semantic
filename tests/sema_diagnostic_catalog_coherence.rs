@@ -87,8 +87,15 @@ fn error_codes_mirror_lists_every_catalog_code() {
 
 #[test]
 fn dead_when_and_constant_fold_warnings_have_help() {
-    assert!(diagnostic_help_core("W0240").is_some());
-    assert!(diagnostic_help_core("W0241").is_some());
+    // Pin the exact mappings so a swap or a wrong-code mapping is caught.
+    assert_eq!(
+        diagnostic_help_core("W0240"),
+        Some("Remove or revise the branch whose When condition is always false.")
+    );
+    assert_eq!(
+        diagnostic_help_core("W0241"),
+        Some("Consider replacing the literal-only fx.* call with its precomputed constant.")
+    );
 
     // Neighbouring help entries are unchanged.
     assert_eq!(
