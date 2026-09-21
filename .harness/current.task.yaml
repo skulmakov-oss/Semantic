@@ -18,6 +18,10 @@ task:
     Repository owner explicit governance authorization (2026-09-21) to allow
     the root .gitattributes change required by #1698 for deterministic LF
     materialization of byte-sensitive 7HELL fixtures.
+    Repository owner explicit governance authorization (2026-09-22) to allow
+    exactly crates/ton618-core/src/diagnostics.rs and docs/ERROR_CODES.md for
+    the #1704 sm-sema catalog-coherence repair (central catalog entries and
+    its derived ERROR_CODES mirror).
 
 intent:
   summary: >-
@@ -48,6 +52,8 @@ scope:
   allowed_paths:
     - .harness/current.task.yaml
     - .gitattributes
+    - crates/ton618-core/src/diagnostics.rs
+    - docs/ERROR_CODES.md
     - README.md
     - CHANGELOG.md
     - docs/LANGUAGE.md
