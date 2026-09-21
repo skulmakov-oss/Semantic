@@ -245,6 +245,10 @@ fn frontend_error_mark(tokens: &[Token], source: &str, pos: usize) -> SourceMark
         return token.mark;
     }
 
+    source_mark_from_byte_offset(source, pos)
+}
+
+fn source_mark_from_byte_offset(source: &str, pos: usize) -> SourceMark {
     let mut mark = SourceMark {
         line: 1,
         col: 1,
@@ -407,7 +411,7 @@ fn load_module_recursive(
             DiagLevel::Error,
             "E0239",
             format!("failed to parse module '{}': {}", path.display(), e.message),
-            SourceMark::default(),
+            source_mark_from_byte_offset(&source, e.pos),
             &source,
         ),
     })?;
@@ -1316,6 +1320,143 @@ Law "L" [priority 1]:
             err.diag.message
         );
         assert!(err.diag.provider_module_id.is_none());
+    }
+
+    const MALFORMED_MODULE_SRC: &str =
+        "Entity Player:\n    state hp: quad\nLaw \"L\" [priority x]:\n    When true -> System.recovery()\n";
+    const MALFORMED_MODULE_MARK: SourceMark = SourceMark {
+        line: 3,
+        col: 19,
+        file_id: 0,
+    };
+
+    fn check_modules(
+        root: &str,
+        modules: &[(&str, &[u8])],
+    ) -> Result<SemanticReport, SemanticError> {
+        let modules = modules
+            .iter()
+            .map(|(id, bytes)| (id.to_string(), bytes.to_vec()))
+            .collect();
+        check_file_with_provider(std::path::Path::new(root), &MapProvider { modules })
+    }
+
+    fn assert_module_parse_error_at(
+        err: &SemanticError,
+        module: &str,
+        source: &str,
+        expected: SourceMark,
+    ) {
+        let profile = ParserProfile::foundation_default();
+        let direct = parse_logos_program_with_profile(source, &profile)
+            .expect_err("fixture must fail direct Logos parse");
+        assert_eq!(err.diag.code, "E0239");
+        assert_eq!(err.diag.mark, expected);
+        assert_eq!(
+            err.diag.mark,
+            source_mark_from_byte_offset(source, direct.pos)
+        );
+        assert_ne!(err.diag.mark, SourceMark::default());
+        assert!(err.diag.message.replace('\\', "/").contains(module));
+        assert!(err.diag.message.ends_with(&direct.message));
+        assert!(err
+            .diag
+            .rendered
+            .contains(&format!("at line {}:{}", expected.line, expected.col)));
+        assert_eq!(err.diag.provider_module_id, None);
+        assert_eq!(err.diag.frontend_error_kind, None);
+    }
+
+    #[test]
+    fn imported_module_parse_error_preserves_parser_position() {
+        let root = "/virtual/root.sm";
+        let child = "/virtual/child.sm";
+        let root_src = warning_project_root("Import \"child.sm\"\n");
+        let err = check_modules(
+            root,
+            &[
+                (root, root_src.as_bytes()),
+                (child, MALFORMED_MODULE_SRC.as_bytes()),
+            ],
+        )
+        .expect_err("malformed imported module must fail");
+        assert_module_parse_error_at(&err, child, MALFORMED_MODULE_SRC, MALFORMED_MODULE_MARK);
+    }
+
+    #[test]
+    fn root_module_parse_error_preserves_parser_position() {
+        let root = "/virtual/root.sm";
+        let err = check_modules(root, &[(root, MALFORMED_MODULE_SRC.as_bytes())])
+            .expect_err("malformed root module must fail");
+        assert_module_parse_error_at(&err, root, MALFORMED_MODULE_SRC, MALFORMED_MODULE_MARK);
+    }
+
+    #[test]
+    fn module_parse_error_aggregate_uses_first_error_position() {
+        let root = "/virtual/root.sm";
+        let src = "Entity P:\n    state hp: quad\nEntity Q\nEntity R\n";
+        let err = check_modules(root, &[(root, src.as_bytes())])
+            .expect_err("malformed root module must fail");
+        assert!(err.diag.message.contains("multiple parser errors (2)"));
+        let expected = SourceMark {
+            line: 3,
+            col: 9,
+            file_id: 0,
+        };
+        assert_module_parse_error_at(&err, root, src, expected);
+    }
+
+    #[test]
+    fn module_parse_error_at_offset_zero_is_a_real_position() {
+        let root = "/virtual/root.sm";
+        let src = "Entity P:\n";
+        let profile = ParserProfile::foundation_default();
+        let direct = parse_logos_program_with_profile(src, &profile).expect_err("must fail");
+        assert_eq!(direct.pos, 0);
+        let err = check_modules(root, &[(root, src.as_bytes())]).expect_err("must fail");
+        assert_eq!(err.diag.code, "E0239");
+        assert_eq!(
+            err.diag.mark,
+            SourceMark {
+                line: 1,
+                col: 1,
+                file_id: 0,
+            }
+        );
+    }
+
+    struct ResolveFailsProvider;
+
+    impl crate::alloc_core::ModuleProvider for ResolveFailsProvider {
+        fn read_module(&self, _module_id: &str) -> Result<Vec<u8>, String> {
+            Ok(b"Import \"x.sm\"\nEntity A:\n    state a: quad\n".to_vec())
+        }
+
+        fn resolve_import(&self, _importer_module_id: &str, _spec: &str) -> Result<String, String> {
+            Err("no such import".to_string())
+        }
+    }
+
+    #[test]
+    fn non_parse_e0239_failures_remain_positionless() {
+        let root = "/virtual/root.sm";
+        let root_src = warning_project_root("Import \"gone.sm\"\n");
+        let read_fail = check_modules(root, &[(root, root_src.as_bytes())])
+            .expect_err("missing import must fail to read");
+        let not_utf8 = check_modules(root, &[(root, &[0xff, 0xfe, 0x00][..])])
+            .expect_err("invalid utf-8 must fail");
+        let resolve_fail =
+            check_file_with_provider(std::path::Path::new(root), &ResolveFailsProvider)
+                .expect_err("unresolvable import must fail");
+        for (err, needle) in [
+            (read_fail, "failed to read import"),
+            (not_utf8, "not valid utf-8"),
+            (resolve_fail, "failed to resolve import"),
+        ] {
+            assert_eq!(err.diag.code, "E0239");
+            assert!(err.diag.message.contains(needle), "{}", err.diag.message);
+            assert_eq!(err.diag.mark, SourceMark::default());
+        }
     }
 
     #[test]

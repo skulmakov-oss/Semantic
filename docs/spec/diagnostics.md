@@ -326,6 +326,22 @@ Current guarantees:
 - wildcard overlap is currently resolved by declaration-order fallback rather
   than by a dedicated ambiguity diagnostic
 
+Module parse-failure position:
+
+- a Logos parse failure wrapped as `E0239` by the project/module loader
+  preserves the parser-provided byte position as the diagnostic line/column;
+  this applies to every module processed through the loader, including the
+  root module
+- for an aggregate parser failure the location is the first reported error's
+  position; the wrapped message still carries every parser error
+- the `E0239` code, the `failed to parse module '<module>': <parser message>`
+  wrapper wording, and the module identification through the message are
+  unchanged
+- `E0239` read, invalid-UTF-8, and import-resolution failures have no
+  structured source position and remain positionless
+- this does not establish a canonical FileIdentity, a new parser code
+  taxonomy, or an external JSON/LSP schema
+
 ## Logos Semantic Diagnostics
 
 The Logos path also emits semantic warnings and errors.
