@@ -1890,8 +1890,8 @@ impl<'a> Parser<'a> {
             })));
         }
         if self.check(TokenKind::Num) {
-            let text = self.advance().text;
-            return self.parse_numeric_literal_expr(&text);
+            let token = self.advance();
+            return self.parse_numeric_literal_expr(&token.text, token.pos);
         }
         if self.check(TokenKind::Ident) {
             let name = self.expect_symbol()?;
@@ -2794,7 +2794,9 @@ impl<'a> Parser<'a> {
             if is_plain_int {
                 // Lookahead: is the token after the number `..` or `..=`?
                 // We need to consume the number then check.
-                let num_text = self.advance().text;
+                let num_token = self.advance();
+                let num_text = num_token.text;
+                let num_pos = num_token.pos;
                 if self.check(TokenKind::DotDot) || self.check(TokenKind::DotDotEq) {
                     let inclusive = self.eat(TokenKind::DotDotEq);
                     if !inclusive {
@@ -2807,9 +2809,9 @@ impl<'a> Parser<'a> {
                                 .to_string(),
                         });
                     }
-                    let end_text = self.advance().text;
-                    let start = parse_i64_pattern_bound(&num_text)?;
-                    let end = parse_i64_pattern_bound(&end_text)?;
+                    let end_token = self.advance();
+                    let start = parse_i64_pattern_bound(&num_text, num_pos)?;
+                    let end = parse_i64_pattern_bound(&end_token.text, end_token.pos)?;
                     return Ok(MatchPattern::IntRange(IntRangePattern {
                         start,
                         end,
@@ -2828,7 +2830,7 @@ impl<'a> Parser<'a> {
                         });
                     }
                 }
-                let value = parse_i64_pattern_bound(core)?;
+                let value = parse_i64_pattern_bound(core, num_pos)?;
                 return Ok(MatchPattern::IntRange(IntRangePattern {
                     start: value,
                     end: value,
@@ -3875,16 +3877,20 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_numeric_literal_expr(&mut self, text: &str) -> Result<ExprId, FrontendError> {
+    fn parse_numeric_literal_expr(
+        &mut self,
+        text: &str,
+        pos: usize,
+    ) -> Result<ExprId, FrontendError> {
         let (core, suffix) = split_numeric_suffix(text);
         let literal = match suffix {
-            Some("i32") => NumericLiteral::I32(parse_i32_literal(core)?),
-            Some("u32") => NumericLiteral::U32(parse_u32_literal(core)?),
+            Some("i32") => NumericLiteral::I32(parse_i32_literal(core, pos)?),
+            Some("u32") => NumericLiteral::U32(parse_u32_literal(core, pos)?),
             Some("f64") => {
                 self.require_f64_feature("f64 literals are disabled by profile policy")?;
-                NumericLiteral::F64(parse_decimal_f64_literal(core, "f64")?)
+                NumericLiteral::F64(parse_decimal_f64_literal(core, "f64", pos)?)
             }
-            Some("fx") => NumericLiteral::Fx(parse_decimal_f64_literal(core, "fx")?),
+            Some("fx") => NumericLiteral::Fx(parse_decimal_f64_literal(core, "fx", pos)?),
             Some(_) => {
                 return Err(FrontendError {
                     pos: self.pos(),
@@ -3893,9 +3899,9 @@ impl<'a> Parser<'a> {
             }
             None if core.contains('.') => {
                 self.require_f64_feature("f64 literals are disabled by profile policy")?;
-                NumericLiteral::F64(parse_decimal_f64_literal(core, "f64")?)
+                NumericLiteral::F64(parse_decimal_f64_literal(core, "f64", pos)?)
             }
-            None => NumericLiteral::I32(parse_i32_literal(core)?),
+            None => NumericLiteral::I32(parse_i32_literal(core, pos)?),
         };
         Ok(self.arena.alloc_expr(Expr::NumericLiteral(literal)))
     }
@@ -4095,17 +4101,17 @@ impl<'a> Parser<'a> {
 
 /// Parse a plain integer literal as an i64 range bound.
 /// Only decimal and hex (`0x`) forms are accepted; no suffixes, no decimals.
-fn parse_i64_pattern_bound(text: &str) -> Result<i64, FrontendError> {
+fn parse_i64_pattern_bound(text: &str, pos: usize) -> Result<i64, FrontendError> {
     if text.contains('.') {
         return Err(FrontendError {
-            pos: 0,
+            pos,
             message: "range pattern bound must be an integer literal, not a float".to_string(),
         });
     }
     let (core, suffix) = split_numeric_suffix(text);
     if suffix.is_some() {
         return Err(FrontendError {
-            pos: 0,
+            pos,
             message: "range pattern bound does not accept a type suffix; use a plain integer"
                 .to_string(),
         });
@@ -4113,13 +4119,13 @@ fn parse_i64_pattern_bound(text: &str) -> Result<i64, FrontendError> {
     if let Some(hex) = core.strip_prefix("0x").or_else(|| core.strip_prefix("0X")) {
         let digits = strip_digit_separators(hex);
         return i64::from_str_radix(&digits, 16).map_err(|_| FrontendError {
-            pos: 0,
+            pos,
             message: "invalid hexadecimal range pattern bound".to_string(),
         });
     }
     let digits = strip_digit_separators(core);
     digits.parse::<i64>().map_err(|_| FrontendError {
-        pos: 0,
+        pos,
         message: format!("invalid integer range pattern bound '{}'", text),
     })
 }
@@ -4137,58 +4143,58 @@ fn strip_digit_separators(text: &str) -> String {
     text.chars().filter(|ch| *ch != '_').collect()
 }
 
-fn parse_i32_literal(text: &str) -> Result<i32, FrontendError> {
+fn parse_i32_literal(text: &str, pos: usize) -> Result<i32, FrontendError> {
     if text.contains('.') {
         return Err(FrontendError {
-            pos: 0,
+            pos,
             message: "i32 literal cannot contain decimal point".to_string(),
         });
     }
     if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
         let digits = strip_digit_separators(hex);
         return i32::from_str_radix(&digits, 16).map_err(|_| FrontendError {
-            pos: 0,
+            pos,
             message: "invalid i32 hexadecimal literal".to_string(),
         });
     }
     let digits = strip_digit_separators(text);
     digits.parse::<i32>().map_err(|_| FrontendError {
-        pos: 0,
+        pos,
         message: "invalid i32 literal".to_string(),
     })
 }
 
-fn parse_u32_literal(text: &str) -> Result<u32, FrontendError> {
+fn parse_u32_literal(text: &str, pos: usize) -> Result<u32, FrontendError> {
     if text.contains('.') {
         return Err(FrontendError {
-            pos: 0,
+            pos,
             message: "u32 literal cannot contain decimal point".to_string(),
         });
     }
     if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
         let digits = strip_digit_separators(hex);
         return u32::from_str_radix(&digits, 16).map_err(|_| FrontendError {
-            pos: 0,
+            pos,
             message: "invalid u32 hexadecimal literal".to_string(),
         });
     }
     let digits = strip_digit_separators(text);
     digits.parse::<u32>().map_err(|_| FrontendError {
-        pos: 0,
+        pos,
         message: "invalid u32 literal".to_string(),
     })
 }
 
-fn parse_decimal_f64_literal(text: &str, kind: &str) -> Result<f64, FrontendError> {
+fn parse_decimal_f64_literal(text: &str, kind: &str, pos: usize) -> Result<f64, FrontendError> {
     if text.starts_with("0x") || text.starts_with("0X") {
         return Err(FrontendError {
-            pos: 0,
+            pos,
             message: format!("{kind} literal currently requires decimal form"),
         });
     }
     let digits = strip_digit_separators(text);
     digits.parse::<f64>().map_err(|_| FrontendError {
-        pos: 0,
+        pos,
         message: format!("invalid {kind} literal"),
     })
 }
@@ -8659,6 +8665,201 @@ mod grammar_admission_tests {
             .expect_err("parser must run out of tokens while expecting INDENT");
         assert_eq!(err.pos, src.len());
         assert_ne!(err.pos, src.chars().count());
+    }
+
+    // #1943: numeric helper errors must carry the consumed numeric token's
+    // byte offset (`Token.pos`), not a `0` placeholder.
+    fn numeric_stmt_source(body: &str) -> String {
+        format!("fn main() {{\n    let q: i32 = 1;\n    {body}\n    return;\n}}\n")
+    }
+
+    fn numeric_parse_error(src: &str) -> FrontendError {
+        parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("numeric fixture must fail to parse")
+    }
+
+    fn assert_numeric_error_at(src: &str, bad: &str, message: &str) {
+        let expected = src.find(bad).expect("bad spelling must occur in fixture");
+        assert_ne!(
+            expected, 0,
+            "fixture must place the literal after byte zero"
+        );
+        let err = numeric_parse_error(src);
+        assert_eq!(err.pos, expected, "error must point at {bad:?} in {src:?}");
+        assert_eq!(err.message, message);
+        assert_eq!(err.kind(), FrontendErrorKind::Syntax);
+    }
+
+    #[test]
+    fn range_pattern_start_bound_error_uses_start_token_position() {
+        let src = numeric_stmt_source("match x { 1i32..2 => { return; } _ => { return; } }");
+        assert_numeric_error_at(
+            &src,
+            "1i32",
+            "range pattern bound does not accept a type suffix; use a plain integer",
+        );
+        let src = numeric_stmt_source("match x { 0x..3 => { return; } _ => { return; } }");
+        assert_numeric_error_at(&src, "0x", "invalid hexadecimal range pattern bound");
+    }
+
+    #[test]
+    fn range_pattern_end_bound_error_uses_end_token_position() {
+        // The start bound is valid and sits at a different offset, so a
+        // start-position mix-up cannot pass.
+        let cases = [
+            ("1..0x", "0x", "invalid hexadecimal range pattern bound"),
+            (
+                "1..2.5",
+                "2.5",
+                "range pattern bound must be an integer literal, not a float",
+            ),
+            (
+                "1..99999999999999999999",
+                "99999999999999999999",
+                "invalid integer range pattern bound '99999999999999999999'",
+            ),
+        ];
+        for (range, bad, message) in cases {
+            let src = numeric_stmt_source(&format!(
+                "match x {{ {range} => {{ return; }} _ => {{ return; }} }}"
+            ));
+            let start_pos = src.find(range).expect("range must occur");
+            let end_pos = src.find(bad).expect("bad end bound must occur");
+            assert_ne!(start_pos, end_pos, "start and end tokens must differ");
+            assert_numeric_error_at(&src, bad, message);
+        }
+    }
+
+    #[test]
+    fn range_pattern_reports_the_start_bound_when_both_bounds_are_bad() {
+        let src = numeric_stmt_source("match x { 0x..0x => { return; } _ => { return; } }");
+        let err = numeric_parse_error(&src);
+        assert_eq!(err.pos, src.find("0x").unwrap());
+        assert_ne!(err.pos, src.rfind("0x").unwrap());
+    }
+
+    #[test]
+    fn single_numeric_pattern_error_uses_that_token_position() {
+        let src =
+            numeric_stmt_source("match x { 99999999999999999999 => { return; } _ => { return; } }");
+        assert_numeric_error_at(
+            &src,
+            "99999999999999999999",
+            "invalid integer range pattern bound '99999999999999999999'",
+        );
+        let src = numeric_stmt_source("match x { 0x => { return; } _ => { return; } }");
+        assert_numeric_error_at(&src, "0x", "invalid hexadecimal range pattern bound");
+    }
+
+    #[test]
+    fn i32_literal_errors_use_the_numeric_token_position() {
+        for (bad, message) in [
+            ("99999999999", "invalid i32 literal"),
+            ("0x", "invalid i32 hexadecimal literal"),
+            ("1.5i32", "i32 literal cannot contain decimal point"),
+        ] {
+            let src = numeric_stmt_source(&format!("let a: i32 = {bad};"));
+            assert_numeric_error_at(&src, bad, message);
+        }
+    }
+
+    #[test]
+    fn u32_literal_errors_use_the_numeric_token_position() {
+        for (bad, message) in [
+            ("99999999999u32", "invalid u32 literal"),
+            ("1.5u32", "u32 literal cannot contain decimal point"),
+        ] {
+            let src = numeric_stmt_source(&format!("let a: u32 = {bad};"));
+            assert_numeric_error_at(&src, bad, message);
+        }
+    }
+
+    #[test]
+    fn f64_literal_helper_error_uses_the_numeric_token_position() {
+        // The strict default profile rejects f64 before the helper runs, so
+        // use the profile that admits f64 to reach the helper-level failure.
+        let src = numeric_stmt_source("let a: f64 = 0x10f64;");
+        assert_numeric_error_at(
+            &src,
+            "0x10f64",
+            "f64 literal currently requires decimal form",
+        );
+    }
+
+    #[test]
+    fn decimal_float_helper_uses_the_supplied_position_for_f64_and_fx() {
+        // The lexer cannot currently produce a hexadecimal `fx` token (its
+        // hex branch consumes the `f`), so the shared helper is exercised
+        // directly for the `fx` spelling.
+        let fx = parse_decimal_f64_literal("0x10", "fx", 42).expect_err("hex fx must fail");
+        assert_eq!(fx.pos, 42);
+        assert_eq!(fx.message, "fx literal currently requires decimal form");
+        let f64_err = parse_decimal_f64_literal("0x10", "f64", 7).expect_err("hex f64 must fail");
+        assert_eq!(f64_err.pos, 7);
+        assert_eq!(
+            f64_err.message,
+            "f64 literal currently requires decimal form"
+        );
+    }
+
+    #[test]
+    fn valid_numeric_literals_and_patterns_still_parse() {
+        let src = numeric_stmt_source(
+            "let a: i32 = 0x10; let b: u32 = 7u32; let c: fx = 1.5fx; \
+             match x { 1..=5 => { return; } 9 => { return; } _ => { return; } }",
+        );
+        parse_rustlike_with_profile(&src, &ParserProfile::foundation_default())
+            .expect("valid numeric fixture must parse");
+    }
+
+    #[test]
+    fn genuine_byte_zero_rustlike_error_stays_at_offset_zero() {
+        let src = "Bogus\nfn main() { return; }\n";
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("unknown leading token must be rejected at that token");
+        assert_eq!(err.pos, 0);
+        assert!(err.pos < src.len());
+    }
+
+    #[test]
+    fn genuine_byte_zero_policy_error_is_a_token_at_offset_zero() {
+        // The strict profile rejects the leading `schema` token itself, so
+        // offset zero is a real token position here, not a placeholder.
+        let src = "schema S { a: i32 }\nfn main() { return; }\n";
+        let err = parse_rustlike_with_profile(src, &ParserProfile::default())
+            .expect_err("strict profile must reject schema declarations");
+        assert_eq!(err.pos, 0);
+        assert_eq!(err.kind(), FrontendErrorKind::PolicyViolation);
+        let tokens = crate::lexer::lex_tokens(src).expect("fixture must lex");
+        assert_eq!((tokens[0].pos, tokens[0].text.as_str()), (0, "schema"));
+    }
+
+    #[test]
+    fn numeric_error_position_is_a_utf8_byte_offset() {
+        let src = format!(
+            "// \u{e9}\u{4e2d}\n{}",
+            numeric_stmt_source("let a: i32 = 99999999999;")
+        );
+        let expected = src.find("99999999999").unwrap();
+        assert_ne!(
+            src[..expected].len(),
+            src[..expected].chars().count(),
+            "fixture must have a multibyte prefix"
+        );
+        let err = numeric_parse_error(&src);
+        assert_eq!(err.pos, expected);
+        assert_ne!(err.pos, src[..expected].chars().count());
+    }
+
+    #[test]
+    fn numeric_error_position_follows_the_actual_line_endings() {
+        let lf = numeric_stmt_source("let a: i32 = 99999999999;");
+        let crlf = lf.replace('\n', "\r\n");
+        let lf_expected = lf.find("99999999999").unwrap();
+        let crlf_expected = crlf.find("99999999999").unwrap();
+        assert_ne!(lf_expected, crlf_expected, "CRLF shifts the byte offset");
+        assert_eq!(numeric_parse_error(&lf).pos, lf_expected);
+        assert_eq!(numeric_parse_error(&crlf).pos, crlf_expected);
     }
 
     #[test]
