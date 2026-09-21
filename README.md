@@ -5,300 +5,464 @@
 # Semantic Language
 
 <p align="center">
-  <strong>A deterministic, verifier-first language platform for reasoning programs and explicit four-state logic.</strong>
+  <strong>A deterministic, verifier-first programming language and execution platform with native four-state logic.</strong>
 </p>
 
 <p align="center">
   <a href="docs/getting_started.md"><img src="https://img.shields.io/badge/Start-Quickstart-2563eb?style=for-the-badge" alt="Quickstart"></a>
   <a href="docs/spec/index.md"><img src="https://img.shields.io/badge/Read-Specification-7c3aed?style=for-the-badge" alt="Specification"></a>
-  <a href="docs/roadmap/v1_readiness.md"><img src="https://img.shields.io/badge/Status-Limited_Release-f59e0b?style=for-the-badge" alt="Limited release status"></a>
+  <a href="ARCHITECTURE.md"><img src="https://img.shields.io/badge/View-Architecture-0e7a72?style=for-the-badge" alt="Architecture"></a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Quad_Logic-N%2FF%2FT%2FS-7c3aed?style=flat-square" alt="Quad logic N/F/T/S">
+  <img src="https://img.shields.io/badge/Logic-N%20%2F%20F%20%2F%20T%20%2F%20S-7c3aed?style=flat-square" alt="Quad logic N/F/T/S">
   <img src="https://img.shields.io/badge/Execution-Verifier_First-2563eb?style=flat-square" alt="Verifier-first execution">
   <img src="https://img.shields.io/badge/Runtime-Deterministic-16a34a?style=flat-square" alt="Deterministic runtime">
+  <img src="https://img.shields.io/badge/Artifact-SemCode-f59e0b?style=flat-square" alt="SemCode">
   <img src="https://img.shields.io/github/license/skulmakov-oss/Semantic?style=flat-square" alt="License">
   <img src="https://img.shields.io/github/last-commit/skulmakov-oss/Semantic?style=flat-square" alt="Last commit">
 </p>
 
-Semantic compiles `.sm` source into a versioned `.smc` **SemCode** artifact, checks that artifact at a dedicated verifier boundary, and executes admitted code in a deterministic virtual machine.
+Semantic compiles `.sm` source into versioned SemCode (`.smc`), admits that artifact through an explicit verifier boundary, and executes admitted code in a deterministic virtual machine.
 
 ```text
-.sm source
-   -> frontend and semantic analysis
-   -> deterministic IR
-   -> SemCode (.smc)
-   -> verifier admission
-   -> deterministic VM
-   -> optional capability-controlled host boundary
+Semantic source (.sm)
+        │
+        ▼
+frontend + semantic analysis
+        │
+        ▼
+deterministic lowering / IR
+        │
+        ▼
+SemCode (.smc)
+        │
+        ▼
+verifier admission
+        │
+        ▼
+deterministic VM
+        │
+        ▼
+capability-controlled external boundary
 ```
 
+Semantic is not a syntax experiment or a parser prototype. The complete source-to-artifact-to-execution path exists today and is exercised by the repository's compiler, verifier, VM, CLI, examples, tests, and qualification suites.
+
 > [!IMPORTANT]
-> Semantic is an active R&D platform, not a finished general-purpose language product. A narrow practical contour is qualified for limited release; current `main` contains additional landed and benchmark-qualified work that is not release-promised. The `v1.1.1` git tag is not treated as published stable evidence because its own checkpoint left exact-tag asset smoke blocking and no corresponding GitHub Release exists.
+> Semantic is an active systems-language and verified-execution R&D project. Current `main` is broader than the currently qualified limited-release contour. Implemented behavior, qualified behavior, and published-stable behavior are deliberately treated as different states.
+
+---
 
 ## Why Semantic?
 
-Most languages model a proposition as either `true` or `false`. Real systems often need two additional states: **not enough evidence** and **conflicting evidence**.
+Most programming languages reduce logical state to two values:
 
-Semantic makes that distinction explicit with the native `quad` type:
+```text
+true / false
+```
 
-| Value | Meaning |
-|---|---|
-| `N` | unknown / no sufficient evidence |
-| `F` | false |
-| `T` | true |
-| `S` | conflict / incompatible evidence |
+Semantic has a native four-state domain:
 
-A `quad` is not an unusual spelling of `bool`. Branching remains explicit:
+| State | Encoding | Meaning |
+|---|---|---|
+| `N` | `00` | no sufficient evidence / unknown |
+| `F` | `01` | evidence for false |
+| `T` | `10` | evidence for true |
+| `S` | `11` | evidence for both / conflict |
+
+The distinction is structural, not cosmetic.
+
+`quad` stores independent true and false evidence planes. The core algebra is deterministic:
+
+- `join(a, b)` = bitwise OR
+- `meet(a, b)` = bitwise AND
+- `inverse(a)` = swap true and false planes
+
+That means conflict survives instead of being silently overwritten.
+
+For example:
 
 ```sm
-if state == T {
-    // confirmed true
-}
+fn main() {
+    let yes: quad = T;
+    let no: quad = F;
 
-if state == S {
-    // conflict must be handled deliberately
+    let conflict: quad = yes || no;
+
+    assert(conflict == S);
 }
 ```
 
-This is useful for:
+In ordinary Boolean reasoning, combining true and false often forces one value to win.
 
-- rule and decision systems;
-- semantic state machines;
-- safety and admission policies;
-- evidence-aware computation;
-- deterministic programs that must expose uncertainty instead of hiding it.
+Semantic can preserve the fact that both pieces of evidence exist.
 
-## Try Semantic
+This makes the model useful for systems involving:
 
-### Prerequisites
+- reasoning over incomplete information;
+- conflicting observations;
+- rule and policy evaluation;
+- multi-source evidence;
+- deterministic state machines;
+- safety and admission decisions;
+- agent and tool orchestration;
+- systems where uncertainty must remain explicit.
 
-- a current Rust toolchain;
+A `quad` is therefore not another spelling of `bool`.
+
+---
+
+## A Small Semantic Program
+
+```sm
+record Sensor {
+    id: i32,
+    state: quad,
+    reading: i32,
+}
+
+fn evaluate(sensor: Sensor) -> quad {
+    return if sensor.reading < 0 {
+        N
+    } else if sensor.reading >= 10 && sensor.reading <= 90 {
+        T
+    } else {
+        F
+    };
+}
+
+fn main() {
+    let sensor: Sensor = Sensor {
+        id: 101,
+        state: N,
+        reading: 45,
+    };
+
+    let evaluated: Sensor =
+        sensor with { state: evaluate(sensor) };
+
+    assert(evaluated.state == T);
+}
+```
+
+This uses real current Semantic surface features:
+
+- nominal records;
+- typed functions;
+- native `quad`;
+- `i32`;
+- expression-oriented `if`;
+- record copy-with;
+- deterministic assertions.
+
+---
+
+## Try It
+
+### Requirements
+
+- current Rust toolchain;
 - Git;
 - Windows, Linux, or macOS.
 
-### 1. Clone and build
+Clone and build:
 
 ```bash
 git clone https://github.com/skulmakov-oss/Semantic.git
 cd Semantic
+
 cargo build --bin smc --bin svm
 ```
 
-The repository currently builds the CLI from source. A polished end-user installer or package-manager distribution is not yet the primary onboarding route.
-
-### 2. Run a canonical example
+Run a canonical program:
 
 ```bash
-cargo run --bin smc -- run examples/canonical/rule_state_decision/src/main.sm
+cargo run --bin smc -- run \
+  examples/canonical/rule_state_decision/src/main.sm
 ```
 
-This example demonstrates records, `quad`, explicit branch decisions, `Result`, verifier-first execution, and a deterministic assertion.
-
-### 3. Inspect the full source-to-artifact path
+Or inspect the entire pipeline explicitly:
 
 ```bash
-cargo run --bin smc -- check examples/canonical/rule_state_decision/src/main.sm
-cargo run --bin smc -- compile examples/canonical/rule_state_decision/src/main.sm -o decision.smc
+cargo run --bin smc -- check \
+  examples/canonical/rule_state_decision/src/main.sm
+
+cargo run --bin smc -- compile \
+  examples/canonical/rule_state_decision/src/main.sm \
+  -o decision.smc
+
 cargo run --bin smc -- verify decision.smc
+
 cargo run --bin smc -- run-smc decision.smc
-cargo run --bin svm -- disasm decision.smc
+
+cargo run --bin smc -- disasm decision.smc
 ```
 
-Expected flow:
+Conceptually:
 
 ```text
 check source
-  -> compile SemCode
-  -> verify artifact
-  -> run admitted artifact
-  -> inspect disassembly
+   ↓
+compile SemCode
+   ↓
+verify artifact
+   ↓
+execute admitted artifact
+   ↓
+inspect VM instructions
 ```
 
-## Your First Semantic Program
+No installed language SDK is required for repository development; the toolchain can be run directly through Cargo.
 
-Save this as `decision.sm`:
+---
 
-```sm
-fn decide(sensor: quad, ready: bool) -> quad {
-    if sensor == N { return N; }
-    if sensor == S { return S; }
-    if ready == true { return T; }
-    return F;
-}
+## Verifier-First Execution
 
-fn main() {
-    let verdict: quad = decide(T, true);
-    assert(verdict == T);
-}
+Semantic deliberately separates four different responsibilities.
+
+### 1. Source semantics
+
+The frontend and semantic layers decide what source code means and whether it is admissible.
+
+### 2. Artifact construction
+
+Accepted source is lowered through deterministic IR and emitted as versioned SemCode.
+
+### 3. Admission
+
+Persisted `.smc` artifacts cross a dedicated verifier boundary before execution.
+
+The verifier is not merely a helper hidden inside the VM.
+
+It is an architectural boundary responsible for rejecting invalid executable artifacts.
+
+### 4. Execution
+
+`sm-vm` executes admitted SemCode under explicit runtime rules and quotas.
+
+External authority is not implicitly granted to the VM.
+
+Host-facing effects cross controlled PROMETHEUS boundaries.
+
+```text
+source
+  │
+  ▼
+sm-front
+  │
+  ▼
+sm-sema
+  │
+  ▼
+sm-ir
+  │
+  ▼
+sm-emit
+  │
+  ▼
+SemCode
+  │
+  ▼
+sm-verify
+  │
+  ▼
+sm-vm
+  │
+  ▼
+PROMETHEUS capability boundary
 ```
 
-This follows the canonical compact guard-return style frozen in
-[`docs/spec/source_style.md`](docs/spec/source_style.md).
-
-Check and run it:
-
-```bash
-cargo run --bin smc -- check decision.sm
-cargo run --bin smc -- run decision.sm
-```
-
-Compile and verify it explicitly:
-
-```bash
-cargo run --bin smc -- compile decision.sm -o decision.smc
-cargo run --bin smc -- verify decision.smc
-cargo run --bin smc -- run-smc decision.smc
-```
-
-### Visible output on current `main`
-
-Current `main` also contains a narrow, capability-controlled `print(text)` path:
-
-```sm
-fn main() {
-    print("Hello, Semantic");
-}
-```
-
-This path is benchmark-qualified on current `main`, but it is deliberately **not** a claim of unrestricted stdout, formatting, file I/O, stdin, networking, or a broad host ABI.
+---
 
 ## What Works Today
 
-The repository contains more than a parser prototype. The following paths are implemented and covered by current specs, examples, or qualification evidence.
+Semantic currently contains a real executable programming surface, not just planned syntax.
 
-### Qualified practical contour
+Among the implemented and exercised areas are:
 
-- functions, locals, `if / else`, `return`, and explicit `match`;
-- native `quad`, `bool`, `i32`, `u32`, and `unit` families in the admitted contour;
-- records and rule/state-oriented programs;
-- explicit `Option` and `Result` control flow;
-- built-in `Sequence(T)` iteration;
-- direct-record user-defined `Iterable` dispatch;
-- direct local helper imports in the admitted bare and selected forms;
-- source -> semantic analysis -> IR -> SemCode -> verifier -> VM execution.
+### Language
 
-### Landed and benchmark-qualified on current `main`, not yet promised as stable
-
-- same-family `i32` arithmetic and comparisons;
-- mutable locals and reassignment;
-- `while`, `loop`, `break`, and `continue`;
-- bounded `text`, concatenation, and explicit `to_text`;
-- persistent `Sequence(T)` helpers and functional `Map(K, V)` operations;
+- functions and typed parameters;
+- locals and mutable locals;
+- `if / else`;
+- `match`;
+- `while` and `loop`;
+- `break` and `continue`;
+- records;
+- immutable record copy-with;
+- tuples;
+- native `quad`;
+- `bool`;
+- `i32`;
+- `u32`;
+- `f64`;
+- `fx`;
+- bounded `text`;
+- `Option(T)` and `Result(T, E)`;
+- `Sequence(T)`;
+- persistent `Map(K, V)` operations;
+- imports and bounded project-root workflows;
 - deterministic seeded pseudo-random helpers;
-- narrow capability-controlled `print(text)` observation;
-- bounded project-root command routes.
+- assertions and bounded contract-oriented source forms.
 
-### Additional landed work on current `main`, not yet qualified
+Not every landed surface is part of the same release promise. See the maturity and readiness documents for the precise classification.
 
-- schema and boundary-core work;
-- package-baseline widening beyond the bounded project-root contour;
-- first-wave generics and broader closure forms beyond the qualified immutable
-  short-lambda slice;
-- first-wave UI/application boundary work;
-- broader module, iterable, and language-surface work beyond the admitted limited-release slice.
+### Compiler and execution
 
-For the detailed and continuously maintained classification, use the [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md).
+- source parsing;
+- semantic analysis;
+- deterministic lowering;
+- IR inspection;
+- SemCode generation;
+- SemCode verification;
+- deterministic VM execution;
+- disassembly;
+- runtime quotas;
+- diagnostic catalog and `smc explain`;
+- deterministic hashes and inspection routes;
+- contract and boundary tests.
 
-## Status: Stable, Qualified, and Current-Main Are Different
+### Toolchain
 
-Semantic uses explicit status vocabulary so that implemented work is not silently advertised as a stable promise.
-
-| Status | Meaning |
-|---|---|
-| **Published stable** | Promised by an explicitly published stable release and its validated assets. No current feature meets that evidence test. |
-| **Qualified limited release** | Proven in a bounded practical contour by qualification evidence. |
-| **Landed on current `main`, not yet promised** | Implemented or benchmark-qualified, but not promoted into the stable or qualified release promise. |
-| **Out of scope** | Deliberately excluded from the current release contour. |
-
-Current top-level posture:
-
-- Semantic is **not** presented as production-ready;
-- Semantic is **not** yet a broad general-purpose ecosystem;
-- current `main` is wider than the qualified limited-release contour;
-- UI and Workbench do not own compiler, verifier, VM, or runtime truth;
-- stable promotion requires an explicit release decision, matching specs, and evidence.
-
-Read the authoritative documents when status precision matters:
-
-- [Semantic v1 Readiness](docs/roadmap/v1_readiness.md)
-- [Public Status Model](docs/roadmap/public_status_model.md)
-- [Public Maturity Snapshot](docs/roadmap/public_maturity_snapshot.md)
-- [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md)
-- [Foundation Source Profile 1.2](docs/spec/foundation_source_profile_v1.md)
-- [Foundation Standard Library v0](docs/spec/foundation_stdlib_v0.md)
-
-## How Execution Is Controlled
-
-Semantic separates construction, admission, execution, and external effects.
+`smc` is the canonical user-facing command.
 
 ```text
-source describes intent
-  -> compiler lowers it
-  -> emitter creates SemCode
-  -> verifier admits or rejects the artifact
-  -> VM executes under quotas and deterministic rules
-  -> capability boundary controls optional host effects
-  -> audit layer records controlled effects where supported
+smc check
+smc run
+smc compile
+smc verify
+smc run-smc
+smc test
+
+smc dump-ast
+smc dump-ir
+smc dump-bytecode
+smc disasm
+
+smc hash-ast
+smc hash-ir
+smc hash-smc
+
+smc lint
+smc fmt
+smc explain
+smc repl
+smc 7hell
 ```
 
-### The compiler does not execute source directly
+The exact CLI contract lives in:
 
-Source is parsed, checked, lowered, and emitted as SemCode. This keeps source semantics separate from runtime execution.
+[`docs/spec/cli.md`](docs/spec/cli.md)
 
-### The verifier is a real boundary
+---
 
-Persisted `.smc` execution must not bypass verification. Malformed bytecode, invalid control flow, unsupported capabilities, incompatible metadata, and resource-bound violations belong at the admission boundary.
+## Semantic Hub
 
-### The VM is deterministic and bounded
+Semantic also contains a governed boundary for external computational tools.
 
-Given the same admitted SemCode, runtime configuration, capability context, and input boundary, execution is expected to produce the same result, trap class, and observable behavior.
+The Semantic Hub is designed so external engines do not become alternate owners of language or execution semantics.
 
-### Host effects are explicit
+```text
+Semantic / application logic
+          │
+          ▼
+      Semantic Hub
+          │
+    admission boundary
+          │
+   ┌──────┴──────┐
+   │ capability  │
+   │ resource    │
+   │ provenance  │
+   │ audit       │
+   └──────┬──────┘
+          │
+          ▼
+    external tool
+```
 
-The VM does not receive unrestricted authority over the host. Effects cross the PROMETHEUS integration layer through explicit ABI and capability contracts.
+Current CLI surface includes:
 
-<p align="center">
-  <img width="1693" height="929" alt="Semantic execution architecture" src="https://github.com/user-attachments/assets/d8fd9017-062e-45a2-b0cf-695dc320ae24">
-</p>
+```bash
+smc hub tools
+smc hub describe <tool-id>
+smc hub invoke <tool-id> <operation-id> --input request.json
+smc hub session --requests requests.ndjson
+smc hub audit --request <request-id>
+```
 
-## CLI Cheat Sheet
+The current reference integration is:
 
-`smc` is the canonical user-facing toolchain command. `svm` is the lower-level VM-oriented entrypoint.
+TurboVec (`vector.turbovec`)
 
-| Command | Purpose |
+with a bounded typed request/reply path for vector index and search operations.
+
+Hub invocation is capability-gated and resource-bounded. Tools do not receive an unrestricted bypass into Semantic execution.
+
+See:
+
+[`docs/architecture/semantic_hub_v0.md`](docs/architecture/semantic_hub_v0.md)
+
+---
+
+## PROMETHEUS Boundary
+
+Semantic Core owns program construction and verified execution.
+
+PROMETHEUS owns controlled interaction with the environment.
+
+Current integration crates include:
+
+| Layer | Owner |
 |---|---|
-| `smc check <file.sm|project-root>` | Parse and semantically check source. |
-| `smc run <file.sm|project-root>` | Compile and execute from source through the standard route. |
-| `smc compile <input> -o app.smc` | Produce a SemCode artifact. |
-| `smc verify <app.smc|project-root>` | Admit source-derived or persisted SemCode without running it. |
-| `smc test <project-root>` | Run discovered project tests in deterministic path order. |
-| `smc run-smc app.smc` | Execute a persisted artifact through the verified route. |
-| `smc disasm app.smc` | Inspect SemCode instructions. |
-| `smc dump-ast <input>` | Inspect the parsed source model. |
-| `smc dump-ir <input>` | Inspect lowered IR. |
-| `smc lint <file.sm>` | Run lint-oriented checks. |
-| `smc fmt <path>` | Format Semantic source. |
-| `smc explain <code>` | Explain a diagnostic code. |
-| `smc repl` | Start the interactive check-oriented REPL. |
-| `smc 7hell <file.sm> [--json]` | Run the diagnostic/readiness qualification path. |
-| `svm run app.smc` | Run SemCode through the lower-level VM entrypoint. |
-| `svm disasm app.smc` | Disassemble SemCode through the VM entrypoint. |
+| ABI | `prom-abi` |
+| capabilities | `prom-cap` |
+| gates | `prom-gates` |
+| semantic state | `prom-state` |
+| rules / agenda | `prom-rules` |
+| orchestration | `prom-runtime` |
+| audit / replay metadata | `prom-audit` |
 
-The complete current command contract is in [docs/spec/cli.md](docs/spec/cli.md).
+The boundary exists to prevent external effects from becoming implicit language semantics.
+
+The architectural rule is simple:
+
+> Construction, admission, execution, and external authority are separate concerns.
+
+---
+
+## Rust-like Semantic and Logos
+
+The repository currently contains two source profiles with deliberately different authority.
+
+### Rust-like Semantic
+
+The executable programming surface.
+
+It owns the source path that can proceed through:
+
+```text
+source → IR → SemCode → verifier → VM
+```
+
+### Logos
+
+A separate experimental declarative profile.
+
+Logos may be parsed and projected for inspection, but it does not share the Rust-like SemCode execution authority.
+
+The two profiles must not silently fall through into one another.
+
+This boundary is intentional.
+
+---
 
 ## Project-Root Workflow
 
-Current `main` supports a bounded project-root baseline using the existing `semantic.toml` or `Semantic.package` layouts represented by repository fixtures and tests.
+Semantic supports a bounded project-root model in addition to individual `.sm` files.
 
-For the local-only package baseline, `smc package inspect <project-root>` emits
-a deterministic provenance record containing the declared dependency graph,
-manifest/content fingerprints, and capability-request inventory. It performs no
-remote fetch and grants no capability; see
-[`docs/spec/package_baseline_v0.md`](docs/spec/package_baseline_v0.md).
-
-From a supported project root:
+Typical workflow:
 
 ```bash
 smc check .
@@ -308,164 +472,241 @@ smc verify .
 smc test .
 ```
 
-This is not yet a complete package ecosystem. It does not claim a public registry, dependency solver, multi-package workspace manager, or `smc new` scaffolding.
-The canonical layout, deterministic discovery rules, and identity boundary are
-defined in [Project Model v0](docs/spec/project_model_v0.md).
+The current project/package model provides deterministic local discovery and provenance-oriented behavior.
 
-When running from this repository without installing the binaries, prefix commands with:
+It does not yet imply:
 
-```bash
-cargo run --bin smc --
+- a public package registry;
+- remote dependency installation;
+- a complete package solver;
+- arbitrary multi-package workspace semantics;
+- a mature package ecosystem.
+
+See:
+
+[`docs/spec/project_model_v0.md`](docs/spec/project_model_v0.md)
+
+and:
+
+[`docs/spec/package_baseline_v0.md`](docs/spec/package_baseline_v0.md)
+
+---
+
+## Architecture
+
+Semantic is a Rust workspace with explicit ownership boundaries.
+
+```text
+Semantic/
+├── crates/
+│   ├── sm-*                 language, IR, SemCode, verifier, VM, CLI
+│   ├── prom-*               capability-controlled integration boundary
+│   └── semantic-core-*      low-level execution substrate
+│
+├── examples/                executable Semantic programs
+├── docs/
+│   ├── spec/                normative contracts
+│   ├── architecture/        ownership and system design
+│   ├── roadmap/             maturity and phase governance
+│   └── core/                low-level algebra and substrate contracts
+│
+├── tests/                   integration and public-contract evidence
+├── reports/                 qualification evidence
+└── assets/                  repository assets
 ```
+
+Core owners:
+
+| Crate | Responsibility |
+|---|---|
+| `sm-profile` | parser/profile policy |
+| `sm-front` | lexer, parser, AST, source typing |
+| `sm-sema` | semantic analysis and diagnostics |
+| `sm-ir` | lowering, deterministic IR and artifact contract ownership |
+| `sm-emit` | SemCode producer facade |
+| `sm-verify` | executable artifact admission |
+| `sm-runtime-core` | shared runtime vocabulary and quotas |
+| `sm-vm` | verified execution and disassembly |
+| `smc-cli` | canonical CLI |
+
+The fundamental repository rule is:
+
+> One public concept has one owner.
+
+The repository intentionally retains a narrow compatibility perimeter (`crates/ton618-core`, `src/bin/ton618_core.rs`, `ton618_legacy/`). These paths are not second owners of Semantic architecture; new language, execution, and integration work belongs in canonical `sm-*`, `semantic-core-*`, or `prom-*` owners.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/architecture/blueprint.md`](docs/architecture/blueprint.md).
+
+---
+
+## Determinism and Contract Discipline
+
+Semantic is developed around explicit contracts rather than accidental behavior.
+
+Repository principles include:
+
+- specification before widening
+- deterministic behavior
+- explicit ownership
+- verifier-first execution
+- fail-closed boundaries
+- tests as contract evidence
+- no silent contract mutation
+
+A green test suite does not automatically promote a feature into the public stable contract.
+
+Implementation, qualification, and release promotion are separate states.
+
+---
+
+## Current Status
+
+Semantic uses four explicit status classes:
+
+| Status | Meaning |
+|---|---|
+| Published stable | explicitly published and supported by validated release evidence |
+| Qualified limited release | proven inside a bounded qualification contour |
+| Landed on `main`, not yet promised | implemented but not promoted into the release promise |
+| Out of scope | intentionally outside the current contour |
+
+Current repository posture:
+
+- there is no currently evidenced Published Stable feature line;
+- a bounded practical programming contour is Qualified Limited Release;
+- current `main` contains substantially more implementation than that qualified contour;
+- those additional features remain landed on `main`, not yet promised until explicitly promoted;
+- Semantic is not presented as production-ready or as a complete general-purpose ecosystem.
+
+Current prerelease:
+
+`v1.2.0-beta.1`
+
+For exact status, do not infer from this README alone.
+
+Read:
+
+- [`docs/roadmap/v1_readiness.md`](docs/roadmap/v1_readiness.md)
+- [`docs/roadmap/public_status_model.md`](docs/roadmap/public_status_model.md)
+- [`docs/status/feature_maturity_matrix.md`](docs/status/feature_maturity_matrix.md)
+- [`docs/roadmap/stable_foundation/semantic_stable_foundation_matrix.md`](docs/roadmap/stable_foundation/semantic_stable_foundation_matrix.md)
+
+---
+
+## Current Engineering Direction
+
+The active program is the Semantic Stable Foundation.
+
+Its purpose is not to rapidly add syntax.
+
+Its purpose is to reconcile and harden the contracts already present across:
+
+```text
+source
+→ diagnostics
+→ semantic authority
+→ IR
+→ SemCode
+→ verifier
+→ VM
+→ runtime boundaries
+→ compatibility
+→ qualification
+```
+
+Current work is focused on closing inconsistencies before later compatibility, migration, self-hosting, and wider ecosystem work build on top of them.
+
+The roadmap is intentionally sequential: foundation first, widening later.
+
+---
 
 ## Examples
 
-Start with the curated examples under `examples/canonical/`.
+Start with the curated programs in:
 
-| Example | Demonstrates | First command |
-|---|---|---|
-| [rule_state_decision](examples/canonical/rule_state_decision/) | `quad`, records, `Result`, explicit decisions | `smc run examples/canonical/rule_state_decision/src/main.sm` |
-| [text_core](examples/canonical/text_core/) | bounded text, concatenation, `to_text`, controlled output | `smc run examples/canonical/text_core/src/main.sm` |
-| [loop_control_flow](examples/canonical/loop_control_flow/) | `while`, `loop`, `break`, `continue` | `smc run examples/canonical/loop_control_flow/src/main.sm` |
-| [collections_core](examples/canonical/collections_core/) | practical collection operations | `smc run examples/canonical/collections_core/src/main.sm` |
-| [option_result_control_flow](examples/canonical/option_result_control_flow/) | explicit absence and failure paths | `smc run examples/canonical/option_result_control_flow/src/main.sm` |
-| [cli_batch_core](examples/canonical/cli_batch_core/) | sequence-driven batch classification | `smc run examples/canonical/cli_batch_core/src/main.sm` |
+[`examples/canonical/`](examples/canonical/)
 
-The benchmark suite also includes a deterministic headless Snake program:
+Useful entry points include:
+
+| Example | Demonstrates |
+|---|---|
+| `rule_state_decision` | `quad`, records, `Result`, explicit decisions |
+| `text_core` | bounded text and controlled output |
+| `loop_control_flow` | imperative loop control |
+| `collections_core` | collection operations |
+| `option_result_control_flow` | explicit absence and failure |
+| `cli_batch_core` | deterministic batch classification |
+
+There is also a deterministic headless Snake benchmark:
 
 ```bash
 cargo run --bin smc -- run examples/benchmarks/snake_core.sm
 ```
 
-See the [Examples Index](docs/examples_index.md) for the complete curated list and the intentional boundary example.
+See:
 
-## Repository Map
+[`docs/examples_index.md`](docs/examples_index.md)
 
-Semantic is a Rust workspace with narrow ownership boundaries.
+---
 
-```text
-Semantic/
-├── crates/sm-*                 language construction, SemCode, verifier, VM, CLI
-├── crates/prom-*               capability, ABI, state, rules, audit, UI boundary
-├── crates/semantic-core-*      low-level core capsule and execution substrate
-├── crates/core-lab             isolated core experimentation and qualification
-├── examples/                   canonical programs, benchmarks, boundary examples
-├── docs/spec/                  canonical public contracts
-├── docs/architecture/          system and ownership design
-├── docs/roadmap/               maturity, readiness, and release control
-├── tests/                      integration and public-contract evidence
-├── reports/                    qualification and gate evidence
-└── assets/                     branding and repository assets
-```
+## Explicit Non-Claims
 
-High-level ownership:
+Do not infer the following from adjacent implemented features.
 
-| Layer | Responsibility |
-|---|---|
-| **Language construction** | lexer, parser, semantic analysis, IR, deterministic passes, SemCode emission |
-| **Execution** | SemCode verification, runtime quotas and traps, deterministic VM execution |
-| **PROMETHEUS integration** | host ABI, capabilities, gates, state, rules, orchestration, audit |
-| **UI / application** | operator-facing display and application shell; never execution authority |
-| **Core capsule / laboratories** | low-level execution-core and quad substrate qualification without creating a second language surface |
+Semantic does not currently claim:
 
-### Compatibility perimeter
-
-The repository intentionally retains a narrow compatibility perimeter:
-
-- `crates/ton618-core` — compatibility-named low-level primitives;
-- `src/bin/ton618_core.rs` — retained compatibility launcher;
-- `ton618_legacy/` — historical source archive.
-
-These paths are not second owners of Semantic architecture. New language, execution, and integration work belongs in the canonical `sm-*`, `semantic-core-*`, or `prom-*` owners.
-
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for the short architecture map and [docs/architecture/blueprint.md](docs/architecture/blueprint.md) for the detailed design.
-
-## UI and Workbench
-
-The repository contains native UI and Workbench-related development, including a WGPU demo path.
-
-```bash
-cargo run -p prom-ui-demo
-```
-
-<p align="center">
-  <img src="assets/readme/semantic-ui-demo-wgpu-native.png" alt="Semantic native WGPU UI demo" width="900">
-</p>
-
-### First native Semantic application
-
-On 2026-07-30, Semantic completed its first visible end-to-end native application proof: a dual-mode Arithmetic and Quad Logic Calculator built on the Semantic VM and UI-DNA2.
-<img width="408" height="556" alt="Снимок экрана 2026-07-30 073436" src="https://github.com/user-attachments/assets/abe5892c-831c-4520-a5d6-5b354e6a23d4" />
-<img width="404" height="552" alt="Снимок экрана 2026-07-30 083013" src="https://github.com/user-attachments/assets/80a18f13-5351-42f8-85c7-b91a32b76a23" />
-
-To run the calculator prototype:
-
-```bash
-cargo run -p quad_logic_calculator
-```
-
-The application demonstrates a complete current-main path from Semantic-owned state transitions to a visible interactive native UI:
-
-```text
-Semantic source
-  -> compile to SemCode
-  -> verifier admission
-  -> typed VM function invocation
-  -> CalculatorState + CalculatorAction
-  -> returned CalculatorState
-  -> admitted projection update
-  -> native UI rendering
-```
-
-It provides standard arithmetic and native four-state logic over `N`, `F`, `T`, and `S`, with keyboard and pointer interaction, explicit evaluation state, error handling, and recovery.
-
-[Read the milestone report](docs/milestones/first-native-semantic-application.md).
-
-This is a current-main executable proof, not a stable public UI or application ABI promise. The UI may request operations and display results, but it must not bypass verifier admission or become the owner of language/runtime semantics.
-
-## Current Explicit Limits
-
-Do not infer support for the following from adjacent features:
-
-- unrestricted stdout or general formatting;
-- arbitrary file, stdin, process, or network I/O;
-- broad host ABI access;
+- unrestricted host access;
+- unrestricted stdout;
+- arbitrary filesystem access;
+- arbitrary stdin;
+- arbitrary networking;
+- process execution;
+- a broad unfrozen host ABI;
 - a complete standard library;
-- a public package registry or dependency solver;
-- a frozen runtime ABI or binary ISA;
+- a public package registry;
+- a mature dependency solver;
+- a frozen universal binary ISA;
 - full-workspace `no_std`;
 - production-ready deployment;
-- stable promotion of every feature on `main`.
+- stable status for everything landed on `main`.
 
-The current runtime ownership contract is also intentionally narrow: tuple and direct record-field access paths, frame-local borrow lifetime, and overlap rejection. Advanced region reasoning, ADT payload paths, schema paths, and inter-frame borrows are outside that frozen slice.
+Capabilities are widened deliberately rather than inherited implicitly.
 
-## Documentation Path
+---
 
-Choose the path that matches what you need:
+## Documentation
 
-| Goal | Start here |
+For first-time readers:
+
+| Goal | Document |
 |---|---|
-| Run the toolchain | [Getting Started](docs/getting_started.md) |
-| Browse working programs | [Examples Index](docs/examples_index.md) |
-| Learn the language philosophy | [Semantic Language Principles](docs/language/semantic_language_principles.md) |
-| Learn quad syntax | [Semantic Quad Surface](docs/language/semantic_quad_surface.md) |
-| Write canonical-style source | [Canonical Source Style v0](docs/spec/source_style.md) |
-| Read the public contract | [Specification Index](docs/spec/index.md) |
-| Understand the architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Check feature maturity | [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md) |
-| Check release posture | [Semantic v1 Readiness](docs/roadmap/v1_readiness.md) |
-| Check `no_std` boundaries | [no_std Support Matrix](docs/NO_STD.md) |
+| Run Semantic | [Getting Started](docs/getting_started.md) |
+| Language surface | [Syntax](docs/spec/syntax.md) |
+| Native Quad algebra | [Quad Algebra](docs/core/quad_algebra.md) |
+| Full public contracts | [Specification Index](docs/spec/index.md) |
+| Architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Detailed architecture | [Blueprint](docs/architecture/blueprint.md) |
+| Module ownership | [Module Ownership Map](docs/architecture/module_ownership_map.md) |
+| CLI contract | [CLI Specification](docs/spec/cli.md) |
+| Feature maturity | [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md) |
+| Release posture | [Semantic v1 Readiness](docs/roadmap/v1_readiness.md) |
 
-## Development and Validation
+For coding agents, repository-local `.agents/skills` should be treated as workflow guidance, while normative syntax and semantic truth remain grounded in `docs/spec/*`, executable examples, and tests.
 
-For a normal change, start with:
+Do not invent Semantic syntax from analogy with another language.
+
+---
+
+## Development
+
+Basic qualification:
 
 ```bash
 cargo fmt --check
 cargo test --workspace
 ```
 
-Useful public-contract checks:
+Representative contract checks:
 
 ```bash
 cargo test --test public_api_contracts
@@ -473,35 +714,48 @@ cargo test --test canonical_examples
 cargo test --test runtime_ownership_e2e
 ```
 
-Repository rule:
+Repository development discipline:
 
 ```text
 one logical change
-  -> one PR
-  -> tests when behavior changes
-  -> spec/docs sync when a contract changes
-  -> no silent widening of release claims
+        ↓
+one focused PR
+        ↓
+behavioral tests
+        ↓
+owning spec sync when contracts change
+        ↓
+qualification
+        ↓
+review
 ```
 
-Tests are treated as contract evidence, not only as regression checks.
+Tests are evidence of a contract.
+
+They are not permission to silently redefine one.
+
+---
 
 ## Contributing
 
-Contributions are most useful when they preserve ownership boundaries and keep public claims aligned with implementation, specs, and tests.
+Contributions are welcome when they preserve the project's ownership and contract boundaries.
 
-Before opening a PR:
+Before opening a change:
 
-1. keep the patch focused on one logical change;
-2. update the owning spec when public behavior changes;
-3. add or update tests for visible behavior;
-4. avoid adding new architecture to compatibility paths;
-5. state whether the result is stable, qualified, current-main only, or out of scope.
+1. identify the owning layer;
+2. keep the patch focused;
+3. update the owning specification when public behavior changes;
+4. add evidence for visible behavior;
+5. avoid adding new architecture to compatibility paths;
+6. distinguish implemented behavior from qualified or published behavior.
 
-For architecture-sensitive work, read:
+Architecture-sensitive contributors should read:
 
-- [Module Ownership Map](docs/architecture/module_ownership_map.md)
-- [Dependency and Boundary Rules](docs/architecture/dependency_boundary_rules.md)
-- [Public Status Model](docs/roadmap/public_status_model.md)
+- [`docs/architecture/module_ownership_map.md`](docs/architecture/module_ownership_map.md)
+- [`docs/architecture/dependency_boundary_rules.md`](docs/architecture/dependency_boundary_rules.md)
+- [`docs/roadmap/public_status_model.md`](docs/roadmap/public_status_model.md)
+
+---
 
 ## License
 
@@ -509,4 +763,6 @@ Semantic is licensed under the [Apache License 2.0](LICENSE).
 
 Copyright 2026 Said Kulmakov.
 
-Third-party dependencies and external assets remain under their respective licenses. See [NOTICE](NOTICE) for attribution and project-scope notes.
+Third-party dependencies and external assets remain under their respective licenses.
+
+See [NOTICE](NOTICE) for attribution and project-scope notes.
