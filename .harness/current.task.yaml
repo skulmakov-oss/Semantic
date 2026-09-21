@@ -15,6 +15,9 @@ task:
     docs/roadmap/stable_foundation/ssf08_closure_audit.md. This file's own
     prior activation (chore(ssf07): ..., commit 5ddb703b) established the
     precedent this transition follows. Only SSF-09 is now active.
+    Repository owner explicit governance authorization (2026-09-21) to allow
+    the root .gitattributes change required by #1698 for deterministic LF
+    materialization of byte-sensitive 7HELL fixtures.
 
 intent:
   summary: >-
@@ -44,6 +47,7 @@ intent:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
+    - .gitattributes
     - README.md
     - CHANGELOG.md
     - docs/LANGUAGE.md
