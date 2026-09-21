@@ -3947,8 +3947,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // Exhausted tokens report EOF; 0 is a genuine offset, not a sentinel.
     fn pos(&self) -> usize {
-        self.tokens.get(self.idx).map(|t| t.pos).unwrap_or(0)
+        self.tokens
+            .get(self.idx)
+            .map(|t| t.pos)
+            .unwrap_or(self.source.len())
     }
 
     fn is_layout(kind: TokenKind) -> bool {
@@ -8617,6 +8621,31 @@ mod grammar_admission_tests {
              as pos: 0 for inputs with no content before the first real \
              declaration, which would mask a regression here)"
         );
+    }
+
+    #[test]
+    fn exhausted_token_list_reports_source_eof_position() {
+        let profile = ParserProfile::foundation_default();
+        for src in [
+            "Entity Player:\n",
+            "Entity P:",
+            "Entity P:\n    state hp: quad\nLaw \"L\" [priority 1]:\n",
+        ] {
+            let err = parse_logos_with_profile(src, &profile)
+                .expect_err("parser must run out of tokens while expecting INDENT");
+            assert_eq!(err.pos, src.len(), "exhaustion must report EOF for {src:?}");
+        }
+    }
+
+    #[test]
+    fn genuine_byte_zero_error_is_not_the_exhaustion_position() {
+        let profile = ParserProfile::foundation_default();
+        let src = "Bogus\nEntity P:\n    state hp: quad\n";
+        let err = parse_logos_with_profile(src, &profile)
+            .expect_err("unknown leading token must be rejected at that token");
+        assert_eq!(err.pos, 0);
+        assert!(err.pos < src.len());
+        assert!(err.message.contains("--> <input>:1:1"), "{}", err.message);
     }
 
     #[test]

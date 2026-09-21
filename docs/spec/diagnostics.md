@@ -329,9 +329,9 @@ Current guarantees:
 Module parse-failure position:
 
 - a Logos parse failure wrapped as `E0239` by the project/module loader
-  preserves the parser-provided byte position as the diagnostic line/column;
-  this applies to every module processed through the loader, including the
-  root module
+  preserves the parser-provided byte position as the diagnostic line/column
+  (columns are counted in source bytes, matching the lexer); this applies to
+  every module processed through the loader, including the root module
 - for an aggregate parser failure the location is the first reported error's
   position; the wrapped message still carries every parser error
 - the `E0239` code, the `failed to parse module '<module>': <parser message>`

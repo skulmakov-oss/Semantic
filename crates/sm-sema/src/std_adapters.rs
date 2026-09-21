@@ -1357,8 +1357,16 @@ Law "L" [priority 1]:
             source_mark_from_byte_offset(source, direct.pos)
         );
         assert_ne!(err.diag.mark, SourceMark::default());
-        assert!(err.diag.message.replace('\\', "/").contains(module));
-        assert!(err.diag.message.ends_with(&direct.message));
+        let rest = err
+            .diag
+            .message
+            .strip_prefix("failed to parse module '")
+            .expect("wrapper prefix must be preserved");
+        let (shown_module, parser_message) = rest
+            .split_once("': ")
+            .expect("wrapper must separate module identity from the parser message");
+        assert_eq!(shown_module.replace('\\', "/"), module);
+        assert_eq!(parser_message, direct.message);
         assert!(err
             .diag
             .rendered
@@ -1407,22 +1415,59 @@ Law "L" [priority 1]:
     }
 
     #[test]
-    fn module_parse_error_at_offset_zero_is_a_real_position() {
+    fn module_parse_error_at_genuine_byte_zero_maps_to_line_one_column_one() {
         let root = "/virtual/root.sm";
-        let src = "Entity P:\n";
+        let src = "Bogus\nEntity P:\n    state hp: quad\n";
         let profile = ParserProfile::foundation_default();
         let direct = parse_logos_program_with_profile(src, &profile).expect_err("must fail");
         assert_eq!(direct.pos, 0);
-        let err = check_modules(root, &[(root, src.as_bytes())]).expect_err("must fail");
-        assert_eq!(err.diag.code, "E0239");
-        assert_eq!(
-            err.diag.mark,
-            SourceMark {
-                line: 1,
-                col: 1,
-                file_id: 0,
-            }
+        assert!(direct.pos < src.len(), "offset zero must not be exhaustion");
+        assert!(
+            direct.message.contains("--> <input>:1:1"),
+            "the parser located a real token at offset zero: {}",
+            direct.message
         );
+        let err = check_modules(root, &[(root, src.as_bytes())]).expect_err("must fail");
+        let expected = SourceMark {
+            line: 1,
+            col: 1,
+            file_id: 0,
+        };
+        assert_module_parse_error_at(&err, root, src, expected);
+    }
+
+    #[test]
+    fn module_parse_error_at_token_exhaustion_maps_to_source_eof() {
+        let root = "/virtual/root.sm";
+        let cases = [
+            (
+                "Entity Player:\n",
+                SourceMark {
+                    line: 2,
+                    col: 1,
+                    file_id: 0,
+                },
+            ),
+            (
+                "Entity P:",
+                SourceMark {
+                    line: 1,
+                    col: 10,
+                    file_id: 0,
+                },
+            ),
+        ];
+        let profile = ParserProfile::foundation_default();
+        for (src, expected) in cases {
+            let direct = parse_logos_program_with_profile(src, &profile).expect_err("must fail");
+            assert_eq!(
+                direct.pos,
+                src.len(),
+                "exhausted parser must report EOF: {src:?}"
+            );
+            let err = check_modules(root, &[(root, src.as_bytes())]).expect_err("must fail");
+            assert_module_parse_error_at(&err, root, src, expected);
+        }
     }
 
     struct ResolveFailsProvider;
