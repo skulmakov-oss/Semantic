@@ -319,6 +319,7 @@ fn ton618_content_inventory_is_explicit() {
         "./crates/ton618-core/src/lib.rs",
         "./crates/ton618-core/tests/quadro_logic.rs",
         "./crates/ton618-core/tests/quadro_shadow.rs",
+        "./docs/ERROR_CODES.md",
         "./docs/NAMING.md",
         "./docs/NO_STD.md",
         "./docs/architecture/dependency_boundary_rules.md",
@@ -339,6 +340,7 @@ fn ton618_content_inventory_is_explicit() {
         "./src/bin/ton618_core.rs",
         "./src/lib.rs",
         "./tests/legacy_guards.rs",
+        "./tests/sema_diagnostic_catalog_coherence.rs",
         "./ton618_legacy/Cargo.toml",
     ]
     .iter()
