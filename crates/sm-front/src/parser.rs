@@ -8649,6 +8649,19 @@ mod grammar_admission_tests {
     }
 
     #[test]
+    fn exhausted_token_list_position_is_a_utf8_byte_offset() {
+        // EOF positions are byte offsets: a multibyte comment makes the
+        // byte length differ from the Unicode character count.
+        let profile = ParserProfile::foundation_default();
+        let src = "// é\nEntity P:\n";
+        assert_ne!(src.len(), src.chars().count());
+        let err = parse_logos_with_profile(src, &profile)
+            .expect_err("parser must run out of tokens while expecting INDENT");
+        assert_eq!(err.pos, src.len());
+        assert_ne!(err.pos, src.chars().count());
+    }
+
+    #[test]
     fn global_surface_denial_outranks_legacy_compatibility_denial() {
         // Both policy gates fail for the same input - the law requires
         // the global require_logos_surface gate to win, matching
