@@ -92,7 +92,7 @@
       "source": {
         "file": "tests/fixtures/7hell_e1/syntax_invalid.sm",
         "line": 1,
-        "column": 1
+        "column": 9
       }
     }
   ],
