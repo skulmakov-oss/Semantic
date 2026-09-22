@@ -22,6 +22,10 @@ task:
     exactly crates/ton618-core/src/diagnostics.rs and docs/ERROR_CODES.md for
     the #1704 sm-sema catalog-coherence repair (central catalog entries and
     its derived ERROR_CODES mirror).
+    Repository owner explicit governance authorization (2026-09-22) to allow
+    exactly docs/architecture/dependency_boundary_rules.md and
+    docs/architecture/module_ownership_map.md for the SSF-09 carrier-owner
+    governance architectural decision.
 
 intent:
   summary: >-
@@ -54,6 +58,8 @@ scope:
     - .gitattributes
     - crates/ton618-core/src/diagnostics.rs
     - docs/ERROR_CODES.md
+    - docs/architecture/dependency_boundary_rules.md
+    - docs/architecture/module_ownership_map.md
     - README.md
     - CHANGELOG.md
     - docs/LANGUAGE.md
