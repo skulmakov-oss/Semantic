@@ -2994,12 +2994,25 @@ The canonical diagnostic semantics must not be defined in terms of Rust-specific
 ### Implementation authorization state
 ```text
 OWNER DECISION: FROZEN (Position B)
+CARRIER CONTRACT: FROZEN (docs/roadmap/stable_foundation/ssf09_canonical_carrier_contract.md)
 IMPLEMENTATION: NOT AUTHORIZED
 ```
 Current task envelope (`.harness/current.task.yaml`) retains `dependency_changes: false` and does not authorize any diagnostic crate path.
 A separate repository-owner governance checkpoint must authorize:
-1. exact crate name and path;
-2. workspace membership;
-3. required Cargo dependency edges;
-4. harness allowed path;
-5. `dependency_changes` widening if required.
+1. crate creation under `crates/sm-diagnostic/**`;
+2. workspace membership in root `Cargo.toml`;
+3. required Cargo dependency edges (`dependency_changes: true`);
+4. harness allowed path expansion.
+
+### Canonical carrier contract addendum (2026-09-22)
+Following the freeze of Position B, the detailed architectural and semantic specification of the canonical internal carrier is established in:
+- [`docs/roadmap/stable_foundation/ssf09_canonical_carrier_contract.md`](ssf09_canonical_carrier_contract.md)
+
+This normative contract freezes:
+- Exact crate name and path: `sm-diagnostic` (`crates/sm-diagnostic`) in the `Shared Foundation / Contract Leaf` tier.
+- Internal semantic model: `DiagnosticCode`, `DiagnosticSeverity` (`Error | Warning`), `DiagnosticFamily` (`Frontend | Semantic | Verification | Runtime`), `DiagnosticMessage`, `SourceContext` (`SourceId` + optional `SourceRange`), `RelatedLocation`, `DiagnosticNote`, `FixProposal` (cardinality 0..1, guidance only), and `DiagnosticCause` (`Diagnostic | Report`, strictly structured without string-flattening).
+- Environment boundary: `#![no_std] + alloc`, no `serde`, no filesystem, no network, no OS strings.
+- Producer authority gates: `C0` (primitives), `C1A/C1B` (`sm-front` code/severity/range authority repair), `C2` (`sm-sema`), `C3A/C3B` (`sm-verify` code token & severity authority repair), `C4` (runtime diagnostic admission), `C5` (human renderer), `C6` (external machine schema).
+- Strict non-fabrication law: missing producer semantic authority blocks adaptation; the carrier never synthesizes placeholder codes, zero-width ranges from legacy points, or string causes.
+- Implementation authorization: The crate does not yet exist and implementation remains strictly unauthorized under the current task envelope.
+
