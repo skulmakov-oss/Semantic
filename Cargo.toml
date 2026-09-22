@@ -13,6 +13,7 @@ categories = ["no-std", "science"]
 members = [
     ".",
     "crates/ton618-core",
+    "crates/sm-diagnostic",
     "crates/sm-front",
     "crates/sm-profile",
     "crates/sm-sema",

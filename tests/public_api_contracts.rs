@@ -36,6 +36,10 @@ fn semantic_diagnostic_public_shape_is_explicitly_qualified() {
 
 const TARGETS: &[(&str, &str)] = &[
     (
+        "crates/sm-diagnostic/src/lib.rs",
+        "tests/golden_snapshots/public_api/sm_diagnostic_lib.txt",
+    ),
+    (
         "crates/sm-front/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_front_lib.txt",
     ),
