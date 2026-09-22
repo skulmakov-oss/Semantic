@@ -115,7 +115,7 @@ cause:             0..1 (Option<Box<DiagnosticCause>>)
 ```
 
 ### 5.1 DiagnosticCode
-- **Concept**: Opaque textual identifier owned strictly by the producer stage (e.g. `"E0101"`, `"S0404"`).
+- **Concept**: Opaque textual identifier owned strictly by the producer stage (e.g. `"E0101"`).
 - **Invariants**:
   - Valid UTF-8.
   - Not empty (`!ident.is_empty()`).
@@ -129,7 +129,7 @@ cause:             0..1 (Option<Box<DiagnosticCause>>)
   ```
 
 ### 5.2 Severity
-- **Concept**: Two-state severity vocabulary representing compiler and verifier findings.
+- **Concept**: Two-state severity vocabulary representing compiler/verifier findings and runtime failures explicitly admitted as canonical diagnostics.
 - **Invariants**:
   ```rust
   pub enum DiagnosticSeverity {
@@ -270,8 +270,9 @@ cause:             0..1 (Option<Box<DiagnosticCause>>)
    - **Determinism Law**: Identical producer semantic input and identical proven context must produce structurally equal canonical diagnostics with deterministic observable collection order.
    - Rust in-memory representations are not an external byte ABI; in-memory byte stability is not asserted.
 2. **Equality vs Identity**:
-   - **Semantic Diagnostic Identity**: Defined by `(code, severity, family)` in conjunction with proven `SourceContext`.
-   - **Structural Equality**: `PartialEq` / `Eq` covers all fields including notes, proposals, and nested causes.
+   - **Semantic Diagnostic Identity**: Defined strictly by `(code, severity, family)` per SSF-09 Decision B.
+   - **Diagnostic Instance Context**: `SourceContext` and other structured contextual fields are proven context attached to a specific diagnostic occurrence; they are NOT part of the producer-owned semantic identity. (For example, two occurrences of error `E0201` at different source locations share identical semantic diagnostic identity while representing distinct diagnostic instances with different `SourceContext`).
+   - **Structural Equality**: `PartialEq` / `Eq` covers all fields including instance context, notes, proposals, and nested causes.
 3. **Deduplication**:
    - **Canonical Deduplication: NONE**.
    - The carrier leaf guarantees lossless multiplicity preservation. Emitted diagnostics are never discarded, deduplicated, or folded by the carrier.
@@ -339,7 +340,8 @@ Explicitly forbidden behaviors:
 6. Using enum `Debug` string formatting as a stable diagnostic code.
 7. Synthesizing empty or dummy `FixProposal` values.
 8. Flattening `RejectReport` into a single text string.
-9. Synthesizing `SourceId(0)` or `"<input>"` as an external canonical file identity.
+9. Synthesizing canonical internal `SourceId` from legacy compatibility perimeter representations (e.g. legacy `FileId`), `file_id = 0`, or another placeholder numeric value.
+10. Synthesizing canonical external stable source identity from `"<input>"`, a basename, a display-only path, or another presentation placeholder.
 
 ---
 
