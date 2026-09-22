@@ -5,6 +5,7 @@ Project zones:
 - `Construction`: `sm-front`, `sm-sema`, `sm-ir`, `sm-emit`, `sm-profile`
 - `Execution`: `sm-verify`, `sm-runtime-core`, `sm-vm`
 - `Integration`: `prom-abi`, `prom-cap`, `prom-runtime`, `prom-state`, `prom-rules`, `prom-gates`, `prom-audit`
+- `Shared Foundation / Contract Leaf`: neutral foundational tier (`sm-format` precedent)
 
 Current pending ownership notes:
 
@@ -13,6 +14,7 @@ Current pending ownership notes:
 - SemCode format contract is owned by `sm-ir` in the current `v1` baseline; `sm-emit` remains a producer-facing facade and compatibility layer
 - public CLI contract is owned by `smc-cli` in the current `v1` baseline; root `smc` is a thin entrypoint wrapper over that owner
 - the retained non-owning TON618 compatibility perimeter (`ton618_core`, `ton618-core`) must not grow into second owners
+- canonical internal diagnostic carrier: pending new dedicated leaf crate in the neutral `Shared Foundation / Contract Leaf` tier (precedent: `sm-format`; not part of Construction, Execution, Integration, Host/CLI, or TON618 compatibility perimeter). Ownership decision is frozen (Position B); implementation is pending and NOT authorized under current task envelope (`dependency_changes: false`). Concrete crate name and path are not yet frozen.
 
 Compatibility checkpoint:
 
@@ -22,6 +24,18 @@ Compatibility checkpoint:
 Allowed flow:
 
 `Construction -> Execution -> Integration`
+
+Neutral shared contract leaves (`Shared Foundation / Contract Leaf`) sit below and cross-cut these zones without owning zone-specific compiler/runtime semantics:
+
+```text
+                 Shared Diagnostic Contract Leaf
+                     ▲        ▲        ▲
+                     │        │        │
+             Construction  Execution  Host/Tooling
+```
+
+Consumers may depend inward on the shared diagnostic carrier owner. The diagnostic carrier owner MUST NOT depend on:
+`sm-front`, `sm-sema`, `sm-ir`, `sm-emit`, `sm-verify`, `sm-runtime-core`, `sm-vm`, `smc-cli`, `prom-*`, or `ton618-core`.
 
 Boundary rules:
 

@@ -2807,3 +2807,199 @@ violation Decision F's INVARIANT already forbids. See the PR closing
 [#1933](https://github.com/skulmakov-oss/Semantic/issues/1933) for the
 full regression matrix, mutation-testing results, and review
 disposition.
+
+## Carrier-owner decision addendum (post-repair-DAG closeout, 2026-09-22)
+
+Following completion and qualification of the diagnostic repair DAG items
+(`#1670`, `#1697`, `#1698`, `#1699`, `#1704`, `#1943` numeric-position repair,
+and `#1700` public API guard), repository owner review formally froze the canonical
+internal diagnostic carrier ownership decision.
+
+### Historical context preservation
+The earlier text above recorded:
+`Canonical-carrier owner selection: NOT FROZEN, by design.`
+That accurately reflects the state at the time this document was drafted:
+an exhaustive analysis of all 8 existing candidate crates proved that none
+satisfied all architectural requirements, leaving a new crate as the leading
+direction pending completion of the repair DAG and explicit governance review.
+That historical statement is preserved intact without retroactive rewrite.
+This addendum records the subsequent owner decision that resolved that pending selection.
+
+### Frozen decision: POSITION B — CANONICAL DIAGNOSTIC CARRIER OWNER
+No existing crate satisfies all required:
+- dependency-graph correctness;
+- ownership-policy consistency;
+- compatibility isolation;
+- responsibility cohesion.
+
+Therefore the canonical INTERNAL diagnostic carrier shall have one new,
+dedicated, low-level shared contract owner.
+
+The owner is conceptually frozen as a new dedicated crate.
+The concrete crate name and path are **NOT** yet frozen (e.g. neither `sm-diagnostic` nor `sm-diag` is claimed to exist today).
+In this document and architecture records, it is identified as the
+`future dedicated diagnostic contract crate`.
+
+### Architectural placement: Shared Foundation / Contract Leaf
+The future carrier owner is NOT part of:
+- `Construction`
+- `Execution`
+- `Integration`
+- `Host / CLI`
+- `TON618 compatibility perimeter`
+
+It is placed in the neutral foundational tier:
+`Shared Foundation / Contract Leaf`
+
+Its architectural role is comparable to a low-level shared contract leaf such as
+`sm-format`, but it does NOT share `sm-format`'s SemCode format responsibility.
+The two ownership domains remain strictly distinct and are not merged.
+
+### Dependency-direction invariant
+The dependency hierarchy is strictly directional:
+
+```text
+                 Shared Diagnostic Contract Leaf
+                     ▲        ▲        ▲
+                     │        │        │
+             Construction  Execution  Host/Tooling
+```
+
+Consumers from Construction, Execution, and Host/Tooling may depend inward on the
+shared diagnostic contract leaf.
+
+The diagnostic carrier owner MUST NOT depend on:
+- `sm-front`
+- `sm-sema`
+- `sm-ir`
+- `sm-emit`
+- `sm-verify`
+- `sm-runtime-core`
+- `sm-vm`
+- `smc-cli`
+- `prom-*`
+- `ton618-core`
+
+The diagnostic owner remains dependency-foundational relative to these layers.
+No dependency edges to or from this future crate are authorized under the current task envelope (`dependency_changes: false`).
+
+### Existing candidate disposition (concise rationale)
+1. **`sm-profile`**: Rejected due to responsibility mismatch. Its charter is language admission/policy configuration (`ParserProfile`), not diagnostic carrier representation.
+2. **`sm-front`**: Rejected due to dependency direction and frontend ownership. Execution crates depending on it would pull in lexer/parser/AST, violating layering.
+3. **`sm-sema`**: Rejected due to dependency direction and semantic-analysis ownership.
+4. **`sm-ir`**: Rejected due to dependency cycle/inversion and IR/optimizer responsibility mismatch.
+5. **`sm-emit`**: Rejected due to dependency direction and emission facade responsibility mismatch.
+6. **`sm-format`**: Rejected as owner. While a low-level contract leaf, it owns the SemCode binary format contract; adding diagnostics would create an unrelated second responsibility. Cited only as an architectural precedent for a neutral contract leaf.
+7. **`sm-runtime-core`**: Rejected because Construction crates must not depend on Execution-zone runtime vocabulary; responsibility mismatch with runtime trap taxonomy.
+8. **`ton618-core`**: DISQUALIFIED BY GOVERNANCE. `docs/roadmap/language_maturity/ton618_compatibility_perimeter_scope.md` is a closed governance track that explicitly forbids moving canonical ownership into TON618-named paths. Its retained compatibility perimeter must not acquire new canonical ownership.
+
+### Canonical semantic responsibility
+Consistent with the pre-existing frozen `Canonical carrier boundary` (§ "INTERNAL CANONICAL DIAGNOSTIC MODEL") above, the semantic capability of the carrier is strictly distinguished from its concrete in-memory representation.
+
+#### 1. ALREADY FROZEN SEMANTIC CAPABILITY
+The canonical internal model at minimum represents:
+- diagnostic identity / code (Decision B)
+- severity
+- diagnostic family / stage
+- primary diagnostic message
+- canonical file identity (Decision C, optional / absent-capable)
+- canonical source range (Decision D, optional / absent-capable)
+- structured related locations
+- structured notes
+- optional structured fix / proposal
+- optional structured cause (e.g. for `RuntimeError::VerifierRejected(RejectReport)`-style wrapping)
+
+These semantic dimensions are already part of the frozen carrier boundary and are neither waived nor optional future additions.
+
+#### 2. STILL NOT FROZEN (DEFERRED REPRESENTATION DESIGN)
+The concrete implementation and representation design details remain deferred to the `CANONICAL CARRIER CONTRACT`:
+- concrete Rust struct / enum layout
+- field names and method surface
+- collection/container representation (`Vec` vs `SmallVec` vs other storage)
+- exact cardinality mechanics
+- string ownership / allocation strategy (borrowed vs owned vs shared)
+- exact internal data structures for notes, related locations, fix/proposal, and causes
+- serialization layout and external schema definition
+
+### SourceMark / source identity law
+Per SSF-09 Decision C and D authority, `ton618-core::SourceMark` remains legacy and transitional.
+The future carrier owner MUST NOT depend on `ton618-core`.
+The migration topology is strictly:
+```text
+legacy SourceMark / producer-local position
+                  ↓ adapter
+canonical FileIdentity + SourceRange
+```
+Never:
+```text
+canonical carrier
+        ↓ dependency
+ton618-core::SourceMark
+```
+Adapters are not implemented in this documentation checkpoint.
+
+### Existing diagnostic types & runtime scope
+Current diagnostic types remain valid transitional producers/adapters:
+- `FrontendError` / `FrontendErrorKind`
+- `SemanticDiagnostic` / `SemanticError` / `DiagLevel`
+- `VerificationDiagnostic` / `VerificationCode`
+- `RuntimeTrap` / runtime failure vocabulary where applicable
+- `SourceMark`, `provider_module_id`, `diagnostic_catalog()`, `rendered: String`
+
+These are not guaranteed a 1:1 replacement in the future carrier.
+Crucially, not every `RuntimeTrap` becomes a canonical diagnostic: the diagnostic contract owner is dependency-safe for Execution-layer consumers if a later carrier contract determines that a particular execution failure projects into canonical diagnostics. SSF-08 runtime failure ownership remains authoritative.
+
+### Rendering boundary
+Canonical carrier ownership MUST NOT include:
+- terminal rendering
+- ANSI/color policy
+- CLI printing
+- stderr/stdout behavior
+- caret formatting policy
+- filesystem loading
+- source parsing
+- surface classification
+- semantic analysis
+- IR lowering
+- VM execution
+
+The presence of `rendered: String` in current `SemanticDiagnostic` is transitional presentation material, not evidence that rendering belongs in the canonical carrier.
+
+### Catalog relationship
+- `diagnostic identity`: canonical carrier vocabulary concern.
+- `diagnostic explanation/help catalog`: downstream lookup/documentation concern.
+
+`ton618-core::diagnostic_catalog()` remains legacy/transitional. The catalog is not migrated in this checkpoint, and `ton618-core` must not become the permanent source of diagnostic identity.
+
+### Internal vs. external schema separation
+The separation between internal semantics and external exchange schemas is strictly frozen:
+```text
+canonical internal diagnostic semantics
+                ↓ explicit projection
+versioned external diagnostic schema
+```
+They are separate artifacts with independent versioning. The anti-pattern of `internal Rust Diagnostic + Serialize derive = public protocol` is rejected.
+The carrier owner must not own:
+- serde compatibility
+- JSON schema versioning
+- LSP wire models
+- JSON-RPC
+- CLI machine-output compatibility
+
+The external-schema owner is not selected by this checkpoint.
+
+### Bootstrap constraint
+The canonical diagnostic semantics must not be defined in terms of Rust-specific wire/protocol machinery in a way that would make later Semantic self-hosting depend on Rust/Serde representation choices.
+
+### Implementation authorization state
+```text
+OWNER DECISION: FROZEN (Position B)
+IMPLEMENTATION: NOT AUTHORIZED
+```
+Current task envelope (`.harness/current.task.yaml`) retains `dependency_changes: false` and does not authorize any diagnostic crate path.
+A separate repository-owner governance checkpoint must authorize:
+1. exact crate name and path;
+2. workspace membership;
+3. required Cargo dependency edges;
+4. harness allowed path;
+5. `dependency_changes` widening if required.
