@@ -14,7 +14,7 @@ Current pending ownership notes:
 - SemCode format contract is owned by `sm-ir` in the current `v1` baseline; `sm-emit` remains a producer-facing facade and compatibility layer
 - public CLI contract is owned by `smc-cli` in the current `v1` baseline; root `smc` is a thin entrypoint wrapper over that owner
 - the retained non-owning TON618 compatibility perimeter (`ton618_core`, `ton618-core`) must not grow into second owners
-- canonical internal diagnostic carrier: pending new dedicated leaf crate in the neutral `Shared Foundation / Contract Leaf` tier (precedent: `sm-format`; not part of Construction, Execution, Integration, Host/CLI, or TON618 compatibility perimeter). Ownership decision is frozen (Position B); implementation is pending and NOT authorized under current task envelope (`dependency_changes: false`). Concrete crate name and path are not yet frozen.
+- canonical internal diagnostic carrier: pending new dedicated leaf crate named `sm-diagnostic` (`crates/sm-diagnostic`) in the neutral `Shared Foundation / Contract Leaf` tier (precedent: `sm-format`; not part of Construction, Execution, Integration, Host/CLI, or TON618 compatibility perimeter). Ownership decision is frozen (Position B) and carrier contract is frozen (`docs/roadmap/stable_foundation/ssf09_canonical_carrier_contract.md`); implementation is pending and NOT authorized under current task envelope (`dependency_changes: false`).
 
 Compatibility checkpoint:
 
@@ -28,13 +28,14 @@ Allowed flow:
 Neutral shared contract leaves (`Shared Foundation / Contract Leaf`) sit below and cross-cut these zones without owning zone-specific compiler/runtime semantics:
 
 ```text
-                 Shared Diagnostic Contract Leaf
-                     ▲        ▲        ▲
-                     │        │        │
-             Construction  Execution  Host/Tooling
+                  sm-diagnostic
+             (Contract Leaf / Tier 0)
+                 ▲     ▲     ▲
+                 │     │     │
+         Construction Execution Host/Tooling
 ```
 
-Consumers may depend inward on the shared diagnostic carrier owner. The diagnostic carrier owner MUST NOT depend on:
+Consumers may depend inward on the shared diagnostic carrier owner (`sm-diagnostic`). The diagnostic carrier owner MUST NOT depend on:
 `sm-front`, `sm-sema`, `sm-ir`, `sm-emit`, `sm-verify`, `sm-runtime-core`, `sm-vm`, `smc-cli`, `prom-*`, or `ton618-core`.
 
 Boundary rules:
