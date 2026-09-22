@@ -26,6 +26,18 @@ task:
     exactly docs/architecture/dependency_boundary_rules.md and
     docs/architecture/module_ownership_map.md for the SSF-09 carrier-owner
     governance architectural decision.
+    Repository owner explicit governance authorization (2026-09-22) to widen
+    the governance envelope for the frozen canonical diagnostic carrier Phase C0.
+    This authorization permits ONLY:
+    1. creation of crates/sm-diagnostic/**;
+    2. addition of crates/sm-diagnostic as a root workspace member in Cargo.toml;
+    3. Cargo metadata necessary for the new crate itself;
+    4. C0 qualification/public-API/boundary tests already under tests/**.
+    It explicitly does NOT authorize: sm-front, sm-sema, sm-verify,
+    sm-runtime-core, sm-vm, or smc-cli dependency on sm-diagnostic; prom-*
+    dependency changes; any existing crate Cargo.toml modification; adapter
+    implementation; renderer implementation; external JSON/LSP schema work;
+    or subsequent phases C1A/C1B/C2/C3A/C3B/C4/C5/C6.
 
 intent:
   summary: >-
@@ -56,6 +68,8 @@ scope:
   allowed_paths:
     - .harness/current.task.yaml
     - .gitattributes
+    - Cargo.toml
+    - crates/sm-diagnostic/**
     - crates/ton618-core/src/diagnostics.rs
     - docs/ERROR_CODES.md
     - docs/architecture/dependency_boundary_rules.md
@@ -98,7 +112,7 @@ authorization:
   documentation_correction: true
   test_addition: true
   workflow_changes: false
-  dependency_changes: false
+  dependency_changes: true
   github_issue_lifecycle: true
   git_commit_push_pr: true
   merge_after_review_and_checks: true
@@ -117,6 +131,13 @@ constraints:
   ownership_position: A
   ownership_position_decision_record: >-
     docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md
+  sm_diagnostic_c0_scope: crate_creation_only
+  sm_diagnostic_c0_dependency_rule: >-
+    During C0, `dependency_changes: true` authorizes only creation of
+    `crates/sm-diagnostic`, its root workspace membership in `Cargo.toml`, and its own
+    zero-internal-dependency manifest (`crates/sm-diagnostic/Cargo.toml`). It does not
+    authorize new dependency edges from or between existing crates, modifications to
+    existing crate manifests, or external dependencies beyond C0 requirements.
   no_rust_equivalent_lifetime_region_claim: true
   diagnostic_authority_decision_required_before_any_implementation: true
   diagnostic_repair_dag_worked_in_dependency_order_not_independently: true
