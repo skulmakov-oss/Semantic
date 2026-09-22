@@ -16,6 +16,7 @@ Core ownership:
 - runtime primitives: `sm-runtime-core`
 - VM execution mechanics: `sm-vm`
 - CLI orchestration: `smc-cli`
+- canonical internal diagnostic carrier: future dedicated shared low-level contract owner in neutral `Shared Foundation / Contract Leaf` tier (precedent: `sm-format`; ownership decision frozen per Position B; implementation pending and unauthorized under current harness; exact crate name and path pending Canonical Carrier Contract / implementation governance)
 
 Integration ownership:
 
@@ -42,4 +43,5 @@ Ownership rules:
 - `prom-state` owns semantic state, not `sm-vm`;
 - `prom-rules` owns agenda/conflict logic, not `sm-vm`;
 - `prom-runtime` orchestrates verified entrypoints but does not own VM
-  execution, runtime traps, or quota semantics.
+  execution, runtime traps, or quota semantics;
+- the canonical internal diagnostic carrier belongs to a single dedicated shared contract owner in `Shared Foundation / Contract Leaf` tier; it is not owned by `ton618-core` (disqualified by governance), `sm-sema`, `sm-front`, or any Execution crate; implementation remains unauthorized until a separate governance checkpoint authorizes the crate path, workspace membership, and dependency edge.
