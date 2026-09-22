@@ -2811,9 +2811,9 @@ disposition.
 ## Carrier-owner decision addendum (post-repair-DAG closeout, 2026-09-22)
 
 Following completion and qualification of the diagnostic repair DAG items
-(`#1670`, `#1697`, `#1698`, `#1699`, `#1704`, and `#1700` public API guard),
-repository owner review formally froze the canonical internal diagnostic carrier
-ownership decision.
+(`#1670`, `#1697`, `#1698`, `#1699`, `#1704`, `#1943` numeric-position repair,
+and `#1700` public API guard), repository owner review formally froze the canonical
+internal diagnostic carrier ownership decision.
 
 ### Historical context preservation
 The earlier text above recorded:
@@ -2894,24 +2894,32 @@ No dependency edges to or from this future crate are authorized under the curren
 8. **`ton618-core`**: DISQUALIFIED BY GOVERNANCE. `docs/roadmap/language_maturity/ton618_compatibility_perimeter_scope.md` is a closed governance track that explicitly forbids moving canonical ownership into TON618-named paths. Its retained compatibility perimeter must not acquire new canonical ownership.
 
 ### Canonical semantic responsibility
-The concrete Rust struct/enum layout is NOT frozen by this checkpoint.
-This checkpoint freezes only that the future carrier domain must be capable of representing the already-authorized semantic dimensions:
-- diagnostic identity / code
-- severity
-- diagnostic family or stage
-- canonical file identity
-- canonical source range
-- primary diagnostic message
+Consistent with the pre-existing frozen `Canonical carrier boundary` (§ "INTERNAL CANONICAL DIAGNOSTIC MODEL") above, the semantic capability of the carrier is strictly distinguished from its concrete in-memory representation.
 
-The following are NOT frozen at this checkpoint and are deferred to the `CANONICAL CARRIER CONTRACT`:
-- secondary labels
-- notes collections
-- fix-its
-- suggestions
-- related locations
-- serialization representation
-- Rust enum/struct layout
-- allocation/string strategy
+#### 1. ALREADY FROZEN SEMANTIC CAPABILITY
+The canonical internal model at minimum represents:
+- diagnostic identity / code (Decision B)
+- severity
+- diagnostic family / stage
+- primary diagnostic message
+- canonical file identity (Decision C, optional / absent-capable)
+- canonical source range (Decision D, optional / absent-capable)
+- structured related locations
+- structured notes
+- optional structured fix / proposal
+- optional structured cause (e.g. for `RuntimeError::VerifierRejected(RejectReport)`-style wrapping)
+
+These semantic dimensions are already part of the frozen carrier boundary and are neither waived nor optional future additions.
+
+#### 2. STILL NOT FROZEN (DEFERRED REPRESENTATION DESIGN)
+The concrete implementation and representation design details remain deferred to the `CANONICAL CARRIER CONTRACT`:
+- concrete Rust struct / enum layout
+- field names and method surface
+- collection/container representation (`Vec` vs `SmallVec` vs other storage)
+- exact cardinality mechanics
+- string ownership / allocation strategy (borrowed vs owned vs shared)
+- exact internal data structures for notes, related locations, fix/proposal, and causes
+- serialization layout and external schema definition
 
 ### SourceMark / source identity law
 Per SSF-09 Decision C and D authority, `ton618-core::SourceMark` remains legacy and transitional.
