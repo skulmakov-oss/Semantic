@@ -1,0 +1,67 @@
+source: crates/sm-diagnostic/src/lib.rs
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EmptyCodeError;
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DiagnosticCode();
+pub fn try_from_static(value: &'static str) -> Result<Self, EmptyCodeError> {
+pub fn try_from_string(value: String) -> Result<Self, EmptyCodeError> {
+pub fn as_str(&self) -> &str {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DiagnosticSeverity {
+Error,
+Warning,
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DiagnosticFamily {
+Frontend,
+Semantic,
+Verification,
+Runtime,
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceId();
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct OffsetOverflow;
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ByteOffset();
+pub fn try_from_usize(value: usize) -> Result<Self, OffsetOverflow> {
+pub const fn as_u64(self) -> u64 {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceRange {
+pub fn new(start: ByteOffset, end: ByteOffset) -> Option<Self> {
+pub const fn start(&self) -> ByteOffset {
+pub const fn end(&self) -> ByteOffset {
+pub const fn is_empty(&self) -> bool {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SourceContext {
+pub source: SourceId,
+pub range: Option<SourceRange>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EmptyMessageError;
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DiagnosticMessage();
+pub fn new(msg: impl Into<String>) -> Result<Self, EmptyMessageError> {
+pub fn as_str(&self) -> &str {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RelatedLocation {
+pub context: SourceContext,
+pub message: Option<String>,
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DiagnosticNote {
+pub message: String,
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FixProposal {
+pub message: String,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DiagnosticCause {
+Diagnostic(Box<Diagnostic>),
+Report(Vec<Diagnostic>),
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Diagnostic {
+pub code: DiagnosticCode,
+pub severity: DiagnosticSeverity,
+pub family: DiagnosticFamily,
+pub message: DiagnosticMessage,
+pub source_context: Option<SourceContext>,
+pub related_locations: Vec<RelatedLocation>,
+pub notes: Vec<DiagnosticNote>,
+pub fix_proposal: Option<FixProposal>,
+pub cause: Option<Box<DiagnosticCause>>,
