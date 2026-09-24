@@ -26,6 +26,8 @@ mod frontend {
 }
 
 #[cfg(feature = "std")]
+mod error;
+#[cfg(feature = "std")]
 pub mod hello_ir;
 #[cfg(feature = "std")]
 pub mod hello_semcode;
@@ -48,6 +50,8 @@ mod legacy_lowering;
 #[cfg(feature = "std")]
 pub mod passes;
 
+#[cfg(feature = "std")]
+pub use error::{CompilePipelineError, ConfigurationError, IrError};
 #[cfg(feature = "std")]
 pub use frontend::{CompileProfile, OptLevel};
 #[cfg(feature = "std")]

@@ -15,6 +15,8 @@ pub use sm_format::semcode_format::*;
 #[cfg(feature = "std")]
 pub mod passes;
 #[cfg(feature = "std")]
+pub use error::{CompilePipelineError, ConfigurationError, IrError};
+#[cfg(feature = "std")]
 pub use frontend::{CompileProfile, OptLevel};
 #[cfg(feature = "std")]
 pub use legacy_lowering::*;

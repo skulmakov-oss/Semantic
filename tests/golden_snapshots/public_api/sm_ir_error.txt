@@ -1,0 +1,12 @@
+source: crates/sm-ir/src/error.rs
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IrError {
+pub message: String,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigurationError {
+pub message: String,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CompilePipelineError {
+Frontend(FrontendError),
+InternalIr(IrError),
+Configuration(ConfigurationError),
