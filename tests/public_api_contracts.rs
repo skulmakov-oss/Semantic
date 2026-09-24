@@ -84,6 +84,10 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/sm_ir_lib.txt",
     ),
     (
+        "crates/sm-ir/src/error.rs",
+        "tests/golden_snapshots/public_api/sm_ir_error.txt",
+    ),
+    (
         "crates/sm-profile/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_profile_lib.txt",
     ),

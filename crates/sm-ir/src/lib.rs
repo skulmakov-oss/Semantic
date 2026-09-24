@@ -26,7 +26,7 @@ mod frontend {
 }
 
 #[cfg(feature = "std")]
-pub mod error;
+mod error;
 #[cfg(feature = "std")]
 pub mod hello_ir;
 #[cfg(feature = "std")]
