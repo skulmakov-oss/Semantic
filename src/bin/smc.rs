@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use sm_emit::{compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
-use sm_front::FrontendError;
+use sm_ir::CompilePipelineError;
 use sm_verify::{RejectReport, VerifiedProgram};
 use sm_vm::RuntimeError as VmRuntimeError;
 use smc_cli::{CliPipeline, ControlledObservationQualificationEnvelope};
@@ -1353,16 +1353,21 @@ fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenH
 }
 
 fn diagnostic_from_compile_error(
-    error: &FrontendError,
+    error: &CompilePipelineError,
     target_display: &str,
 ) -> SevenHellDiagnostic {
+    let message = match error {
+        CompilePipelineError::Frontend(fe) => fe.message.clone(),
+        CompilePipelineError::InternalIr(ie) => ie.message.clone(),
+        CompilePipelineError::Configuration(ce) => ce.message.clone(),
+    };
     SevenHellDiagnostic {
         id: "D001".to_string(),
         stage: "lowering",
         kind: SevenHellDiagnosticKind::LoweringDiagnostic,
         code: "E0300".to_string(),
         category: "lowering",
-        message_needle: error.message.clone(),
+        message_needle: message,
         severity: "error",
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
