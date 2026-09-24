@@ -38,6 +38,16 @@ task:
     dependency changes; any existing crate Cargo.toml modification; adapter
     implementation; renderer implementation; external JSON/LSP schema work;
     or subsequent phases C1A/C1B/C2/C3A/C3B/C4/C5/C6.
+    Repository owner explicit governance authorization (2026-09-24) for a
+    separate infrastructure task outside SSF-09's diagnostic scope: add a
+    read-only automatic Claude adversarial PR review workflow. This permits
+    ONLY `.github/workflows/claude-review.yml` (plus this file). Because
+    scripts/harness-check.ps1 evaluates forbidden_paths before allowed_paths
+    and cannot express a single-file exception, `.github/**` moves out of
+    forbidden_paths; every other `.github/**` path stays rejected by the
+    allowed_paths check. It does NOT authorize any other workflow or
+    `.github/**` file, application/compiler/runtime code, secrets in git,
+    automatic approval or merge, or any change to PR #1953.
 
 intent:
   summary: >-
@@ -67,6 +77,7 @@ intent:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
+    - .github/workflows/claude-review.yml
     - .gitattributes
     - Cargo.toml
     - crates/sm-diagnostic/**
@@ -98,7 +109,6 @@ scope:
     - crates/smc-cli/**
 
   forbidden_paths:
-    - .github/**
     - apps/**
     - experiments/**
     - src/**
@@ -111,7 +121,7 @@ authorization:
   documentation_addition: true
   documentation_correction: true
   test_addition: true
-  workflow_changes: false
+  workflow_changes: true
   dependency_changes: true
   github_issue_lifecycle: true
   git_commit_push_pr: true
