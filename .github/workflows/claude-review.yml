@@ -147,3 +147,18 @@ jobs:
           claude_args: |
             --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/comments:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git grep:*)"
             --disallowedTools "Edit,Write,NotebookEdit,Bash(gh pr review:*),Bash(gh pr merge:*),Bash(gh api graphql:*),Bash(git push:*),Bash(git commit:*)"
+
+      # The action exits "success" when it skips itself (e.g. workflow-validation
+      # skip, missing credential). A run is only green if the summary for this
+      # exact head SHA is actually visible on the PR.
+      - name: Verify review was published for this head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+        run: |
+          n=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq "[.[] | select(.user.login == \"claude[bot]\" and (.body | contains(\"ADVERSARIAL REVIEW SUMMARY\")) and (.body | contains(\"$HEAD_SHA\")))] | length" \
+            | awk '{s += $1} END {print s + 0}')
+          [ "$n" -gt 0 ] || { echo "::error::no Claude ADVERSARIAL REVIEW SUMMARY for head $HEAD_SHA was published on PR #$PR_NUMBER"; exit 1; }
+          echo "Published Claude review summaries for $HEAD_SHA: $n"
