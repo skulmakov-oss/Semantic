@@ -8,7 +8,8 @@ pub use sm_format::semcode_format::*;
 #[cfg(feature = "std")]
 pub use sm_ir::{
     compile_program_to_semcode, compile_program_to_semcode_with_options,
-    compile_program_to_semcode_with_options_debug, emit_ir_to_semcode, CompileProfile, OptLevel,
+    compile_program_to_semcode_with_options_debug, emit_ir_to_semcode, CompilePipelineError,
+    CompileProfile, ConfigurationError, IrError, OptLevel,
 };
 
 #[cfg(feature = "std")]

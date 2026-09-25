@@ -605,7 +605,7 @@ pub struct IrFunction {
 /// arms exist only for exhaustiveness and return a descriptive error rather
 /// than `unreachable!()`, matching this codebase's "no fallback" discipline
 /// if that invariant is ever violated.
-fn callable_family_for_type(ty: &Type) -> Result<CallableValueFamily, FrontendError> {
+fn callable_family_for_type(ty: &Type) -> Result<CallableValueFamily, CompilePipelineError> {
     match ty {
         Type::Quad => Ok(CallableValueFamily::Quad),
         Type::Bool => Ok(CallableValueFamily::Bool),
@@ -632,7 +632,7 @@ fn callable_family_for_type(ty: &Type) -> Result<CallableValueFamily, FrontendEr
         Type::Record(_) => Ok(CallableValueFamily::Record),
         Type::Adt(_) => Ok(CallableValueFamily::Adt),
         Type::Unit => Ok(CallableValueFamily::Unit),
-        Type::QVec(_) => Err(FrontendError {
+        Type::QVec(_) => Err(CompilePipelineError::Frontend(FrontendError {
             pos: 0,
             message:
                 "'qvec' has no executable runtime value representation and cannot be used as a \
@@ -640,19 +640,17 @@ fn callable_family_for_type(ty: &Type) -> Result<CallableValueFamily, FrontendEr
                  parser-writable, typechecking syntax with no corresponding sm-vm::Value variant \
                  and no lowering path that ever constructs one)"
                     .to_string(),
-        }),
-        Type::RangeI32 => Err(FrontendError {
-            pos: 0,
-            message: "internal error: 'RangeI32' is a range-expression-only type and should be \
+        })),
+        Type::RangeI32 => Err(CompilePipelineError::InternalIr(IrError {
+            message: "'RangeI32' is a range-expression-only type and should be \
                        unreachable as a resolved callable parameter type"
                 .to_string(),
-        }),
-        Type::TypeVar(_) => Err(FrontendError {
-            pos: 0,
-            message: "internal error: an unresolved type-inference variable should be \
+        })),
+        Type::TypeVar(_) => Err(CompilePipelineError::InternalIr(IrError {
+            message: "an unresolved type-inference variable should be \
                        unreachable as a resolved callable parameter type"
                 .to_string(),
-        }),
+        })),
     }
 }
 
@@ -784,7 +782,7 @@ pub fn lower_expr_to_ir(
     arena: &AstArena,
     var_types: &HashMap<SymbolId, Type>,
     fn_table: &FnTable,
-) -> Result<Vec<IrInstr>, FrontendError> {
+) -> Result<Vec<IrInstr>, CompilePipelineError> {
     let mut out = Vec::new();
     let mut next = 0u16;
     let mut env = ScopeEnv::new();
@@ -830,10 +828,9 @@ pub fn lower_expr_to_ir(
         &mut lowered_locals,
     )?;
     if !closure_state.lifted_funcs.is_empty() {
-        return Err(FrontendError {
-            pos: 0,
+        return Err(CompilePipelineError::InternalIr(IrError {
             message: "lower_expr_to_ir does not emit lifted closure helpers; use compile_program_to_ir for first-class closures".to_string(),
-        });
+        }));
     }
     Ok(out)
 }
@@ -891,7 +888,7 @@ fn lower_function_to_ir_with_tables(
     record_table: &RecordTable,
     adt_table: &AdtTable,
     impl_list: &[sm_front::ImplDecl],
-) -> Result<LoweredFunctionBundle, FrontendError> {
+) -> Result<LoweredFunctionBundle, CompilePipelineError> {
     ensure_function_is_ir_concrete(func, arena)?;
     let parent_fn_name = resolve_symbol_name(arena, func.name)?.to_string();
     let ensures_result_symbol = find_contract_result_symbol(&func.ensures, arena)?;
@@ -920,11 +917,10 @@ fn lower_function_to_ir_with_tables(
     let signature_params = canonical_params
         .iter()
         .map(|(_, ty)| callable_family_for_type(ty))
-        .collect::<Result<Vec<_>, FrontendError>>()?;
+        .collect::<Result<Vec<_>, CompilePipelineError>>()?;
     let canonical_ret = canonicalize_declared_type(&func.ret, record_table, adt_table, arena)?;
     let mut env = ScopeEnv::with_params(&canonical_params);
-    ctx.next_reg = u16::try_from(func.params.len()).map_err(|_| FrontendError {
-        pos: 0,
+    ctx.next_reg = u16::try_from(func.params.len()).map_err(|_| IrError {
         message: "too many function parameters for register space".to_string(),
     })?;
     for (idx, (name, _)) in func.params.iter().enumerate() {
@@ -952,13 +948,13 @@ fn lower_function_to_ir_with_tables(
             &mut ctx.lowered_locals,
         )?;
         if cond_ty != Type::Bool {
-            return Err(FrontendError {
+            return Err(CompilePipelineError::Frontend(FrontendError {
                 pos: 0,
                 message: format!(
                     "requires clause condition must be bool in lowering, got {:?}",
                     cond_ty
                 ),
-            });
+            }));
         }
         ctx.instrs.push(IrInstr::Assert { cond: cond_reg });
     }
@@ -1032,15 +1028,30 @@ fn lower_function_to_ir_with_tables(
             )?;
             ctx.instrs.push(IrInstr::Ret { src: None });
         } else {
-            return Err(FrontendError {
+            return Err(CompilePipelineError::Frontend(FrontendError {
                 pos: 0,
                 message: format!(
                     "function '{}' may exit without returning {:?}",
                     resolve_symbol_name(arena, func.name)?,
                     func.ret
                 ),
-            });
+            }));
         }
+    }
+
+    let mut lifted = Vec::with_capacity(ctx.closure_state.lifted_funcs.len());
+    for pending in ctx.closure_state.lifted_funcs {
+        let params = pending
+            .param_types
+            .iter()
+            .map(callable_family_for_type)
+            .collect::<Result<Vec<_>, CompilePipelineError>>()?;
+        lifted.push(IrFunction {
+            name: pending.name,
+            instrs: pending.instrs,
+            ownership_events: pending.ownership_events,
+            params,
+        });
     }
 
     Ok(LoweredFunctionBundle {
@@ -1050,7 +1061,7 @@ fn lower_function_to_ir_with_tables(
             ownership_events: ctx.ownership_events,
             params: signature_params,
         },
-        lifted: ctx.closure_state.lifted_funcs,
+        lifted,
     })
 }
 
@@ -1116,22 +1127,21 @@ pub fn lower_function_to_ir(
     func: &Function,
     arena: &AstArena,
     fn_table: &FnTable,
-) -> Result<IrFunction, FrontendError> {
+) -> Result<IrFunction, CompilePipelineError> {
     type_check_function_with_table(func, arena, fn_table)?;
     let empty_records = RecordTable::new();
     let empty_adts = AdtTable::new();
     let lowered =
         lower_function_to_ir_with_tables(func, arena, fn_table, &empty_records, &empty_adts, &[])?;
     if !lowered.lifted.is_empty() {
-        return Err(FrontendError {
-            pos: 0,
+        return Err(CompilePipelineError::InternalIr(IrError {
             message: "lower_function_to_ir does not emit lifted closure helpers; use compile_program_to_ir for first-class closures".to_string(),
-        });
+        }));
     }
     Ok(lowered.primary)
 }
 
-pub fn compile_program_to_ir(input: &str) -> Result<Vec<IrFunction>, FrontendError> {
+pub fn compile_program_to_ir(input: &str) -> Result<Vec<IrFunction>, CompilePipelineError> {
     let profile = ParserProfile::foundation_default();
     compile_program_to_ir_with_options_and_profile(
         input,
@@ -1145,7 +1155,7 @@ pub fn compile_program_to_immutable_ir(
     input: &str,
     profile: CompileProfile,
     opt: OptLevel,
-) -> Result<ImmutableIrProgram, FrontendError> {
+) -> Result<ImmutableIrProgram, CompilePipelineError> {
     let parser_profile = ParserProfile::foundation_default();
     Ok(ImmutableIrProgram::from_vec(
         compile_program_to_ir_with_options_and_profile(input, profile, opt, &parser_profile)?,
@@ -1156,7 +1166,7 @@ pub fn compile_program_to_ir_with_options(
     input: &str,
     profile: CompileProfile,
     opt: OptLevel,
-) -> Result<Vec<IrFunction>, FrontendError> {
+) -> Result<Vec<IrFunction>, CompilePipelineError> {
     let parser_profile = ParserProfile::foundation_default();
     compile_program_to_ir_with_options_and_profile(input, profile, opt, &parser_profile)
 }
@@ -1164,7 +1174,7 @@ pub fn compile_program_to_ir_with_options(
 pub fn compile_program_to_ir_with_profile(
     input: &str,
     parser_profile: &ParserProfile,
-) -> Result<Vec<IrFunction>, FrontendError> {
+) -> Result<Vec<IrFunction>, CompilePipelineError> {
     compile_program_to_ir_with_options_and_profile(
         input,
         CompileProfile::RustLike,
@@ -1317,7 +1327,7 @@ fn no_surface_claim_error() -> FrontendError {
 fn lower_rustlike_program_to_ir(
     mut program: Program,
     opt: OptLevel,
-) -> Result<Vec<IrFunction>, FrontendError> {
+) -> Result<Vec<IrFunction>, CompilePipelineError> {
     let fn_table = build_fn_table(&program)?;
     let record_table = build_record_table(&program)?;
     let adt_table = build_adt_table(&program)?;
@@ -1354,12 +1364,16 @@ fn lower_rustlike_program_to_ir(
         }
     }
     if matches!(opt, OptLevel::O1) {
-        crate::passes::run_default_opt_passes(&mut out).map_err(|e| FrontendError {
-            pos: 0,
-            message: e.0,
-        })?;
+        run_pipeline_opt_passes(&mut out)?;
     }
     Ok(out)
+}
+
+/// O1 step of the lowering pipeline. Optimizer failures are internal compiler
+/// defects, never source diagnostics.
+fn run_pipeline_opt_passes(out: &mut Vec<IrFunction>) -> Result<(), CompilePipelineError> {
+    crate::passes::run_default_opt_passes(out).map_err(|e| IrError { message: e.0 })?;
+    Ok(())
 }
 
 pub fn compile_program_to_ir_with_options_and_profile(
@@ -1367,23 +1381,21 @@ pub fn compile_program_to_ir_with_options_and_profile(
     profile: CompileProfile,
     opt: OptLevel,
     parser_profile: &ParserProfile,
-) -> Result<Vec<IrFunction>, FrontendError> {
+) -> Result<Vec<IrFunction>, CompilePipelineError> {
     match profile {
         CompileProfile::RustLike if !cfg!(feature = "profile-rust") => {
-            return Err(FrontendError {
-                pos: 0,
+            return Err(CompilePipelineError::Configuration(ConfigurationError {
                 message:
                     "RustLike profile is disabled at compile time (enable feature 'profile-rust')"
                         .to_string(),
-            });
+            }));
         }
         CompileProfile::Logos if !cfg!(feature = "profile-logos") => {
-            return Err(FrontendError {
-                pos: 0,
+            return Err(CompilePipelineError::Configuration(ConfigurationError {
                 message:
                     "Logos profile is disabled at compile time (enable feature 'profile-logos')"
                         .to_string(),
-            });
+            }));
         }
         _ => {}
     }
@@ -1404,10 +1416,9 @@ pub fn compile_program_to_ir_with_options_and_profile(
         // explicit Logos always redirects, unconditionally, regardless of
         // input (unchanged, existing behavior; the profile-logos-disabled
         // case already returned above).
-        CompileProfile::Logos => Err(FrontendError {
-            pos: 0,
+        CompileProfile::Logos => Err(CompilePipelineError::Configuration(ConfigurationError {
             message: "Logos input lowers to LogosIrLaw stream; SemCode function IR requires RustLike frontend".to_string(),
-        }),
+        })),
         CompileProfile::Auto => {
             let tokens = lex(input)?;
             let logos = admit_logos_program_with_profile_probe(input, &tokens, parser_profile);
@@ -1419,16 +1430,14 @@ pub fn compile_program_to_ir_with_options_and_profile(
                 // redirect (or feature-disabled message) remains correct.
                 SurfaceAuthority::LogosOwns(Ok(_)) => {
                     if cfg!(feature = "profile-logos") {
-                        Err(FrontendError {
-                            pos: 0,
+                        Err(CompilePipelineError::Configuration(ConfigurationError {
                             message: "Logos input lowers to LogosIrLaw stream; SemCode function IR requires RustLike frontend".to_string(),
-                        })
+                        }))
                     } else {
-                        Err(FrontendError {
-                            pos: 0,
+                        Err(CompilePipelineError::Configuration(ConfigurationError {
                             message: "Logos input detected, but Logos profile is disabled at compile time"
                                 .to_string(),
-                        })
+                        }))
                     }
                 }
                 // Blocker 2 fix: the authoritative Logos failure survives
@@ -1437,13 +1446,12 @@ pub fn compile_program_to_ir_with_options_and_profile(
                 // never subject to the profile-logos feature check (there is
                 // no "detected but disabled" ambiguity when a real,
                 // already-authoritative FrontendError already exists).
-                SurfaceAuthority::LogosOwns(Err(e)) => Err(e),
+                SurfaceAuthority::LogosOwns(Err(e)) => Err(CompilePipelineError::Frontend(e)),
                 SurfaceAuthority::RustLikeOwns(Ok(program)) => {
                     if !cfg!(feature = "profile-rust") {
-                        return Err(FrontendError {
-                            pos: 0,
+                        return Err(CompilePipelineError::Configuration(ConfigurationError {
                             message: "RustLike lowering is disabled at compile time".to_string(),
-                        });
+                        }));
                     }
                     // Decision F's `Program` is already authoritative -
                     // lower it directly, never re-parse it.
@@ -1451,24 +1459,26 @@ pub fn compile_program_to_ir_with_options_and_profile(
                 }
                 // Symmetric to LogosOwns(Err): authoritative, unconditional,
                 // never routed through Logos.
-                SurfaceAuthority::RustLikeOwns(Err(e)) => Err(e),
+                SurfaceAuthority::RustLikeOwns(Err(e)) => Err(CompilePipelineError::Frontend(e)),
                 // Blocker 1 fix: a genuine tie is a terminal classification
                 // error - never resolved by fallback, evaluation order, or
                 // either side's own Ok/Err alone. Both underlying outcomes
                 // are preserved in the rendered message.
                 SurfaceAuthority::Ambiguous { logos, rustlike } => {
-                    Err(ambiguous_surface_error(&logos, &rustlike))
+                    Err(CompilePipelineError::Frontend(ambiguous_surface_error(&logos, &rustlike)))
                 }
                 // Decision F, settled: terminal once both grammars (the
                 // only two candidates this system has) are already
                 // evaluated - never an invitation to retry either parser.
-                SurfaceAuthority::NoSurfaceClaim => Err(no_surface_claim_error()),
+                SurfaceAuthority::NoSurfaceClaim => Err(CompilePipelineError::Frontend(no_surface_claim_error())),
             }
         }
     }
 }
 
-pub fn compile_program_to_ir_optimized(input: &str) -> Result<Vec<IrFunction>, FrontendError> {
+pub fn compile_program_to_ir_optimized(
+    input: &str,
+) -> Result<Vec<IrFunction>, CompilePipelineError> {
     let profile = ParserProfile::foundation_default();
     compile_program_to_ir_with_options_and_profile(
         input,
@@ -1478,15 +1488,14 @@ pub fn compile_program_to_ir_optimized(input: &str) -> Result<Vec<IrFunction>, F
     )
 }
 
-pub fn validate_ir(f: &IrFunction) -> Result<(), FrontendError> {
+pub fn validate_ir(f: &IrFunction) -> Result<(), IrError> {
     let mut labels: HashMap<String, usize> = HashMap::new();
     let mut has_ret = false;
 
     for (idx, instr) in f.instrs.iter().enumerate() {
         if let IrInstr::Label { name } = instr {
             if labels.insert(name.clone(), idx).is_some() {
-                return Err(FrontendError {
-                    pos: idx,
+                return Err(IrError {
                     message: format!("duplicate label '{}' in '{}'", name, f.name),
                 });
             }
@@ -1497,19 +1506,17 @@ pub fn validate_ir(f: &IrFunction) -> Result<(), FrontendError> {
     }
 
     if !has_ret {
-        return Err(FrontendError {
-            pos: 0,
+        return Err(IrError {
             message: format!("function '{}' has no RET", f.name),
         });
     }
 
-    for (idx, instr) in f.instrs.iter().enumerate() {
+    for instr in &f.instrs {
         match instr {
             IrInstr::Jmp { label } | IrInstr::JmpIf { label, .. }
                 if !labels.contains_key(label) =>
             {
-                return Err(FrontendError {
-                    pos: idx,
+                return Err(IrError {
                     message: format!("jump to unknown label '{}' in '{}'", label, f.name),
                 });
             }
@@ -1519,7 +1526,7 @@ pub fn validate_ir(f: &IrFunction) -> Result<(), FrontendError> {
     Ok(())
 }
 
-pub fn compile_program_to_semcode(input: &str) -> Result<Vec<u8>, FrontendError> {
+pub fn compile_program_to_semcode(input: &str) -> Result<Vec<u8>, CompilePipelineError> {
     compile_program_to_semcode_with_options(input, CompileProfile::RustLike, OptLevel::O0)
 }
 
@@ -1527,7 +1534,7 @@ pub fn compile_program_to_semcode_with_options(
     input: &str,
     profile: CompileProfile,
     opt: OptLevel,
-) -> Result<Vec<u8>, FrontendError> {
+) -> Result<Vec<u8>, CompilePipelineError> {
     compile_program_to_semcode_with_options_debug(input, profile, opt, false)
 }
 
@@ -1536,29 +1543,25 @@ pub fn compile_program_to_semcode_with_options_debug(
     profile: CompileProfile,
     opt: OptLevel,
     debug_symbols: bool,
-) -> Result<Vec<u8>, FrontendError> {
+) -> Result<Vec<u8>, CompilePipelineError> {
     if debug_symbols && !cfg!(feature = "debug-symbols") {
-        return Err(FrontendError {
-            pos: 0,
+        return Err(CompilePipelineError::Configuration(ConfigurationError {
             message: "debug symbols are disabled at compile time (enable feature 'debug-symbols')"
                 .to_string(),
-        });
+        }));
     }
     let ir = compile_program_to_immutable_ir(input, profile, opt)?;
     for f in ir.functions() {
         validate_ir(f)?;
     }
-    emit_semcode(ir.functions(), debug_symbols)
+    Ok(emit_semcode(ir.functions(), debug_symbols)?)
 }
 
-pub fn emit_ir_to_semcode(
-    funcs: &[IrFunction],
-    debug_symbols: bool,
-) -> Result<Vec<u8>, FrontendError> {
+pub fn emit_ir_to_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, IrError> {
     emit_semcode(funcs, debug_symbols)
 }
 
-fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, FrontendError> {
+fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, IrError> {
     // #1718: fail closed at the single producer boundary every public
     // emission entrypoint converges on (`compile_program_to_semcode_*` and
     // `emit_ir_to_semcode` both call this function) - before any header is
@@ -1570,9 +1573,8 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // at all. No silent drop, no downgrade to a parent/Tuple/Field path, no
     // "emit it and let the verifier catch it" - refuse emission outright.
     if has_adt_write_ownership_event(funcs) {
-        return Err(FrontendError {
-            pos: 0,
-            message: "internal error: a Write ownership event carries an AdtPayload path \
+        return Err(IrError {
+            message: "a Write ownership event carries an AdtPayload path \
                       component, which is not an admitted SemCode ownership path under the \
                       current Stable Foundation contour (#1718) - emission refused"
                 .to_string(),
@@ -1687,8 +1689,7 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
         let name_bytes = f.name.as_bytes();
         write_u16_le(
             &mut out,
-            u16::try_from(name_bytes.len()).map_err(|_| FrontendError {
-                pos: 0,
+            u16::try_from(name_bytes.len()).map_err(|_| IrError {
                 message: "function name too long".to_string(),
             })?,
         );
@@ -1703,18 +1704,16 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
         max_opcode_revision_used = max_opcode_revision_used.max(func_max_revision);
         write_u32_le(
             &mut out,
-            u32::try_from(code.len()).map_err(|_| FrontendError {
-                pos: 0,
+            u32::try_from(code.len()).map_err(|_| IrError {
                 message: "function code too large".to_string(),
             })?,
         );
         out.extend_from_slice(&code);
     }
     if max_opcode_revision_used > chosen_header.rev {
-        return Err(FrontendError {
-            pos: 0,
+        return Err(IrError {
             message: format!(
-                "internal error: emitted opcode requires minimum SemCode revision {}, \
+                "emitted opcode requires minimum SemCode revision {}, \
                  but header selection chose revision {} ('{}') - a header-selection \
                  predicate is missing for an opcode with a non-baseline \
                  Opcode::minimum_semcode_revision()",
@@ -1730,24 +1729,20 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
 /// #1732 (FA-05-002) review follow-up: reads back the opcode byte
 /// `emit_instr` just wrote at `opcode_byte_pos` and returns its
 /// `Opcode::minimum_semcode_revision()`. Fails closed - returns
-/// `Err(FrontendError)` - rather than silently skipping, if the byte is
+/// `Err(IrError)` - rather than silently skipping, if the byte is
 /// missing or unrecognized. Under the current `emit_instr`, every non-Label
 /// `IrInstr` variant always writes a real `Opcode::X.byte()` as its first
 /// byte, so both error paths are unreachable through the public API today;
 /// they exist so a future `emit_instr` change that broke that invariant
 /// hard-fails immediately instead of letting the mechanical revision guard
 /// silently under-report the required header revision.
-fn opcode_minimum_revision_at(code: &[u8], opcode_byte_pos: usize) -> Result<u16, FrontendError> {
-    let raw_opcode = *code.get(opcode_byte_pos).ok_or_else(|| FrontendError {
-        pos: 0,
-        message: "internal error: emit_instr produced no opcode byte for a non-Label instruction"
-            .to_string(),
+fn opcode_minimum_revision_at(code: &[u8], opcode_byte_pos: usize) -> Result<u16, IrError> {
+    let raw_opcode = *code.get(opcode_byte_pos).ok_or_else(|| IrError {
+        message: "emit_instr produced no opcode byte for a non-Label instruction".to_string(),
     })?;
-    let opcode = Opcode::from_byte(raw_opcode).map_err(|_| FrontendError {
-        pos: 0,
+    let opcode = Opcode::from_byte(raw_opcode).map_err(|_| IrError {
         message: format!(
-            "internal error: emit_instr wrote an unrecognized opcode byte 0x{raw_opcode:02x} \
-             that Opcode::from_byte cannot decode"
+            "emit_instr wrote an unrecognized opcode byte 0x{raw_opcode:02x} that Opcode::from_byte cannot decode"
         ),
     })?;
     Ok(opcode.minimum_semcode_revision())
@@ -1765,22 +1760,16 @@ fn emit_semcode_function(
         Vec<BorrowActivationResolved>,
         Vec<WriteExecutionResolved>,
     ),
-    FrontendError,
+    IrError,
 > {
     // #1726 Checkpoint D1: this is the one and only place activation sites are
     // resolved, so it must not admit an already-incoherent function. Checkpoint
     // C's optimizer passes already validate this after every rewrite; this is
     // the corresponding check on lowering's own direct output for O0 (which
     // runs no optimizer pass at all, so nothing else validates it before now).
-    crate::passes::validate_activation_sites(f).map_err(|e| FrontendError {
-        pos: 0,
-        message: e.0,
-    })?;
+    crate::passes::validate_activation_sites(f).map_err(|e| IrError { message: e.0 })?;
     // #1891 Checkpoint W2A: same reasoning, for the `WriteSiteId` pairing.
-    crate::passes::validate_write_sites(f).map_err(|e| FrontendError {
-        pos: 0,
-        message: e.0,
-    })?;
+    crate::passes::validate_write_sites(f).map_err(|e| IrError { message: e.0 })?;
     let mut interner = StringInterner::new();
     for instr in &f.instrs {
         match instr {
@@ -1858,12 +1847,10 @@ fn emit_semcode_function(
             }
             _ => {
                 pc = pc
-                    .checked_add(encoded_size(instr).ok_or(FrontendError {
-                        pos: 0,
+                    .checked_add(encoded_size(instr).ok_or_else(|| IrError {
                         message: "label has no encoded size".to_string(),
                     })? as u32)
-                    .ok_or(FrontendError {
-                        pos: 0,
+                    .ok_or_else(|| IrError {
                         message: "bytecode size overflow".to_string(),
                     })?;
             }
@@ -1901,8 +1888,7 @@ fn emit_semcode_function(
         if matches!(instr, IrInstr::Label { .. }) {
             continue;
         }
-        let pc = u32::try_from(instr_stream.len()).map_err(|_| FrontendError {
-            pos: 0,
+        let pc = u32::try_from(instr_stream.len()).map_err(|_| IrError {
             message: "instruction stream too large".to_string(),
         })?;
         let opcode_byte_pos = instr_stream.len();
@@ -1915,8 +1901,7 @@ fn emit_semcode_function(
                 .insert(*site, ExecutableAnchor(pc))
                 .is_some()
             {
-                return Err(FrontendError {
-                    pos: 0,
+                return Err(IrError {
                     message: format!(
                         "function `{}`: ActivationSiteId({}) annotated on more than one surviving StoreVar",
                         f.name, site.0
@@ -1943,8 +1928,7 @@ fn emit_semcode_function(
         };
         if let Some((site, resolved)) = write_resolution {
             if write_anchors.insert(site, resolved).is_some() {
-                return Err(FrontendError {
-                    pos: 0,
+                return Err(IrError {
                     message: format!(
                         "function `{}`: WriteSiteId({}) annotated on more than one surviving write-capable instruction",
                         f.name, site.0
@@ -1956,8 +1940,7 @@ fn emit_semcode_function(
         let instr_min_revision = opcode_minimum_revision_at(&instr_stream, opcode_byte_pos)?;
         max_opcode_revision = max_opcode_revision.max(instr_min_revision);
         if debug_symbols {
-            let line = u32::try_from(dbg.len() + 1).map_err(|_| FrontendError {
-                pos: 0,
+            let line = u32::try_from(dbg.len() + 1).map_err(|_| IrError {
                 message: "debug table too large".to_string(),
             })?;
             dbg.push((pc, line, 1));
@@ -1979,8 +1962,7 @@ fn emit_semcode_function(
             None => BorrowActivationResolved::FrameEntry,
             Some(site) => {
                 let anchor = activation_anchors.get(&site).copied().ok_or_else(|| {
-                    FrontendError {
-                        pos: 0,
+                    IrError {
                         message: format!(
                             "function `{}`: Borrow event references ActivationSiteId({}) with no surviving executable anchor",
                             f.name, site.0
@@ -2009,15 +1991,13 @@ fn emit_semcode_function(
         if event.kind != OwnershipPathEventKind::Write {
             continue;
         }
-        let site = event.write_site.ok_or_else(|| FrontendError {
-            pos: 0,
+        let site = event.write_site.ok_or_else(|| IrError {
             message: format!(
                 "function `{}`: Write event has no WriteSiteId at emission time",
                 f.name
             ),
         })?;
-        let resolved = write_anchors.get(&site).copied().ok_or_else(|| FrontendError {
-            pos: 0,
+        let resolved = write_anchors.get(&site).copied().ok_or_else(|| IrError {
             message: format!(
                 "function `{}`: Write event references WriteSiteId({}) with no surviving executable anchor",
                 f.name, site.0
@@ -2032,8 +2012,7 @@ fn emit_semcode_function(
         code.extend_from_slice(b"DBG0");
         write_u16_le(
             &mut code,
-            u16::try_from(dbg.len()).map_err(|_| FrontendError {
-                pos: 0,
+            u16::try_from(dbg.len()).map_err(|_| IrError {
                 message: "too many debug symbols".to_string(),
             })?,
         );
@@ -2066,8 +2045,7 @@ fn emit_semcode_function(
         // bytes `decode_semcode_envelope` unconditionally rejects,
         // discovered only downstream at every verified execution route.
         if f.params.len() > MAX_SIGNATURE_PARAMETERS_PER_FUNCTION {
-            return Err(FrontendError {
-                pos: 0,
+            return Err(IrError {
                 message: format!(
                     "too many callable-signature parameters: {} (max {})",
                     f.params.len(),
@@ -2078,8 +2056,7 @@ fn emit_semcode_function(
         code.extend_from_slice(&SIGNATURE_SECTION_TAG);
         write_u16_le(
             &mut code,
-            u16::try_from(f.params.len()).map_err(|_| FrontendError {
-                pos: 0,
+            u16::try_from(f.params.len()).map_err(|_| IrError {
                 message: "too many callable-signature parameters".to_string(),
             })?,
         );
@@ -2180,7 +2157,7 @@ fn emit_instr(
     label_pc: &HashMap<String, u32>,
     interner: &StringInterner,
     out: &mut Vec<u8>,
-) -> Result<(), FrontendError> {
+) -> Result<(), IrError> {
     match instr {
         IrInstr::Label { .. } => {}
         IrInstr::LoadQ { dst, val } => {
@@ -2232,8 +2209,7 @@ fn emit_instr(
         IrInstr::MakeSequence { dst, items } => {
             out.push(Opcode::MakeSequence.byte());
             write_u16_le(out, *dst);
-            let count = u16::try_from(items.len()).map_err(|_| FrontendError {
-                pos: 0,
+            let count = u16::try_from(items.len()).map_err(|_| IrError {
                 message: "sequence literal has too many items".to_string(),
             })?;
             write_u16_le(out, count);
@@ -2249,8 +2225,7 @@ fn emit_instr(
             out.push(Opcode::MakeClosure.byte());
             write_u16_le(out, *dst);
             write_u16_le(out, interner.lookup(name)?);
-            let count = u16::try_from(captures.len()).map_err(|_| FrontendError {
-                pos: 0,
+            let count = u16::try_from(captures.len()).map_err(|_| IrError {
                 message: "closure literal captures exceed v0 limit".to_string(),
             })?;
             write_u16_le(out, count);
@@ -2355,8 +2330,7 @@ fn emit_instr(
         IrInstr::MakeTuple { dst, items } => {
             out.push(Opcode::MakeTuple.byte());
             write_u16_le(out, *dst);
-            let count = u16::try_from(items.len()).map_err(|_| FrontendError {
-                pos: 0,
+            let count = u16::try_from(items.len()).map_err(|_| IrError {
                 message: "tuple literal has too many elements".to_string(),
             })?;
             write_u16_le(out, count);
@@ -2373,8 +2347,7 @@ fn emit_instr(
             out.push(Opcode::MakeRecord.byte());
             write_u16_le(out, *dst);
             write_u16_le(out, interner.lookup(name)?);
-            let count = u16::try_from(items.len()).map_err(|_| FrontendError {
-                pos: 0,
+            let count = u16::try_from(items.len()).map_err(|_| IrError {
                 message: "record literal has too many fields".to_string(),
             })?;
             write_u16_le(out, count);
@@ -2394,8 +2367,7 @@ fn emit_instr(
             write_u16_le(out, interner.lookup(adt_name)?);
             write_u16_le(out, interner.lookup(variant_name)?);
             write_u16_le(out, *tag);
-            let count = u16::try_from(items.len()).map_err(|_| FrontendError {
-                pos: 0,
+            let count = u16::try_from(items.len()).map_err(|_| IrError {
                 message: "enum constructor has too many payload items".to_string(),
             })?;
             write_u16_le(out, count);
@@ -2481,8 +2453,7 @@ fn emit_instr(
         IrInstr::DivFx { dst, lhs, rhs } => emit_3reg(Opcode::DivFx, *dst, *lhs, *rhs, out),
         IrInstr::Jmp { label } => {
             out.push(Opcode::Jmp.byte());
-            let addr = *label_pc.get(label).ok_or(FrontendError {
-                pos: 0,
+            let addr = *label_pc.get(label).ok_or_else(|| IrError {
                 message: format!("unknown label '{}'", label),
             })?;
             write_u32_le(out, addr);
@@ -2490,8 +2461,7 @@ fn emit_instr(
         IrInstr::JmpIf { cond, label } => {
             out.push(Opcode::JmpIf.byte());
             write_u16_le(out, *cond);
-            let addr = *label_pc.get(label).ok_or(FrontendError {
-                pos: 0,
+            let addr = *label_pc.get(label).ok_or_else(|| IrError {
                 message: format!("unknown label '{}'", label),
             })?;
             write_u32_le(out, addr);
@@ -2515,8 +2485,7 @@ fn emit_instr(
             write_u16_le(out, interner.lookup(name)?);
             write_u16_le(
                 out,
-                u16::try_from(args.len()).map_err(|_| FrontendError {
-                    pos: 0,
+                u16::try_from(args.len()).map_err(|_| IrError {
                     message: "too many call args".to_string(),
                 })?,
             );
@@ -2889,7 +2858,7 @@ fn emit_ownership_events(
     resolved_borrow_activations: &[BorrowActivationResolved],
     resolved_write_execution: &[WriteExecutionResolved],
     out: &mut Vec<u8>,
-) -> Result<(), FrontendError> {
+) -> Result<(), IrError> {
     if ownership_events.is_empty() {
         if require_section {
             // Header claims CAP_OWNERSHIP_PATHS; emit an empty OWN0 section so
@@ -2903,8 +2872,7 @@ fn emit_ownership_events(
     out.extend_from_slice(&OWNERSHIP_SECTION_TAG);
     write_u16_le(
         out,
-        u16::try_from(ownership_events.len()).map_err(|_| FrontendError {
-            pos: 0,
+        u16::try_from(ownership_events.len()).map_err(|_| IrError {
             message: "too many ownership path events".to_string(),
         })?,
     );
@@ -2928,11 +2896,8 @@ fn emit_ownership_events(
         if chosen_header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
             match event.kind {
                 OwnershipPathEventKind::Borrow => {
-                    let resolved = resolved_borrow_iter.next().ok_or_else(|| FrontendError {
-                        pos: 0,
-                        message:
-                            "internal error: fewer resolved Borrow activations than Borrow events"
-                                .to_string(),
+                    let resolved = resolved_borrow_iter.next().ok_or_else(|| IrError {
+                        message: "fewer resolved Borrow activations than Borrow events".to_string(),
                     })?;
                     match resolved {
                         BorrowActivationResolved::FrameEntry => {
@@ -2945,11 +2910,8 @@ fn emit_ownership_events(
                     }
                 }
                 OwnershipPathEventKind::Write => {
-                    let resolved = resolved_write_iter.next().ok_or_else(|| FrontendError {
-                        pos: 0,
-                        message:
-                            "internal error: fewer resolved Write executions than Write events"
-                                .to_string(),
+                    let resolved = resolved_write_iter.next().ok_or_else(|| IrError {
+                        message: "fewer resolved Write executions than Write events".to_string(),
                     })?;
                     match resolved {
                         WriteExecutionResolved::StoreVarSite(anchor) => {
@@ -2976,8 +2938,7 @@ fn emit_ownership_events(
         write_u32_le(out, u32::from(interner.lookup(&event.path.root)?));
         write_u16_le(
             out,
-            u16::try_from(event.path.components.len()).map_err(|_| FrontendError {
-                pos: 0,
+            u16::try_from(event.path.components.len()).map_err(|_| IrError {
                 message: "ownership path is too deep".to_string(),
             })?,
         );
@@ -3048,12 +3009,11 @@ impl StringInterner {
         Self::default()
     }
 
-    fn id(&mut self, s: &str) -> Result<u16, FrontendError> {
+    fn id(&mut self, s: &str) -> Result<u16, IrError> {
         if let Some(id) = self.ids.get(s) {
             return Ok(*id);
         }
-        let id = u16::try_from(self.by_id.len()).map_err(|_| FrontendError {
-            pos: 0,
+        let id = u16::try_from(self.by_id.len()).map_err(|_| IrError {
             message: "string table overflow".to_string(),
         })?;
         self.ids.insert(s.to_string(), id);
@@ -3061,18 +3021,16 @@ impl StringInterner {
         Ok(id)
     }
 
-    fn lookup(&self, s: &str) -> Result<u16, FrontendError> {
-        self.ids.get(s).copied().ok_or(FrontendError {
-            pos: 0,
+    fn lookup(&self, s: &str) -> Result<u16, IrError> {
+        self.ids.get(s).copied().ok_or_else(|| IrError {
             message: format!("string '{}' not interned", s),
         })
     }
 
-    fn emit_table(&self, out: &mut Vec<u8>) -> Result<(), FrontendError> {
+    fn emit_table(&self, out: &mut Vec<u8>) -> Result<(), IrError> {
         write_u16_le(
             out,
-            u16::try_from(self.by_id.len()).map_err(|_| FrontendError {
-                pos: 0,
+            u16::try_from(self.by_id.len()).map_err(|_| IrError {
                 message: "string table too large".to_string(),
             })?,
         );
@@ -3080,8 +3038,7 @@ impl StringInterner {
             let b = s.as_bytes();
             write_u16_le(
                 out,
-                u16::try_from(b.len()).map_err(|_| FrontendError {
-                    pos: 0,
+                u16::try_from(b.len()).map_err(|_| IrError {
                     message: "string too long".to_string(),
                 })?,
             );
@@ -3162,7 +3119,7 @@ fn lower_closure_literal_expr(
     // `expected_closure.param` this function already uses to bind those
     // registers below, so the signature can never drift from the actual
     // register layout.
-    let mut lifted_signature_params = Vec::with_capacity(closure.captures.len() + 1);
+    let mut lifted_signature_param_types = Vec::with_capacity(closure.captures.len() + 1);
 
     for (index, capture) in closure.captures.iter().enumerate() {
         let capture_ty = env.get(*capture).ok_or(FrontendError {
@@ -3172,7 +3129,7 @@ fn lower_closure_literal_expr(
                 resolve_symbol_name(arena, *capture)?
             ),
         })?;
-        lifted_signature_params.push(callable_family_for_type(&capture_ty)?);
+        lifted_signature_param_types.push(capture_ty.clone());
         if env.is_const(*capture)? {
             lifted_env.insert_const(*capture, capture_ty.clone());
         } else {
@@ -3193,7 +3150,7 @@ fn lower_closure_literal_expr(
         pos: 0,
         message: "closure parameter index exceeds v0 limit".to_string(),
     })?;
-    lifted_signature_params.push(callable_family_for_type(expected_closure.param.as_ref())?);
+    lifted_signature_param_types.push(expected_closure.param.as_ref().clone());
     lifted_env.insert(closure.param, expected_closure.param.as_ref().clone());
     lifted_instrs.push(IrInstr::StoreVar {
         name: lifted_lowered_locals.bind(arena, closure.param)?,
@@ -3243,11 +3200,11 @@ fn lower_closure_literal_expr(
     lifted_instrs.push(IrInstr::Ret {
         src: Some(body_reg),
     });
-    closure_state.lifted_funcs.push(IrFunction {
+    closure_state.lifted_funcs.push(PendingLiftedFunc {
         name: helper_name.clone(),
         instrs: lifted_instrs,
         ownership_events: lifted_ownership_events,
-        params: lifted_signature_params,
+        param_types: lifted_signature_param_types,
     });
 
     let mut capture_regs = Vec::with_capacity(closure.captures.len());
@@ -11392,10 +11349,18 @@ impl LoweredLocalEnv {
 }
 
 #[derive(Debug, Default)]
+struct PendingLiftedFunc {
+    name: String,
+    instrs: Vec<IrInstr>,
+    ownership_events: Vec<OwnershipPathEvent>,
+    param_types: Vec<Type>,
+}
+
+#[derive(Debug, Default)]
 struct ClosureLoweringState {
     parent_fn_name: String,
     next_closure_id: u32,
-    lifted_funcs: Vec<IrFunction>,
+    lifted_funcs: Vec<PendingLiftedFunc>,
 }
 
 #[derive(Debug, Default)]
@@ -11899,6 +11864,33 @@ mod opt_tests {
     use sm_front::parse_program;
 
     #[test]
+    fn optimizer_failure_surfaces_as_internal_ir() {
+        // A Write event with no WriteSiteId fails the cleanup pass's entry
+        // validation, driving the real O1 pipeline step into its error path.
+        let mut funcs = vec![IrFunction {
+            name: "main".to_string(),
+            instrs: vec![IrInstr::Ret { src: None }],
+            ownership_events: vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                path: AccessPath::new("x".to_string()),
+                activation_site: None,
+                write_site: None,
+            }],
+            params: vec![],
+        }];
+        match run_pipeline_opt_passes(&mut funcs) {
+            Err(CompilePipelineError::InternalIr(e)) => {
+                assert!(
+                    e.message.contains("Write event has no WriteSiteId"),
+                    "{}",
+                    e.message
+                )
+            }
+            other => panic!("expected CompilePipelineError::InternalIr, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn storage_admission_sequence_and_map_aggregate_storage_lowers() {
         // FA-02-038 / #1861 corrective round: Sequence/Map have no prior
         // normative record-field statement (unlike Tuple/Measured/Option/
@@ -12021,10 +12013,16 @@ mod opt_tests {
     // is gated. See ensure_function_is_ir_concrete's doc comment for the
     // full architecture rationale.
 
-    fn expect_ir_generic_rejection(result: Result<Vec<IrFunction>, FrontendError>, fn_name: &str) {
-        let err = result.expect_err(&format!(
+    fn expect_ir_generic_rejection(
+        result: Result<Vec<IrFunction>, CompilePipelineError>,
+        fn_name: &str,
+    ) {
+        let err = match result.expect_err(&format!(
             "a generic function ('{fn_name}') must be rejected at IR compilation"
-        ));
+        )) {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(
             err.message.contains(fn_name)
                 && err
@@ -12190,8 +12188,12 @@ mod opt_tests {
         let program = parse_program(src).expect("parse");
         let fn_table = sm_front::build_fn_table(&program).expect("fn table");
         let func = &program.functions[0];
-        let err = lower_function_to_ir(func, &program.arena, &fn_table)
-            .expect_err("direct lower_function_to_ir must also reject a generic function");
+        let err = match lower_function_to_ir(func, &program.arena, &fn_table)
+            .expect_err("direct lower_function_to_ir must also reject a generic function")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(
             err.message.contains("id")
                 && err
@@ -12220,8 +12222,12 @@ mod opt_tests {
                 return;
             }
         "#;
-        let err = compile_program_to_semcode(src)
-            .expect_err("SemCode compilation of a generic function must reject deterministically");
+        let err = match compile_program_to_semcode(src)
+            .expect_err("SemCode compilation of a generic function must reject deterministically")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(
             err.message.contains("id")
                 && err
@@ -13075,11 +13081,17 @@ mod opt_tests {
             ),
         ];
         for (shape, src) in cases {
-            let err =
-                compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
-                    .expect_err(&format!(
-                    "{shape}: dynamic-index ref capture is expected to be rejected pre-lowering"
-                ));
+            let err = match compile_program_to_ir_with_options(
+                src,
+                CompileProfile::RustLike,
+                OptLevel::O0,
+            )
+            .expect_err(&format!(
+                "{shape}: dynamic-index ref capture is expected to be rejected pre-lowering"
+            )) {
+                CompilePipelineError::Frontend(err) => err,
+                other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+            };
             assert!(
                 err.message.contains("not an admitted static path"),
                 "{shape}: unexpected rejection reason: {}",
@@ -13128,7 +13140,10 @@ mod opt_tests {
             }
         "#;
 
-        let err = compile_program_to_ir(src).expect_err("control statements must reject");
+        let err = match compile_program_to_ir(src).expect_err("control statements must reject") {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(err.message.contains(
             "value-producing block currently supports only const-bindings, let-bindings, discard binds, and expression statements before the tail value"
         ));
@@ -13168,7 +13183,11 @@ mod opt_tests {
             }
         "#;
 
-        let err = compile_program_to_ir(src).expect_err("mismatched branch types must reject");
+        let err = match compile_program_to_ir(src).expect_err("mismatched branch types must reject")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(err.message.contains("if expression branch type mismatch"));
     }
 
@@ -13496,7 +13515,11 @@ mod opt_tests {
             }
         "#;
 
-        let err = compile_program_to_ir(src).expect_err("builtin named arguments must reject");
+        let err = match compile_program_to_ir(src).expect_err("builtin named arguments must reject")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(err
             .message
             .contains("named arguments are not supported for builtin 'sqrt'"));
@@ -13580,8 +13603,12 @@ mod opt_tests {
             }
         "#;
 
-        let err =
-            compile_program_to_ir(src).expect_err("non-const-safe default parameter must reject");
+        let err = match compile_program_to_ir(src)
+            .expect_err("non-const-safe default parameter must reject")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(err.message.contains("default parameter 'factor'"));
     }
 
@@ -13665,7 +13692,10 @@ mod opt_tests {
             }
         "#;
 
-        let err = compile_program_to_ir(src).expect_err("assignment to const must reject");
+        let err = match compile_program_to_ir(src).expect_err("assignment to const must reject") {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(err
             .message
             .contains("cannot assign to const binding 'total'"));
@@ -13687,8 +13717,12 @@ mod opt_tests {
             }
         "#;
 
-        let err =
-            compile_program_to_ir(src).expect_err("tuple assignment to const target must reject");
+        let err = match compile_program_to_ir(src)
+            .expect_err("tuple assignment to const target must reject")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(err
             .message
             .contains("cannot assign to const binding 'count'"));
@@ -13996,8 +14030,12 @@ mod opt_tests {
         // reach SemCode emission.
         let src = "fn f(x: qvec) -> i32 { return 0; } fn main() { return; }";
 
-        let ir_err = compile_program_to_ir(src)
-            .expect_err("qvec callable parameter must be rejected, not silently lowered");
+        let ir_err = match compile_program_to_ir(src)
+            .expect_err("qvec callable parameter must be rejected, not silently lowered")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(
             ir_err.message.contains("qvec"),
             "rejection must name the offending type, got: {}",
@@ -14009,8 +14047,12 @@ mod opt_tests {
             ir_err.message
         );
 
-        let semcode_err = compile_program_to_semcode(src)
-            .expect_err("no SemCode bytes may be emitted for a qvec callable parameter");
+        let semcode_err = match compile_program_to_semcode(src)
+            .expect_err("no SemCode bytes may be emitted for a qvec callable parameter")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(semcode_err.message.contains("qvec"));
     }
 
@@ -14926,8 +14968,12 @@ mod opt_tests {
             }
         "#;
 
-        let err =
-            compile_program_to_ir(src).expect_err("wrong executable Iterable contract must reject");
+        let err = match compile_program_to_ir(src)
+            .expect_err("wrong executable Iterable contract must reject")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(err
             .message
             .contains("fn next(self: Self, index: i32) -> Option(Item)"));
@@ -16676,8 +16722,12 @@ mod opt_tests {
             }
         "#;
 
-        let err = compile_program_to_ir(src)
-            .expect_err("mismatched match expression branches must reject");
+        let err = match compile_program_to_ir(src)
+            .expect_err("mismatched match expression branches must reject")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(err
             .message
             .contains("match expression branch type mismatch"));
@@ -17833,13 +17883,17 @@ mod opt_tests {
     #[test]
     fn r3_explicit_rustlike_malformed_error_stays_authoritative() {
         let src = "fn main() {\n    return;\n"; // missing closing brace
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::RustLike,
             OptLevel::O0,
             &foundation_profile(),
         )
-        .expect_err("malformed RustLike source must fail");
+        .expect_err("malformed RustLike source must fail")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(
             !err.message.contains("Logos"),
             "the RustLike error must not be replaced by any Logos-flavored diagnostic, got: {}",
@@ -17911,13 +17965,20 @@ mod opt_tests {
     #[test]
     fn b_explicit_logos_always_redirects_to_logos_ir_law_stream() {
         let src = "fn main() {\n    return;\n}\n";
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Logos,
             OptLevel::O0,
             &foundation_profile(),
         )
-        .expect_err("explicit Logos never lowers to SemCode function IR");
+        .expect_err("explicit Logos never lowers to SemCode function IR")
+        {
+            CompilePipelineError::Configuration(err) => err,
+            other => panic!(
+                "expected CompilePipelineError::Configuration, got {:?}",
+                other
+            ),
+        };
         assert_eq!(
             err.message,
             "Logos input lowers to LogosIrLaw stream; SemCode function IR requires RustLike frontend"
@@ -17958,13 +18019,20 @@ mod opt_tests {
     fn a2_auto_logos_ownership_never_proceeds_through_rustlike_ir() {
         reset_authority_probes();
         let src = "\nEntity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When true -> System.recovery()\n";
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Auto,
             OptLevel::O0,
             &foundation_profile(),
         )
-        .expect_err("a genuine Logos program must not lower through this RustLike-only IR path");
+        .expect_err("a genuine Logos program must not lower through this RustLike-only IR path")
+        {
+            CompilePipelineError::Configuration(err) => err,
+            other => panic!(
+                "expected CompilePipelineError::Configuration, got {:?}",
+                other
+            ),
+        };
         assert_eq!(
             err.message,
             expected_logos_owned_message(),
@@ -18020,13 +18088,17 @@ mod opt_tests {
         );
 
         reset_authority_probes();
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Auto,
             OptLevel::O0,
             &profile,
         )
-        .expect_err("positive Logos evidence + parse failure must stay Logos-owned");
+        .expect_err("positive Logos evidence + parse failure must stay Logos-owned")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         // Blocker 2: the complete FrontendError (pos and message) must
         // survive exactly - not the generic redirect, not a substring
         // match, not a RustLike-shaped error.
@@ -18057,13 +18129,17 @@ mod opt_tests {
             other => panic!("control check: fixture must produce Exclusive(Err), got: {other:?}"),
         };
 
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Auto,
             OptLevel::O0,
             &profile,
         )
-        .expect_err("must still fail");
+        .expect_err("must still fail")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert_eq!(
             err, original_error,
             "must be the exact originating error - not the generic redirect, and not any \
@@ -18157,13 +18233,17 @@ mod opt_tests {
             .expect_err("control check: RustLike's own parse of this text must also fail");
 
         reset_authority_probes();
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Auto,
             OptLevel::O0,
             &profile,
         )
-        .expect_err("a genuine Exclusive/Exclusive conflict must fail");
+        .expect_err("a genuine Exclusive/Exclusive conflict must fail")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(
             err.message.contains("AMBIGUOUS"),
             "must be a terminal ambiguity classification error, got: {}",
@@ -18208,13 +18288,17 @@ mod opt_tests {
         );
 
         reset_authority_probes();
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Auto,
             OptLevel::O0,
             &profile,
         )
-        .expect_err("a Shared/Shared tie must surface ambiguity, not silently pick a side");
+        .expect_err("a Shared/Shared tie must surface ambiguity, not silently pick a side")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(
             err.message.contains("AMBIGUOUS"),
             "expected a terminal ambiguity classification error, got: {}",
@@ -18252,13 +18336,17 @@ mod opt_tests {
         );
 
         reset_authority_probes();
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Auto,
             OptLevel::O0,
             &profile,
         )
-        .expect_err("blank/comment-only input has no surface claim");
+        .expect_err("blank/comment-only input has no surface claim")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert!(
             err.message.contains("NO SURFACE CLAIM"),
             "must be the terminal sm-ir-owned no-surface-claim diagnostic, not a RustLike-shaped \
@@ -18303,13 +18391,17 @@ mod opt_tests {
         };
 
         reset_authority_probes();
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Auto,
             OptLevel::O0,
             &profile,
         )
-        .expect_err("malformed RustLike-exclusive source must fail");
+        .expect_err("malformed RustLike-exclusive source must fail")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert_eq!(
             err, original_error,
             "the authoritative originating RustLike FrontendError must survive exactly - never \
@@ -18330,13 +18422,20 @@ mod opt_tests {
     #[test]
     fn feature_gate_auto_positive_logos_evidence_without_profile_logos_feature() {
         let src = "\nEntity A:\n    state x: quad\n";
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::Auto,
             OptLevel::O0,
             &foundation_profile(),
         )
-        .expect_err("Logos-owned input must still fail when profile-logos is disabled");
+        .expect_err("Logos-owned input must still fail when profile-logos is disabled")
+        {
+            CompilePipelineError::Configuration(err) => err,
+            other => panic!(
+                "expected CompilePipelineError::Configuration, got {:?}",
+                other
+            ),
+        };
         assert_eq!(
             err.message,
             "Logos input detected, but Logos profile is disabled at compile time",
@@ -18349,13 +18448,20 @@ mod opt_tests {
     #[test]
     fn feature_gate_rustlike_lowering_disabled_still_correctly_gated() {
         let src = "fn main() {\n    return;\n}\n";
-        let err = compile_program_to_ir_with_options_and_profile(
+        let err = match compile_program_to_ir_with_options_and_profile(
             src,
             CompileProfile::RustLike,
             OptLevel::O0,
             &foundation_profile(),
         )
-        .expect_err("RustLike lowering must be gated off");
+        .expect_err("RustLike lowering must be gated off")
+        {
+            CompilePipelineError::Configuration(err) => err,
+            other => panic!(
+                "expected CompilePipelineError::Configuration, got {:?}",
+                other
+            ),
+        };
         assert_eq!(
             err.message,
             "RustLike profile is disabled at compile time (enable feature 'profile-rust')"

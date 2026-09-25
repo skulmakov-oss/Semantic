@@ -38,6 +38,16 @@ task:
     dependency changes; any existing crate Cargo.toml modification; adapter
     implementation; renderer implementation; external JSON/LSP schema work;
     or subsequent phases C1A/C1B/C2/C3A/C3B/C4/C5/C6.
+    Repository owner explicit governance authorization (2026-09-24) to widen
+    the governance envelope to allow exactly `src/bin/smc.rs` in `allowed_paths`
+    for the downstream mechanical adaptation required by the SSF-09 C1A P0B
+    CompilePipelineError migration (SevenHell compile error handling in root smc binary).
+    Repository owner explicit governance authorization (2026-09-25) to allow
+    exactly `src/lib.rs` in `allowed_paths`, solely to restore public facade
+    coherence: `semantic::frontend` re-exports the existing P0A transport types
+    (`CompilePipelineError`, `IrError`, `ConfigurationError`) alongside the
+    functions that return them. No new facade-owned error type; no other
+    `src/**` path is authorized.
 
 intent:
   summary: >-
@@ -96,12 +106,15 @@ scope:
     - crates/sm-verify/**
     - crates/sm-vm/**
     - crates/smc-cli/**
+    - src/bin/smc.rs
+    - src/lib.rs
 
   forbidden_paths:
     - .github/**
     - apps/**
     - experiments/**
-    - src/**
+    - src/bin/svm.rs
+    - src/bin/ton618_core.rs
     - third_party/**
     - ton618_legacy/**
 

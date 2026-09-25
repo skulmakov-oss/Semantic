@@ -1,4 +1,5 @@
 use sm_emit::compile_program_to_semcode;
+use sm_ir::CompilePipelineError;
 use sm_runtime_core::RuntimeTrap;
 use sm_vm::{run_verified_semcode, RuntimeError};
 
@@ -24,8 +25,12 @@ fn assert_false_reaches_deterministic_assertion_trap() {
 
 #[test]
 fn assert_with_zero_arguments_is_rejected() {
-    let error =
-        compile_program_to_semcode(&program("assert();")).expect_err("assert() must reject");
+    let error = match compile_program_to_semcode(&program("assert();"))
+        .expect_err("assert() must reject")
+    {
+        CompilePipelineError::Frontend(err) => err,
+        other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+    };
     assert!(
         error.message.contains("assert builtin expects 1 arg"),
         "unexpected error: {}",
@@ -35,8 +40,12 @@ fn assert_with_zero_arguments_is_rejected() {
 
 #[test]
 fn assert_with_two_positional_arguments_is_rejected() {
-    let error = compile_program_to_semcode(&program("assert(true, false);"))
-        .expect_err("assert(true, false) must reject");
+    let error = match compile_program_to_semcode(&program("assert(true, false);"))
+        .expect_err("assert(true, false) must reject")
+    {
+        CompilePipelineError::Frontend(err) => err,
+        other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+    };
     assert!(
         error.message.contains("assert builtin expects 1 arg"),
         "unexpected error: {}",
@@ -50,8 +59,12 @@ fn assert_with_a_named_argument_is_rejected() {
     // sm-front's parse_call_args), not `name: value`. `assert(condition = true)` must
     // be rejected exactly like any other malformed assert call, not silently accepted
     // because it still happens to carry exactly one argument value.
-    let error = compile_program_to_semcode(&program("assert(condition = true);"))
-        .expect_err("assert(condition = true) must reject");
+    let error = match compile_program_to_semcode(&program("assert(condition = true);"))
+        .expect_err("assert(condition = true) must reject")
+    {
+        CompilePipelineError::Frontend(err) => err,
+        other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+    };
     assert!(
         error
             .message
@@ -63,8 +76,12 @@ fn assert_with_a_named_argument_is_rejected() {
 
 #[test]
 fn assert_with_a_non_bool_argument_is_rejected() {
-    let error =
-        compile_program_to_semcode(&program("assert(1);")).expect_err("assert(1) must reject");
+    let error = match compile_program_to_semcode(&program("assert(1);"))
+        .expect_err("assert(1) must reject")
+    {
+        CompilePipelineError::Frontend(err) => err,
+        other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+    };
     assert!(
         error
             .message

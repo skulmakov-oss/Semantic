@@ -2,7 +2,7 @@ use crate::hello_ir::{
     HelloIrCompleteQuad, HelloIrLocalQuad, HelloIrModule, HelloIrObserveText, HelloIrQuadLit,
     HelloIrRequireQuadEq, HelloIrStmt,
 };
-use crate::FrontendError;
+use crate::IrError;
 use std::string::String;
 use std::vec::Vec;
 
@@ -13,14 +13,12 @@ pub struct HelloConceptualSemCode {
 
 pub fn emit_hello_conceptual_semcode(
     module: &HelloIrModule,
-) -> Result<HelloConceptualSemCode, FrontendError> {
+) -> Result<HelloConceptualSemCode, IrError> {
     let lines = render_hello_conceptual_semcode(module)?;
     Ok(HelloConceptualSemCode { lines })
 }
 
-pub fn render_hello_conceptual_semcode(
-    module: &HelloIrModule,
-) -> Result<Vec<String>, FrontendError> {
+pub fn render_hello_conceptual_semcode(module: &HelloIrModule) -> Result<Vec<String>, IrError> {
     let mut lines = Vec::with_capacity(module.entry.body.len());
 
     for stmt in &module.entry.body {
@@ -49,10 +47,9 @@ pub fn render_hello_conceptual_semcode(
     }
 
     if lines.is_empty() {
-        return Err(FrontendError::syntax(
-            0,
-            "Hello conceptual SemCode requires at least one statement",
-        ));
+        return Err(IrError {
+            message: "Hello conceptual SemCode requires at least one statement".to_string(),
+        });
     }
 
     Ok(lines)

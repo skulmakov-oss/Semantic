@@ -1,6 +1,7 @@
 use prom_abi::{AbiError, AbiFailureKind, ApplicationHostAbi, HostCallId};
 use prom_cap::{ApplicationCapabilityProfile, CapabilityKind, CapabilityManifest};
 use sm_emit::compile_program_to_semcode;
+use sm_ir::CompilePipelineError;
 use sm_runtime_core::{ExecutionConfig, ExecutionContext};
 use sm_vm::{run_verified_semcode_with_application_host_and_capabilities_and_config, RuntimeError};
 use std::path::PathBuf;
@@ -88,8 +89,12 @@ fn main() {
 "#,
         ),
     ] {
-        let error = compile_program_to_semcode(source)
-            .expect_err("application builtin name must reject before lowering");
+        let error = match compile_program_to_semcode(source)
+            .expect_err("application builtin name must reject before lowering")
+        {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        };
         assert_eq!(
             error.message,
             format!("function name '{name}' is reserved for the application boundary")
