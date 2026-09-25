@@ -48,9 +48,10 @@ impl SevenHellDiagnosticKind {
         self.as_human()
     }
 
-    /// `IrError` and `ConfigurationError` carry no diagnostic code by
-    /// contract (sm-ir error.rs), so their report entries must not have one.
-    fn has_diagnostic_code(self) -> bool {
+    /// Diagnostic kinds carry a code and a severity. `IrError` and
+    /// `ConfigurationError` carry neither by contract (sm-ir error.rs), so
+    /// their report entries must have both absent.
+    fn is_diagnostic(self) -> bool {
         !matches!(
             self,
             Self::InternalCompilerError | Self::ConfigurationRejection
@@ -128,10 +129,12 @@ struct SevenHellDiagnostic {
     id: String,
     stage: &'static str,
     kind: SevenHellDiagnosticKind,
-    code: String,
+    /// `None` only for non-diagnostic kinds (see `is_diagnostic`).
+    code: Option<String>,
     category: &'static str,
     message_needle: String,
-    severity: &'static str,
+    /// `None` only for non-diagnostic kinds (see `is_diagnostic`).
+    severity: Option<&'static str>,
     source: SevenHellDiagnosticSource,
 }
 
@@ -962,12 +965,10 @@ fn failure_stage_summary(diagnostic: &SevenHellDiagnostic) -> String {
     )
 }
 
+/// Presentation only: human output marks an absent code as `none`; the
+/// underlying record keeps `None`.
 fn diagnostic_code_display(diagnostic: &SevenHellDiagnostic) -> &str {
-    if diagnostic.kind.has_diagnostic_code() {
-        &diagnostic.code
-    } else {
-        "none"
-    }
+    diagnostic.code.as_deref().unwrap_or("none")
 }
 
 fn apply_diagnostics_hell_report_quality(mut report: SevenHellReport) -> SevenHellReport {
@@ -1080,16 +1081,26 @@ fn evaluate_7hell_report_quality(report: &SevenHellReport) -> DiagnosticsHellFin
         if diagnostic.stage.trim().is_empty() {
             failures.push(format!("diagnostic {} stage is empty", diagnostic.id));
         }
-        if diagnostic.kind.has_diagnostic_code() {
-            if diagnostic.code.trim().is_empty() {
-                failures.push(format!("diagnostic {} code is empty", diagnostic.id));
+        let fields = [
+            ("code", diagnostic.code.as_deref()),
+            ("severity", diagnostic.severity),
+        ];
+        for (field, value) in fields {
+            match (diagnostic.kind.is_diagnostic(), value) {
+                (true, None) => {
+                    failures.push(format!("diagnostic {} {} is absent", diagnostic.id, field))
+                }
+                (true, Some(v)) if v.trim().is_empty() => {
+                    failures.push(format!("diagnostic {} {} is empty", diagnostic.id, field))
+                }
+                (false, Some(_)) => failures.push(format!(
+                    "diagnostic {} is {} and must not carry a {}",
+                    diagnostic.id,
+                    diagnostic.kind.as_human(),
+                    field
+                )),
+                _ => {}
             }
-        } else if !diagnostic.code.is_empty() {
-            failures.push(format!(
-                "diagnostic {} is {} and must not carry a diagnostic code",
-                diagnostic.id,
-                diagnostic.kind.as_human()
-            ));
         }
         if diagnostic.category.trim().is_empty() {
             failures.push(format!("diagnostic {} category is empty", diagnostic.id));
@@ -1099,9 +1110,6 @@ fn evaluate_7hell_report_quality(report: &SevenHellReport) -> DiagnosticsHellFin
                 "diagnostic {} message needle is empty",
                 diagnostic.id
             ));
-        }
-        if diagnostic.severity.trim().is_empty() {
-            failures.push(format!("diagnostic {} severity is empty", diagnostic.id));
         }
         if diagnostic.source.file.trim().is_empty() {
             failures.push(format!("diagnostic {} source file is empty", diagnostic.id));
@@ -1327,20 +1335,19 @@ fn render_json_diagnostics(diagnostics: &[SevenHellDiagnostic]) -> String {
             Some(column) => column.to_string(),
             None => "null".to_string(),
         };
-        let code = if diagnostic.kind.has_diagnostic_code() {
-            format!("\"{}\"", json_escape(&diagnostic.code))
-        } else {
-            "null".to_string()
+        let json_opt = |value: Option<&str>| match value {
+            Some(v) => format!("\"{}\"", json_escape(v)),
+            None => "null".to_string(),
         };
         out.push_str(&format!(
-            "    {{\n      \"id\": \"{}\",\n      \"stage\": \"{}\",\n      \"kind\": \"{}\",\n      \"code\": {},\n      \"category\": \"{}\",\n      \"message_needle\": \"{}\",\n      \"severity\": \"{}\",\n      \"source\": {{\n        \"file\": \"{}\",\n        \"line\": {},\n        \"column\": {}\n      }}\n    }}",
+            "    {{\n      \"id\": \"{}\",\n      \"stage\": \"{}\",\n      \"kind\": \"{}\",\n      \"code\": {},\n      \"category\": \"{}\",\n      \"message_needle\": \"{}\",\n      \"severity\": {},\n      \"source\": {{\n        \"file\": \"{}\",\n        \"line\": {},\n        \"column\": {}\n      }}\n    }}",
             json_escape(&diagnostic.id),
             json_escape(diagnostic.stage),
             diagnostic.kind.as_json(),
-            code,
+            json_opt(diagnostic.code.as_deref()),
             json_escape(diagnostic.category),
             json_escape(&diagnostic.message_needle),
-            json_escape(diagnostic.severity),
+            json_opt(diagnostic.severity),
             json_escape(&diagnostic.source.file),
             line,
             column
@@ -1376,10 +1383,10 @@ fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenH
         id: "D001".to_string(),
         stage,
         kind,
-        code,
+        code: Some(code),
         category,
         message_needle,
-        severity: "error",
+        severity: Some("error"),
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
             line,
@@ -1392,24 +1399,27 @@ fn diagnostic_from_compile_error(
     error: &CompilePipelineError,
     target_display: &str,
 ) -> SevenHellDiagnostic {
-    // Only frontend failures are source diagnostics; internal and configuration
-    // failures keep their origin and get no diagnostic code.
-    let (kind, code, category, message) = match error {
+    // Only frontend failures are source diagnostics. Internal and configuration
+    // failures keep their origin and carry neither code nor severity.
+    let (kind, code, severity, category, message) = match error {
         CompilePipelineError::Frontend(fe) => (
             SevenHellDiagnosticKind::LoweringDiagnostic,
-            "E0300",
+            Some("E0300".to_string()),
+            Some("error"),
             "lowering",
             fe.message.clone(),
         ),
         CompilePipelineError::InternalIr(ie) => (
             SevenHellDiagnosticKind::InternalCompilerError,
-            "",
+            None,
+            None,
             "internal",
             ie.message.clone(),
         ),
         CompilePipelineError::Configuration(ce) => (
             SevenHellDiagnosticKind::ConfigurationRejection,
-            "",
+            None,
+            None,
             "configuration",
             ce.message.clone(),
         ),
@@ -1418,10 +1428,10 @@ fn diagnostic_from_compile_error(
         id: "D001".to_string(),
         stage: "lowering",
         kind,
-        code: code.to_string(),
+        code,
         category,
         message_needle: message,
-        severity: "error",
+        severity,
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
             line: None,
@@ -1442,10 +1452,10 @@ fn diagnostic_from_verifier_error(
         id: "D001".to_string(),
         stage: "verifier",
         kind: SevenHellDiagnosticKind::VerifierRejection,
-        code: format!("{:?}", diagnostic.code),
+        code: Some(format!("{:?}", diagnostic.code)),
         category: "verifier",
         message_needle: diagnostic.message.clone(),
-        severity: "error",
+        severity: Some("error"),
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
             line: None,
@@ -1460,10 +1470,10 @@ fn diagnostic_from_vm_error(error: &VmRuntimeError, target_display: &str) -> Sev
             id: "D001".to_string(),
             stage: "vm",
             kind: SevenHellDiagnosticKind::VmTrap,
-            code: format!("{:?}", trap),
+            code: Some(format!("{:?}", trap)),
             category: "vm",
             message_needle: vm_trap_message_needle(*trap),
-            severity: "error",
+            severity: Some("error"),
             source: SevenHellDiagnosticSource {
                 file: target_display.to_string(),
                 line: None,
@@ -1474,10 +1484,10 @@ fn diagnostic_from_vm_error(error: &VmRuntimeError, target_display: &str) -> Sev
             id: "D001".to_string(),
             stage: "vm",
             kind: SevenHellDiagnosticKind::VmError,
-            code: vm_error_code(other),
+            code: Some(vm_error_code(other)),
             category: "vm",
             message_needle: other.to_string(),
-            severity: "error",
+            severity: Some("error"),
             source: SevenHellDiagnosticSource {
                 file: target_display.to_string(),
                 line: None,
@@ -1493,11 +1503,11 @@ fn diagnostic_from_practical_error(error_text: &str, target_display: &str) -> Se
         id: "D001".to_string(),
         stage: "practical",
         kind: SevenHellDiagnosticKind::PracticalDiagnostic,
-        code: "PracticalQualificationFailed".to_string(),
+        code: Some("PracticalQualificationFailed".to_string()),
         category: "practical",
         message_needle: extract_error_message(first_line)
             .unwrap_or_else(|| first_line.trim().to_string()),
-        severity: "error",
+        severity: Some("error"),
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
             line: None,
@@ -1544,10 +1554,10 @@ fn boundary_denial_diagnostic(target_display: &str) -> SevenHellDiagnostic {
         id: "D001".to_string(),
         stage: "syntax",
         kind: SevenHellDiagnosticKind::BoundaryDenial,
-        code: "E0239".to_string(),
+        code: Some("E0239".to_string()),
         category: "boundary",
         message_needle: "input file could not be read".to_string(),
-        severity: "error",
+        severity: Some("error"),
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
             line: None,
@@ -1651,7 +1661,13 @@ mod tests {
         });
         let diagnostic = diagnostic_from_compile_error(&error, "program.sm");
         assert_eq!(diagnostic.kind, SevenHellDiagnosticKind::LoweringDiagnostic);
-        assert_eq!(diagnostic.code, "E0300");
+        assert_eq!(diagnostic.code.as_deref(), Some("E0300"));
+        assert_eq!(diagnostic.severity, Some("error"));
+
+        let report = build_lowering_failed_7hell_report("program.sm".to_string(), diagnostic);
+        let json = render_7hell_report(&report, SevenHellOutputMode::Json);
+        assert!(json.contains("\"code\": \"E0300\""), "{json}");
+        assert!(json.contains("\"severity\": \"error\""), "{json}");
     }
 
     #[test]
@@ -1675,9 +1691,10 @@ mod tests {
         for (error, kind, json_kind) in cases {
             let diagnostic = diagnostic_from_compile_error(&error, "program.sm");
             assert_eq!(diagnostic.kind, kind);
-            assert!(
-                diagnostic.code.is_empty(),
-                "no fabricated code for {kind:?}"
+            assert_eq!(diagnostic.code, None, "no fabricated code for {kind:?}");
+            assert_eq!(
+                diagnostic.severity, None,
+                "no fabricated severity for {kind:?}"
             );
 
             let report = apply_diagnostics_hell_report_quality(build_lowering_failed_7hell_report(
@@ -1693,25 +1710,66 @@ mod tests {
             let json = render_7hell_report(&report, SevenHellOutputMode::Json);
             assert!(json.contains(json_kind), "{json}");
             assert!(json.contains("\"code\": null"), "{json}");
+            assert!(json.contains("\"severity\": null"), "{json}");
             assert!(!json.contains("E0300"), "{json}");
+            assert!(!json.contains("\"severity\": \"error\""), "{json}");
         }
     }
 
-    #[test]
-    fn evaluator_fails_code_on_codeless_kind() {
+    fn internal_report_with(
+        code: Option<String>,
+        severity: Option<&'static str>,
+    ) -> DiagnosticsHellFinding {
         let error = CompilePipelineError::InternalIr(sm_ir::IrError {
             message: "emission invariant".to_string(),
         });
         let mut diagnostic = diagnostic_from_compile_error(&error, "program.sm");
-        diagnostic.code = "E0300".to_string();
+        diagnostic.code = code;
+        diagnostic.severity = severity;
         let report = build_lowering_failed_7hell_report("program.sm".to_string(), diagnostic);
+        evaluate_7hell_report_quality(&report)
+    }
 
-        let finding = evaluate_7hell_report_quality(&report);
-
+    #[test]
+    fn evaluator_rejects_fabricated_code_on_non_diagnostic_kind() {
+        let finding = internal_report_with(Some("E0300".to_string()), None);
         assert!(matches!(finding.status, DiagnosticsHellStatus::Fail));
-        assert!(finding
-            .summary
-            .contains("is internal-compiler-error and must not carry a diagnostic code"));
+        assert!(
+            finding
+                .summary
+                .contains("is internal-compiler-error and must not carry a code"),
+            "{}",
+            finding.summary
+        );
+    }
+
+    #[test]
+    fn evaluator_rejects_fabricated_severity_on_non_diagnostic_kind() {
+        let finding = internal_report_with(None, Some("error"));
+        assert!(matches!(finding.status, DiagnosticsHellStatus::Fail));
+        assert!(
+            finding
+                .summary
+                .contains("is internal-compiler-error and must not carry a severity"),
+            "{}",
+            finding.summary
+        );
+    }
+
+    #[test]
+    fn evaluator_rejects_absent_code_or_severity_on_diagnostic_kind() {
+        for (code, severity, expected) in [
+            (None, Some("error"), "D001 code is absent"),
+            (Some("E0000".to_string()), None, "D001 severity is absent"),
+        ] {
+            let mut diagnostic = syntax_diagnostic();
+            diagnostic.code = code;
+            diagnostic.severity = severity;
+            let report = build_check_failed_7hell_report("program.sm".to_string(), diagnostic);
+            let finding = evaluate_7hell_report_quality(&report);
+            assert!(matches!(finding.status, DiagnosticsHellStatus::Fail));
+            assert!(finding.summary.contains(expected), "{}", finding.summary);
+        }
     }
 
     #[test]
@@ -1733,6 +1791,12 @@ mod tests {
             output.rendered
         );
         assert!(!output.rendered.contains("E0300"), "{}", output.rendered);
+        assert!(
+            output.rendered.contains("\"code\": null")
+                && output.rendered.contains("\"severity\": null"),
+            "{}",
+            output.rendered
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -132,7 +132,8 @@ pub mod semantics {
 pub mod frontend {
     pub use sm_emit::{
         compile_program_to_semcode, compile_program_to_semcode_with_options,
-        compile_program_to_semcode_with_options_debug, emit_ir_to_semcode,
+        compile_program_to_semcode_with_options_debug, emit_ir_to_semcode, CompilePipelineError,
+        ConfigurationError, IrError,
     };
     pub use sm_front::{
         build_fn_table, builtin_sig, derive_validation_plan_table, lex, parse_logos_program,
@@ -197,7 +198,8 @@ pub mod frontend {
             compile_program_to_ir_optimized, compile_program_to_ir_with_options,
             compile_program_to_ir_with_options_and_profile, compile_program_to_ir_with_profile,
             lower_expr_to_ir, lower_function_to_ir, lower_logos_laws_to_ir, validate_ir,
-            ImmutableIrProgram, IrFunction, IrInstr, LogosIrLaw,
+            CompilePipelineError, ConfigurationError, ImmutableIrProgram, IrError, IrFunction,
+            IrInstr, LogosIrLaw,
         };
     }
 
@@ -205,6 +207,7 @@ pub mod frontend {
         pub use super::{
             compile_program_to_semcode, compile_program_to_semcode_with_options,
             compile_program_to_semcode_with_options_debug, emit_ir_to_semcode,
+            CompilePipelineError, ConfigurationError, IrError,
         };
     }
 

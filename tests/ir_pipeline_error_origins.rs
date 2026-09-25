@@ -22,6 +22,30 @@ fn compile_contract_signatures() {
     let _: fn(&HelloIrModule) -> Result<Vec<String>, IrError> = render_hello_conceptual_semcode;
 }
 
+// Facade coherence: every facade that re-exports a migrated function also
+// names the error type it returns, so consumers need no direct sm_ir import.
+#[test]
+fn facades_name_the_error_types_their_functions_return() {
+    use semantic_language::frontend;
+
+    let _: fn(&str) -> Result<Vec<u8>, sm_emit::CompilePipelineError> =
+        sm_emit::compile_program_to_semcode;
+    let _: fn(&[IrFunction], bool) -> Result<Vec<u8>, sm_emit::IrError> =
+        sm_emit::emit_ir_to_semcode;
+    let _: fn(&str) -> Result<Vec<u8>, frontend::CompilePipelineError> =
+        frontend::compile_program_to_semcode;
+    let _: fn(&str) -> Result<Vec<IrFunction>, frontend::ir::CompilePipelineError> =
+        frontend::ir::compile_program_to_ir;
+    let _: fn(&IrFunction) -> Result<(), frontend::ir::IrError> = frontend::ir::validate_ir;
+    let _: fn(&[IrFunction], bool) -> Result<Vec<u8>, frontend::emit::IrError> =
+        frontend::emit::emit_ir_to_semcode;
+    let _ = |e: frontend::CompilePipelineError| match e {
+        frontend::CompilePipelineError::Frontend(_) => (),
+        frontend::CompilePipelineError::InternalIr(frontend::IrError { .. }) => (),
+        frontend::CompilePipelineError::Configuration(frontend::ConfigurationError { .. }) => (),
+    };
+}
+
 #[test]
 fn test_a_genuine_frontend_survives_mixed_pipeline() {
     let src = "fn main() {\n    let x: i32 = true;\n    return;\n}\n";
