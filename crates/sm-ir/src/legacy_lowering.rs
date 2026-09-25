@@ -1364,9 +1364,16 @@ fn lower_rustlike_program_to_ir(
         }
     }
     if matches!(opt, OptLevel::O1) {
-        crate::passes::run_default_opt_passes(&mut out).map_err(|e| IrError { message: e.0 })?;
+        run_pipeline_opt_passes(&mut out)?;
     }
     Ok(out)
+}
+
+/// O1 step of the lowering pipeline. Optimizer failures are internal compiler
+/// defects, never source diagnostics.
+fn run_pipeline_opt_passes(out: &mut Vec<IrFunction>) -> Result<(), CompilePipelineError> {
+    crate::passes::run_default_opt_passes(out).map_err(|e| IrError { message: e.0 })?;
+    Ok(())
 }
 
 pub fn compile_program_to_ir_with_options_and_profile(
@@ -11855,6 +11862,33 @@ mod opt_tests {
     use crate::passes::run_default_opt_passes;
     use sm_format::semcode_decode::{decode_semcode_envelope, DecodedAccessPathComponent};
     use sm_front::parse_program;
+
+    #[test]
+    fn optimizer_failure_surfaces_as_internal_ir() {
+        // A Write event with no WriteSiteId fails the cleanup pass's entry
+        // validation, driving the real O1 pipeline step into its error path.
+        let mut funcs = vec![IrFunction {
+            name: "main".to_string(),
+            instrs: vec![IrInstr::Ret { src: None }],
+            ownership_events: vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                path: AccessPath::new("x".to_string()),
+                activation_site: None,
+                write_site: None,
+            }],
+            params: vec![],
+        }];
+        match run_pipeline_opt_passes(&mut funcs) {
+            Err(CompilePipelineError::InternalIr(e)) => {
+                assert!(
+                    e.message.contains("Write event has no WriteSiteId"),
+                    "{}",
+                    e.message
+                )
+            }
+            other => panic!("expected CompilePipelineError::InternalIr, got {:?}", other),
+        }
+    }
 
     #[test]
     fn storage_admission_sequence_and_map_aggregate_storage_lowers() {
