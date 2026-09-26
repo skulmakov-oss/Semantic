@@ -1332,6 +1332,24 @@ fn lower_rustlike_program_to_ir(
     let record_table = build_record_table(&program)?;
     let adt_table = build_adt_table(&program)?;
     type_check_program(&program)?;
+    // P1A0-R1F: generic admission is a program-level fact. Check every
+    // function this program would lower, in the same order as the loops
+    // below, before lowering any body, so a caller's incidental TypeVar
+    // re-check can never pre-empt E0280. The per-function guard inside
+    // lower_function_to_ir_with_tables stays as the fail-closed backstop.
+    for f in &program.functions {
+        ensure_function_is_ir_concrete(f, &program.arena)?;
+    }
+    for imp in &program.impls.clone() {
+        for method in &imp.methods {
+            if !method.type_params.is_empty() {
+                let mut named = method.clone();
+                let lowered_name = impl_method_function_name(&program.arena, imp, method)?;
+                named.name = program.arena.intern_symbol(&lowered_name);
+                ensure_function_is_ir_concrete(&named, &program.arena)?;
+            }
+        }
+    }
     let mut out = Vec::new();
     for f in &program.functions {
         let lowered = lower_function_to_ir_with_tables(
@@ -12118,6 +12136,199 @@ mod opt_tests {
             }
         "#;
         expect_ir_generic_rejection(compile_program_to_ir(never_called), "id");
+    }
+
+    // P1A0-R1F: the generic-admission rejection (E0280) is a program-level fact
+    // and must not depend on declaration order. Before the program-wide
+    // preflight, a caller declared before its generic callee was body-lowered
+    // first and failed with an incidental TypeVar re-check instead.
+    const R1F_CALLER_FIRST: &str = r#"
+        fn main() {
+            let y: i32 = id(1);
+            let _ = y;
+            return;
+        }
+        fn id<T>(x: T) -> T {
+            return x;
+        }
+    "#;
+    const R1F_GENERIC_FIRST: &str = r#"
+        fn id<T>(x: T) -> T {
+            return x;
+        }
+        fn main() {
+            let y: i32 = id(1);
+            let _ = y;
+            return;
+        }
+    "#;
+
+    fn r1f_frontend_error(result: Result<Vec<IrFunction>, CompilePipelineError>) -> FrontendError {
+        match result.expect_err("a program containing a generic function must be rejected") {
+            CompilePipelineError::Frontend(err) => err,
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn r1f_a_generic_declared_after_caller_is_rejected_by_generic_admission() {
+        expect_ir_generic_rejection(compile_program_to_ir(R1F_CALLER_FIRST), "id");
+    }
+
+    #[test]
+    fn r1f_b_generic_declared_before_caller_is_rejected_by_generic_admission() {
+        expect_ir_generic_rejection(compile_program_to_ir(R1F_GENERIC_FIRST), "id");
+    }
+
+    #[test]
+    fn r1f_c_declaration_order_does_not_change_the_diagnostic() {
+        let a = r1f_frontend_error(compile_program_to_ir(R1F_CALLER_FIRST));
+        let b = r1f_frontend_error(compile_program_to_ir(R1F_GENERIC_FIRST));
+        assert_eq!(a, b, "declaration order changed the diagnostic");
+        assert_eq!(a.kind(), b.kind());
+    }
+
+    #[test]
+    fn r1f_d_no_caller_body_lowering_preempts_generic_admission() {
+        // Each caller form previously reached a lowering TypeVar re-check
+        // (`arg 0 for 'id' has type ..., expected TypeVar(..)` in expression
+        // position, `arg 0 for 'sink' type mismatch` in statement position).
+        let expression_calls = r#"
+            fn main() {
+                let a: i32 = first(1, 2);
+                let b: bool = first(true, false);
+                let _ = a;
+                let _ = b;
+                return;
+            }
+            fn first<T>(x: T, y: T) -> T {
+                return x;
+            }
+        "#;
+        expect_ir_generic_rejection(compile_program_to_ir(expression_calls), "first");
+        let statement_call = r#"
+            fn main() {
+                sink(1);
+                return;
+            }
+            fn sink<T>(x: T) {
+                return;
+            }
+        "#;
+        expect_ir_generic_rejection(compile_program_to_ir(statement_call), "sink");
+        // Same fact through the SemCode and Auto-profile program entrypoints.
+        match compile_program_to_semcode(R1F_CALLER_FIRST).expect_err("SemCode must reject") {
+            CompilePipelineError::Frontend(err) => {
+                assert!(
+                    err.message.contains("generic function 'id'"),
+                    "{}",
+                    err.message
+                )
+            }
+            other => panic!("expected CompilePipelineError::Frontend, got {:?}", other),
+        }
+        expect_ir_generic_rejection(
+            compile_program_to_ir_with_options(
+                R1F_CALLER_FIRST,
+                CompileProfile::Auto,
+                OptLevel::O0,
+            ),
+            "id",
+        );
+    }
+
+    #[test]
+    fn r1f_e_non_generic_program_compiles_unchanged() {
+        let src = r#"
+            fn helper(x: i32) -> i32 {
+                return x + 1;
+            }
+            fn main() {
+                let y: i32 = helper(1);
+                let _ = y;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("non-generic program must still lower");
+        let names: Vec<&str> = ir.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["helper", "main"]);
+    }
+
+    #[test]
+    fn r1f_f_unused_generic_declared_after_caller_is_rejected() {
+        let src = r#"
+            fn main() {
+                let y: i32 = helper(1);
+                let _ = y;
+                return;
+            }
+            fn helper(x: i32) -> i32 {
+                return x;
+            }
+            fn marker<T>(x: i32) -> i32 {
+                return x;
+            }
+        "#;
+        expect_ir_generic_rejection(compile_program_to_ir(src), "marker");
+    }
+
+    #[test]
+    fn r1f_g_generic_impl_method_preflight_preempts_body_lowering() {
+        // Functions are lowered before impl methods, and `f` below has a
+        // genuine, source-reachable lowering failure (it may fall through
+        // without returning). Only the impl-method branch of the program-wide
+        // preflight lets the generic method's E0280 win over that body.
+        let failing_body = r#"
+            trait Show {
+                fn show(self: Self) -> i32;
+            }
+            record P {
+                v: i32,
+            }
+            fn f(b: bool) -> i32 {
+                if b {
+                    return 1;
+                }
+            }
+        "#;
+        let generic_method = r#"
+            impl Show for P {
+                fn show<T>(self: Self) -> i32 {
+                    return 1;
+                }
+            }
+        "#;
+        let main_fn = r#"
+            fn main() {
+                return;
+            }
+        "#;
+
+        // Control: without the generic method, the competing body failure is real.
+        let without_generic = format!("{failing_body}{main_fn}");
+        assert_eq!(
+            r1f_frontend_error(compile_program_to_ir(&without_generic)),
+            FrontendError {
+                pos: 0,
+                message: "function 'f' may exit without returning I32".to_string(),
+            }
+        );
+
+        // With it, program-level generic admission (E0280) wins, naming the
+        // method by its lowered identity. No structured code exists before
+        // P1A, so the whole FrontendError is the strongest identity checked.
+        let with_generic = format!("{failing_body}{generic_method}{main_fn}");
+        assert_eq!(
+            r1f_frontend_error(compile_program_to_ir(&with_generic)),
+            FrontendError {
+                pos: 0,
+                message:
+                    "generic function '__impl::Show::P::show' is admitted by the frontend but is \
+                          not executable in the current IR contract because concrete IR \
+                          monomorphisation is not implemented"
+                        .to_string(),
+            }
+        );
     }
 
     #[test]
