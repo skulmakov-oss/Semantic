@@ -14938,6 +14938,19 @@ fn ensure_type_resolved(
             ensure_type_resolved(ok_ty, record_table, adt_table, arena, context.clone())?;
             ensure_type_resolved(err_ty, record_table, adt_table, arena, context)
         }
+        // P1A0-R1P-D1: a closure's parameter and result are declared-type
+        // positions, so every nominal reference inside them must resolve too
+        // (same rule as `canonicalize_declared_type`).
+        Type::Closure(closure) => {
+            ensure_type_resolved(
+                &closure.param,
+                record_table,
+                adt_table,
+                arena,
+                context.clone(),
+            )?;
+            ensure_type_resolved(&closure.ret, record_table, adt_table, arena, context)
+        }
         _ => Ok(()),
     }
 }
