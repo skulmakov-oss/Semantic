@@ -5070,15 +5070,10 @@ fn lower_expr_with_expected(
                 regs[slot] = Some(r);
             }
             let regs: Vec<u16> = regs.into_iter().flatten().collect();
-            if sig.ret == Type::Unit {
-                return Err(FrontendError {
-                    pos: 0,
-                    message: format!(
-                        "unit-returning call '{}' cannot be used as expression value",
-                        resolve_symbol_name(arena, *name)?
-                    ),
-                });
-            }
+            // P1A0-R1P-D2: a call in value position yields its result register
+            // whatever its type; a `unit` result is the runtime `Value::Unit`
+            // written by the callee's `Ret`. (Statement calls are lowered with
+            // `dst: None` by `lower_expr_stmt_with_parts`.)
             let r = alloc(next);
             out.push(IrInstr::Call {
                 dst: Some(r),
