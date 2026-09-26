@@ -881,6 +881,39 @@ fn ensure_function_is_ir_concrete(func: &Function, arena: &AstArena) -> Result<(
     Ok(())
 }
 
+/// P1A0-R1P-D1: a statement's declared annotation is canonicalized once,
+/// before the value it annotates is lowered, and that canonical type is both
+/// the value's `expected` type and the binding's type. Typecheck does the same
+/// (`canonicalize_declared_type` before inference), so lowering never compares
+/// a raw `Record(name)` spelling against a canonical `Adt(name)`.
+fn canonical_annotation(
+    ty: Option<&Type>,
+    record_table: &RecordTable,
+    adt_table: &AdtTable,
+    arena: &AstArena,
+) -> Result<Option<Type>, FrontendError> {
+    ty.map(|ann| canonicalize_declared_type(ann, record_table, adt_table, arena))
+        .transpose()
+}
+
+/// P1A0-R1P-D1: record field types are declared types. Typecheck canonicalizes
+/// each field type where it reads one; lowering reads them in many places, so
+/// the program's record table is canonicalized once, after `type_check_program`
+/// has validated every record declaration (all field types resolve).
+fn canonicalize_record_field_types(
+    record_table: &RecordTable,
+    adt_table: &AdtTable,
+    arena: &AstArena,
+) -> Result<RecordTable, FrontendError> {
+    let mut canonical = record_table.clone();
+    for record in canonical.values_mut() {
+        for field in &mut record.fields {
+            field.ty = canonicalize_declared_type(&field.ty, record_table, adt_table, arena)?;
+        }
+    }
+    Ok(canonical)
+}
+
 fn lower_function_to_ir_with_tables(
     func: &Function,
     arena: &AstArena,
@@ -1332,6 +1365,7 @@ fn lower_rustlike_program_to_ir(
     let record_table = build_record_table(&program)?;
     let adt_table = build_adt_table(&program)?;
     type_check_program(&program)?;
+    let record_table = canonicalize_record_field_types(&record_table, &adt_table, &program.arena)?;
     // P1A0-R1F: generic admission is a program-level fact. Check every
     // function this program would lower, in the same order as the loops
     // below, before lowering any body, so a caller's incidental TypeVar
@@ -6812,6 +6846,7 @@ fn lower_stmt(
                 &mut ctx.ownership_events,
                 &ctx.lowered_locals,
             )?;
+            let declared_ty = canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
             let (reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6822,17 +6857,13 @@ fn lower_stmt(
                 fn_table,
                 record_table,
                 adt_table,
-                ty.clone(),
+                declared_ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
                 &mut ctx.lowered_locals,
             )?;
-            let final_ty = if let Some(ann) = ty {
-                canonicalize_declared_type(ann, record_table, adt_table, arena)?
-            } else {
-                vty
-            };
+            let final_ty = declared_ty.unwrap_or(vty);
             env.insert_const(*name, final_ty);
             ctx.instrs.push(IrInstr::StoreVar {
                 name: ctx.lowered_locals.bind(arena, *name)?,
@@ -6854,6 +6885,7 @@ fn lower_stmt(
                 &mut ctx.ownership_events,
                 &ctx.lowered_locals,
             )?;
+            let declared_ty = canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
             let (reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6864,17 +6896,13 @@ fn lower_stmt(
                 fn_table,
                 record_table,
                 adt_table,
-                ty.clone(),
+                declared_ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
                 &mut ctx.lowered_locals,
             )?;
-            let final_ty = if let Some(ann) = ty {
-                canonicalize_declared_type(ann, record_table, adt_table, arena)?
-            } else {
-                vty
-            };
+            let final_ty = declared_ty.unwrap_or(vty);
             if *is_mut {
                 env.insert_mut(*name, final_ty);
             } else {
@@ -6896,6 +6924,7 @@ fn lower_stmt(
                 &ctx.lowered_locals,
             )?;
             let sequence_path = sequence_access_path_from_expr(*value, arena, &ctx.lowered_locals)?;
+            let declared_ty = canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
             let (tuple_reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6906,17 +6935,13 @@ fn lower_stmt(
                 fn_table,
                 record_table,
                 adt_table,
-                ty.clone(),
+                declared_ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
                 &mut ctx.lowered_locals,
             )?;
-            let final_ty = if let Some(ann) = ty {
-                canonicalize_declared_type(ann, record_table, adt_table, arena)?
-            } else {
-                vty
-            };
+            let final_ty = declared_ty.unwrap_or(vty);
             bind_tuple_items(
                 items,
                 tuple_reg,
@@ -7043,6 +7068,7 @@ fn lower_stmt(
                 &ctx.lowered_locals,
             )?;
             let sequence_path = sequence_access_path_from_expr(*value, arena, &ctx.lowered_locals)?;
+            let declared_ty = canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
             let (tuple_reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -7053,17 +7079,13 @@ fn lower_stmt(
                 fn_table,
                 record_table,
                 adt_table,
-                ty.clone(),
+                declared_ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
                 &mut ctx.lowered_locals,
             )?;
-            let final_ty = if let Some(ann) = ty {
-                canonicalize_declared_type(ann, record_table, adt_table, arena)?
-            } else {
-                vty
-            };
+            let final_ty = declared_ty.unwrap_or(vty);
             bind_let_else_tuple_items(
                 items,
                 tuple_reg,
@@ -7095,6 +7117,7 @@ fn lower_stmt(
                 &mut ctx.ownership_events,
                 &ctx.lowered_locals,
             )?;
+            let declared_ty = canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
             let _ = lower_expr_with_expected(
                 *value,
                 arena,
@@ -7105,7 +7128,7 @@ fn lower_stmt(
                 fn_table,
                 record_table,
                 adt_table,
-                ty.clone(),
+                declared_ty,
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
@@ -8040,6 +8063,8 @@ fn lower_value_block_expr(
                     ownership_events,
                     lowered_locals,
                 )?;
+                let declared_ty =
+                    canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
                 let (reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -8050,17 +8075,13 @@ fn lower_value_block_expr(
                     fn_table,
                     record_table,
                     adt_table,
-                    ty.clone(),
+                    declared_ty.clone(),
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
                     lowered_locals,
                 )?;
-                let final_ty = if let Some(ann) = ty {
-                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
-                } else {
-                    vty
-                };
+                let final_ty = declared_ty.unwrap_or(vty);
                 block_env.insert_const(*name, final_ty);
                 out.push(IrInstr::StoreVar {
                     name: lowered_locals.bind(arena, *name)?,
@@ -8081,6 +8102,8 @@ fn lower_value_block_expr(
                     ownership_events,
                     lowered_locals,
                 )?;
+                let declared_ty =
+                    canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
                 let (reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -8091,17 +8114,13 @@ fn lower_value_block_expr(
                     fn_table,
                     record_table,
                     adt_table,
-                    ty.clone(),
+                    declared_ty.clone(),
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
                     lowered_locals,
                 )?;
-                let final_ty = if let Some(ann) = ty {
-                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
-                } else {
-                    vty
-                };
+                let final_ty = declared_ty.unwrap_or(vty);
                 if *is_mut {
                     block_env.insert_mut(*name, final_ty);
                 } else {
@@ -8127,6 +8146,8 @@ fn lower_value_block_expr(
                 // emit a Borrow event for this call site regardless of the
                 // sink, since it only pushes when a path is present.
                 let sequence_path = sequence_access_path_from_expr(*value, arena, lowered_locals)?;
+                let declared_ty =
+                    canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
                 let (tuple_reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -8137,17 +8158,13 @@ fn lower_value_block_expr(
                     fn_table,
                     record_table,
                     adt_table,
-                    ty.clone(),
+                    declared_ty.clone(),
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
                     lowered_locals,
                 )?;
-                let final_ty = if let Some(ann) = ty {
-                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
-                } else {
-                    vty
-                };
+                let final_ty = declared_ty.unwrap_or(vty);
                 bind_tuple_items(
                     items,
                     tuple_reg,
@@ -8224,6 +8241,8 @@ fn lower_value_block_expr(
                     ownership_events,
                     lowered_locals,
                 )?;
+                let declared_ty =
+                    canonical_annotation(ty.as_ref(), record_table, adt_table, arena)?;
                 let _ = lower_expr_with_expected(
                     *value,
                     arena,
@@ -8234,7 +8253,7 @@ fn lower_value_block_expr(
                     fn_table,
                     record_table,
                     adt_table,
-                    ty.clone(),
+                    declared_ty,
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
@@ -12328,6 +12347,343 @@ mod opt_tests {
                           monomorphisation is not implemented"
                         .to_string(),
             }
+        );
+    }
+
+    // P1A0-R1P-D1: each program below passes `type_check_program`; before D1,
+    // lowering rejected it by comparing a raw declared `Record(E)` spelling
+    // with the canonical `Adt(E)` of the same enum.
+    const D1_ENUM: &str = r#"
+        enum E {
+            A(i32),
+            B,
+        }
+    "#;
+
+    fn d1_lowers(body_and_decls: &str) {
+        let src = format!("{D1_ENUM}{body_and_decls}");
+        if let Err(err) = compile_program_to_ir(&src) {
+            panic!("typechecked program must lower, got {err:?}");
+        }
+    }
+
+    #[test]
+    fn d1_t1_enum_in_typed_sequence_lowers() {
+        d1_lowers(
+            r#"
+            fn main() {
+                let s: Sequence(E) = [E::A(1), E::B];
+                let nested: Sequence(Sequence(E)) = [[E::B]];
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_t2_enum_record_field_passed_to_function_lowers() {
+        d1_lowers(
+            r#"
+            record H {
+                e: E,
+                s: Sequence(E),
+            }
+            fn takes(e: E) -> i32 {
+                return 1;
+            }
+            fn main() {
+                let h: H = H { e: E::B, s: [E::B] };
+                let n: i32 = takes(h.e);
+                let m: i32 = takes(h.s[0]);
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_t3_enum_in_option_result_and_tuple_annotations_lowers() {
+        d1_lowers(
+            r#"
+            fn main() {
+                let o: Option(E) = Option::Some(E::B);
+                let r: Result(E, i32) = Result::Ok(E::B);
+                let t: (Sequence(E), i32) = ([E::B], 1);
+                let x: E = loop { break E::B; };
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_t4_closure_with_enum_param_and_result_lowers() {
+        d1_lowers(
+            r#"
+            fn run(f: Closure(i32 -> E)) -> E {
+                return f(1);
+            }
+            fn main() {
+                let c: Closure(i32 -> E) = (x => E::B);
+                let d: Closure(E -> i32) = (e => 1);
+                let n: i32 = d(E::B);
+                let v: E = run((x => E::A(x)));
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_t5_former_r1f_statement_call_without_generics_lowers() {
+        // reached `arg 0 for 'takes' type mismatch` (a former R1-F site) with no generic in sight
+        d1_lowers(
+            r#"
+            record H {
+                e: E,
+            }
+            fn takes(e: E) -> i32 {
+                return 1;
+            }
+            fn main() {
+                let h: H = H { e: E::B };
+                takes(h.e);
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_t6_enum_record_field_scrutinee_lowers() {
+        d1_lowers(
+            r#"
+            record H {
+                e: E,
+            }
+            fn main() {
+                let h: H = H { e: E::B };
+                match h.e {
+                    E::B => {
+                        print("b");
+                    }
+                    _ => {
+                        print("o");
+                    }
+                }
+                let v: i32 = match h.e {
+                    E::A(x) => { x }
+                    _ => { 0 }
+                };
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_t7_real_record_types_stay_records() {
+        let src = format!(
+            "{D1_ENUM}{}",
+            r#"
+            record P {
+                v: i32,
+            }
+            record H {
+                p: P,
+                e: E,
+                ps: Sequence(P),
+            }
+            fn main() {
+                let h: H = H { p: P { v: 1 }, e: E::B, ps: [P { v: 2 }] };
+                let n: i32 = h.p.v + h.ps[0].v;
+                return;
+            }
+        "#
+        );
+        compile_program_to_ir(&src).expect("records lower");
+        let mut program = parse_program(&src).expect("parse");
+        // intern_symbol returns the id the parser already assigned
+        let [h, p, e, f_p, f_e, f_ps] =
+            ["H", "P", "E", "p", "e", "ps"].map(|name| program.arena.intern_symbol(name));
+        let records = build_record_table(&program).expect("records");
+        let adts = build_adt_table(&program).expect("adts");
+        let canonical =
+            canonicalize_record_field_types(&records, &adts, &program.arena).expect("canonical");
+        let field_ty = |name: SymbolId| {
+            canonical[&h]
+                .fields
+                .iter()
+                .find(|field| field.name == name)
+                .map(|field| field.ty.clone())
+                .expect("field")
+        };
+        assert_eq!(field_ty(f_p), Type::Record(p));
+        assert_eq!(field_ty(f_e), Type::Adt(e));
+        assert_eq!(
+            field_ty(f_ps),
+            Type::Sequence(SequenceType {
+                family: SequenceCollectionFamily::OrderedSequence,
+                item: Box::new(Type::Record(p)),
+            })
+        );
+    }
+
+    #[test]
+    fn d1_t8_scalar_annotations_are_unchanged() {
+        let program = parse_program("fn main() {\n    return;\n}\n").expect("parse");
+        let (records, adts) = (RecordTable::new(), AdtTable::new());
+        for ty in [
+            Type::I32,
+            Type::U32,
+            Type::Bool,
+            Type::Quad,
+            Type::F64,
+            Type::Fx,
+            Type::Text,
+            Type::Unit,
+        ] {
+            assert_eq!(
+                canonical_annotation(Some(&ty), &records, &adts, &program.arena).expect("scalar"),
+                Some(ty)
+            );
+        }
+        assert_eq!(
+            canonical_annotation(None, &records, &adts, &program.arena).expect("none"),
+            None
+        );
+        compile_program_to_ir(
+            "fn main() {\n    let a: i32 = 1;\n    let b: bool = a > 0;\n    let c: f64 = 1.5;\n    let t: (i32, bool) = (a, b);\n    return;\n}\n",
+        )
+        .expect("scalar program lowers");
+    }
+
+    // P1A0-R1P-D1: one test per annotated statement arm. Each program reaches
+    // exactly that arm with an annotation whose raw spelling (`Record(E)`)
+    // differs from its canonical type (`Adt(E)`); reverting only that arm to
+    // the raw `ty` makes only its own test fail. (`lower_stmt` Let: d1_t1/d1_t3.)
+    #[test]
+    fn d1_annotation_lower_stmt_let_tuple_canonical_expected() {
+        d1_lowers(
+            r#"
+            fn main() {
+                let (a, b): (Sequence(E), i32) = ([E::B], 1);
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_annotation_lower_stmt_let_else_tuple_canonical_expected() {
+        d1_lowers(
+            r#"
+            fn main() {
+                let (T, s): (quad, Sequence(E)) = (T, [E::B]) else return;
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_annotation_lower_stmt_discard_canonical_expected() {
+        d1_lowers(
+            r#"
+            fn main() {
+                let _: Sequence(E) = [E::B];
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_annotation_value_block_let_canonical_expected() {
+        d1_lowers(
+            r#"
+            fn main() {
+                let n: i32 = {
+                    let s: Sequence(E) = [E::B];
+                    1
+                };
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_annotation_value_block_let_tuple_canonical_expected() {
+        d1_lowers(
+            r#"
+            fn main() {
+                let n: i32 = {
+                    let (a, b): (Sequence(E), i32) = ([E::B], 1);
+                    b
+                };
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_annotation_value_block_discard_canonical_expected() {
+        d1_lowers(
+            r#"
+            fn main() {
+                let n: i32 = {
+                    let _: Sequence(E) = [E::B];
+                    1
+                };
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_annotation_const_enum_types_lower() {
+        // Behaviour guard only. Const initializers admit literals, ranges,
+        // tuples, unary/binary operations and earlier const bindings (loop
+        // variables are const), none of which compares the nominal part of
+        // `expected`, so the two Const arms lower identically with a raw or a
+        // canonical annotation: reverting them is an equivalent mutant.
+        d1_lowers(
+            r#"
+            fn g() -> Sequence(E) {
+                return [E::B];
+            }
+            fn main() {
+                for x in g() {
+                    const k: E = x;
+                    const t: (E, i32) = (k, 1);
+                    let n: i32 = {
+                        const j: E = x;
+                        1
+                    };
+                }
+                return;
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn d1_u10_c_record_field_closure_with_enum_lowers() {
+        d1_lowers(
+            r#"
+            record K {
+                f: Closure(E -> E),
+            }
+            fn main() {
+                let k: K = K { f: (x => x) };
+                let g: Closure(E -> E) = k.f;
+                let r: E = g(E::B);
+                return;
+            }
+        "#,
         );
     }
 

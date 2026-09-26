@@ -1030,6 +1030,26 @@ pub fn canonicalize_declared_type(
                 arena,
             )?),
         )),
+        // P1A0-R1P-D1: a closure's parameter and result are declared types
+        // like any other position, so they resolve exactly as in
+        // `canonicalize_declared_type_generic` (a named enum becomes
+        // `Adt(name)`, a nested `TypeVar` is rejected).
+        Type::Closure(closure) => Ok(Type::Closure(crate::types::ClosureType {
+            family: closure.family,
+            capture: closure.capture,
+            param: Box::new(canonicalize_declared_type(
+                &closure.param,
+                record_table,
+                adt_table,
+                arena,
+            )?),
+            ret: Box::new(canonicalize_declared_type(
+                &closure.ret,
+                record_table,
+                adt_table,
+                arena,
+            )?),
+        })),
         Type::Record(name) => {
             let is_record = record_table.contains_key(name);
             let is_adt = adt_table.contains_key(name);
@@ -2167,6 +2187,173 @@ fn main() {
             let program = parse_program(&src).expect("parse");
             build_trait_table(&program)
                 .unwrap_or_else(|err| panic!("'{method_sig}' must admit Self: {err:?}"));
+        }
+    }
+
+    #[test]
+    fn d1_canonicalize_declared_type_resolves_closure_positions() {
+        let src = r#"
+            enum E { A, B }
+            record P { v: i32 }
+            fn main() {
+                return;
+            }
+        "#;
+        let mut program = parse_program(src).expect("parse");
+        let unknown = program.arena.intern_symbol("Nope");
+        let id = |name: &str| *program.arena.symbol_to_id.get(name).expect("interned");
+        let (e, p) = (id("E"), id("P"));
+        let record_table = build_record_table(&program).expect("record table");
+        let adt_table = build_adt_table(&program).expect("adt table");
+        let closure = |param: Type, ret: Type| {
+            Type::Closure(ClosureType {
+                family: ClosureValueFamily::UnaryDirect,
+                capture: ClosureCapturePolicy::Immutable,
+                param: Box::new(param),
+                ret: Box::new(ret),
+            })
+        };
+        let canon =
+            |ty: &Type| canonicalize_declared_type(ty, &record_table, &adt_table, &program.arena);
+
+        // the parser spells every named type Record(name); only the tables make an enum Adt(name)
+        assert_eq!(
+            canon(&closure(Type::Record(e), Type::Record(p))).expect("closure resolves"),
+            closure(Type::Adt(e), Type::Record(p))
+        );
+        let nested = Type::Sequence(SequenceType {
+            family: SequenceCollectionFamily::OrderedSequence,
+            item: Box::new(closure(
+                Type::Record(p),
+                Type::Option(Box::new(Type::Record(e))),
+            )),
+        });
+        assert_eq!(
+            canon(&nested).expect("nested closure resolves"),
+            Type::Sequence(SequenceType {
+                family: SequenceCollectionFamily::OrderedSequence,
+                item: Box::new(closure(
+                    Type::Record(p),
+                    Type::Option(Box::new(Type::Adt(e)))
+                )),
+            })
+        );
+        // a closure position obeys the same non-generic contract as a bare position
+        assert_eq!(
+            canon(&closure(Type::TypeVar(e), Type::I32)).expect_err("nested TypeVar"),
+            canon(&Type::TypeVar(e)).expect_err("bare TypeVar")
+        );
+        assert_eq!(
+            canon(&closure(Type::I32, Type::Record(unknown))).expect_err("nested unknown name"),
+            canon(&Type::Record(unknown)).expect_err("bare unknown name")
+        );
+    }
+
+    #[test]
+    fn d1_typecheck_accepts_enum_typed_closure_annotation() {
+        // before D1 typecheck compared the raw annotation Record(E) against the
+        // body's Adt(E) and rejected this valid program
+        let src = r#"
+            enum E { A, B }
+            fn main() {
+                let c: Closure(i32 -> E) = (x => E::B);
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        type_check_program(&program).expect("enum-typed closure annotation typechecks");
+    }
+
+    // P1A0-R1P-D1 U10: an unresolved nominal inside a closure position is a
+    // frontend (nominal resolution) failure in every declared-type position,
+    // including storage positions nothing ever reads, so it can never first
+    // surface when lowering canonicalizes declared types.
+    fn d1_u10_typecheck_error(decls: &str, body: &str) -> FrontendError {
+        let src = format!("{decls}\nfn main() {{\n{body}\n    return;\n}}\n");
+        let program = parse_program(&src).expect("parse");
+        type_check_program(&program).expect_err("unresolved nominal must be rejected by typecheck")
+    }
+
+    fn d1_unknown_nope(context: &str) -> FrontendError {
+        FrontendError {
+            pos: 0,
+            message: format!("unknown record type 'Nope' in {context}"),
+        }
+    }
+
+    #[test]
+    fn d1_u10_a_record_field_closure_with_unknown_nominal_is_rejected_by_typecheck() {
+        assert_eq!(
+            d1_u10_typecheck_error("record R {\n    g: Closure(Nope -> i32),\n}", ""),
+            d1_unknown_nope("field 'R.g'")
+        );
+        assert_eq!(
+            d1_u10_typecheck_error("record R {\n    g: Closure(i32 -> Nope),\n}", ""),
+            d1_unknown_nope("field 'R.g'")
+        );
+    }
+
+    #[test]
+    fn d1_u10_b_nested_record_field_closure_with_unknown_nominal_is_rejected_by_typecheck() {
+        assert_eq!(
+            d1_u10_typecheck_error("record R {\n    g: Sequence(Closure(Nope -> i32)),\n}", ""),
+            d1_unknown_nope("field 'R.g'")
+        );
+    }
+
+    #[test]
+    fn d1_u10_c_record_field_closure_with_enum_typechecks() {
+        let src = r#"
+            enum E { A, B }
+            record R {
+                g: Closure(E -> E),
+            }
+            fn main() {
+                let r: R = R { g: (x => x) };
+                return;
+            }
+        "#;
+        type_check_program(&parse_program(src).expect("parse")).expect("valid closure field");
+    }
+
+    #[test]
+    fn d1_u10_d_adt_payload_closure_with_unknown_nominal_is_rejected_by_typecheck() {
+        assert_eq!(
+            d1_u10_typecheck_error("enum Boxed {\n    V(Closure(Nope -> i32)),\n    Z,\n}", ""),
+            d1_unknown_nope("variant 'Boxed::V' payload item 0")
+        );
+    }
+
+    #[test]
+    fn d1_u10_e_nested_valid_nominals_in_closure_positions_typecheck() {
+        let src = r#"
+            enum E { A, B }
+            record R {
+                g: Closure(Sequence(E) -> Option(E)),
+            }
+            enum Boxed { V(Closure(E -> Option(E))) }
+            fn main() {
+                let c: Closure(Sequence(E) -> Option(E)) = (s => Option::Some(E::B));
+                return;
+            }
+        "#;
+        type_check_program(&parse_program(src).expect("parse"))
+            .expect("valid nested closure types");
+    }
+
+    #[test]
+    fn d1_ns12_unresolved_nominal_parity_across_let_positions() {
+        for ann in [
+            "Nope",
+            "Sequence(Nope)",
+            "Closure(Nope -> i32)",
+            "Closure(i32 -> Nope)",
+        ] {
+            assert_eq!(
+                d1_u10_typecheck_error("", &format!("    let x: {ann} = 1;")),
+                d1_unknown_nope("let 'x'"),
+                "annotation {ann}"
+            );
         }
     }
 
