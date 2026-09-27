@@ -968,7 +968,15 @@ fn check_match_arms_joined(
 
     let mut successors: Vec<ScopeEnv> = Vec::new();
     for arm in arms {
-        let mut arm_env = build_pattern_arm_env(scrutinee, &arm.pat, &st, arena, env, adt_table)?;
+        let mut arm_env = build_pattern_arm_env(
+            scrutinee,
+            &arm.pat,
+            &st,
+            arena,
+            env,
+            record_table,
+            adt_table,
+        )?;
 
         check_match_guard(
             arm.guard,
@@ -1003,6 +1011,7 @@ fn check_match_arms_joined(
             &st,
             arms.iter().map(|arm| (&arm.pat, arm.guard)),
             arena,
+            record_table,
             adt_table,
         )? {
             Some((family_label, missing)) if !missing.is_empty() => {
@@ -2707,6 +2716,7 @@ fn infer_expr_type(
                 &value_ty,
                 arena,
                 env,
+                record_table,
                 adt_table,
             )?;
             let (then_ty, mut then_result_env) = infer_value_block_type(
@@ -13684,6 +13694,7 @@ fn build_pattern_arm_env(
     scrutinee_ty: &Type,
     arena: &AstArena,
     env: &mut ScopeEnv,
+    record_table: &RecordTable,
     adt_table: &AdtTable,
 ) -> Result<ScopeEnv, FrontendError> {
     if matches!(pattern, MatchPattern::Or(_)) {
@@ -13699,6 +13710,7 @@ fn build_pattern_arm_env(
         &PatternPath::root(),
         &mut plan,
         arena,
+        record_table,
         adt_table,
     )?;
     validate_binding_plan_conflicts(&plan)?;
@@ -13759,6 +13771,7 @@ fn infer_match_expr_type(
             &scrutinee_ty,
             arena,
             env,
+            record_table,
             adt_table,
         )?;
         check_match_guard(
@@ -13832,6 +13845,7 @@ fn infer_match_expr_type(
             &scrutinee_ty,
             match_expr.arms.iter().map(|arm| (&arm.pat, arm.guard)),
             arena,
+            record_table,
             adt_table,
         )? {
             Some((family_label, missing)) if !missing.is_empty() => {
@@ -16256,6 +16270,7 @@ struct MatchFamilySpec {
 fn resolve_match_family_spec(
     scrutinee_ty: &Type,
     arena: &AstArena,
+    record_table: &RecordTable,
     adt_table: &AdtTable,
 ) -> Result<Option<MatchFamilySpec>, FrontendError> {
     match scrutinee_ty {
@@ -16269,10 +16284,18 @@ fn resolve_match_family_spec(
             })?;
             let family_name = resolve_symbol_name(arena, *adt_name)?.to_string();
             let mut variants = Vec::new();
+            // P1A0-R1P-D3: a family spec carries semantic payload types, as the
+            // Option/Result arms below already do. The AdtTable keeps declared
+            // payloads raw (a named enum is still spelled `Record(name)`), so
+            // resolve them here exactly as the enum constructor does.
             for variant in &adt.variants {
                 variants.push(MatchFamilyVariantSpec {
                     name: resolve_symbol_name(arena, variant.name)?.to_string(),
-                    payload: variant.payload.clone(),
+                    payload: variant
+                        .payload
+                        .iter()
+                        .map(|ty| canonicalize_declared_type(ty, record_table, adt_table, arena))
+                        .collect::<Result<Vec<_>, _>>()?,
                 });
             }
             Ok(Some(MatchFamilySpec {
@@ -16317,9 +16340,11 @@ fn missing_exhaustive_sum_variants<'a>(
     scrutinee_ty: &Type,
     patterns: impl IntoIterator<Item = (&'a MatchPattern, Option<ExprId>)>,
     arena: &AstArena,
+    record_table: &RecordTable,
     adt_table: &AdtTable,
 ) -> Result<Option<(String, Vec<String>)>, FrontendError> {
-    let Some(family) = resolve_match_family_spec(scrutinee_ty, arena, adt_table)? else {
+    let Some(family) = resolve_match_family_spec(scrutinee_ty, arena, record_table, adt_table)?
+    else {
         return Ok(None);
     };
 
@@ -16730,10 +16755,11 @@ pub(crate) fn build_adt_pattern_plan(
     base: &PatternPath,
     out: &mut BindingPlan,
     arena: &AstArena,
+    record_table: &RecordTable,
     adt_table: &AdtTable,
 ) -> Result<(), FrontendError> {
-    let family =
-        resolve_match_family_spec(expected_ty, arena, adt_table)?.ok_or_else(|| FrontendError {
+    let family = resolve_match_family_spec(expected_ty, arena, record_table, adt_table)?
+        .ok_or_else(|| FrontendError {
             pos: 0,
             message: "ADT pattern plan: scrutinee is not a sum type".to_string(),
         })?;
@@ -16802,6 +16828,7 @@ pub(crate) fn build_match_pattern_plan(
     base: &PatternPath,
     out: &mut BindingPlan,
     arena: &AstArena,
+    record_table: &RecordTable,
     adt_table: &AdtTable,
 ) -> Result<(), FrontendError> {
     match pat {
@@ -16840,9 +16867,15 @@ pub(crate) fn build_match_pattern_plan(
             }
             Ok(())
         }
-        MatchPattern::Adt(adt_pat) => {
-            build_adt_pattern_plan(adt_pat, expected_ty, base, out, arena, adt_table)
-        }
+        MatchPattern::Adt(adt_pat) => build_adt_pattern_plan(
+            adt_pat,
+            expected_ty,
+            base,
+            out,
+            arena,
+            record_table,
+            adt_table,
+        ),
         MatchPattern::Or(alts) => {
             if alts.is_empty() {
                 return Err(FrontendError {
@@ -16857,6 +16890,7 @@ pub(crate) fn build_match_pattern_plan(
                 base,
                 &mut first_plan,
                 arena,
+                record_table,
                 adt_table,
             )?;
             validate_binding_plan_conflicts(&first_plan)?;
@@ -16869,7 +16903,15 @@ pub(crate) fn build_match_pattern_plan(
 
             for alt in &alts[1..] {
                 let mut alt_plan = BindingPlan::default();
-                build_match_pattern_plan(alt, expected_ty, base, &mut alt_plan, arena, adt_table)?;
+                build_match_pattern_plan(
+                    alt,
+                    expected_ty,
+                    base,
+                    &mut alt_plan,
+                    arena,
+                    record_table,
+                    adt_table,
+                )?;
                 validate_binding_plan_conflicts(&alt_plan)?;
 
                 let shape: Vec<(u32, CaptureMode)> = alt_plan
