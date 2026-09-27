@@ -30,11 +30,15 @@ fn arm(scr: &str, pat: &str, body: &str, other: &str) -> String {
 /// Typecheck, lower, emit SemCode, verify and run; the program's own
 /// `assert`s check the bound payload's value.
 fn runs(src: &str) {
-    let bytes = match compile_program_to_semcode(src) {
-        Ok(bytes) => bytes,
-        Err(err) => panic!("valid program must compile, got {err}"),
-    };
-    run_verified_semcode(&bytes).expect("verified execution");
+    if let Err(err) = run_outcome(src) {
+        panic!("{err}");
+    }
+}
+
+fn run_outcome(src: &str) -> Result<(), String> {
+    let bytes = compile_program_to_semcode(src)
+        .map_err(|err| format!("valid program must compile, got {err}"))?;
+    run_verified_semcode(&bytes).map_err(|err| format!("verified execution failed: {err:?}"))
 }
 
 fn typechecks(src: &str) {
@@ -113,16 +117,23 @@ fn d3_p3_container_payloads_canonicalize_recursively() {
             "    return match p {\n        Result::Ok(i) => { is_b(i) }\n        _ => { false }\n    };",
         ),
     ];
-    for (ty, value, check) in shapes {
-        let decls = format!(
-            "{INNER}{IS_B}enum O {{\n    W({ty}),\n    Nn,\n}}\nfn check(p: {ty}) -> bool {{\n{check}\n}}\n"
-        );
-        let body = format!(
-            "    let x = O::W({value});\n{}",
-            arm("x", "O::W(p)", "            assert(check(p));", "O::Nn")
-        );
-        runs(&with_main(&decls, &body));
-    }
+    // Every shape is run and reported, so one failing shape cannot hide another.
+    let failures: Vec<String> = shapes
+        .iter()
+        .filter_map(|(ty, value, check)| {
+            let decls = format!(
+                "{INNER}{IS_B}enum O {{\n    W({ty}),\n    Nn,\n}}\nfn check(p: {ty}) -> bool {{\n{check}\n}}\n"
+            );
+            let body = format!(
+                "    let x = O::W({value});\n{}",
+                arm("x", "O::W(p)", "            assert(check(p));", "O::Nn")
+            );
+            run_outcome(&with_main(&decls, &body))
+                .err()
+                .map(|err| format!("{ty}: {err}"))
+        })
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 #[test]
@@ -224,6 +235,45 @@ fn d3_p10_if_let_binding_typechecks_with_the_canonical_type() {
         "    let x = Outer::Wrap(Inner::B);\n    let b: bool = if let Outer::Wrap(v) = x { is_b(v) } else { false };",
     );
     typechecks(&src);
+}
+
+const PAYLOAD: &str =
+    "record Payload {\n    value: i32,\n}\nenum Holder {\n    Wrap(Payload),\n    Empty,\n}\n";
+
+#[test]
+fn d3_p11_record_payload_stays_a_record_for_field_access() {
+    // Canonicalization follows the declaration tables: a declared record
+    // payload is still a record once destructured.
+    let src = with_main(
+        PAYLOAD,
+        &format!(
+            "    let x = Holder::Wrap(Payload {{ value: 7 }});\n{}",
+            arm(
+                "x",
+                "Holder::Wrap(p)",
+                "            assert(p.value == 7);",
+                "Holder::Empty"
+            )
+        ),
+    );
+    runs(&src);
+}
+
+#[test]
+fn d3_p12_record_payload_reaches_a_record_consumer() {
+    let src = with_main(
+        &format!("{PAYLOAD}fn read(p: Payload) -> i32 {{\n    return p.value;\n}}\n"),
+        &format!(
+            "    let x = Holder::Wrap(Payload {{ value: 9 }});\n{}",
+            arm(
+                "x",
+                "Holder::Wrap(p)",
+                "            assert(read(p) == 9);",
+                "Holder::Empty"
+            )
+        ),
+    );
+    runs(&src);
 }
 
 #[test]
