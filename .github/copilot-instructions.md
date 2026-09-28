@@ -32,12 +32,21 @@ Copilot instructions are subordinate to these documents and cannot loosen or wai
   - `search_graph(name_pattern, label, file_pattern)` — locate functions, types, and modules.
   - `trace_call_path(function_name, direction, depth)` — trace caller/callee chains.
   - `get_code_snippet(qualified_name)` — retrieve symbol source code.
-  - `detect_changes(project)` — map diffs to affected symbols and risk.
+  - `detect_changes(project)` — map diff impact to affected symbols and risk.
 - **Strict No Autonomous Fallback**:
   - If Codebase Memory MCP is unavailable, do **not** silently fall back to grep, local-only discovery, or raw text scanning.
   - Follow the fail-closed blocker protocol in `CONSTRAINTS.md`:
     $$\text{capability unavailable} \rightarrow \text{STOP} \rightarrow \text{report exact blocker} \rightarrow \text{owner decides}$$
   - Only the repository owner may authorize a task-scoped, visible, and temporary fallback.
+
+### GitHub-hosted code-review exception
+
+For **GitHub-hosted Copilot pull-request review only**, the repository owner has provided the narrow read-only fallback authorization in [`.github/skills/code-review/SKILL.md`](skills/code-review/SKILL.md).
+
+- Use Codebase Memory MCP normally when it is available.
+- If it is unavailable in the hosted review environment, follow the `code-review` skill exactly.
+- That fallback is limited to the current PR review and does not authorize implementation, repository mutation, broad architecture reconstruction, or unsupported architecture claims.
+- This exception does not apply to Copilot coding-agent tasks, local implementation sessions, or other repository work.
 
 ---
 

@@ -43,6 +43,17 @@ If Codebase Memory MCP is unavailable in the execution environment:
    - Repository owner may authorize a task-scoped, visible, and temporary fallback.
    - Historical sessions where an agent proceeded without MCP tools do not create fallback authority.
 
+### Owner-authorized GitHub-hosted code-review fallback
+
+The repository owner has explicitly authorized one narrow exception to the stop rule above:
+
+- it applies only to **GitHub-hosted Copilot pull-request review**;
+- it applies only when Codebase Memory MCP is unavailable in that hosted review environment;
+- it is read-only and lasts only for the current review task;
+- its permitted evidence sources, prohibitions, risk handling, and disclosure requirements are defined in [`.github/skills/code-review/SKILL.md`](../skills/code-review/SKILL.md).
+
+This exception satisfies the repository-owner-decision requirement above. It does **not** authorize fallback for implementation/coding-agent tasks, repository mutation, broad repository reconstruction, or architecture/call-graph claims unsupported by the evidence allowed in the review skill.
+
 ---
 
 ## 3. Canonical Governance Reference
