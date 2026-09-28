@@ -46,10 +46,14 @@ pub mod semcode_format {
 use frontend::*;
 
 #[cfg(feature = "std")]
+mod adt_descriptors;
+#[cfg(feature = "std")]
 mod legacy_lowering;
 #[cfg(feature = "std")]
 pub mod passes;
 
+#[cfg(feature = "std")]
+pub use adt_descriptors::adt_descriptor_table;
 #[cfg(feature = "std")]
 pub use error::{CompilePipelineError, ConfigurationError, IrError};
 #[cfg(feature = "std")]
