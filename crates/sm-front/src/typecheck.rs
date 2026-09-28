@@ -3699,7 +3699,7 @@ fn infer_expr_type(
                                 .to_string(),
                         });
                     }
-                    if !supports_stable_equality_type(&lt, record_table, adt_table)? {
+                    if !supports_stable_equality_type(&lt, record_table, adt_table, arena)? {
                         let message = if matches!(lt, Type::Record(_)) {
                             "record equality is allowed only when every field type already supports stable equality"
                         } else {
@@ -15212,9 +15212,10 @@ fn supports_stable_equality_type(
     ty: &Type,
     record_table: &RecordTable,
     adt_table: &AdtTable,
+    arena: &AstArena,
 ) -> Result<bool, FrontendError> {
     let mut active = BTreeSet::new();
-    supports_stable_equality_type_inner(ty, record_table, adt_table, &mut active)
+    supports_stable_equality_type_inner(ty, record_table, adt_table, arena, &mut active)
 }
 
 fn ensure_requires_expr_supported(expr_id: ExprId, arena: &AstArena) -> Result<(), FrontendError> {
@@ -15330,6 +15331,7 @@ fn supports_stable_equality_type_inner(
     ty: &Type,
     record_table: &RecordTable,
     adt_table: &AdtTable,
+    arena: &AstArena,
     active: &mut BTreeSet<SymbolId>,
 ) -> Result<bool, FrontendError> {
     match ty {
@@ -15342,32 +15344,40 @@ fn supports_stable_equality_type_inner(
         | Type::F64
         | Type::Unit => Ok(true),
         Type::Measured(base, _) => {
-            supports_stable_equality_type_inner(base, record_table, adt_table, active)
+            supports_stable_equality_type_inner(base, record_table, adt_table, arena, active)
         }
         Type::Sequence(sequence) => supports_stable_equality_type_inner(
             sequence.item.as_ref(),
             record_table,
             adt_table,
+            arena,
             active,
         ),
         Type::QVec(_) => Ok(false),
         Type::RangeI32 => Ok(false),
         Type::Tuple(items) => {
             for item in items {
-                if !supports_stable_equality_type_inner(item, record_table, adt_table, active)? {
+                if !supports_stable_equality_type_inner(
+                    item,
+                    record_table,
+                    adt_table,
+                    arena,
+                    active,
+                )? {
                     return Ok(false);
                 }
             }
             Ok(true)
         }
         Type::Option(item) => {
-            supports_stable_equality_type_inner(item, record_table, adt_table, active)
+            supports_stable_equality_type_inner(item, record_table, adt_table, arena, active)
         }
         Type::Result(ok_ty, err_ty) => {
-            if !supports_stable_equality_type_inner(ok_ty, record_table, adt_table, active)? {
+            if !supports_stable_equality_type_inner(ok_ty, record_table, adt_table, arena, active)?
+            {
                 return Ok(false);
             }
-            supports_stable_equality_type_inner(err_ty, record_table, adt_table, active)
+            supports_stable_equality_type_inner(err_ty, record_table, adt_table, arena, active)
         }
         Type::Record(name) => {
             if !active.insert(*name) {
@@ -15378,8 +15388,18 @@ fn supports_stable_equality_type_inner(
                 message: "record equality subset references unknown record type".to_string(),
             })?;
             for field in &record.fields {
-                if !supports_stable_equality_type_inner(&field.ty, record_table, adt_table, active)?
-                {
+                // P1A0-R1P-D4: declared field types are stored raw (a named
+                // enum is spelled `Record`), so resolve them through the
+                // canonical authority before classifying them.
+                let field_ty =
+                    canonicalize_declared_type(&field.ty, record_table, adt_table, arena)?;
+                if !supports_stable_equality_type_inner(
+                    &field_ty,
+                    record_table,
+                    adt_table,
+                    arena,
+                    active,
+                )? {
                     active.remove(name);
                     return Ok(false);
                 }
