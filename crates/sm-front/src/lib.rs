@@ -157,6 +157,10 @@ const APPLICATION_BUILTIN_NAMES: &[&str] = &[
     "time_duration_ms",
 ];
 
+/// SSF-09 D2: the built-in ADT identities. A user enum must not take one of
+/// these names, or its ADT descriptor would collide with the built-in's.
+const BUILTIN_ADT_NAMES: &[&str] = &["Option", "Result"];
+
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub type SchemaTable = BTreeMap<SymbolId, SchemaDecl>;
 
@@ -790,6 +794,13 @@ pub fn build_record_table(program: &Program) -> Result<RecordTable, FrontendErro
 pub fn build_adt_table(program: &Program) -> Result<AdtTable, FrontendError> {
     let mut out = BTreeMap::new();
     for adt in &program.adts {
+        let name = resolve_symbol_name(&program.arena, adt.name)?;
+        if BUILTIN_ADT_NAMES.contains(&name) {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!("enum name '{name}' is reserved for the built-in ADT"),
+            });
+        }
         if out.contains_key(&adt.name) {
             return Err(FrontendError {
                 pos: 0,
@@ -2010,6 +2021,31 @@ fn main() {
             "unexpected error: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn build_adt_table_rejects_enums_named_after_builtin_adts() {
+        // SSF-09 D2: `Option` and `Result` are built-in ADT identities.
+        for name in ["Option", "Result"] {
+            let src = format!("enum {name} {{ A, B }}\nfn main() {{ return; }}\n");
+            let program = parse_program(&src).expect("parse");
+            let expected = FrontendError {
+                pos: 0,
+                message: format!("enum name '{name}' is reserved for the built-in ADT"),
+            };
+            assert_eq!(build_adt_table(&program), Err(expected.clone()));
+            assert_eq!(crate::type_check_program(&program), Err(expected));
+        }
+    }
+
+    #[test]
+    fn build_adt_table_admits_ordinary_enum_names() {
+        let program = parse_program(
+            "enum E { A }\nenum Optional { A }\nenum Results { A }\nfn main() { return; }\n",
+        )
+        .expect("parse");
+        assert_eq!(build_adt_table(&program).expect("adt table").len(), 3);
+        crate::type_check_program(&program).expect("ordinary enum names typecheck");
     }
 
     #[test]

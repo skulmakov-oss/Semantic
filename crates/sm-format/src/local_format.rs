@@ -20,6 +20,7 @@ pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
 pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
 pub const MAGIC20: [u8; 8] = *b"SEMCOD20";
 pub const MAGIC21: [u8; 8] = *b"SEMCOD21";
+pub const MAGIC22: [u8; 8] = *b"SEMCOD22";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -68,6 +69,11 @@ pub const CAP_OWNERSHIP_SEQUENCE_PATHS: u32 = 1 << 26;
 pub const CAP_OWNERSHIP_ADT_BORROW_PATHS: u32 = 1 << 27;
 
 pub const SIGNATURE_SECTION_TAG: [u8; 4] = *b"SIG0";
+
+/// SSF-09 D2: tag of the module-level ADT descriptor section. Its presence
+/// is derived from the header revision alone
+/// (`SEMCODE_ADT_DESCRIPTOR_MIN_REVISION`), never sniffed from content.
+pub const ADT_DESCRIPTOR_SECTION_TAG: [u8; 4] = *b"ADT0";
 
 pub const OWNERSHIP_SECTION_TAG: [u8; 4] = *b"OWN0";
 pub const OWNERSHIP_EVENT_KIND_BORROW: u8 = 0;
@@ -488,6 +494,24 @@ pub const SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
 /// kept as a distinct named constant because the two families' admission
 /// authority is independently decided and may diverge in a future revision.
 pub const SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
+
+/// SSF-09 D2: the ADT descriptor contract header. Under this revision every
+/// artifact carries the mandatory `ADT0` section immediately after the magic.
+/// Capabilities are inherited unchanged from `HEADER_V21`.
+///
+/// D2-1 defines the vocabulary only: this header is deliberately absent from
+/// `supported_headers()` and is never emitted. The D2 artifact envelope
+/// (emission, decoding and admission) is activated as a whole in D2-2.
+pub const HEADER_V22: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC22,
+    epoch: 0,
+    rev: 23,
+    capabilities: HEADER_V21.capabilities,
+};
+
+/// SSF-09 D2: the minimum header revision whose artifacts carry the mandatory
+/// `ADT0` section. Section presence is derived from this revision only.
+pub const SEMCODE_ADT_DESCRIPTOR_MIN_REVISION: u16 = HEADER_V22.rev;
 
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
@@ -952,6 +976,222 @@ pub fn read_utf8(bytes: &[u8], i: &mut usize, len: usize) -> Result<String, Semc
     Ok(s)
 }
 
+/// SSF-09 D2: why an ADT descriptor or descriptor table cannot be built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdtDescriptorError {
+    EmptyName,
+    NameTooLong { name: String },
+    DuplicateVariant { descriptor: String, variant: String },
+    TooManyVariants { descriptor: String },
+    DuplicateDescriptor { name: String },
+    TooManyDescriptors,
+}
+
+impl core::fmt::Display for AdtDescriptorError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            AdtDescriptorError::EmptyName => write!(f, "ADT descriptor name is empty"),
+            AdtDescriptorError::NameTooLong { name } => write!(
+                f,
+                "ADT descriptor name '{}' exceeds the u16 length limit",
+                name
+            ),
+            AdtDescriptorError::DuplicateVariant {
+                descriptor,
+                variant,
+            } => write!(
+                f,
+                "ADT descriptor '{}' repeats variant '{}'",
+                descriptor, variant
+            ),
+            AdtDescriptorError::TooManyVariants { descriptor } => write!(
+                f,
+                "ADT descriptor '{}' exceeds the u16 variant-count limit",
+                descriptor
+            ),
+            AdtDescriptorError::DuplicateDescriptor { name } => {
+                write!(f, "duplicate ADT descriptor identity '{}'", name)
+            }
+            AdtDescriptorError::TooManyDescriptors => {
+                write!(f, "ADT descriptor table exceeds the u16 entry-count limit")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AdtDescriptorError {}
+
+fn check_adt_descriptor_name(name: &str) -> Result<(), AdtDescriptorError> {
+    if name.is_empty() {
+        return Err(AdtDescriptorError::EmptyName);
+    }
+    if u16::try_from(name.len()).is_err() {
+        return Err(AdtDescriptorError::NameTooLong {
+            name: name.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// SSF-09 D2: one variant of an [`AdtDescriptor`]. A variant's tag is its
+/// position in [`AdtDescriptor::variants`]; the tag is never stored as a
+/// second, independent authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdtVariantDescriptor {
+    name: String,
+    payload_arity: u16,
+}
+
+impl AdtVariantDescriptor {
+    pub fn new(name: &str, payload_arity: u16) -> Result<Self, AdtDescriptorError> {
+        check_adt_descriptor_name(name)?;
+        Ok(Self {
+            name: name.to_string(),
+            payload_arity,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn payload_arity(&self) -> u16 {
+        self.payload_arity
+    }
+}
+
+/// SSF-09 D2: one ADT. Its canonical type name is the ADT's semantic
+/// identity; its variants are in source declaration order, so a variant's
+/// tag is its index. Payload types are deliberately absent (D3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdtDescriptor {
+    name: String,
+    variants: Vec<AdtVariantDescriptor>,
+}
+
+impl AdtDescriptor {
+    pub fn new(
+        name: &str,
+        variants: Vec<AdtVariantDescriptor>,
+    ) -> Result<Self, AdtDescriptorError> {
+        check_adt_descriptor_name(name)?;
+        if u16::try_from(variants.len()).is_err() {
+            return Err(AdtDescriptorError::TooManyVariants {
+                descriptor: name.to_string(),
+            });
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for variant in &variants {
+            if !seen.insert(variant.name.as_str()) {
+                return Err(AdtDescriptorError::DuplicateVariant {
+                    descriptor: name.to_string(),
+                    variant: variant.name.clone(),
+                });
+            }
+        }
+        Ok(Self {
+            name: name.to_string(),
+            variants,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Variants in declaration order: `variants()[tag]` is the variant with
+    /// that tag.
+    pub fn variants(&self) -> &[AdtVariantDescriptor] {
+        &self.variants
+    }
+}
+
+/// The frozen built-in ADTs. Their variant order is the tag order the
+/// compiler already uses for `Option` and `Result` values.
+fn builtin_adt_descriptors() -> [AdtDescriptor; 2] {
+    let variant = |name: &str, payload_arity| AdtVariantDescriptor {
+        name: name.to_string(),
+        payload_arity,
+    };
+    [
+        AdtDescriptor {
+            name: "Option".to_string(),
+            variants: vec![variant("None", 0), variant("Some", 1)],
+        },
+        AdtDescriptor {
+            name: "Result".to_string(),
+            variants: vec![variant("Ok", 1), variant("Err", 1)],
+        },
+    ]
+}
+
+/// SSF-09 D2: the canonical ADT descriptor table of one artifact.
+///
+/// It always contains the built-in `Option` and `Result` descriptors, so it
+/// is never empty, and its descriptors are in strictly ascending order of
+/// their name bytes.
+///
+/// A descriptor's position in [`AdtDescriptorTable::descriptors`] is only a
+/// deterministic lookup ordinal within this one table. It is NOT the ADT's
+/// identity (the canonical type name is) and it is not stable across
+/// artifacts: adding any other ADT can shift it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdtDescriptorTable {
+    descriptors: Vec<AdtDescriptor>,
+}
+
+impl AdtDescriptorTable {
+    /// Builds the canonical table from the built-in descriptors plus `user`.
+    /// Two descriptors sharing a name are rejected; a user descriptor named
+    /// `Option` or `Result` collides with the built-in.
+    pub fn with_builtins(user: Vec<AdtDescriptor>) -> Result<Self, AdtDescriptorError> {
+        let mut descriptors: Vec<AdtDescriptor> =
+            builtin_adt_descriptors().into_iter().chain(user).collect();
+        descriptors.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+        if let Some(pair) = descriptors.windows(2).find(|w| w[0].name == w[1].name) {
+            return Err(AdtDescriptorError::DuplicateDescriptor {
+                name: pair[0].name.clone(),
+            });
+        }
+        if u16::try_from(descriptors.len()).is_err() {
+            return Err(AdtDescriptorError::TooManyDescriptors);
+        }
+        Ok(Self { descriptors })
+    }
+
+    pub fn descriptors(&self) -> &[AdtDescriptor] {
+        &self.descriptors
+    }
+
+    /// Encodes the `ADT0` section, all integers little-endian:
+    ///
+    /// ```text
+    /// section    := "ADT0" descriptor_count:u16 descriptor[descriptor_count]
+    /// descriptor := name_len:u16 name:[u8] variant_count:u16 variant[variant_count]
+    /// variant    := name_len:u16 name:[u8] payload_arity:u16
+    /// ```
+    pub fn encode_section(&self) -> Vec<u8> {
+        // Every count and name length below was checked to fit `u16` when
+        // the table and its descriptors were built.
+        let write_name = |out: &mut Vec<u8>, name: &str| {
+            write_u16_le(out, name.len() as u16);
+            out.extend_from_slice(name.as_bytes());
+        };
+        let mut out = Vec::new();
+        out.extend_from_slice(&ADT_DESCRIPTOR_SECTION_TAG);
+        write_u16_le(&mut out, self.descriptors.len() as u16);
+        for descriptor in &self.descriptors {
+            write_name(&mut out, &descriptor.name);
+            write_u16_le(&mut out, descriptor.variants.len() as u16);
+            for variant in &descriptor.variants {
+                write_name(&mut out, &variant.name);
+                write_u16_le(&mut out, variant.payload_arity);
+            }
+        }
+        out
+    }
+}
+
 // #1736 (FA-05-006): regression coverage for the checked-arithmetic repair.
 // Before the fix, `*i + width > bytes.len()` used raw addition, so a cursor
 // near `usize::MAX` (reachable from an attacker-controlled cursor/length on
@@ -1050,5 +1290,237 @@ mod tests {
             read_utf8(&bytes, &mut 0, 3),
             Err(SemcodeFormatError::UnexpectedEof)
         );
+    }
+}
+
+// SSF-09 D2-1: ADT descriptor model and ADT0 encoder.
+#[cfg(test)]
+mod adt_descriptor_tests {
+    use super::*;
+
+    fn variant(name: &str, payload_arity: u16) -> AdtVariantDescriptor {
+        AdtVariantDescriptor::new(name, payload_arity).expect("valid variant")
+    }
+
+    fn adt(name: &str, variants: &[(&str, u16)]) -> AdtDescriptor {
+        AdtDescriptor::new(name, variants.iter().map(|(n, a)| variant(n, *a)).collect())
+            .expect("valid descriptor")
+    }
+
+    fn names(table: &AdtDescriptorTable) -> Vec<&str> {
+        table.descriptors().iter().map(|d| d.name()).collect()
+    }
+
+    fn shape(descriptor: &AdtDescriptor) -> Vec<(&str, u16)> {
+        descriptor
+            .variants()
+            .iter()
+            .map(|v| (v.name(), v.payload_arity()))
+            .collect()
+    }
+
+    fn find<'a>(table: &'a AdtDescriptorTable, name: &str) -> &'a AdtDescriptor {
+        table
+            .descriptors()
+            .iter()
+            .find(|d| d.name() == name)
+            .expect("descriptor present")
+    }
+
+    #[test]
+    fn table_without_user_enums_still_holds_option_and_result() {
+        let table = AdtDescriptorTable::with_builtins(vec![]).expect("table");
+        assert_eq!(names(&table), ["Option", "Result"]);
+    }
+
+    #[test]
+    fn builtin_option_and_result_have_frozen_variants_and_arities() {
+        let table = AdtDescriptorTable::with_builtins(vec![adt("E", &[("A", 0)])]).expect("table");
+        assert_eq!(shape(find(&table, "Option")), [("None", 0), ("Some", 1)]);
+        assert_eq!(shape(find(&table, "Result")), [("Ok", 1), ("Err", 1)]);
+    }
+
+    #[test]
+    fn descriptors_sort_by_raw_utf8_name_bytes_not_by_locale() {
+        let table = AdtDescriptorTable::with_builtins(vec![
+            adt("b", &[]),
+            adt("Z", &[]),
+            adt("\u{c9}mile", &[]),
+            adt("A", &[]),
+            adt("Opt", &[]),
+        ])
+        .expect("table");
+        // 0x5A (Z) < 0x62 (b) < 0xC3 0x89 (E-acute); "Opt" is a prefix of
+        // "Option" and sorts first.
+        assert_eq!(
+            names(&table),
+            ["A", "Opt", "Option", "Result", "Z", "b", "\u{c9}mile"]
+        );
+    }
+
+    #[test]
+    fn declaration_order_does_not_affect_the_table() {
+        let z = || adt("Z", &[("Z0", 0)]);
+        let a = || adt("A", &[("A0", 1)]);
+        let za = AdtDescriptorTable::with_builtins(vec![z(), a()]).expect("table");
+        let az = AdtDescriptorTable::with_builtins(vec![a(), z()]).expect("table");
+        assert_eq!(za, az);
+        assert_eq!(names(&za), ["A", "Option", "Result", "Z"]);
+        assert_eq!(za.encode_section(), az.encode_section());
+    }
+
+    #[test]
+    fn descriptor_ordinal_is_a_lookup_position_not_identity() {
+        // Adding an unrelated ADT shifts ordinals, but every name still
+        // denotes the same descriptor.
+        let small = AdtDescriptorTable::with_builtins(vec![adt("Z", &[("Z0", 0)])]).expect("table");
+        let large = AdtDescriptorTable::with_builtins(vec![adt("Z", &[("Z0", 0)]), adt("A", &[])])
+            .expect("table");
+        let position = |t: &AdtDescriptorTable, n: &str| {
+            t.descriptors().iter().position(|d| d.name() == n).unwrap()
+        };
+        assert_ne!(position(&small, "Option"), position(&large, "Option"));
+        for name in ["Option", "Result", "Z"] {
+            assert_eq!(find(&small, name), find(&large, name));
+        }
+    }
+
+    #[test]
+    fn variants_keep_declaration_order() {
+        let table =
+            AdtDescriptorTable::with_builtins(vec![adt("E", &[("Zebra", 0), ("Alpha", 0)])])
+                .expect("table");
+        assert_eq!(shape(find(&table, "E")), [("Zebra", 0), ("Alpha", 0)]);
+    }
+
+    #[test]
+    fn duplicate_descriptor_identity_is_rejected() {
+        assert_eq!(
+            AdtDescriptorTable::with_builtins(vec![adt("E", &[]), adt("E", &[])]),
+            Err(AdtDescriptorError::DuplicateDescriptor {
+                name: "E".to_string()
+            })
+        );
+        for builtin in ["Option", "Result"] {
+            assert_eq!(
+                AdtDescriptorTable::with_builtins(vec![adt(builtin, &[])]),
+                Err(AdtDescriptorError::DuplicateDescriptor {
+                    name: builtin.to_string()
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_variant_and_empty_names_are_rejected() {
+        assert_eq!(
+            AdtDescriptor::new("E", vec![variant("A", 0), variant("A", 1)]),
+            Err(AdtDescriptorError::DuplicateVariant {
+                descriptor: "E".to_string(),
+                variant: "A".to_string()
+            })
+        );
+        assert_eq!(
+            AdtDescriptor::new("", vec![]),
+            Err(AdtDescriptorError::EmptyName)
+        );
+        assert_eq!(
+            AdtVariantDescriptor::new("", 0),
+            Err(AdtDescriptorError::EmptyName)
+        );
+    }
+
+    #[test]
+    fn u16_limits_are_enforced_at_construction() {
+        let long = "n".repeat(usize::from(u16::MAX) + 1);
+        assert!(matches!(
+            AdtVariantDescriptor::new(&long, 0),
+            Err(AdtDescriptorError::NameTooLong { .. })
+        ));
+        assert!(AdtVariantDescriptor::new(&long[1..], 0).is_ok());
+
+        let variants = (0..=usize::from(u16::MAX))
+            .map(|i| variant(&format!("V{i}"), 0))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            AdtDescriptor::new("E", variants),
+            Err(AdtDescriptorError::TooManyVariants {
+                descriptor: "E".to_string()
+            })
+        );
+
+        // Two built-ins plus 65534 user descriptors exceed u16::MAX.
+        let users = (0..usize::from(u16::MAX) - 1)
+            .map(|i| adt(&format!("E{i}"), &[]))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            AdtDescriptorTable::with_builtins(users),
+            Err(AdtDescriptorError::TooManyDescriptors)
+        );
+    }
+
+    #[test]
+    fn payload_arity_boundary_encodes_as_u16() {
+        let table =
+            AdtDescriptorTable::with_builtins(vec![adt("W", &[("Max", u16::MAX)])]).expect("table");
+        let bytes = table.encode_section();
+        let tail = [
+            0x01, 0x00, b'W', 0x01, 0x00, 0x03, 0x00, b'M', b'a', b'x', 0xff, 0xff,
+        ];
+        assert!(bytes.ends_with(&tail), "{bytes:?}");
+    }
+
+    #[test]
+    fn adt0_section_bytes_are_exact_for_builtins_only() {
+        let table = AdtDescriptorTable::with_builtins(vec![]).expect("table");
+        #[rustfmt::skip]
+        let expected: Vec<u8> = [
+            &b"ADT0"[..], &[0x02, 0x00],
+            &[0x06, 0x00], b"Option", &[0x02, 0x00],
+                &[0x04, 0x00], b"None", &[0x00, 0x00],
+                &[0x04, 0x00], b"Some", &[0x01, 0x00],
+            &[0x06, 0x00], b"Result", &[0x02, 0x00],
+                &[0x02, 0x00], b"Ok", &[0x01, 0x00],
+                &[0x03, 0x00], b"Err", &[0x01, 0x00],
+        ]
+        .concat();
+        assert_eq!(table.encode_section(), expected);
+    }
+
+    #[test]
+    fn adt0_section_bytes_are_exact_for_a_user_enum() {
+        let table =
+            AdtDescriptorTable::with_builtins(vec![adt("E", &[("A", 0), ("B", 1), ("C", 2)])])
+                .expect("table");
+        #[rustfmt::skip]
+        let expected: Vec<u8> = [
+            &b"ADT0"[..], &[0x03, 0x00],
+            &[0x01, 0x00], b"E", &[0x03, 0x00],
+                &[0x01, 0x00], b"A", &[0x00, 0x00],
+                &[0x01, 0x00], b"B", &[0x01, 0x00],
+                &[0x01, 0x00], b"C", &[0x02, 0x00],
+            &[0x06, 0x00], b"Option", &[0x02, 0x00],
+                &[0x04, 0x00], b"None", &[0x00, 0x00],
+                &[0x04, 0x00], b"Some", &[0x01, 0x00],
+            &[0x06, 0x00], b"Result", &[0x02, 0x00],
+                &[0x02, 0x00], b"Ok", &[0x01, 0x00],
+                &[0x03, 0x00], b"Err", &[0x01, 0x00],
+        ]
+        .concat();
+        assert_eq!(table.encode_section(), expected);
+    }
+
+    #[test]
+    fn d2_header_vocabulary_is_defined_but_not_admitted() {
+        assert_eq!(HEADER_V22.magic, *b"SEMCOD22");
+        assert_eq!(HEADER_V22.rev, 23);
+        assert_eq!(HEADER_V22.epoch, 0);
+        assert_eq!(HEADER_V22.capabilities, HEADER_V21.capabilities);
+        assert_eq!(SEMCODE_ADT_DESCRIPTOR_MIN_REVISION, 23);
+        assert_eq!(ADT_DESCRIPTOR_SECTION_TAG, *b"ADT0");
+        // D2-2 admits the D2 envelope as a whole; until then SEMCOD22 is
+        // neither supported nor decodable.
+        assert!(!supported_headers().contains(&HEADER_V22));
+        assert_eq!(header_spec_from_magic(&MAGIC22), None);
     }
 }
