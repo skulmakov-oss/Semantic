@@ -48,6 +48,15 @@ task:
     (`CompilePipelineError`, `IrError`, `ConfigurationError`) alongside the
     functions that return them. No new facade-owned error type; no other
     `src/**` path is authorized.
+    Repository owner explicit governance authorization (2026-09-28) for a
+    controlled governance-maintenance transition to fix GitHub-hosted Copilot
+    pull-request review when Codebase Memory MCP is unavailable. This
+    authorization permits ONLY `.github/copilot-instructions.md`,
+    `.github/instructions/codebase-workflow.instructions.md`, and
+    `.github/skills/code-review/SKILL.md`. The fallback is read-only,
+    PR-review-only, task-scoped, visible, and does not authorize implementation,
+    repository mutation by the reviewer, or architecture/discovery claims
+    without evidence.
 
 intent:
   summary: >-
@@ -108,9 +117,11 @@ scope:
     - crates/smc-cli/**
     - src/bin/smc.rs
     - src/lib.rs
+    - .github/copilot-instructions.md
+    - .github/instructions/codebase-workflow.instructions.md
+    - .github/skills/code-review/SKILL.md
 
   forbidden_paths:
-    - .github/**
     - apps/**
     - experiments/**
     - src/bin/svm.rs
