@@ -53,6 +53,32 @@ fn validate_executable_imports(program: &Program) -> Result<(), FrontendError> {
     Ok(())
 }
 
+/// Validate first-wave generic arity limit for a function definition (FA-02-002 / #1634, FND-375).
+///
+/// The first-wave generic contract admits at most one type parameter per
+/// definition site. The parser deliberately has no arity limit -- `parse_type_params_with_bounds`
+/// may represent `<T, U, ...>` as raw AST (see `generic_function_two_type_params_are_parsed` /
+/// `function_with_multiple_type_params_mixed_bounds_is_parsed` in `parser.rs`, which pin that
+/// parsing fidelity) -- so admission is enforced here. This applies equally to top-level free
+/// functions and to functions stored as impl methods.
+pub(crate) fn validate_function_generic_arity(
+    func: &Function,
+    arena: &AstArena,
+) -> Result<(), FrontendError> {
+    if func.type_params.len() > 1 {
+        let name = resolve_symbol_name(arena, func.name)?;
+        return Err(FrontendError {
+            pos: 0,
+            message: format!(
+                "function '{name}' declares {} type parameters; first-wave generic \
+                 definitions admit at most one",
+                func.type_params.len()
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn is_numeric_literal_like_expr(expr_id: ExprId, arena: &AstArena) -> bool {
     match arena.expr(expr_id) {
         Expr::NumericLiteral(_) => true,
@@ -343,6 +369,7 @@ fn type_check_function_with_tables(
     adt_table: &AdtTable,
     impl_list: &[ImplDecl],
 ) -> Result<(), FrontendError> {
+    validate_function_generic_arity(func, arena)?;
     if func.params.len() != func.param_defaults.len() {
         return Err(FrontendError {
             pos: 0,
@@ -5366,6 +5393,59 @@ mod tests {
     }
 
     #[test]
+    fn type_check_function_rejects_reserved_application_builtin_name() {
+        // FND-372 regression: type_check_function must enforce reservations
+        // from APPLICATION_BUILTIN_NAMES (e.g. stdout_write) via build_fn_table.
+        let src = r#"
+            fn stdout_write(text: text) {
+                return;
+            }
+        "#;
+        let err = typecheck_single_function_source(src)
+            .expect_err("function named stdout_write must be rejected as reserved");
+        assert!(
+            err.message.contains("stdout_write") && err.message.contains("reserved"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn generic_call_site_recursively_substitutes_type_vars_in_compound_signatures() {
+        // FND-023 regression: recursive type variable substitution in generic
+        // call signatures for compound types like Option(T).
+        let src = r#"
+            fn wrap_opt<T>(x: T) -> Option(T) {
+                return Option::Some(x);
+            }
+
+            fn main() {
+                let v: Option(i32) = wrap_opt(42);
+                let _ = v;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("generic call with Option(T) return must typecheck");
+    }
+
+    #[test]
+    fn type_check_function_preserves_generic_type_params() {
+        // FND-026 regression: generic declarations must preserve their parameter
+        // scope in single-function check.
+        let src = r#"
+            fn identity<T>(x: T) -> T {
+                return x;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        type_check_function(&program)
+            .expect("generic function must preserve type params and pass type_check_function");
+        let table = build_fn_table(&program).expect("table builds");
+        let sig = table.values().next().expect("signature exists");
+        assert_eq!(sig.type_params.len(), 1, "type_params must be preserved");
+    }
+
+    #[test]
     fn type_check_function_admits_generic_parameter_nested_in_compound_type() {
         // (D) Catches a fake repair that only handles a direct top-level
         // TypeVar param but still falls back to non-generic canonicalization
@@ -9567,6 +9647,38 @@ mod tests {
         assert!(
             err.message.contains("generic") || err.message.contains("type param"),
             "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn impl_method_with_two_type_params_is_rejected_by_generic_arity_limit() {
+        // FND-375: generic arity limit (<= 1) must be enforced on functions
+        // stored as impl methods, not only on program.functions.
+        let src = r#"
+            trait Show {
+                fn show(self: MyType) -> i32;
+            }
+
+            record MyType { x: i32 }
+
+            impl Show for MyType {
+                fn show<T, U>(self: MyType) -> i32 {
+                    return 0;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("impl method declaring two type parameters must be rejected");
+        assert!(
+            err.message.contains("show")
+                && err.message.contains("2 type parameters")
+                && err.message.contains("at most one"),
+            "unexpected error message: {}",
             err.message
         );
     }
@@ -14046,6 +14158,7 @@ fn validate_impl_conformance(
     for imp in impls {
         let mut seen_methods = BTreeSet::new();
         for method in &imp.methods {
+            validate_function_generic_arity(method, arena)?;
             if !seen_methods.insert(method.name) {
                 return Err(FrontendError {
                     pos: 0,

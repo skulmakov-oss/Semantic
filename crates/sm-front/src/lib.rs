@@ -689,27 +689,7 @@ pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
                 message: format!("duplicate function '{name}'"),
             });
         }
-        // FA-02-002 / #1634: the first-wave generic contract admits at most
-        // one type parameter per definition site. The parser deliberately
-        // has no arity limit -- `parse_type_params_with_bounds` may
-        // represent `<T, U, ...>` as raw AST (see
-        // generic_function_two_type_params_are_parsed /
-        // function_with_multiple_type_params_mixed_bounds_is_parsed in
-        // parser.rs, which pin that parsing fidelity) -- so admission is
-        // enforced here, at the same table-construction boundary that
-        // already owns the reserved-name and duplicate-name checks above,
-        // rather than truncating to the first parameter or silently
-        // admitting the extras.
-        if f.type_params.len() > 1 {
-            return Err(FrontendError {
-                pos: 0,
-                message: format!(
-                    "function '{name}' declares {} type parameters; first-wave generic \
-                     definitions admit at most one",
-                    f.type_params.len()
-                ),
-            });
-        }
+        typecheck::validate_function_generic_arity(f, &program.arena)?;
         out.insert(
             f.name,
             FnSig {
