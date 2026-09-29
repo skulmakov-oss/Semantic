@@ -1,39 +1,121 @@
-/target
-/target_parser
+# ============================================================
+# Rust
+# ============================================================
+/target/
 **/target/
+/target_parser/
 **/*.rs.bk
+
+# Generated SemCode binary outputs (preserve test vectors and canonical fixtures)
+/out.smc
+/*.smc
+/tmp/**/*.smc
+/target/**/*.smc
+/artifacts/local/**/*.smc
+examples/**/calculator.smc
+!tests/**/*.smc
+!examples/canonical/**/*.smc
+
+# Cargo.lock intentionally tracked for reproducible workspace builds
+
+# ============================================================
+# Python Tooling & Virtual Environments
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+ENV/
+env/
+
+# ============================================================
+# Node / Frontend Tooling
+# ============================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.cache/
+
+# ============================================================
+# IDE / Editor Environments
+# ============================================================
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.zed/
+.obsidian/
+docs/.obsidian/
+
+# ============================================================
+# Operating System Junk
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ============================================================
+# Local AI Agents & Tooling Sessions
+# ============================================================
+/.gemini/
+/.claude/
+/.codex/
+/.cursor/
+/.continue/
+/.aider*
+/.playwright-mcp/
+/.codebase-memory/
+/.ccl/
+.mcp.json
+
+# ============================================================
+# Secrets & Environment Configurations
+# ============================================================
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+
+# ============================================================
+# Logs, Dumps & Ephemeral Outputs
+# ============================================================
+/output*.txt
+/run_log.txt
 *.tmp
 *.temp
-*.smc
-!tests/golden/*.smc
-Cargo.lock
-/.semantic-cache/
-/.ccl/
-/.codebase-memory/
-/.claude/
 /scratch/
 /patch.txt
+
+# ============================================================
+# Semantic Local Development & Workbench Artifacts
+# ============================================================
+.semantic-cache/
+**/.semantic-cache/
 /examples/baseline/
 /lancedb/
 /models/
-
-# Local Workbench job evidence -- created by running the native
-# examples/workbench_semantic app against any project directory
-# (including this repo itself, e.g. during manual testing); per-machine
-# runtime output, not repo content.
 .workbench_evidence/
-
-# Full local Workbench screenshot/drag-verification capture sets. These
-# use the capture pipeline's deliberately uncompressed PNG encoder (see
-# crates/prom-ui-iced-adapter/src/png_encode.rs), so the complete local
-# sets run into the hundreds of MB -- far too large to commit. The
-# manifest/log and a small, real-DEFLATE-compressed representative
-# subset (artifacts/workbench/screenshots/representative/) ARE tracked;
-# only the bulk per-frame captures at the top level of each directory
-# are ignored here.
 /artifacts/workbench/screenshots/*.png
 /artifacts/workbench/drag-verification/*.png
-
-# Ephemeral task context checkpoints (agent-managed task memory, not repository content)
 /.harness/context/
 /.harness/reports/context/
