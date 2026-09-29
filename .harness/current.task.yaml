@@ -48,6 +48,15 @@ task:
     (`CompilePipelineError`, `IrError`, `ConfigurationError`) alongside the
     functions that return them. No new facade-owned error type; no other
     `src/**` path is authorized.
+    Architect explicit governance authorization (2026-09-29, SSF-09 D2-2R3,
+    PR #1963) to allow exactly `docs/roadmap/compatibility_statement.md` in
+    `allowed_paths`, solely to record the D2-2 SemCode V22 compatibility
+    migration required by `docs/spec/semcode.md`'s Backward Compatibility
+    Rule. The same decision extends the existing `src/lib.rs` authority to
+    the D2-2 facade re-exports of the existing sm-format ADT descriptor types
+    (`AdtDescriptor`, `AdtDescriptorTable`, `AdtVariantDescriptor`,
+    `AdtDescriptorError`) and `emit_ir_to_semcode_with_adt_descriptors`; no
+    new facade-owned type. No other `docs/**` path is authorized.
 
 intent:
   summary: >-
@@ -94,6 +103,7 @@ scope:
     - docs/roadmap/public_maturity_snapshot.md
     - docs/roadmap/public_status_model.md
     - docs/roadmap/v1_readiness.md
+    - docs/roadmap/compatibility_statement.md
     - docs/roadmap/stable_foundation/**
     - examples/canonical/**
     - examples/qualification/**

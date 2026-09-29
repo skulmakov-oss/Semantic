@@ -81,6 +81,7 @@ without turning this document into a stable bytecode ISA promise.
 | `SEQUENCE_LEN` | Admitted only when the emitted contract carries `CAP_SEQUENCE_ITERATION` and the header family supports the sequence-iteration contract | Capability-gated | Built-in sequence lowering opcode for the admitted `Sequence(T)` iteration slice. |
 | Effect-oriented host-boundary families such as `GateRead`, `GateWrite`, and `PulseEmit` | Admitted only when the emitted contract matches the required capability envelope | Capability-gated / host-boundary | These opcodes do not define capability policy semantics by themselves. |
 | Ownership transport payloads admitted through `OWN0` | Admitted structurally only when the ownership transport slice is present and well formed | Header and capability consistency required | Covers tuple-only (`SEMCOD11`), direct record-field (`SEMCOD12`), `SequenceIndexStatic` `Borrow`/`Write` (`SEMCOD21`, `CAP_OWNERSHIP_SEQUENCE_PATHS`), and `AdtPayload` `Borrow`-only (`SEMCOD21`, `CAP_OWNERSHIP_ADT_BORROW_PATHS`) ownership transport. `Write(AdtPayload)` is rejected unconditionally under every header, including `SEMCOD21` - not a capability gap. |
+| Descriptor-dependent ADT families: `MAKE_ADT`, `ADT_TAG`, `ADT_GET` | Admitted only under a header revision `>= 23` (`SEMCOD22`), checked against the artifact's own decoded `ADT0` table; rejected with `AdtRequiresDescriptorHeader` under any older header | Descriptor authority (`ADT0`), not a capability bit | See `## ADT Descriptor Admission`. The static `ADT_GET` index check is bounded by the largest variant arity of the type. |
 | Unknown, unsupported, or malformed opcode encodings | Rejected | N/A | Rejection must happen before a successful VM execution path. |
 | Opcode streams that fail operand, jump-target, reachable-control-flow, call-target, closure-function-target, register-budget, string-reference, or section-integrity checks | Rejected | N/A | Direct calls may resolve to declared functions or admitted builtins; closure targets must resolve to declared functions. These are verifier admission failures, not successful runtime executions. |
 
@@ -162,6 +163,55 @@ new `Opcode` variant cannot acquire a revision policy implicitly. This
 function must not imply stronger historical knowledge than the repository has
 actually established. Currently the only family assigned a non-baseline
 minimum revision is `QTruth` (revision `19`, `SEMCOD18`).
+
+The descriptor-dependent ADT opcodes (`MAKE_ADT`, `ADT_TAG`, `ADT_GET`) stay
+baseline in this mapping; their header requirement is the separate
+descriptor-authority rule in `## ADT Descriptor Admission`, which rejects
+with `AdtRequiresDescriptorHeader` rather than `OpcodeRequiresNewerHeader`.
+
+## ADT Descriptor Admission
+
+SSF-09 D2-2. The artifact's decoded `ADT0` table (`DecodedSemCode`'s
+`adt_descriptors`, see `docs/spec/semcode.md` `### ADT0 Descriptor Section`)
+is the only ADT descriptor authority the verifier uses. The verifier never
+reconstructs descriptors from instruction operands, string tables, or
+observed tags; never calls `AdtDescriptorTable::with_builtins`; and never
+uses a descriptor's table position as type identity. An instruction's type
+operand is resolved to the descriptor whose canonical name is byte-equal to
+it.
+
+Rules, in the order they are applied:
+
+1. Section admission (revision `>= 23`). A missing, malformed, duplicated,
+   or non-canonical `ADT0` section is rejected at decode, before any function
+   is verified, with `InvalidAdtDescriptorSection`.
+2. Legacy headers (revision `<= 22`). These artifacts have no descriptor
+   authority. The first `MAKE_ADT`, `ADT_TAG`, or `ADT_GET` opcode byte is
+   rejected with `AdtRequiresDescriptorHeader`, before that instruction's
+   operands are decoded. No descriptor table is inferred for them. This is an
+   intentional compatibility change recorded under `docs/spec/semcode.md`
+   `## Backward Compatibility Rule`.
+3. Under revision `>= 23`, after an ADT instruction's operand shape is
+   decoded:
+   - every form: the type name must name a descriptor in the table, else
+     `UnknownAdtType`;
+   - `MAKE_ADT dst, type, variant, tag, count, regs[count]`: `tag` must be a
+     variant index of that descriptor, else `InvalidAdtDiscriminant`; the
+     encoded variant name must equal that variant's name, else
+     `AdtVariantNameMismatch` (the variant name is validation evidence only,
+     never a second identity); `count` must equal that variant's payload
+     arity exactly, else `AdtPayloadArityMismatch`;
+   - `ADT_TAG dst, src, type`: only the type check above applies. The
+     instruction carries no discriminant, so nothing more is statically
+     provable here;
+   - `ADT_GET dst, src, type, index`: `index` must be below the largest
+     payload arity among the type's variants, else
+     `AdtPayloadIndexOutOfRange`. The runtime variant of `src` is not
+     statically known at this instruction, so this is the strongest static
+     bound; the VM keeps its per-value payload bounds check.
+
+An out-of-range type or variant string reference is rejected by the ordinary
+string-reference check (`InvalidStringReference`).
 
 ## Canonical Instruction Framing
 

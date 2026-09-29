@@ -693,3 +693,47 @@ fn descriptor_aware_ir_emission_admits_user_adts() {
     verify_semcode(&bytes).expect("admitted");
     run_verified_semcode(&bytes).expect("runs");
 }
+
+#[test]
+fn facade_consumers_can_name_and_match_descriptor_errors() {
+    use semantic_language::semcode_format::{
+        AdtDescriptor, AdtDescriptorError, AdtDescriptorTable, AdtVariantDescriptor,
+    };
+    fn table(variant: &str) -> Result<AdtDescriptorTable, AdtDescriptorError> {
+        let e = AdtDescriptor::new("E", vec![AdtVariantDescriptor::new(variant, 0)?])?;
+        AdtDescriptorTable::with_builtins(vec![e])
+    }
+    assert!(table("A").is_ok());
+    assert!(matches!(table(""), Err(AdtDescriptorError::EmptyName)));
+}
+
+// ---- documented compatibility migration --------------------------------------
+
+#[test]
+fn legacy_adt_admission_is_withdrawn_and_recompilation_is_the_migration() {
+    // docs/spec/semcode.md "Backward Compatibility Rule": D2-2 withdraws
+    // verifier admission of descriptor-dependent ADT opcodes under legacy
+    // headers; non-ADT legacy artifacts keep their contract.
+    let src = format!("enum E {{\n    A,\n    B(i32),\n}}\n{MAIN}")
+        .replace("    return;", "    let e: E = E::B(1);\n    return;");
+    let current = compile_program_to_semcode(&src).expect("compile");
+    verify_semcode(&current).expect("recompiled V22 artifact is admitted");
+
+    // The same program in its legacy wire form: decodable, never given a
+    // descriptor table, and rejected at its first ADT opcode.
+    let legacy = as_v21(&current);
+    assert_eq!(
+        decode_semcode(&legacy)
+            .expect("still decodable")
+            .adt_descriptors,
+        None
+    );
+    assert_eq!(
+        verify_code(&legacy),
+        VerificationCode::AdtRequiresDescriptorHeader
+    );
+
+    // A legacy artifact without ADT opcodes is unaffected.
+    verify_semcode(&as_v21(&compile_program_to_semcode(MAIN).expect("compile")))
+        .expect("legacy non-ADT artifact still admitted");
+}
