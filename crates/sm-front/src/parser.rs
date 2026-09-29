@@ -1207,6 +1207,10 @@ impl<'a> Parser<'a> {
         }
         if self.eat(TokenKind::KwLoop) {
             let body = self.parse_block()?;
+            if self.eat(TokenKind::Semi) {
+                let loop_expr = self.arena.alloc_expr(Expr::Loop(LoopExpr { body }));
+                return Ok(self.arena.alloc_stmt(Stmt::Expr(loop_expr)));
+            }
             return Ok(self.arena.alloc_stmt(Stmt::Loop { body }));
         }
         if self.eat(TokenKind::KwGuard) {

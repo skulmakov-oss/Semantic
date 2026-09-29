@@ -138,7 +138,9 @@ qualified mask, delta, tile-map, bank-helper, and qualification surfaces.
 Ambiguous names are documented compatibility names before any removal or
 renaming. A change to encoding, masks, delta meaning, tile layout, truth-map
 outputs, or compatibility names requires a dedicated issue, migration note,
-and regression evidence.
+and regression evidence. Any change that alters legacy VM execution behavior or
+source semantics constitutes a breaking change and requires explicit
+repository-owner authorization, a dedicated issue, migration note, and regression evidence.
 
 ## 5. Feature guarantees
 

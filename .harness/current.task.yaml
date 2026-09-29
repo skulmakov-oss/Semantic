@@ -55,8 +55,16 @@ task:
     Rule. The same decision extends the existing `src/lib.rs` authority to
     the D2-2 facade re-exports of the existing sm-format ADT descriptor types
     (`AdtDescriptor`, `AdtDescriptorTable`, `AdtVariantDescriptor`,
-    `AdtDescriptorError`) and `emit_ir_to_semcode_with_adt_descriptors`; no
     new facade-owned type. No other `docs/**` path is authorized.
+    Repository owner explicit governance authorization (2026-09-30, Issue #1966)
+    to allow the exact doc paths required by REM-003 and REM-023:
+    `docs/language/semantic_command_lexicon.md`,
+    `docs/language/semantic_hello_verifier_admission.md`,
+    `docs/research/quad_logic_engineering_decisions_v0_1.md`,
+    `docs/roadmap/core_quad/quad_tile128_layout_boundary.md`,
+    `docs/roadmap/core_quad/v1_compatibility_rollout.md`,
+    `docs/roadmap/first_wave_map_surface.md`
+    in `allowed_paths` for the Ledger Consolidation Phase 1 (#1966) doc reconciliation.
 
 intent:
   summary: >-
@@ -105,6 +113,12 @@ scope:
     - docs/roadmap/v1_readiness.md
     - docs/roadmap/compatibility_statement.md
     - docs/roadmap/stable_foundation/**
+    - docs/language/semantic_command_lexicon.md
+    - docs/language/semantic_hello_verifier_admission.md
+    - docs/research/quad_logic_engineering_decisions_v0_1.md
+    - docs/roadmap/core_quad/quad_tile128_layout_boundary.md
+    - docs/roadmap/core_quad/v1_compatibility_rollout.md
+    - docs/roadmap/first_wave_map_surface.md
     - examples/canonical/**
     - examples/qualification/**
     - tests/**

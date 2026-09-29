@@ -77,6 +77,18 @@ pub fn lower_hello_checked_file(
             "only the canonical verbose Hello shape is admitted for IR lowering",
         ));
     }
+    let body = &checked.file.entry.body;
+    let canonical = body.len() == 4
+        && matches!(&body[0], HelloStmt::State(_))
+        && matches!(&body[1], HelloStmt::Require(_))
+        && matches!(&body[2], HelloStmt::Observe(_))
+        && matches!(&body[3], HelloStmt::Complete(_));
+    if !canonical {
+        return Err(FrontendError::syntax(
+            0,
+            "only the canonical verbose Hello shape is admitted for IR lowering",
+        ));
+    }
 
     let entry = lower_entry(&checked.file.entry)?;
     Ok(HelloIrModule { entry })
@@ -130,5 +142,38 @@ impl From<HelloQuadLit> for HelloIrQuadLit {
             HelloQuadLit::N => HelloIrQuadLit::N,
             HelloQuadLit::S => HelloIrQuadLit::S,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sm_front::hello_parser::HelloFile;
+    use sm_front::hello_sema::HelloSemaReport;
+
+    #[test]
+    fn fnd_120_lower_hello_revalidates_canonical_shape_structurally() {
+        let file = HelloFile {
+            entry: HelloEntry {
+                name: "Hello".to_string(),
+                body: vec![],
+            },
+        };
+        let checked = HelloCheckedFile {
+            file,
+            report: HelloSemaReport {
+                canonical_shape: true,
+                architecture_bearing: true,
+                ..Default::default()
+            },
+        };
+        let err = lower_hello_checked_file(&checked)
+            .expect_err("empty body with canonical_shape=true must reject structurally");
+        assert!(
+            err.message
+                .contains("only the canonical verbose Hello shape is admitted"),
+            "got: {}",
+            err.message
+        );
     }
 }

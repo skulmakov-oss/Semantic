@@ -717,11 +717,11 @@ The current source contract does not yet claim stable support for:
 - collections as first-class language forms
 - generics or trait-like abstraction
 - exceptions or Python-style dynamic execution
+- concurrency-oriented source constructs
 
 Current active collections checkpoint on `main`:
 
 - `docs/roadmap/language_maturity/collections_surface_full_scope.md`
-- concurrency-oriented source constructs
 
 ## Contract Rule
 
