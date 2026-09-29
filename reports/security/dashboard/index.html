@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Semantic Project Health Ledger — Governance & Audit Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="app-sidebar">
+      <div class="sidebar-header">
+        <span class="brand-badge">Audit Baseline</span>
+        <h1 class="brand-title">Semantic Ledger</h1>
+        <div class="brand-subtitle">Health & Debt Governance</div>
+      </div>
+      <nav class="sidebar-nav">
+        <a class="nav-item active" data-view="overview">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <span>Overview</span>
+          </div>
+        </a>
+        <a class="nav-item" data-view="findings">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>Findings</span>
+          </div>
+          <span class="nav-badge" id="badge-count-findings">813</span>
+        </a>
+        <a class="nav-item" data-view="root-causes">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+            <span>Root Causes</span>
+          </div>
+          <span class="nav-badge" id="badge-count-root-causes">29</span>
+        </a>
+        <a class="nav-item" data-view="remediation">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span>Remediation Queue</span>
+          </div>
+          <span class="nav-badge" id="badge-count-remediation">27</span>
+        </a>
+        <a class="nav-item" data-view="pr-coverage">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
+            <span>PR Coverage</span>
+          </div>
+          <span class="nav-badge" id="badge-count-prs">1477</span>
+        </a>
+        <a class="nav-item" data-view="review-threads">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Review Threads</span>
+          </div>
+          <span class="nav-badge" id="badge-count-threads">819</span>
+        </a>
+        <a class="nav-item" data-view="ssf">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v1"/><path d="M18 8h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-4"/></svg>
+            <span>SSF Mapping</span>
+          </div>
+          <span class="nav-badge">813</span>
+        </a>
+        <a class="nav-item" data-view="security">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <span>Security & Privacy</span>
+          </div>
+          <span class="nav-badge" id="badge-count-security">120</span>
+        </a>
+        <a class="nav-item" data-view="metadata">
+          <div class="nav-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <span>Metadata & Audit</span>
+          </div>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div>skulmakov-oss/Semantic</div>
+        <div>Baseline: e41ff311</div>
+      </div>
+    </aside>
+
+    <!-- Main Content Body -->
+    <main class="app-main">
+      <!-- Header Bar -->
+      <header class="app-header">
+        <div class="header-left">
+          <h2 class="page-title" id="page-title">Executive Overview</h2>
+          <div class="header-meta">
+            <div class="meta-pill">
+              <span class="status-indicator-dot"></span>
+              <span>LEDGER v1.0 FROZEN</span>
+            </div>
+            <div class="meta-pill">
+              <span>SHA: e41ff311</span>
+            </div>
+            <div class="meta-pill" id="pill-integrity">
+              <span>INTEGRITY: 100% PASS</span>
+            </div>
+          </div>
+        </div>
+        <div class="header-right">
+          <button class="btn-theme-toggle" id="btn-theme-toggle" title="Toggle dark/light theme">
+            <span id="theme-icon">☀️</span>
+            <span id="theme-label">Light Mode</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- ===================================================================
+           VIEW 1: OVERVIEW DASHBOARD
+           =================================================================== -->
+      <section class="pane active" id="pane-overview">
+        <!-- KPI Metrics Grid -->
+        <div class="kpi-grid">
+          <div class="kpi-card highlight-danger" style="cursor:pointer;" onclick="app.navigateTo('findings', { status: 'STILL_PRESENT,PARTIALLY_FIXED' })">
+            <div class="kpi-card-header">
+              <span>Confirmed Active Debt</span>
+              <span class="badge badge-still-present">ACTION REQUIRED</span>
+            </div>
+            <div class="kpi-value" id="kpi-active-debt">224</div>
+            <div class="kpi-subtext">220 STILL_PRESENT + 4 PARTIALLY_FIXED</div>
+          </div>
+
+          <div class="kpi-card highlight-info" style="cursor:pointer;" onclick="app.navigateTo('root-causes', { status: 'ACTIVE' })">
+            <div class="kpi-card-header">
+              <span>Active Root Causes</span>
+              <span class="badge badge-sev-low">27 ACTIVE</span>
+            </div>
+            <div class="kpi-value" id="kpi-root-causes">27</div>
+            <div class="kpi-subtext">Out of 29 total architectural causes</div>
+          </div>
+
+          <div class="kpi-card highlight-warning" style="cursor:pointer;" onclick="app.navigateTo('remediation')">
+            <div class="kpi-card-header">
+              <span>Remediation PR Packages</span>
+              <span class="badge badge-sev-medium">QUEUE READY</span>
+            </div>
+            <div class="kpi-value" id="kpi-rem-packages">27</div>
+            <div class="kpi-subtext">REM-001 through REM-027 (avg 8.3/PR)</div>
+          </div>
+
+          <div class="kpi-card highlight-success" style="cursor:pointer;" onclick="app.navigateTo('findings', { status: 'FIXED_LATER' })">
+            <div class="kpi-card-header">
+              <span>Historical Fixed Later</span>
+              <span class="badge badge-fixed-later">RESOLVED</span>
+            </div>
+            <div class="kpi-value" id="kpi-fixed-later">440</div>
+            <div class="kpi-subtext">54.1% of all historical review findings</div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-card-header">
+              <span>Total Candidate Findings</span>
+              <span class="badge">100% AUDITED</span>
+            </div>
+            <div class="kpi-value" id="kpi-total-findings">813</div>
+            <div class="kpi-subtext">224 active / 589 non-active</div>
+          </div>
+
+          <div class="kpi-card" style="cursor:pointer;" onclick="app.navigateTo('security')">
+            <div class="kpi-card-header">
+              <span>Security & Privacy</span>
+              <span class="badge badge-sec-boundary">0 SECRETS</span>
+            </div>
+            <div class="kpi-value">120</div>
+            <div class="kpi-subtext">1 CodeQL + 119 Privacy Paths</div>
+          </div>
+
+          <div class="kpi-card" style="cursor:pointer;" onclick="app.navigateTo('pr-coverage')">
+            <div class="kpi-card-header">
+              <span>PR Review Coverage</span>
+              <span class="badge">100% INGESTED</span>
+            </div>
+            <div class="kpi-value">1,477</div>
+            <div class="kpi-subtext">1,372 merged + 105 closed-unmerged</div>
+          </div>
+
+          <div class="kpi-card" style="cursor:pointer;" onclick="app.navigateTo('review-threads')">
+            <div class="kpi-card-header">
+              <span>Review Threads Ingested</span>
+              <span class="badge">819 THREADS</span>
+            </div>
+            <div class="kpi-value">819</div>
+            <div class="kpi-subtext">375 unresolved / 444 resolved</div>
+          </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="chart-grid">
+          <!-- Chart 1: Findings by Technical Status -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">Findings by Technical Status (813 Total)</span>
+              <span class="badge badge-sec-none">Click segment to filter</span>
+            </div>
+            <div class="chart-body" id="chart-status-container"></div>
+          </div>
+
+          <!-- Chart 2: Active Debt by Severity -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">Confirmed Active Debt by Severity (224 Active)</span>
+              <span class="badge badge-sec-none">Breakdown</span>
+            </div>
+            <div class="chart-body" id="chart-active-sev-container"></div>
+          </div>
+
+          <!-- Chart 3: Active Debt by Subsystem / Area -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">Active Debt by Subsystem / Architectural Area</span>
+              <span class="badge badge-sec-none">Hotspots</span>
+            </div>
+            <div class="chart-body" id="chart-active-area-container"></div>
+          </div>
+
+          <!-- Chart 4: Review Debt Accumulation Across PR Eras -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">Review Debt Accumulation Across PR Eras</span>
+              <span class="badge badge-sec-none">Total vs Still Present</span>
+            </div>
+            <div class="chart-body" id="chart-pr-era-container"></div>
+          </div>
+
+          <!-- Chart 5: Remediation Packages by Subsystem -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">Remediation PR Packages by Area (27 Packages)</span>
+              <span class="badge badge-sec-none">Distribution</span>
+            </div>
+            <div class="chart-body" id="chart-rem-area-container"></div>
+          </div>
+
+          <!-- Chart 6: SSF Architectural Alignment -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">Relationship to SSF (Semantic Specification Framework)</span>
+              <span class="badge badge-sec-none">813 Findings</span>
+            </div>
+            <div class="chart-body" id="chart-ssf-container"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================
+           VIEW 2: FINDINGS EXPLORER
+           =================================================================== -->
+      <section class="pane" id="pane-findings">
+        <!-- Filter and Search Toolbar -->
+        <div class="toolbar-container">
+          <div class="toolbar-row">
+            <div class="search-box-wrapper">
+              <span class="search-icon">🔍</span>
+              <input type="text" class="search-input" id="search-findings" placeholder="Search finding ID, summary, PR#, file, reviewer, root cause...">
+            </div>
+            <div class="filter-controls">
+              <button class="quick-filter-btn" id="btn-quick-active">Active Debt Only (224)</button>
+              <button class="quick-filter-btn" id="btn-quick-high">High Severity Only</button>
+              <button class="quick-filter-btn" id="btn-quick-security">Security Impact Only</button>
+              <button class="btn-export" id="btn-export-findings">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Export Filtered CSV</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="toolbar-row">
+            <div class="filter-controls">
+              <select class="filter-select" id="filter-findings-status">
+                <option value="">All Statuses</option>
+              </select>
+              <select class="filter-select" id="filter-findings-severity">
+                <option value="">All Severities</option>
+              </select>
+              <select class="filter-select" id="filter-findings-area">
+                <option value="">All Areas</option>
+              </select>
+              <select class="filter-select" id="filter-findings-type">
+                <option value="">All Types</option>
+              </select>
+              <select class="filter-select" id="filter-findings-sec">
+                <option value="">All Security Classes</option>
+              </select>
+              <select class="filter-select" id="filter-findings-ssf">
+                <option value="">All SSF Relations</option>
+              </select>
+              <select class="filter-select" id="filter-findings-rc">
+                <option value="">All Root Causes</option>
+              </select>
+              <select class="filter-select" id="filter-findings-rem">
+                <option value="">All Remediation Groups</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="active-chips-container" id="active-chips-findings"></div>
+        </div>
+
+        <!-- Table View -->
+        <div class="table-responsive">
+          <table class="data-table" id="table-findings">
+            <thead>
+              <tr>
+                <th data-sort="Finding_ID">Finding ID <span class="sort-icon">↕</span></th>
+                <th data-sort="Current_Severity">Severity <span class="sort-icon">↕</span></th>
+                <th data-sort="Current_Status">Status <span class="sort-icon">↕</span></th>
+                <th data-sort="Area">Area <span class="sort-icon">↕</span></th>
+                <th data-sort="Finding_Type">Finding Type <span class="sort-icon">↕</span></th>
+                <th data-sort="Root_Cause_ID">Root Cause <span class="sort-icon">↕</span></th>
+                <th data-sort="Remediation_Group">Remediation <span class="sort-icon">↕</span></th>
+                <th data-sort="PR_Number">Origin PR <span class="sort-icon">↕</span></th>
+                <th data-sort="Security_Class">Security Class <span class="sort-icon">↕</span></th>
+                <th>Summary</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-findings"></tbody>
+          </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="pagination-container" id="pagination-findings"></div>
+      </section>
+
+      <!-- ===================================================================
+           VIEW 3: ROOT CAUSES
+           =================================================================== -->
+      <section class="pane" id="pane-root-causes">
+        <div class="callout-box">
+          <div class="callout-title">Architectural Root Cause Clustering (29 Causes)</div>
+          <div>All 813 historical findings are partitioned across 29 discrete architectural root causes. 27 root causes contain active debt, and 2 are fully resolved. Click any card to drill down into its individual findings or inspect its remediation package.</div>
+        </div>
+
+        <div class="toolbar-container">
+          <div class="toolbar-row">
+            <div class="search-box-wrapper">
+              <span class="search-icon">🔍</span>
+              <input type="text" class="search-input" id="search-root-causes" placeholder="Search root cause ID, title, area, description...">
+            </div>
+            <div class="filter-controls">
+              <select class="filter-select" id="filter-rc-status">
+                <option value="">All Statuses</option>
+                <option value="ACTIVE">Active (27)</option>
+                <option value="RESOLVED">Resolved (2)</option>
+              </select>
+              <select class="filter-select" id="filter-rc-area">
+                <option value="">All Areas</option>
+              </select>
+              <select class="filter-select" id="filter-rc-severity">
+                <option value="">All Severities</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-grid" id="grid-root-causes"></div>
+      </section>
+
+      <!-- ===================================================================
+           VIEW 4: REMEDIATION QUEUE
+           =================================================================== -->
+      <section class="pane" id="pane-remediation">
+        <div class="callout-box">
+          <div class="callout-title">Deterministic Remediation Execution Queue (27 PR Packages)</div>
+          <div>All 224 confirmed active findings are strictly partitioned into 27 cohesive, non-overlapping PR packages (`REM-001` through `REM-027`). The graph below models prerequisites and unblocked packages.</div>
+        </div>
+
+        <!-- Remediation DAG Visualizer -->
+        <div class="dag-container">
+          <div class="dag-header">
+            <span class="chart-title">Remediation Package Dependency DAG</span>
+            <div style="font-size:12px; color:var(--text-muted);">Click node to inspect package and filter findings</div>
+          </div>
+          <div id="remediation-dag-container"></div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar-container">
+          <div class="toolbar-row">
+            <div class="search-box-wrapper">
+              <span class="search-icon">🔍</span>
+              <input type="text" class="search-input" id="search-remediation" placeholder="Search REM ID, title, scope, area...">
+            </div>
+            <div class="filter-controls">
+              <select class="filter-select" id="filter-rem-area">
+                <option value="">All Areas</option>
+              </select>
+              <select class="filter-select" id="filter-rem-priority">
+                <option value="">All Priorities</option>
+              </select>
+              <select class="filter-select" id="filter-rem-tier">
+                <option value="">All Risk Tiers</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-grid" id="grid-remediation"></div>
+      </section>
+
+      <!-- ===================================================================
+           VIEW 5: PR COVERAGE EXPLORER
+           =================================================================== -->
+      <section class="pane" id="pane-pr-coverage">
+        <div class="callout-box">
+          <div class="callout-title">Full Repository PR Coverage (1,477 Closed PRs)</div>
+          <div>Every merged (1,372) and closed-unmerged (105) pull request in Semantic repository history has been ingested, analyzed, and cross-referenced with review threads and audit findings.</div>
+        </div>
+
+        <div class="toolbar-container">
+          <div class="toolbar-row">
+            <div class="search-box-wrapper">
+              <span class="search-icon">🔍</span>
+              <input type="text" class="search-input" id="search-prs" placeholder="Search PR number, title, author...">
+            </div>
+            <div class="filter-controls">
+              <select class="filter-select" id="filter-prs-merged">
+                <option value="">All PRs (1477)</option>
+                <option value="YES">Merged Only (1372)</option>
+                <option value="NO">Unmerged Only (105)</option>
+              </select>
+              <select class="filter-select" id="filter-prs-threads">
+                <option value="">All PRs</option>
+                <option value="YES">Has Review Threads (480)</option>
+                <option value="NO">No Review Threads (997)</option>
+              </select>
+              <select class="filter-select" id="filter-prs-active">
+                <option value="">All PRs</option>
+                <option value="YES">Has Active Findings</option>
+              </select>
+              <button class="btn-export" id="btn-export-prs">Export Filtered PRs</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="table-prs">
+            <thead>
+              <tr>
+                <th data-sort="PR_Number">PR # <span class="sort-icon">↕</span></th>
+                <th data-sort="PR_Title">Title</th>
+                <th data-sort="Merged">Merged <span class="sort-icon">↕</span></th>
+                <th data-sort="Merge_Date">Merge Date <span class="sort-icon">↕</span></th>
+                <th data-sort="Review_Thread_Count">Review Threads <span class="sort-icon">↕</span></th>
+                <th data-sort="Candidate_Finding_Count">Findings <span class="sort-icon">↕</span></th>
+                <th data-sort="Active_Finding_Count">Active Debt <span class="sort-icon">↕</span></th>
+                <th>Coverage Status</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-prs"></tbody>
+          </table>
+        </div>
+
+        <div class="pagination-container" id="pagination-prs"></div>
+      </section>
+
+      <!-- ===================================================================
+           VIEW 6: HISTORICAL REVIEW THREADS
+           =================================================================== -->
+      <section class="pane" id="pane-review-threads">
+        <div class="callout-box" style="border-left-color: #f59e0b;">
+          <div class="callout-title">CRITICAL DISTINCTION: Review State vs. Technical State</div>
+          <div>An <strong>UNRESOLVED</strong> review thread does not mean the bug is still active on <code>main</code> (440 threads were fixed later). Conversely, a <strong>RESOLVED</strong> thread may have been dismissed without actual technical remediation. Always cross-reference the <em>Technical Status</em> on current main.</div>
+        </div>
+
+        <div class="toolbar-container">
+          <div class="toolbar-row">
+            <div class="search-box-wrapper">
+              <span class="search-icon">🔍</span>
+              <input type="text" class="search-input" id="search-threads" placeholder="Search thread ID, PR#, comment, file...">
+            </div>
+            <div class="filter-controls">
+              <select class="filter-select" id="filter-threads-resolved">
+                <option value="">All Review States (819)</option>
+                <option value="NO">Unresolved Threads (375)</option>
+                <option value="YES">Resolved Threads (444)</option>
+              </select>
+              <select class="filter-select" id="filter-threads-status">
+                <option value="">All Technical Statuses</option>
+              </select>
+              <select class="filter-select" id="filter-threads-author">
+                <option value="">All Reviewers</option>
+              </select>
+              <button class="btn-export" id="btn-export-threads">Export Threads CSV</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="table-threads">
+            <thead>
+              <tr>
+                <th data-sort="PR_Number">PR # <span class="sort-icon">↕</span></th>
+                <th data-sort="Thread_ID">Thread ID <span class="sort-icon">↕</span></th>
+                <th data-sort="Thread_Resolved">Review State <span class="sort-icon">↕</span></th>
+                <th data-sort="Current_Status">Technical Status <span class="sort-icon">↕</span></th>
+                <th data-sort="Review_Author">Reviewer <span class="sort-icon">↕</span></th>
+                <th data-sort="File">File & Line</th>
+                <th data-sort="Mapped_Finding_ID">Mapped Finding <span class="sort-icon">↕</span></th>
+                <th>Comment Summary</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-threads"></tbody>
+          </table>
+        </div>
+
+        <div class="pagination-container" id="pagination-threads"></div>
+      </section>
+
+      <!-- ===================================================================
+           VIEW 7: SSF MAPPING
+           =================================================================== -->
+      <section class="pane" id="pane-ssf">
+        <div class="callout-box" style="border-left-color: #10b981;">
+          <div class="callout-title">Zero SSF Logical Contradictions Verified</div>
+          <div>All 813 findings are classified against the Semantic Specification Framework (SSF). Exactly 0 findings marked <code>STILL_PRESENT</code> are incorrectly marked <code>FIXED_BY_SSF</code>. Active findings within SSF scope are correctly identified as <code>RELATED_TO_SSF</code>.</div>
+        </div>
+
+        <div class="toolbar-container">
+          <div class="toolbar-row">
+            <div class="search-box-wrapper">
+              <span class="search-icon">🔍</span>
+              <input type="text" class="search-input" id="search-ssf" placeholder="Search finding ID, SSF issue, relation, milestone...">
+            </div>
+            <div class="filter-controls">
+              <select class="filter-select" id="filter-ssf-relation">
+                <option value="">All SSF Relations</option>
+              </select>
+              <select class="filter-select" id="filter-ssf-status">
+                <option value="">All Finding Statuses</option>
+              </select>
+              <button class="btn-export" id="btn-export-ssf">Export SSF CSV</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="table-ssf">
+            <thead>
+              <tr>
+                <th data-sort="Finding_ID">Finding ID <span class="sort-icon">↕</span></th>
+                <th data-sort="Origin_PR">Origin PR <span class="sort-icon">↕</span></th>
+                <th data-sort="SSF_Relation">SSF Milestone / Scope <span class="sort-icon">↕</span></th>
+                <th data-sort="Relation_Type">Relation Type <span class="sort-icon">↕</span></th>
+                <th data-sort="Status">Technical Status <span class="sort-icon">↕</span></th>
+                <th data-sort="SSF_Issue">SSF Issue / PR</th>
+                <th>Evidence & Notes</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-ssf"></tbody>
+          </table>
+        </div>
+
+        <div class="pagination-container" id="pagination-ssf"></div>
+      </section>
+
+      <!-- ===================================================================
+           VIEW 8: SECURITY & PRIVACY
+           =================================================================== -->
+      <section class="pane" id="pane-security">
+        <!-- Security KPIs -->
+        <div class="kpi-grid">
+          <div class="kpi-card highlight-success">
+            <div class="kpi-card-header">
+              <span>Secret / Token Exposures</span>
+              <span class="badge badge-fixed-later">ZERO LEAKS</span>
+            </div>
+            <div class="kpi-value">0</div>
+            <div class="kpi-subtext">All 1,477 PR diffs & bodies clean</div>
+          </div>
+
+          <div class="kpi-card highlight-warning">
+            <div class="kpi-card-header">
+              <span>CodeQL Alerts</span>
+              <span class="badge badge-sev-medium">CWE-532</span>
+            </div>
+            <div class="kpi-value">1</div>
+            <div class="kpi-subtext">SEC-001 (PR #1872 cleartext session_id)</div>
+          </div>
+
+          <div class="kpi-card highlight-info">
+            <div class="kpi-card-header">
+              <span>Privacy Path Artifacts</span>
+              <span class="badge badge-sev-low">MONITORED</span>
+            </div>
+            <div class="kpi-value">119</div>
+            <div class="kpi-subtext">Local path references across 58 PRs</div>
+          </div>
+
+          <div class="kpi-card highlight-danger">
+            <div class="kpi-card-header">
+              <span>Security-Impact Findings</span>
+              <span class="badge badge-still-present">GOVERNANCE</span>
+            </div>
+            <div class="kpi-value" id="kpi-sec-impact">19</div>
+            <div class="kpi-subtext">Filesystem, Capability, Verifier gates</div>
+          </div>
+        </div>
+
+        <div class="callout-box">
+          <div class="callout-title">Security & Privacy Governance Separation</div>
+          <div><strong>Security Impact:</strong> Real architectural boundary and integrity concerns (Filesystem, Confidentiality, Capability gates).<br>
+          <strong>Privacy:</strong> Redacted local workspace / system paths left in historical PR bodies. All 119 items have full provenance across 58 PRs with zero usernames displayed.</div>
+        </div>
+
+        <div class="toolbar-container">
+          <div class="toolbar-row">
+            <div class="search-box-wrapper">
+              <span class="search-icon">🔍</span>
+              <input type="text" class="search-input" id="search-sec" placeholder="Search security ID, PR#, category, location, pattern...">
+            </div>
+            <div class="filter-controls">
+              <select class="filter-select" id="filter-sec-category">
+                <option value="">All Categories</option>
+                <option value="CODEQL_CONFIDENTIALITY_ALERT">CodeQL Alert (1)</option>
+                <option value="PRIVACY_PATH_LEAK">Privacy Path Leaks (119)</option>
+              </select>
+              <select class="filter-select" id="filter-sec-type">
+                <option value="">All Pattern Types</option>
+              </select>
+              <button class="btn-export" id="btn-export-sec">Export Security CSV</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="table-sec">
+            <thead>
+              <tr>
+                <th data-sort="Security_ID">Security ID <span class="sort-icon">↕</span></th>
+                <th data-sort="Category">Category <span class="sort-icon">↕</span></th>
+                <th data-sort="Severity">Severity <span class="sort-icon">↕</span></th>
+                <th data-sort="PR_Number">PR # <span class="sort-icon">↕</span></th>
+                <th data-sort="Pattern_Type">Pattern Type <span class="sort-icon">↕</span></th>
+                <th data-sort="Location">Location</th>
+                <th>Redacted Evidence</th>
+                <th data-sort="Current_Status">Status <span class="sort-icon">↕</span></th>
+                <th>Recommended Action</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-sec"></tbody>
+          </table>
+        </div>
+
+        <div class="pagination-container" id="pagination-sec"></div>
+      </section>
+
+      <!-- ===================================================================
+           VIEW 9: METADATA & GOVERNANCE
+           =================================================================== -->
+      <section class="pane" id="pane-metadata">
+        <div class="callout-box">
+          <div class="callout-title">Source of Truth & Audit Lineage</div>
+          <div>This dashboard is a client-side analytical projection of the frozen <code>reports/security/Semantic_Project_Health_Ledger.xlsx</code>. The raw immutable audit evidence resides in <code>historical_pr_review_audit.csv</code>. Any changes must flow through the deterministic generator.</div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-card-header">Baseline Commit</div>
+            <div class="kpi-value" style="font-size:18px;">e41ff311</div>
+            <div class="kpi-subtext">origin/main audit target</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-card-header">Ledger Version</div>
+            <div class="kpi-value" style="font-size:18px;">v1.0 FROZEN</div>
+            <div class="kpi-subtext">2026-09-29 Reconciliation</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-card-header">Audit Scope</div>
+            <div class="kpi-value" style="font-size:18px;">1,477 PRs</div>
+            <div class="kpi-subtext">819 threads, 813 findings</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-card-header">Integrity Checksum</div>
+            <div class="kpi-value" style="font-size:18px;">PASS (0 Drift)</div>
+            <div class="kpi-subtext">Zero foreign key / severity drift</div>
+          </div>
+        </div>
+
+        <div class="chart-card" style="margin-bottom:24px;">
+          <div class="chart-header">
+            <span class="chart-title">Workbook Metadata Attributes</span>
+          </div>
+          <div id="metadata-key-value-list" style="font-family:var(--font-mono); font-size:12px; line-height:1.8;"></div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">Canonical Enumerations & Dictionaries</span>
+          </div>
+          <div id="dictionaries-list" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px;"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ===================================================================
+       SLIDE-OVER DETAIL DRAWER
+       =================================================================== -->
+  <div class="drawer-backdrop" id="drawer-backdrop"></div>
+  <aside class="detail-drawer" id="detail-drawer">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <span class="drawer-id" id="drawer-id">FND-001</span>
+        <span class="badge" id="drawer-badge-status">STILL_PRESENT</span>
+        <span class="badge" id="drawer-badge-sev">HIGH</span>
+      </div>
+      <div class="drawer-actions">
+        <button class="btn-drawer-action" id="btn-drawer-copy-link" title="Copy entity hash link">Copy Link</button>
+        <a class="btn-drawer-action" id="btn-drawer-gh-link" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>
+        <button class="btn-close-drawer" id="btn-close-drawer" aria-label="Close drawer">&times;</button>
+      </div>
+    </div>
+    <div class="drawer-body" id="drawer-body">
+      <!-- Dynamic Drawer Content populated by app.js -->
+    </div>
+  </aside>
+
+  <!-- Load Ledger Dataset (offline file:// compatible) -->
+  <script src="ledger_data.js"></script>
+  <!-- Load Main Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
