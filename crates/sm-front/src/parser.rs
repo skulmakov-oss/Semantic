@@ -2,16 +2,16 @@ use crate::lexer::lex_tokens;
 use crate::types::{
     AdtCtorExpr, AdtDecl, AdtMatchPattern, AdtPatternItem, AdtVariant, AstArena, BinaryOp,
     BlockExpr, CallArg, CaptureMode, ClosureCapturePolicy, ClosureLiteral, ClosureValueFamily,
-    ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, Function,
-    GrammarAdmission, IfExpr, IfLetExpr, ImplDecl, IntRangePattern, IterableLoopDesugaring,
-    LogosEntity, LogosEntityField, LogosEntityFieldKind, LogosLaw, LogosProgram, LogosSystem,
-    LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm, MatchPattern, NumericLiteral,
-    Program, QuadVal, RangeExpr, RecordDecl, RecordField, RecordFieldExpr, RecordInitField,
-    RecordLiteralExpr, RecordPatternItem, RecordPatternTarget, RecordUpdateExpr, SchemaDecl,
-    SchemaField, SchemaRole, SchemaShape, SchemaVariant, SchemaVersion, SequenceCollectionFamily,
-    SequenceIndexExpr, SequenceLiteral, SequenceType, Stmt, StmtId, SymbolId, TextLiteral,
-    TextLiteralFamily, Token, TokenKind, TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem,
-    Type, UnaryOp,
+    ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, FrontendErrorDetail,
+    FrontendErrorItem, Function, GrammarAdmission, IfExpr, IfLetExpr, ImplDecl, IntRangePattern,
+    IterableLoopDesugaring, LogosEntity, LogosEntityField, LogosEntityFieldKind, LogosLaw,
+    LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm,
+    MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl, RecordField,
+    RecordFieldExpr, RecordInitField, RecordLiteralExpr, RecordPatternItem, RecordPatternTarget,
+    RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole, SchemaShape, SchemaVariant,
+    SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral, SequenceType,
+    Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind, TraitBound,
+    TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
 };
 use crate::CompilePolicyView;
 use alloc::format;
@@ -215,6 +215,7 @@ impl<'a> Parser<'a> {
                 TokenKind::KwImpl => impls.push(self.parse_impl_decl()?),
                 _ => {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.tokens[i].pos,
                         message:
                             "expected top-level 'Import', 'enum', 'fn', 'impl', 'record', 'schema', 'trait', or role-marked schema declaration"
@@ -330,6 +331,7 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     break Err(FrontendError {
+                        detail: None,
                         pos: self.tokens[i].pos,
                         message:
                             "expected top-level 'Import', 'enum', 'fn', 'impl', 'record', 'schema', 'trait', or role-marked schema declaration"
@@ -439,6 +441,7 @@ impl<'a> Parser<'a> {
                 } else {
                     if default_seen {
                         return Err(FrontendError {
+                            detail: None,
                             pos: self.pos(),
                             message:
                                 "required parameter cannot follow parameter with default value"
@@ -551,6 +554,7 @@ impl<'a> Parser<'a> {
         }
         if params.is_empty() {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "empty type parameter list is not allowed".to_string(),
             });
@@ -589,6 +593,7 @@ impl<'a> Parser<'a> {
             let pos = self.pos();
             self.pop_type_param_scope(params.len());
             return Err(FrontendError {
+                detail: None,
                 pos,
                 message: format!(
                     "trait bounds on type parameters are not supported by {family} declarations"
@@ -752,6 +757,7 @@ impl<'a> Parser<'a> {
                 )
             } else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message:
                         "schema declaration body must use either 'field: type' entries or 'Variant { ... }' entries"
@@ -794,6 +800,7 @@ impl<'a> Parser<'a> {
             "wire" => SchemaRole::Wire,
             _ => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: role_tok.pos,
                     message: "unknown schema role marker".to_string(),
                 })
@@ -833,6 +840,7 @@ impl<'a> Parser<'a> {
         )?;
         if !self.check(TokenKind::Num) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "schema version marker currently requires unsuffixed decimal integer"
                     .to_string(),
@@ -841,6 +849,7 @@ impl<'a> Parser<'a> {
         let number = self.advance();
         let value =
             parse_schema_version_literal(&number.text).map_err(|message| FrontendError {
+                detail: None,
                 pos: number.pos,
                 message,
             })?;
@@ -871,6 +880,7 @@ impl<'a> Parser<'a> {
                 field_name = self.expect_symbol()?;
                 if !self.check(TokenKind::Colon) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message:
                             "record-shaped schema declarations cannot mix field entries with tagged-union variants"
@@ -927,6 +937,7 @@ impl<'a> Parser<'a> {
                 variant_name = self.expect_symbol()?;
                 if !self.check(TokenKind::LBrace) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message:
                             "tagged-union schema declarations cannot mix variant entries with record-shaped fields"
@@ -978,6 +989,7 @@ impl<'a> Parser<'a> {
         let mut payload = Vec::new();
         if self.check(TokenKind::RParen) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "enum constructor payload cannot be empty parentheses; omit '()' for unit variant".to_string(),
             });
@@ -1024,6 +1036,7 @@ impl<'a> Parser<'a> {
             if self.eat(TokenKind::Underscore) {
                 if let_is_mut {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: "let mut currently requires a plain binding target".to_string(),
                     });
@@ -1037,6 +1050,7 @@ impl<'a> Parser<'a> {
                 let value = self.parse_expr()?;
                 if self.check(TokenKind::KwElse) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message:
                             "let-else currently requires tuple destructuring target; discard target is not supported"
@@ -1049,6 +1063,7 @@ impl<'a> Parser<'a> {
             if self.eat(TokenKind::LParen) {
                 if let_is_mut {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: "let mut currently requires a plain binding target".to_string(),
                     });
@@ -1090,6 +1105,7 @@ impl<'a> Parser<'a> {
                     .any(|item| matches!(item, TuplePatternItem::QuadLiteral(_)))
                 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message:
                             "quad literal tuple patterns currently require let-else; plain tuple destructuring bind supports only name/_/ref items"
@@ -1103,6 +1119,7 @@ impl<'a> Parser<'a> {
             if self.check(TokenKind::LBrace) {
                 if let_is_mut {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: "let mut currently requires a plain binding target".to_string(),
                     });
@@ -1137,6 +1154,7 @@ impl<'a> Parser<'a> {
             let value = self.parse_expr()?;
             if self.check(TokenKind::KwElse) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message:
                         "let-else currently requires tuple destructuring target; plain binding target is not supported"
@@ -1217,12 +1235,14 @@ impl<'a> Parser<'a> {
             let condition = self.parse_expr()?;
             if !self.eat(TokenKind::KwElse) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message: "guard clause requires else return branch".to_string(),
                 });
             }
             if !self.eat(TokenKind::KwReturn) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message: "guard clause currently supports only else return".to_string(),
                 });
@@ -1355,6 +1375,7 @@ impl<'a> Parser<'a> {
                     matches!(existing, TuplePatternItem::Bind { name: existing_name, .. } if *existing_name == name)
                 }) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: format!(
                             "tuple destructuring pattern cannot repeat '{}'",
@@ -1378,6 +1399,7 @@ impl<'a> Parser<'a> {
         )?;
         if items.len() < 2 {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "tuple destructuring pattern requires at least 2 items".to_string(),
             });
@@ -1396,6 +1418,7 @@ impl<'a> Parser<'a> {
                 TuplePatternItem::Discard => bind_items.push(None),
                 TuplePatternItem::QuadLiteral(_) => {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message:
                             "quad literal tuple patterns currently require let-else; tuple assignment targets currently support only name/_ items"
@@ -1404,6 +1427,7 @@ impl<'a> Parser<'a> {
                 }
                 TuplePatternItem::Nested(_) => {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message:
                             "nested tuple patterns are not supported in tuple assignment targets"
@@ -1426,6 +1450,7 @@ impl<'a> Parser<'a> {
                 .any(|existing: &RecordPatternItem| existing.field == field)
             {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message: format!(
                         "record destructuring pattern cannot repeat field '{}'",
@@ -1473,6 +1498,7 @@ impl<'a> Parser<'a> {
                     )
                 }) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: format!(
                             "record destructuring pattern cannot repeat binding '{}'",
@@ -1496,6 +1522,7 @@ impl<'a> Parser<'a> {
         )?;
         if items.is_empty() {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "record destructuring pattern requires at least 1 field".to_string(),
             });
@@ -1510,6 +1537,7 @@ impl<'a> Parser<'a> {
         for item in &items {
             if matches!(item.target, RecordPatternTarget::QuadLiteral(_)) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message:
                         "quad literal record field patterns currently require let-else; plain record destructuring bind supports only name/_ items"
@@ -1526,6 +1554,7 @@ impl<'a> Parser<'a> {
     ) -> Result<Option<ExprId>, FrontendError> {
         if !self.eat(TokenKind::KwReturn) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: format!("{feature_name} currently supports only else return"),
             });
@@ -1785,6 +1814,7 @@ impl<'a> Parser<'a> {
         }
         if !self.check(TokenKind::Ident) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "pipeline stage must start with function name or call".to_string(),
             });
@@ -1927,6 +1957,7 @@ impl<'a> Parser<'a> {
             return Ok(self.arena.alloc_expr(Expr::Var(name)));
         }
         Err(FrontendError {
+            detail: None,
             pos: self.pos(),
             message: "expected primary expression".to_string(),
         })
@@ -1957,6 +1988,7 @@ impl<'a> Parser<'a> {
         let mut payload = Vec::new();
         if self.check(TokenKind::RParen) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "enum constructor payload cannot be empty parentheses; omit '()' for unit variant".to_string(),
             });
@@ -1981,6 +2013,7 @@ impl<'a> Parser<'a> {
     fn parse_paren_expr_or_tuple(&mut self) -> Result<ExprId, FrontendError> {
         if self.check(TokenKind::RParen) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "empty tuple literal is not supported in v0".to_string(),
             });
@@ -2084,6 +2117,7 @@ impl<'a> Parser<'a> {
             } else {
                 if named_seen {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: "positional arguments cannot follow named arguments".to_string(),
                     });
@@ -2134,6 +2168,7 @@ impl<'a> Parser<'a> {
     ) -> Result<ExprId, FrontendError> {
         if !self.starts_short_lambda_head() {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: if from_pipeline {
                     "pipeline short lambda must use form '(x => expr)'".to_string()
@@ -2174,6 +2209,7 @@ impl<'a> Parser<'a> {
         )?;
         if self.check(TokenKind::RParen) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "short lambda immediate call requires exactly one argument".to_string(),
             });
@@ -2181,6 +2217,7 @@ impl<'a> Parser<'a> {
         let arg = self.parse_expr()?;
         if self.eat(TokenKind::Comma) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "short lambda v0 currently supports exactly one argument".to_string(),
             });
@@ -2285,6 +2322,7 @@ impl<'a> Parser<'a> {
                 self.collect_short_lambda_expr_captures(index_expr.index, scopes, captures)
             }
             Expr::Closure(_) => Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message:
                     "nested first-class closure literals are not yet admitted before M8.4 Wave 2"
@@ -2340,12 +2378,14 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             Expr::IfLet(_) => Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message:
                     "first-class closure literals do not yet admit if-let expressions in the closure body"
                         .to_string(),
             }),
             Expr::Loop(_) => Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message:
                     "first-class closure literals do not yet admit loop expressions in the closure body"
@@ -2405,6 +2445,7 @@ impl<'a> Parser<'a> {
             }
             Stmt::Expr(expr_id) => self.collect_short_lambda_expr_captures(*expr_id, scopes, captures),
             _ => Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message:
                     "first-class closure literals currently support only expression-compatible block forms"
@@ -2468,6 +2509,7 @@ impl<'a> Parser<'a> {
                 self.ensure_short_lambda_expr_capture_free(index_expr.index, scopes)
             }
             Expr::Closure(_) => Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message:
                     "short lambda v0 does not currently allow nested first-class closure values in the lambda body"
@@ -2485,6 +2527,7 @@ impl<'a> Parser<'a> {
                     Ok(())
                 } else {
                     Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: format!(
                             "short lambda v0 is capture-free only; body may not reference non-local '{}'",
@@ -2526,12 +2569,14 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             Expr::IfLet(_) => Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message:
                     "short lambda v0 does not currently allow if-let expressions in the lambda body"
                         .to_string(),
             }),
             Expr::Loop(_) => Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message:
                     "short lambda v0 does not currently allow loop expressions in the lambda body"
@@ -2611,6 +2656,7 @@ impl<'a> Parser<'a> {
             }
             Stmt::Expr(expr_id) => self.ensure_short_lambda_expr_capture_free(*expr_id, scopes),
             _ => Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message:
                     "short lambda body currently supports only expression-compatible block forms"
@@ -2646,6 +2692,7 @@ impl<'a> Parser<'a> {
             let then_block = self.parse_value_block()?;
             if !self.eat(TokenKind::KwElse) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message: "if-let expression requires explicit else branch".to_string(),
                 });
@@ -2662,6 +2709,7 @@ impl<'a> Parser<'a> {
         let then_block = self.parse_value_block()?;
         if !self.eat(TokenKind::KwElse) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "if expression requires explicit else branch".to_string(),
             });
@@ -2695,12 +2743,14 @@ impl<'a> Parser<'a> {
             if self.eat(TokenKind::Underscore) {
                 if self.check(TokenKind::KwIf) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: "default '_' arm in match currently cannot have guard".to_string(),
                     });
                 }
                 if default.is_some() {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: "match cannot have more than one default '_' arm".to_string(),
                     });
@@ -2733,12 +2783,14 @@ impl<'a> Parser<'a> {
             if self.eat(TokenKind::Underscore) {
                 if self.check(TokenKind::KwIf) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: "default '_' arm in match currently cannot have guard".to_string(),
                     });
                 }
                 if default.is_some() {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self.pos(),
                         message: "match cannot have more than one default '_' arm".to_string(),
                     });
@@ -2808,6 +2860,7 @@ impl<'a> Parser<'a> {
                     }
                     if !self.check(TokenKind::Num) {
                         return Err(FrontendError {
+                            detail: None,
                             pos: self.pos(),
                             message: "expected integer literal after '..' in range pattern"
                                 .to_string(),
@@ -2826,6 +2879,7 @@ impl<'a> Parser<'a> {
                 if let Some(suffix) = suffix {
                     if suffix != "i32" && suffix != "u32" {
                         return Err(FrontendError {
+                            detail: None,
                             pos: self.pos(),
                             message: format!(
                                 "integer match pattern does not accept numeric suffix '{}'",
@@ -2858,6 +2912,7 @@ impl<'a> Parser<'a> {
             }));
         }
         Err(FrontendError {
+            detail: None,
             pos: self.pos(),
             message: "expected match pattern: N|F|T|S | _ | Type::Variant | int..int | pat | pat"
                 .to_string(),
@@ -2868,6 +2923,7 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         if self.check(TokenKind::RParen) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "enum match pattern payload cannot be empty parentheses; omit '()' for unit variant".to_string(),
             });
@@ -2888,6 +2944,7 @@ impl<'a> Parser<'a> {
                 });
             } else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message: "enum match payload patterns currently support name/ref name/_ items"
                         .to_string(),
@@ -2927,6 +2984,7 @@ impl<'a> Parser<'a> {
         loop {
             if self.check(TokenKind::RBrace) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message: "value-producing block requires trailing value expression before '}'"
                         .to_string(),
@@ -2940,6 +2998,7 @@ impl<'a> Parser<'a> {
 
             if self.check(TokenKind::KwGuard) || self.check(TokenKind::KwReturn) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message:
                         "value-producing block currently supports only const-bindings, let-bindings, discard binds, and expression statements before the tail value"
@@ -2995,6 +3054,7 @@ impl<'a> Parser<'a> {
                     self_ty.clone()
                 } else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: self_pos,
                         message: "'Self' is only admitted in trait or impl method type positions"
                             .to_string(),
@@ -3158,6 +3218,7 @@ impl<'a> Parser<'a> {
             Type::F64
         } else {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "expected type".to_string(),
             });
@@ -3171,6 +3232,7 @@ impl<'a> Parser<'a> {
         }
         if !base.is_core_numeric_scalar() {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "unit annotation is allowed only on i32, u32, f64, or fx in v0"
                     .to_string(),
@@ -3184,6 +3246,7 @@ impl<'a> Parser<'a> {
     fn parse_paren_type_or_tuple(&mut self) -> Result<Type, FrontendError> {
         if self.check(TokenKind::RParen) {
             return Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "empty tuple type is not supported in v0".to_string(),
             });
@@ -3584,8 +3647,17 @@ impl<'a> Parser<'a> {
 
     fn merge_logos_errors(&self, errors: Vec<FrontendError>) -> FrontendError {
         let pos = errors.first().map(|e| e.pos).unwrap_or(0);
+        // SSF-09 C1A: the merged error keeps every underlying error's own
+        // structured detail, in recovery order - but only if every one has
+        // it; a partial list would silently drop an error.
+        let items: Option<Vec<FrontendErrorItem>> = errors
+            .iter()
+            .map(|e| e.detail.as_ref().map(|d| d.items.clone()))
+            .collect::<Option<Vec<_>>>()
+            .map(|lists| lists.into_iter().flatten().collect());
         let msgs: Vec<String> = errors.into_iter().map(|e| e.message).collect();
         FrontendError {
+            detail: items.map(|items| FrontendErrorDetail { items }),
             pos,
             message: format_multiple_parser_errors("E0200", &msgs),
         }
@@ -3841,7 +3913,7 @@ impl<'a> Parser<'a> {
         &mut self,
         kind: TokenKind,
         msg: &str,
-        code: &str,
+        code: &'static str,
     ) -> Result<Token, FrontendError> {
         if self.check_raw(kind) {
             let t = self.tokens[self.idx].clone();
@@ -3897,6 +3969,7 @@ impl<'a> Parser<'a> {
             Some("fx") => NumericLiteral::Fx(parse_decimal_f64_literal(core, "fx", pos)?),
             Some(_) => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: self.pos(),
                     message: "unsupported numeric literal suffix".to_string(),
                 });
@@ -3934,26 +4007,39 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn error_at_current(&self, msg: &str, code: &str) -> FrontendError {
+    fn error_at_current(&self, msg: &str, code: &'static str) -> FrontendError {
         if let Some(tok) = self.tokens.get(self.idx) {
             self.error_at_token(tok, msg, code)
         } else {
             FrontendError {
+                detail: Some(Self::single_detail(code, msg, self.pos())),
                 pos: self.pos(),
                 message: format!("error[{code}]: {msg}"),
             }
         }
     }
 
-    fn error_at_token(&self, tok: &Token, msg: &str, code: &str) -> FrontendError {
+    fn error_at_token(&self, tok: &Token, msg: &str, code: &'static str) -> FrontendError {
         let line = tok.mark.line.max(1);
         let col = tok.mark.col.max(1);
         let mut sm = SourceMap::new();
         let fid = sm.add_file("<input>", &self.source);
         let src_line = sm.line(fid, line).unwrap_or_default();
         FrontendError {
+            detail: Some(Self::single_detail(code, msg, tok.pos)),
             pos: tok.pos,
             message: format_parser_error_at_input(code, msg, line, col, src_line),
+        }
+    }
+
+    /// SSF-09 C1A: the structured record of one Logos grammar error.
+    fn single_detail(code: &'static str, msg: &str, pos: usize) -> FrontendErrorDetail {
+        FrontendErrorDetail {
+            items: vec![FrontendErrorItem {
+                code,
+                message: msg.to_string(),
+                pos,
+            }],
         }
     }
 
@@ -4022,6 +4108,7 @@ impl<'a> Parser<'a> {
             Ok(())
         } else {
             Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: msg.to_string(),
             })
@@ -4054,6 +4141,7 @@ impl<'a> Parser<'a> {
             Ok(self.arena.intern_symbol(&name))
         } else {
             Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "expected type parameter name".to_string(),
             })
@@ -4066,6 +4154,7 @@ impl<'a> Parser<'a> {
             Ok(self.arena.intern_symbol(&name))
         } else {
             Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: "expected identifier".to_string(),
             })
@@ -4078,6 +4167,7 @@ impl<'a> Parser<'a> {
             Ok(token.trim_matches('"').to_string())
         } else {
             Err(FrontendError {
+                detail: None,
                 pos: self.pos(),
                 message: msg.to_string(),
             })
@@ -4108,6 +4198,7 @@ impl<'a> Parser<'a> {
 fn parse_i64_pattern_bound(text: &str, pos: usize) -> Result<i64, FrontendError> {
     if text.contains('.') {
         return Err(FrontendError {
+            detail: None,
             pos,
             message: "range pattern bound must be an integer literal, not a float".to_string(),
         });
@@ -4115,6 +4206,7 @@ fn parse_i64_pattern_bound(text: &str, pos: usize) -> Result<i64, FrontendError>
     let (core, suffix) = split_numeric_suffix(text);
     if suffix.is_some() {
         return Err(FrontendError {
+            detail: None,
             pos,
             message: "range pattern bound does not accept a type suffix; use a plain integer"
                 .to_string(),
@@ -4123,12 +4215,14 @@ fn parse_i64_pattern_bound(text: &str, pos: usize) -> Result<i64, FrontendError>
     if let Some(hex) = core.strip_prefix("0x").or_else(|| core.strip_prefix("0X")) {
         let digits = strip_digit_separators(hex);
         return i64::from_str_radix(&digits, 16).map_err(|_| FrontendError {
+            detail: None,
             pos,
             message: "invalid hexadecimal range pattern bound".to_string(),
         });
     }
     let digits = strip_digit_separators(core);
     digits.parse::<i64>().map_err(|_| FrontendError {
+        detail: None,
         pos,
         message: format!("invalid integer range pattern bound '{}'", text),
     })
@@ -4150,6 +4244,7 @@ fn strip_digit_separators(text: &str) -> String {
 fn parse_i32_literal(text: &str, pos: usize) -> Result<i32, FrontendError> {
     if text.contains('.') {
         return Err(FrontendError {
+            detail: None,
             pos,
             message: "i32 literal cannot contain decimal point".to_string(),
         });
@@ -4157,12 +4252,14 @@ fn parse_i32_literal(text: &str, pos: usize) -> Result<i32, FrontendError> {
     if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
         let digits = strip_digit_separators(hex);
         return i32::from_str_radix(&digits, 16).map_err(|_| FrontendError {
+            detail: None,
             pos,
             message: "invalid i32 hexadecimal literal".to_string(),
         });
     }
     let digits = strip_digit_separators(text);
     digits.parse::<i32>().map_err(|_| FrontendError {
+        detail: None,
         pos,
         message: "invalid i32 literal".to_string(),
     })
@@ -4171,6 +4268,7 @@ fn parse_i32_literal(text: &str, pos: usize) -> Result<i32, FrontendError> {
 fn parse_u32_literal(text: &str, pos: usize) -> Result<u32, FrontendError> {
     if text.contains('.') {
         return Err(FrontendError {
+            detail: None,
             pos,
             message: "u32 literal cannot contain decimal point".to_string(),
         });
@@ -4178,12 +4276,14 @@ fn parse_u32_literal(text: &str, pos: usize) -> Result<u32, FrontendError> {
     if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
         let digits = strip_digit_separators(hex);
         return u32::from_str_radix(&digits, 16).map_err(|_| FrontendError {
+            detail: None,
             pos,
             message: "invalid u32 hexadecimal literal".to_string(),
         });
     }
     let digits = strip_digit_separators(text);
     digits.parse::<u32>().map_err(|_| FrontendError {
+        detail: None,
         pos,
         message: "invalid u32 literal".to_string(),
     })
@@ -4192,12 +4292,14 @@ fn parse_u32_literal(text: &str, pos: usize) -> Result<u32, FrontendError> {
 fn parse_decimal_f64_literal(text: &str, kind: &str, pos: usize) -> Result<f64, FrontendError> {
     if text.starts_with("0x") || text.starts_with("0X") {
         return Err(FrontendError {
+            detail: None,
             pos,
             message: format!("{kind} literal currently requires decimal form"),
         });
     }
     let digits = strip_digit_separators(text);
     digits.parse::<f64>().map_err(|_| FrontendError {
+        detail: None,
         pos,
         message: format!("invalid {kind} literal"),
     })

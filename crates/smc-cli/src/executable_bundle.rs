@@ -85,6 +85,16 @@ impl From<PrepareSourceError> for String {
 /// rendering contract.
 pub(crate) fn prepare_source(path: &Path) -> Result<(String, PreparedSource), PrepareSourceError> {
     let source = read_raw_source(path).map_err(PrepareSourceError::Read)?;
+    prepare_source_text(source)
+}
+
+/// SSF-09 #1580: the same authority-freezing classification as
+/// [`prepare_source`], over root text the caller already holds (an editor
+/// overlay for an open document). The caller remains responsible for
+/// package admission of the root path, exactly as `read_raw_source` does.
+pub(crate) fn prepare_source_text(
+    source: String,
+) -> Result<(String, PreparedSource), PrepareSourceError> {
     let parser_profile = ParserProfile::foundation_default();
     let tokens = lex(&source).map_err(|error| PrepareSourceError::Lex {
         source: source.clone(),

@@ -1,5 +1,7 @@
 source: crates/sm-verify/src/lib.rs
 #[cfg(feature = "std")]
+pub mod diagnostic_authority;
+#[cfg(feature = "std")]
 pub mod hello_pending_admission;
 #[cfg(feature = "std")]
 pub mod hello_real_semcode_admission;

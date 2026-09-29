@@ -64,9 +64,44 @@ pub enum DiagnosticFamily {
 /// Opaque internal session token identifying an input source.
 ///
 /// Direct external construction is prohibited; minting authority belongs exclusively
-/// to a future canonical source registry/context.
+/// to the canonical [`SourceRegistry`] of one diagnostic session.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId(u64);
+
+/// Canonical per-session minting authority for [`SourceId`] tokens (SSF-09 C1B).
+///
+/// A registry mints a fresh, deterministic, strictly increasing token per
+/// registered source. It carries no host path, URI, or module path semantics:
+/// mapping a token to a canonical logical identity or a transport locator is
+/// the host session's concern, never the carrier's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SourceRegistry {
+    next: u64,
+}
+
+impl SourceRegistry {
+    /// Creates an empty registry whose first minted token is deterministic.
+    pub const fn new() -> Self {
+        Self { next: 0 }
+    }
+
+    /// Mints the next [`SourceId`] of this session.
+    pub fn mint(&mut self) -> SourceId {
+        let id = SourceId(self.next);
+        self.next += 1;
+        id
+    }
+
+    /// Number of sources minted so far.
+    pub const fn len(&self) -> u64 {
+        self.next
+    }
+
+    /// Returns `true` if no source has been minted yet.
+    pub const fn is_empty(&self) -> bool {
+        self.next == 0
+    }
+}
 
 /// Error returned when a machine-sized offset cannot be converted into a 64-bit [`ByteOffset`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -106,6 +141,15 @@ impl SourceRange {
         } else {
             None
         }
+    }
+
+    /// Constructs a [`SourceRange`] from machine-sized bounds.
+    ///
+    /// Returns `None` if either bound overflows `u64` or the range is inverted.
+    pub fn try_from_bounds(start: usize, end: usize) -> Option<Self> {
+        let start = ByteOffset::try_from_usize(start).ok()?;
+        let end = ByteOffset::try_from_usize(end).ok()?;
+        Self::new(start, end)
     }
 
     /// Returns the starting byte offset.
@@ -195,6 +239,29 @@ pub struct Diagnostic {
     pub notes: Vec<DiagnosticNote>,
     pub fix_proposal: Option<FixProposal>,
     pub cause: Option<Box<DiagnosticCause>>,
+}
+
+impl Diagnostic {
+    /// Constructs a diagnostic carrying only its producer-owned identity and
+    /// message; every optional/0..N dimension starts absent/empty.
+    pub fn new(
+        code: DiagnosticCode,
+        severity: DiagnosticSeverity,
+        family: DiagnosticFamily,
+        message: DiagnosticMessage,
+    ) -> Self {
+        Self {
+            code,
+            severity,
+            family,
+            message,
+            source_context: None,
+            related_locations: Vec::new(),
+            notes: Vec::new(),
+            fix_proposal: None,
+            cause: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -343,6 +410,43 @@ mod tests {
             }
             _ => panic!("expected report diagnostic"),
         }
+    }
+
+    #[test]
+    fn source_registry_mints_distinct_deterministic_tokens() {
+        let mut a = SourceRegistry::new();
+        let mut b = SourceRegistry::new();
+        assert!(a.is_empty());
+        let a0 = a.mint();
+        let a1 = a.mint();
+        assert_ne!(a0, a1);
+        assert!(a0 < a1);
+        assert_eq!(a.len(), 2);
+        assert_eq!(b.mint(), a0);
+        assert_eq!(b.mint(), a1);
+    }
+
+    #[test]
+    fn source_range_try_from_bounds_rejects_inversion() {
+        let r = SourceRange::try_from_bounds(3, 7).unwrap();
+        assert_eq!(r.start().as_u64(), 3);
+        assert_eq!(r.end().as_u64(), 7);
+        assert!(SourceRange::try_from_bounds(7, 3).is_none());
+    }
+
+    #[test]
+    fn diagnostic_new_starts_with_absent_optional_dimensions() {
+        let d = Diagnostic::new(
+            DiagnosticCode::try_from_static("E0005").unwrap(),
+            DiagnosticSeverity::Error,
+            DiagnosticFamily::Frontend,
+            DiagnosticMessage::new("unexpected token").unwrap(),
+        );
+        assert!(d.source_context.is_none());
+        assert!(d.related_locations.is_empty());
+        assert!(d.notes.is_empty());
+        assert!(d.fix_proposal.is_none());
+        assert!(d.cause.is_none());
     }
 
     #[test]

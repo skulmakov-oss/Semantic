@@ -107,6 +107,7 @@ mod tests {
     #[test]
     fn test_a_frontend_structural_preservation() {
         let frontend_error = FrontendError {
+            detail: None,
             pos: 42,
             message: "syntax error test".to_string(),
         };
@@ -160,6 +161,7 @@ mod tests {
             message: "resource limit reached".to_string(),
         };
         let frontend_err = FrontendError {
+            detail: None,
             pos: 10,
             message: "resource limit reached".to_string(),
         };
@@ -194,6 +196,7 @@ mod tests {
         use std::error::Error;
 
         let fe = FrontendError {
+            detail: None,
             pos: 1,
             message: "err".to_string(),
         };

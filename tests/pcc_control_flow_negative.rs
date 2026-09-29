@@ -43,7 +43,7 @@ fn pcc_control_flow_negative_fixtures_fail_with_expected_markers() {
         },
         NegativeFixture {
             path: "tests/fixtures/pcc/control_flow/fail/match_missing_fallback.sm",
-            expected_markers: &["E0000", "expected '{'"],
+            expected_markers: &["E0005", "expected '{'"],
         },
         NegativeFixture {
             path: "tests/fixtures/pcc/control_flow/fail/missing_return_path.sm",

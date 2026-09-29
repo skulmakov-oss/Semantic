@@ -163,6 +163,7 @@ pub mod frontend {
         let mut p = parse_program(input)?;
         if p.functions.len() != 1 {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "unexpected trailing tokens after function".to_string(),
             });

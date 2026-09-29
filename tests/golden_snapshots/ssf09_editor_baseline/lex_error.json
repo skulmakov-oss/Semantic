@@ -1,0 +1,42 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "failed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "lex_error.sm",
+      "identity": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "E0004",
+      "severity": "error",
+      "family": "frontend",
+      "message": "unterminated string literal",
+      "source": 0,
+      "range": {
+        "start": {
+          "offset": 30,
+          "line": 2,
+          "column": 19
+        },
+        "end": {
+          "offset": 35,
+          "line": 2,
+          "column": 24
+        }
+      },
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": null
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "failure": null
+}

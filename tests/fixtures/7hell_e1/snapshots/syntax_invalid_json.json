@@ -14,7 +14,7 @@
       "name": "Syntax Hell",
       "key": "syntax",
       "status": "fail",
-      "summary": "code: E0000; category: syntax; summary: expected identifier",
+      "summary": "code: E0005; category: syntax; summary: expected identifier",
       "diagnostic_ids": ["D001"],
       "evidence_ids": [],
       "blocked_by": null
@@ -85,7 +85,7 @@
       "id": "D001",
       "stage": "syntax",
       "kind": "syntax-diagnostic",
-      "code": "E0000",
+      "code": "E0005",
       "category": "syntax",
       "message_needle": "expected identifier",
       "severity": "error",

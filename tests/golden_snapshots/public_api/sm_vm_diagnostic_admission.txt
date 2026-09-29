@@ -1,0 +1,4 @@
+source: crates/sm-vm/src/diagnostic_admission.rs
+pub const RUNTIME_DIAGNOSTIC_CODES: [&str; 7] = [ "R0001", "R0002", "R0003", "R0004", "R0010", "R0020", "R0030", ];
+pub const fn admitted_code(&self) -> Option<&'static str> {
+pub fn to_canonical(&self) -> Option<Diagnostic> {

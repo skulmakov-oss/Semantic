@@ -52,7 +52,9 @@ Current accepted usage forms are:
 - `smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc watch <input.sm> [--metrics] [--color auto|always|never]`
+- `smc check <input.sm|project-root> --format human|json` (SSF-09 canonical path; see `diagnostics_machine_schema_v1.md`)
 - `smc fmt [--check] <path>`
+- `smc lsp [--stdio]` (diagnostics-first language server; see `editor_lsp_baseline.md`)
 - `smc dump-ast <input.sm|project-root>`
 - `smc dump-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]`
 - `smc dump-bytecode <input.sm|project-root> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols]`

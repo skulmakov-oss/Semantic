@@ -12,9 +12,13 @@ mod app;
 #[cfg(feature = "std")]
 mod application_host;
 #[cfg(feature = "std")]
+pub mod canonical_check;
+#[cfg(feature = "std")]
 mod canonical_json;
 #[cfg(feature = "std")]
 mod config;
+#[cfg(feature = "std")]
+pub mod diagnostic_schema;
 #[cfg(feature = "std")]
 mod executable_bundle;
 #[cfg(feature = "std")]
@@ -23,6 +27,8 @@ mod formatter;
 mod hub;
 #[cfg(feature = "std")]
 mod incremental;
+#[cfg(feature = "std")]
+pub mod lsp;
 #[cfg(feature = "std")]
 mod package_manifest;
 #[cfg(feature = "std")]
@@ -68,7 +74,10 @@ pub use config::{
     ConfigParseError, ConfigValidationDiagnostic, ConfigValidationError, ConfigValue,
 };
 #[cfg(feature = "std")]
-pub use formatter::{format_path, format_source_text, FormatterMode, FormatterSummary};
+pub use formatter::{
+    format_path, format_source_checked, format_source_text, FormatRefusal, FormatterMode,
+    FormatterSummary,
+};
 #[cfg(feature = "std")]
 pub use package_manifest::{
     admit_package_entry_module, parse_package_manifest_baseline,

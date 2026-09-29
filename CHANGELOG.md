@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### SSF-09 diagnostics and editor baseline (#1580)
+
+Landed on `main`, not release-promised.
+
+* canonical diagnostic carrier (`sm-diagnostic`) with producer-owned
+  adapters for `sm-front`, `sm-sema`, `sm-verify` (`V0001`-`V0032`) and
+  admitted runtime failures (`R0001`-`R0030`)
+* `smc check --format json`: versioned machine-readable schema
+  `semantic.diagnostics` v1 (`docs/spec/diagnostics_machine_schema_v1.md`)
+* `smc check --format human`: canonical human renderer
+* genuine token-anchored source ranges; absent (never fabricated) where no
+  producer authority exists; the generic `E0000` placeholder is retired in
+  favour of producer codes `E0005`-`E0009` and the Logos parser's own codes
+* canonical source identity from package admission (package + module path
+  relative to `module_root`)
+* `smc lsp`: diagnostics-first language server over stdio with CLI parity,
+  UTF-16 positions, editor overlays, deterministic staleness handling and a
+  formatting bridge (`docs/spec/editor_lsp_baseline.md`)
+* the canonical formatter now refuses any change the canonical lexer cannot
+  prove token-preserving, and writes nothing when it refuses
+
 ## Semantic v1.2.0-beta.1
 
 This is a prerelease candidate (v1.2.0-beta.1). The published stable line remains `v1.1.1`.

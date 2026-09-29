@@ -1,0 +1,80 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "failed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "src/main.sm",
+      "identity": {
+        "package": "demo",
+        "module": "main.sm"
+      }
+    },
+    {
+      "index": 1,
+      "path": "src/util/helper.sm",
+      "identity": {
+        "package": "demo",
+        "module": "util/helper.sm"
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "E0239",
+      "severity": "error",
+      "family": "semantic",
+      "message": "failed to parse module",
+      "source": 1,
+      "range": {
+        "start": {
+          "offset": 46,
+          "line": 3,
+          "column": 19
+        },
+        "end": {
+          "offset": 47,
+          "line": 3,
+          "column": 20
+        }
+      },
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": {
+        "kind": "diagnostic",
+        "diagnostics": [
+          {
+            "code": "E0224",
+            "severity": "error",
+            "family": "frontend",
+            "message": "expected priority number",
+            "source": 1,
+            "range": {
+              "start": {
+                "offset": 46,
+                "line": 3,
+                "column": 19
+              },
+              "end": {
+                "offset": 47,
+                "line": 3,
+                "column": 20
+              }
+            },
+            "related": [],
+            "notes": [],
+            "fix": null,
+            "cause": null
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "failure": null
+}

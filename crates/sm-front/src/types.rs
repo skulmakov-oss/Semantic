@@ -867,6 +867,27 @@ pub enum FrontendErrorKind {
 pub struct FrontendError {
     pub pos: usize,
     pub message: String,
+    /// SSF-09 C1A: structured producer detail, attached only by a grammar
+    /// parser that knows each underlying error's own code, bare message and
+    /// anchor offset (today: the Logos parser, whose `message` is a legacy
+    /// pre-rendered presentation block). `None` means `message` itself is
+    /// the frontend's bare diagnostic text.
+    pub detail: Option<FrontendErrorDetail>,
+}
+
+/// One underlying grammar error of a [`FrontendError`], in producer order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendErrorItem {
+    pub code: &'static str,
+    pub message: String,
+    pub pos: usize,
+}
+
+/// The structured errors behind one [`FrontendError`]; more than one when
+/// the parser recovered past several malformed declarations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendErrorDetail {
+    pub items: Vec<FrontendErrorItem>,
 }
 
 impl FrontendError {
@@ -874,6 +895,7 @@ impl FrontendError {
         Self {
             pos,
             message: message.into(),
+            detail: None,
         }
     }
 
@@ -881,6 +903,7 @@ impl FrontendError {
         Self {
             pos,
             message: format!("policy violation: {}", message.into()),
+            detail: None,
         }
     }
 

@@ -1,0 +1,4 @@
+Entity Broken
+Entity AlsoBroken
+Entity Good:
+    state hp: quad

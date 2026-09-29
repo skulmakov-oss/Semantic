@@ -55,7 +55,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use ton618_core::diagnostics::diagnostic_catalog;
 
-struct CliFsModuleProvider;
+pub(crate) struct CliFsModuleProvider;
 
 impl ModuleProvider for CliFsModuleProvider {
     fn read_module(&self, module_id: &str) -> Result<Vec<u8>, String> {
@@ -81,13 +81,13 @@ impl ModuleProvider for CliFsModuleProvider {
     }
 }
 
-fn ensure_package_module_admission(path: &Path) -> Result<(), String> {
+pub(crate) fn ensure_package_module_admission(path: &Path) -> Result<(), String> {
     admit_package_entry_module(path)
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
-fn cli_profile() -> ParserProfile {
+pub(crate) fn cli_profile() -> ParserProfile {
     ParserProfile::foundation_default()
 }
 
@@ -173,22 +173,70 @@ fn check_root_with_project_authority(
     root_canon: &Path,
     raw_source: &str,
     prepared: PreparedSource,
-    provider: &CliFsModuleProvider,
+    provider: &dyn ModuleProvider,
     parser_profile: &ParserProfile,
 ) -> Result<sm_sema::SemanticReport, sm_sema::SemanticError> {
+    check_root_with_attribution(root_canon, raw_source, prepared, provider, parser_profile).0
+}
+
+/// SSF-09 #1580: which source text the diagnostics of one
+/// [`check_root_with_attribution`] run were produced from. The canonical
+/// check path uses it to bind each diagnostic to a source without
+/// guessing: the answer is fixed by the branch the frozen authority took.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CheckAttribution {
+    /// Project mechanism: a diagnostic belongs to the module named by its
+    /// `provider_module_id`; one without it has no single source.
+    ProviderModules,
+    /// Direct check of the raw root text: every diagnostic belongs to it.
+    RawRoot,
+    /// The checked text was a composed executable bundle, not any one
+    /// source file: no diagnostic can be bound to a source.
+    ComposedBundle,
+}
+
+/// The single dispatch behind `smc check` (legacy and canonical output)
+/// and `smc lsp`, returning its [`CheckAttribution`] alongside the result.
+pub(crate) fn check_root_with_attribution(
+    root_canon: &Path,
+    raw_source: &str,
+    prepared: PreparedSource,
+    provider: &dyn ModuleProvider,
+    parser_profile: &ParserProfile,
+) -> (
+    Result<sm_sema::SemanticReport, sm_sema::SemanticError>,
+    CheckAttribution,
+) {
     match prepared {
-        PreparedSource::LogosOwned(_) => {
-            check_file_with_provider_and_profile(root_canon, provider, parser_profile)
-        }
+        PreparedSource::LogosOwned(_) => (
+            check_file_with_provider_and_profile(root_canon, provider, parser_profile),
+            CheckAttribution::ProviderModules,
+        ),
         PreparedSource::RustLikeOwned(Ok(program)) => {
-            let (effective_source, effective_program) =
-                rustlike_effective_program(root_canon, raw_source, program, parser_profile)
-                    .map_err(bundler_semantic_error)?;
-            check_rustlike_program(&effective_program, &effective_source)
+            match rustlike_effective_program(root_canon, raw_source, program, parser_profile) {
+                Ok((effective_source, effective_program)) => {
+                    let attribution = if effective_source == raw_source {
+                        CheckAttribution::RawRoot
+                    } else {
+                        CheckAttribution::ComposedBundle
+                    };
+                    (
+                        check_rustlike_program(&effective_program, &effective_source),
+                        attribution,
+                    )
+                }
+                Err(message) => (
+                    Err(bundler_semantic_error(message)),
+                    CheckAttribution::ComposedBundle,
+                ),
+            }
         }
         PreparedSource::RustLikeOwned(Err(_))
         | PreparedSource::Ambiguous { .. }
-        | PreparedSource::NoSurfaceClaim => check_source_with_profile(raw_source, parser_profile),
+        | PreparedSource::NoSurfaceClaim => (
+            check_source_with_profile(raw_source, parser_profile),
+            CheckAttribution::RawRoot,
+        ),
     }
 }
 
@@ -233,19 +281,30 @@ fn watch_snapshot(result: Result<sm_sema::SemanticReport, String>) -> String {
 /// own error taxonomy, all plain strings with no `SourceMark`) - so this
 /// stays a plain-message wrapper, not a new structured surface-error
 /// carrier.
+///
+/// SSF-09 C1A: composition failures own the `E0009` code (retired `E0000`
+/// was a generic placeholder). They concern source admission before any
+/// grammar runs, so their family is `Frontend`; they carry no range.
 fn bundler_semantic_error(message: String) -> SemanticError {
     SemanticError {
         diag: SemanticDiagnostic {
             level: DiagLevel::Error,
-            code: "E0000",
+            code: EXECUTABLE_BUNDLE_COMPOSITION_CODE,
             message: message.clone(),
             mark: ton618_core::SourceMark::default(),
             rendered: message,
             provider_module_id: None,
             frontend_error_kind: None,
+            canonical: Box::new(sm_sema::CanonicalAttachment {
+                family: sm_diagnostic::DiagnosticFamily::Frontend,
+                ..sm_sema::CanonicalAttachment::semantic(None)
+            }),
         },
     }
 }
+
+/// `E0009`: executable-bundle source composition failed.
+pub const EXECUTABLE_BUNDLE_COMPOSITION_CODE: &str = "E0009";
 
 fn reject_leading_unknown_flag(input: &str) -> Result<(), String> {
     if input.starts_with('-') {
@@ -259,7 +318,11 @@ pub fn main_entry() -> ExitCode {
     match run(env::args().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{e}");
+            // An empty error means the command already reported its own
+            // failure on stdout (e.g. `smc check --format json`).
+            if !e.is_empty() {
+                eprintln!("{e}");
+            }
             ExitCode::from(1)
         }
     }
@@ -275,6 +338,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "lint" => cmd_lint(&args[1..]),
         "watch" => cmd_watch(&args[1..]),
         "fmt" => cmd_fmt(&args[1..]),
+        "lsp" => cmd_lsp(&args[1..]),
         "dump-ast" => cmd_dump_ast(&args[1..]),
         "dump-ir" => cmd_dump_ir(&args[1..]),
         "dump-bytecode" => cmd_dump_bytecode(&args[1..]),
@@ -699,12 +763,15 @@ fn is_check_result_cache_eligible(prepared: &PreparedSource) -> bool {
 fn cmd_check(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "usage: smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>]"
+            "usage: smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>]\n       smc check <input.sm|project-root> --format human|json"
                 .to_string(),
         );
     }
     let input = args[0].as_str();
     reject_leading_unknown_flag(input)?;
+    if args[1..].iter().any(|arg| arg == "--format") {
+        return cmd_check_canonical(input, &args[1..]);
+    }
     let input_path = Path::new(input);
     let root = if input_path.is_dir() {
         resolve_project_root_check_entry(input_path)?
@@ -901,6 +968,100 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanonicalCheckFormat {
+    Human,
+    Json,
+}
+
+/// SSF-09 #1580: `smc check --format human|json` - the canonical check
+/// path shared with `smc lsp` (`crate::canonical_check`), rendered by the
+/// canonical human renderer (C5) or the versioned machine schema (C6).
+/// Output goes to stdout; the process fails when the check fails or could
+/// not run. The legacy cache/metrics/deny flags are not part of this
+/// contract and are rejected rather than silently ignored.
+fn cmd_check_canonical(input: &str, flags: &[String]) -> Result<(), String> {
+    let mut format = None;
+    let mut i = 0usize;
+    while i < flags.len() {
+        match flags[i].as_str() {
+            "--format" => {
+                if format.is_some() {
+                    return Err("--format given more than once".to_string());
+                }
+                i += 1;
+                format = Some(match flags.get(i).map(String::as_str) {
+                    Some("human") => CanonicalCheckFormat::Human,
+                    Some("json") => CanonicalCheckFormat::Json,
+                    Some(other) => {
+                        return Err(format!(
+                            "unknown --format value '{}' (expected human or json)",
+                            other
+                        ))
+                    }
+                    None => return Err("missing value for --format".to_string()),
+                });
+            }
+            other => {
+                return Err(format!(
+                    "flag '{}' is not supported together with --format",
+                    other
+                ))
+            }
+        }
+        i += 1;
+    }
+    let format = format.ok_or_else(|| "missing value for --format".to_string())?;
+    let request = crate::canonical_check::CheckRequest {
+        entry: PathBuf::from(input),
+        overlay: crate::canonical_check::SourceOverlay::new(),
+        display_base: env::current_dir().ok(),
+        root_display_fallback: Some(input.replace('\\', "/")),
+    };
+    let result = crate::canonical_check::check_canonical(&request);
+    let (rendered, ok) = match (&result, format) {
+        (Ok(report), CanonicalCheckFormat::Json) => (
+            crate::diagnostic_schema::render_json_report(report),
+            report.status == crate::canonical_check::CheckStatus::Passed,
+        ),
+        (Ok(report), CanonicalCheckFormat::Human) => (
+            crate::diagnostic_schema::render_human_report(report),
+            report.status == crate::canonical_check::CheckStatus::Passed,
+        ),
+        (Err(failure), CanonicalCheckFormat::Json) => (
+            crate::diagnostic_schema::render_json_failure(failure),
+            false,
+        ),
+        (Err(failure), CanonicalCheckFormat::Human) => (
+            crate::diagnostic_schema::render_human_failure(failure),
+            false,
+        ),
+    };
+    print!("{rendered}");
+    let _ = io::stdout().flush();
+    if ok {
+        Ok(())
+    } else {
+        Err(String::new())
+    }
+}
+
+/// SSF-09 #1580: `smc lsp [--stdio]` - the diagnostics-first language
+/// server over stdio (`crate::lsp`). `--stdio` is accepted because editor
+/// clients commonly pass it; stdio is the only transport.
+fn cmd_lsp(args: &[String]) -> Result<(), String> {
+    for arg in args {
+        if arg != "--stdio" {
+            return Err(format!("unknown flag '{}'\nusage: smc lsp [--stdio]", arg));
+        }
+    }
+    match crate::lsp::serve_stdio() {
+        crate::lsp::LspExit::Clean => Ok(()),
+        crate::lsp::LspExit::Unclean => Err(String::new()),
+        crate::lsp::LspExit::Framing(message) => Err(format!("smc lsp: protocol error: {message}")),
+    }
 }
 
 fn cmd_watch(args: &[String]) -> Result<(), String> {
@@ -2687,7 +2848,7 @@ mod tests {
     }
 
     #[test]
-    fn lex_failure_keeps_check_e0000_and_direct_e0004_contracts() {
+    fn lex_failure_check_reports_lexer_e0004_and_direct_e0004_contracts() {
         let src = "fn main() {\n    let message: text = \"line one\nline two\";\n}\n";
         let parser_profile = cli_profile();
 
@@ -2700,11 +2861,11 @@ mod tests {
             &parser_profile,
         )
         .expect_err("check rendering must preserve the semantic failure");
-        assert!(check_rendered.contains("Error [E0000]"));
-        assert!(
-            check_rendered.find("Error [E0000]") < check_rendered.find("error[E0004]"),
-            "semantic E0000 must be the outer diagnostic code: {check_rendered}"
-        );
+        // SSF-09 C1A: `check` now relays the lexer's own producer code
+        // instead of wrapping it in the retired generic `E0000`.
+        assert!(check_rendered.contains("Error [E0004]"), "{check_rendered}");
+        assert!(check_rendered.contains("unterminated string literal"));
+        assert!(!check_rendered.contains("E0000"), "{check_rendered}");
 
         let direct_error = lex(src).expect_err("fixture must fail lexing");
         let direct_rendered: String = PrepareSourceError::Lex {
@@ -3362,6 +3523,7 @@ mod tests {
     fn is_check_result_cache_eligible_excludes_every_terminal_outcome() {
         use sm_front::FrontendError;
         let err = || FrontendError {
+            detail: None,
             message: "probe".to_string(),
             pos: 0,
         };
@@ -4736,9 +4898,11 @@ fn usage() -> String {
         "Semantic Language toolchain v0",
         "  smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust] [--opt-level O0|O1] [--debug-symbols] [--metrics]",
         "  smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]",
+        "  smc check <input.sm|project-root> --format human|json",
         "  smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]",
         "  smc watch <input.sm> [--metrics] [--color auto|always|never]",
         "  smc fmt [--check] <path>",
+        "  smc lsp [--stdio]",
         "  smc dump-ast <input.sm>",
         "  smc dump-ir <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
         "  smc dump-bytecode <input.sm> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols]",

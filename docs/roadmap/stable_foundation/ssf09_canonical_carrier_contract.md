@@ -518,3 +518,29 @@ pub struct Diagnostic {
     pub cause: Option<Box<DiagnosticCause>>,
 }
 ```
+
+---
+
+## Implementation status addendum (2026-09-29, `#1580` completion PR)
+
+Appended; the frozen contract above is not rewritten. Under the repository
+owner's explicit `#1580` one-PR completion authorization (recorded in
+`.harness/current.task.yaml`), the migration DAG of section 7 is
+implemented:
+
+| Phase | Implementation |
+|---|---|
+| C0 | `crates/sm-diagnostic` (plus `SourceRegistry` as the sole `SourceId` minting authority, `SourceRange::try_from_bounds`, `Diagnostic::new`) |
+| C1A | `sm-front`: lexer failure records (`LexFailure`), structured Logos error detail (`FrontendErrorDetail`), token-anchored range authority (`diagnostic_authority.rs`) |
+| C1B | `FrontendDiagnostic::to_canonical` |
+| C2 | `SemanticDiagnostic::{family, range, canonical_message, related, frontend_cause}` and `SemanticDiagnostic::to_canonical` |
+| C3A/C3B | `VerificationCode::code_token` (`V0001`-`V0032`, exhaustive match, never `Debug`), `severity()`, `VerificationDiagnostic::to_canonical`, `RejectReport::to_canonical` |
+| C4 | `sm-vm` `diagnostic_admission.rs`: explicit admission table (`R0001`-`R0030`), verifier rejection as a structured `Report` cause |
+| C5 | `smc check --format human` (`smc-cli/src/diagnostic_schema.rs`) |
+| C6 | `semantic.diagnostics` v1 (`docs/spec/diagnostics_machine_schema_v1.md`) |
+
+Non-fabrication (section 8) is enforced by tests and by the mutation
+campaign `tests/ssf09_mutation_campaign.py`. The carrier remains
+`#![no_std]` + `alloc` with zero dependencies; its authorized consumers are
+guarded by `tests/dependency_boundaries.rs`.
+

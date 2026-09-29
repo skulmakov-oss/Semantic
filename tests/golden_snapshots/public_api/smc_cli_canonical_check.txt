@@ -1,0 +1,45 @@
+source: crates/smc-cli/src/canonical_check.rs
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceOverlay {
+pub fn new() -> Self {
+pub fn insert(&mut self, path: &Path, text: String) {
+pub fn remove(&mut self, path: &Path) {
+pub fn get(&self, path: &Path) -> Option<&str> {
+pub fn is_empty(&self) -> bool {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceIdentity {
+pub package: String,
+pub module: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedSource {
+pub id: SourceId,
+pub identity: Option<SourceIdentity>,
+pub display_path: Option<String>,
+pub host_path: Option<PathBuf>,
+pub text: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckStatus {
+Passed,
+Failed,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalCheckReport {
+pub status: CheckStatus,
+pub sources: Vec<CheckedSource>,
+pub diagnostics: Vec<Diagnostic>,
+pub fn source(&self, id: SourceId) -> Option<&CheckedSource> {
+pub fn source_index(&self, id: SourceId) -> Option<usize> {
+pub fn error_count(&self) -> usize {
+pub fn warning_count(&self) -> usize {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostCheckFailure {
+pub message: String,
+#[derive(Debug, Clone, Default)]
+pub struct CheckRequest {
+pub entry: PathBuf,
+pub overlay: SourceOverlay,
+pub display_base: Option<PathBuf>,
+pub root_display_fallback: Option<String>,
+pub fn check_canonical(request: &CheckRequest) -> Result<CanonicalCheckReport, HostCheckFailure> {
+pub fn check_standalone_text(text: &str) -> Result<CanonicalCheckReport, HostCheckFailure> {
+pub fn source_identity(path: &Path) -> Option<SourceIdentity> {
+pub fn line_column(text: &str, offset: usize) -> (usize, usize) {

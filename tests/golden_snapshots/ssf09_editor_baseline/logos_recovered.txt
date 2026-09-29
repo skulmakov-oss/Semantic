@@ -1,0 +1,18 @@
+error[E0239]: failed to parse module
+  --> logos_recovered.sm:1:14
+   |
+ 1 | Entity Broken
+   |              ^
+   = caused by:
+     error[E0211]: expected ':'
+       --> logos_recovered.sm:1:14
+        |
+      1 | Entity Broken
+        |              ^
+        = related: E0211: expected ':'
+          --> logos_recovered.sm:2:18
+           |
+         2 | Entity AlsoBroken
+           |                  ^
+
+check failed: 1 error(s), 0 warning(s)

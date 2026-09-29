@@ -1,0 +1,13 @@
+warning[W0240]: dead law branch detected in 'L': condition is always false
+  --> src/util/helper.sm:4:5
+   |
+ 4 |     When N ->
+   |     ^^^^
+
+warning[W0252]: unused state 'A.x'
+  --> src/util/helper.sm:2:5
+   |
+ 2 |     state x: quad
+   |     ^^^^^
+
+check passed: 0 error(s), 2 warning(s)

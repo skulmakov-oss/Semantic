@@ -1,0 +1,4 @@
+error[E0201]: type mismatch in let 'x': I32 vs Bool
+  --> type_error.sm
+
+check failed: 1 error(s), 0 warning(s)

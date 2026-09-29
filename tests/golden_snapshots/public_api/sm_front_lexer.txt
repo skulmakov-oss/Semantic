@@ -1,0 +1,9 @@
+source: crates/sm-front/src/lexer.rs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LexFailure {
+pub code: &'static str,
+pub detail: String,
+pub range: Option<core::ops::Range<usize>>,
+pub error: FrontendError,
+pub fn lex_tokens(input: &str) -> Result<Vec<Token>, FrontendError> {
+pub fn lex_tokens_with_authority(input: &str) -> Result<Vec<Token>, LexFailure> {

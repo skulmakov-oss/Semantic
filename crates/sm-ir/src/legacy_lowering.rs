@@ -634,6 +634,7 @@ fn callable_family_for_type(ty: &Type) -> Result<CallableValueFamily, CompilePip
         Type::Adt(_) => Ok(CallableValueFamily::Adt),
         Type::Unit => Ok(CallableValueFamily::Unit),
         Type::QVec(_) => Err(CompilePipelineError::Frontend(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "'qvec' has no executable runtime value representation and cannot be used as a \
@@ -693,6 +694,7 @@ fn encode_fx_literal(value: f64) -> Result<i32, FrontendError> {
     let scaled = value * FX_SCALE as f64;
     if !scaled.is_finite() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "fx literal is not finite".to_string(),
         });
@@ -700,6 +702,7 @@ fn encode_fx_literal(value: f64) -> Result<i32, FrontendError> {
     let rounded = scaled.round();
     if rounded < i32::MIN as f64 || rounded > i32::MAX as f64 {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "fx literal is out of range for the v1 fixed-point carrier".to_string(),
         });
@@ -716,6 +719,7 @@ fn try_encode_fx_literal_expr(
             NumericLiteral::I32(value) => value
                 .checked_mul(FX_SCALE)
                 .ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "fx literal is out of range for the v1 fixed-point carrier"
                         .to_string(),
@@ -723,6 +727,7 @@ fn try_encode_fx_literal_expr(
                 .map(Some),
             NumericLiteral::U32(value) => {
                 let value = i32::try_from(*value).map_err(|_| FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "fx literal is out of range for the v1 fixed-point carrier"
                         .to_string(),
@@ -730,6 +735,7 @@ fn try_encode_fx_literal_expr(
                 value
                     .checked_mul(FX_SCALE)
                     .ok_or(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "fx literal is out of range for the v1 fixed-point carrier"
                             .to_string(),
@@ -748,6 +754,7 @@ fn try_encode_fx_literal_expr(
             value
                 .checked_neg()
                 .ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "fx literal is out of range for the v1 fixed-point carrier"
                         .to_string(),
@@ -870,6 +877,7 @@ pub fn lower_expr_to_ir(
 fn ensure_function_is_ir_concrete(func: &Function, arena: &AstArena) -> Result<(), FrontendError> {
     if !func.type_params.is_empty() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "generic function '{}' is admitted by the frontend but is not \
@@ -983,6 +991,7 @@ fn lower_function_to_ir_with_tables(
         )?;
         if cond_ty != Type::Bool {
             return Err(CompilePipelineError::Frontend(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "requires clause condition must be bool in lowering, got {:?}",
@@ -1063,6 +1072,7 @@ fn lower_function_to_ir_with_tables(
             ctx.instrs.push(IrInstr::Ret { src: None });
         } else {
             return Err(CompilePipelineError::Frontend(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "function '{}' may exit without returning {:?}",
@@ -1131,6 +1141,7 @@ fn resolve_explicit_iterable_loop_contract(
             .iter()
             .find(|method| resolve_symbol_name(arena, method.name).ok() == Some("next"))
             .ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: iterable_for_gap_message().to_string(),
             })?;
@@ -1139,12 +1150,14 @@ fn resolve_explicit_iterable_loop_contract(
             || method.params[1].1 != Type::I32
         {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: iterable_for_gap_message().to_string(),
             });
         }
         let Type::Option(item_ty) = &method.ret else {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: iterable_for_gap_message().to_string(),
             });
@@ -1331,6 +1344,7 @@ fn ambiguous_surface_error<L, R>(
         }
     }
     FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "AMBIGUOUS SOURCE SURFACE: this input satisfies both the Logos and RustLike \
@@ -1344,6 +1358,7 @@ fn ambiguous_surface_error<L, R>(
 
 fn no_surface_claim_error() -> FrontendError {
     FrontendError {
+        detail: None,
         pos: 0,
         message: "NO SURFACE CLAIM: this input establishes no top-level evidence for either \
                    the Logos or RustLike grammar"
@@ -3222,6 +3237,7 @@ fn lower_closure_literal_expr(
 ) -> Result<(u16, Type), FrontendError> {
     let Some(Type::Closure(expected_closure)) = expected else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "canonical lowering for first-class closures requires contextual Closure(T -> U) type in M8.4 Wave 3"
@@ -3232,6 +3248,7 @@ fn lower_closure_literal_expr(
         || expected_closure.capture != ClosureCapturePolicy::Immutable
     {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "canonical lowering currently admits only the UnaryDirect immutable closure family in M8.4 Wave 3"
@@ -3243,6 +3260,7 @@ fn lower_closure_literal_expr(
     let mut lifted_env = ScopeEnv::new();
     let mut lifted_instrs = Vec::new();
     let mut local_next = u16::try_from(closure.captures.len() + 1).map_err(|_| FrontendError {
+        detail: None,
         pos: 0,
         message: "closure parameter/capture count exceeds register space".to_string(),
     })?;
@@ -3272,6 +3290,7 @@ fn lower_closure_literal_expr(
 
     for (index, capture) in closure.captures.iter().enumerate() {
         let capture_ty = env.get(*capture).ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "unknown captured value '{}' during closure lowering",
@@ -3287,6 +3306,7 @@ fn lower_closure_literal_expr(
         lifted_instrs.push(IrInstr::StoreVar {
             name: lifted_lowered_locals.bind(arena, *capture)?,
             src: u16::try_from(index).map_err(|_| FrontendError {
+                detail: None,
                 pos: 0,
                 message: "closure capture index exceeds v0 limit".to_string(),
             })?,
@@ -3296,6 +3316,7 @@ fn lower_closure_literal_expr(
     }
 
     let param_reg = u16::try_from(closure.captures.len()).map_err(|_| FrontendError {
+        detail: None,
         pos: 0,
         message: "closure parameter index exceeds v0 limit".to_string(),
     })?;
@@ -3339,6 +3360,7 @@ fn lower_closure_literal_expr(
     )?;
     if body_ty != expected_closure.ret.as_ref().clone() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "lifted closure body type mismatch during lowering: expected {:?}, got {:?}",
@@ -3395,6 +3417,7 @@ fn lower_direct_closure_call_expr(
         || closure_ty.capture != ClosureCapturePolicy::Immutable
     {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "direct invocation lowering currently admits only the UnaryDirect immutable closure family in M8.4 Wave 3"
@@ -3403,6 +3426,7 @@ fn lower_direct_closure_call_expr(
     }
     if args.len() != 1 || args.iter().any(|arg| arg.name.is_some()) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "direct invocation of first-class closure values currently requires exactly one positional argument in M8.4 Wave 3"
@@ -3411,6 +3435,7 @@ fn lower_direct_closure_call_expr(
     }
     if closure_ty.ret.as_ref() == &Type::Unit {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "unit-returning direct closure call '{}' cannot be used as expression value",
@@ -3442,6 +3467,7 @@ fn lower_direct_closure_call_expr(
     )?;
     if arg_ty != closure_ty.param.as_ref().clone() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "closure argument for '{}' has type {:?}, expected {:?}",
@@ -3481,6 +3507,7 @@ fn lower_direct_closure_call_stmt(
         || closure_ty.capture != ClosureCapturePolicy::Immutable
     {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "direct invocation lowering currently admits only the UnaryDirect immutable closure family in M8.4 Wave 3"
@@ -3489,6 +3516,7 @@ fn lower_direct_closure_call_stmt(
     }
     if args.len() != 1 || args.iter().any(|arg| arg.name.is_some()) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "direct invocation of first-class closure values currently requires exactly one positional argument in M8.4 Wave 3"
@@ -3518,6 +3546,7 @@ fn lower_direct_closure_call_stmt(
     )?;
     if arg_ty != closure_ty.param.as_ref().clone() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "closure argument for '{}' has type {:?}, expected {:?}",
@@ -3615,6 +3644,7 @@ fn lower_expr_with_expected(
             };
             if sequence.items.is_empty() && expected_item_ty.is_none() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "empty ordered sequence literal currently requires contextual Sequence(type) in M8.3 Wave 2"
@@ -3643,6 +3673,7 @@ fn lower_expr_with_expected(
                 if let Some(expected_item_ty) = item_ty.as_ref() {
                     if *expected_item_ty != actual_ty {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "ordered sequence literal item type mismatch during lowering: expected {:?}, got {:?}",
@@ -3656,6 +3687,7 @@ fn lower_expr_with_expected(
                 item_regs.push(reg);
             }
             let item_ty = item_ty.ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "ordered sequence literal lowering requires at least one item or contextual Sequence(type)".to_string(),
             })?;
@@ -3704,6 +3736,7 @@ fn lower_expr_with_expected(
             )?;
             if start_ty != Type::I32 {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "range literal currently requires i32 bounds, got {:?}",
@@ -3729,6 +3762,7 @@ fn lower_expr_with_expected(
             )?;
             if end_ty != Type::I32 {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "range literal currently requires i32 bounds, got {:?}",
@@ -3756,6 +3790,7 @@ fn lower_expr_with_expected(
             if let Some(types) = expected_items {
                 if types.len() != items.len() {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "tuple arity mismatch in lowering: expected {}, got {}",
@@ -3796,6 +3831,7 @@ fn lower_expr_with_expected(
             let record = record_table
                 .get(&record_literal.name)
                 .ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unknown record type '{}' in record literal lowering",
@@ -3810,6 +3846,7 @@ fn lower_expr_with_expected(
                     .find(|decl_field| decl_field.name == field.name)
                     .map(|decl_field| decl_field.ty.clone())
                     .ok_or(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "record literal '{}' has no field named '{}' during lowering",
@@ -3841,6 +3878,7 @@ fn lower_expr_with_expected(
                     .get(&decl_field.name)
                     .copied()
                     .ok_or(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "record literal '{}' is missing field '{}' during lowering",
@@ -3877,6 +3915,7 @@ fn lower_expr_with_expected(
             )?;
             let Type::Record(record_name) = base_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "record field access lowering requires record base before '.{}', got {:?}",
@@ -3886,6 +3925,7 @@ fn lower_expr_with_expected(
                 });
             };
             let record = record_table.get(&record_name).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "unknown record type '{}' in field access lowering",
@@ -3898,6 +3938,7 @@ fn lower_expr_with_expected(
                 .enumerate()
                 .find(|(_, field)| field.name == field_expr.field)
                 .ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "record type '{}' has no field named '{}' during lowering",
@@ -3911,6 +3952,7 @@ fn lower_expr_with_expected(
                 src,
                 record_name: resolve_symbol_name(arena, record_name)?.to_string(),
                 index: u16::try_from(index).map_err(|_| FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "record field slot index exceeds v0 limit".to_string(),
                 })?,
@@ -3935,6 +3977,7 @@ fn lower_expr_with_expected(
             )?;
             let Type::Sequence(sequence_ty) = base_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "sequence indexing lowering requires Sequence(type) base before '[...]', got {:?}",
@@ -3960,6 +4003,7 @@ fn lower_expr_with_expected(
             )?;
             if index_ty != Type::I32 {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "sequence indexing currently requires i32 index during lowering, got {:?}",
@@ -3993,6 +4037,7 @@ fn lower_expr_with_expected(
             )?;
             let Type::Record(record_name) = base_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "record copy-with lowering requires record base before 'with', got {:?}",
@@ -4001,6 +4046,7 @@ fn lower_expr_with_expected(
                 });
             };
             let record = record_table.get(&record_name).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "unknown record type '{}' in record copy-with lowering",
@@ -4009,6 +4055,7 @@ fn lower_expr_with_expected(
             })?;
             if update_expr.fields.is_empty() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "record copy-with requires at least one explicit override field"
                         .to_string(),
@@ -4022,6 +4069,7 @@ fn lower_expr_with_expected(
                     .find(|decl_field| decl_field.name == field.name)
                     .map(|decl_field| decl_field.ty.clone())
                     .ok_or(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "record copy-with '{}' has no field named '{}' during lowering",
@@ -4047,6 +4095,7 @@ fn lower_expr_with_expected(
                 )?;
                 if lowered_overrides.insert(field.name, reg).is_some() {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "record copy-with '{}' cannot repeat field '{}' during lowering",
@@ -4068,6 +4117,7 @@ fn lower_expr_with_expected(
                     src: base_reg,
                     record_name: resolve_symbol_name(arena, record_name)?.to_string(),
                     index: u16::try_from(index).map_err(|_| FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "record copy-with slot index exceeds v0 limit".to_string(),
                     })?,
@@ -4133,6 +4183,7 @@ fn lower_expr_with_expected(
             let expected_erased = erased_expected(expected.as_ref());
             if expected_erased == Some(Type::Fx) {
                 let val = try_encode_fx_literal_expr(expr_id, arena)?.ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "expected fx literal".to_string(),
                 })?;
@@ -4143,6 +4194,7 @@ fn lower_expr_with_expected(
                 ))
             } else {
                 let val = i32::try_from(*n).map_err(|_| FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("numeric literal {} does not fit in i32", n),
                 })?;
@@ -4158,6 +4210,7 @@ fn lower_expr_with_expected(
             let expected_erased = erased_expected(expected.as_ref());
             if expected_erased == Some(Type::Fx) {
                 let val = try_encode_fx_literal_expr(expr_id, arena)?.ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "expected fx literal".to_string(),
                 })?;
@@ -4207,6 +4260,7 @@ fn lower_expr_with_expected(
         }
         Expr::Var(name) => {
             let ty = env.get(*name).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("unknown variable '{}'", resolve_symbol_name(arena, *name)?),
             })?;
@@ -4251,6 +4305,7 @@ fn lower_expr_with_expected(
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "if expression condition must be bool".to_string(),
                 });
@@ -4316,6 +4371,7 @@ fn lower_expr_with_expected(
             )?;
             if then_ty != else_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "if expression branch type mismatch in lowering: then {:?}, else {:?}",
@@ -4376,6 +4432,7 @@ fn lower_expr_with_expected(
         Expr::Call(name, args) => {
             if is_builtin_assert_name(*name, arena, fn_table)? {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "assert builtin is statement-only and cannot be used as expression value"
@@ -4386,6 +4443,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "len" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'len' takes exactly one positional argument".to_string(),
                     });
@@ -4413,6 +4471,7 @@ fn lower_expr_with_expected(
                         Ok((dst, Type::I32))
                     }
                     _ => Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'len' expects a Sequence argument, got {:?}",
@@ -4425,6 +4484,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "is_empty" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'is_empty' takes exactly one positional argument"
                             .to_string(),
@@ -4453,6 +4513,7 @@ fn lower_expr_with_expected(
                         Ok((dst, Type::Bool))
                     }
                     _ => Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'is_empty' expects a Sequence argument, got {:?}",
@@ -4466,6 +4527,7 @@ fn lower_expr_with_expected(
             if name_str == "push" || name_str == "prepend" {
                 if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin '{name_str}' takes exactly two positional arguments"
@@ -4490,6 +4552,7 @@ fn lower_expr_with_expected(
                 )?;
                 let Type::Sequence(seq_type) = &seq_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin '{name_str}' first argument must be a Sequence, got {:?}",
@@ -4516,6 +4579,7 @@ fn lower_expr_with_expected(
                 )?;
                 if val_ty != elem_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin '{name_str}' second argument type {:?} does not match \
@@ -4536,6 +4600,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "contains" {
                 if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'contains' takes exactly two positional arguments"
                             .to_string(),
@@ -4559,6 +4624,7 @@ fn lower_expr_with_expected(
                 )?;
                 let Type::Sequence(seq_type) = &seq_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'contains' first argument must be a Sequence, got {:?}",
@@ -4585,6 +4651,7 @@ fn lower_expr_with_expected(
                 )?;
                 if val_ty != elem_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'contains' value type {:?} does not match element type {:?}",
@@ -4600,6 +4667,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "pop" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'pop' takes exactly one positional argument".to_string(),
                     });
@@ -4628,6 +4696,7 @@ fn lower_expr_with_expected(
                         Ok((dst, seq_ty))
                     }
                     _ => Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'pop' expects a Sequence argument, got {:?}",
@@ -4640,6 +4709,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "map_empty" {
                 if !args.is_empty() {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'map_empty' takes no arguments".to_string(),
                     });
@@ -4651,6 +4721,7 @@ fn lower_expr_with_expected(
                     Some(ref t @ Type::Map(_)) => t.clone(),
                     Some(ref other) => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "map_empty() requires a Map(K, V) contextual type, got {:?}",
@@ -4660,6 +4731,7 @@ fn lower_expr_with_expected(
                     }
                     None => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "map_empty() requires a contextual Map(K, V) type; \
                                  use 'let q: Map(K, V) = map_empty()'"
@@ -4675,6 +4747,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "map_contains" {
                 if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'map_contains' takes exactly two positional arguments"
                             .to_string(),
@@ -4698,6 +4771,7 @@ fn lower_expr_with_expected(
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_contains' first argument must be Map, got {:?}",
@@ -4734,6 +4808,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "map_get" {
                 if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'map_get' takes exactly three positional arguments"
                             .to_string(),
@@ -4757,6 +4832,7 @@ fn lower_expr_with_expected(
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_get' first argument must be Map, got {:?}",
@@ -4811,6 +4887,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "map_set" {
                 if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'map_set' takes exactly three positional arguments"
                             .to_string(),
@@ -4834,6 +4911,7 @@ fn lower_expr_with_expected(
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_set' first argument must be Map, got {:?}",
@@ -4891,6 +4969,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "print" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "builtin 'print' takes exactly one positional argument (msg: text)"
@@ -4923,6 +5002,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "to_text" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'to_text' takes exactly one positional argument"
                             .to_string(),
@@ -4959,6 +5039,7 @@ fn lower_expr_with_expected(
                 let expected_arity = if name_str == "qtruth_not" { 1 } else { 2 };
                 if args.len() != expected_arity || args.iter().any(|arg| arg.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin '{name_str}' takes exactly {expected_arity} positional argument{}",
@@ -4986,6 +5067,7 @@ fn lower_expr_with_expected(
                     )?;
                     if arg_ty != Type::Quad {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "builtin '{name_str}' expects quad arguments, got {:?}",
@@ -5020,6 +5102,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "random_seed" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'random_seed' takes exactly one positional argument (seed: i32)"
                             .to_string(),
@@ -5052,6 +5135,7 @@ fn lower_expr_with_expected(
             if resolve_symbol_name(arena, *name)? == "random_next_i32" {
                 if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "builtin 'random_next_i32' takes exactly two positional arguments (lo: i32, hi: i32)"
@@ -5122,6 +5206,7 @@ fn lower_expr_with_expected(
                 );
             } else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("unknown function '{}'", resolve_symbol_name(arena, *name)?),
                 });
@@ -5154,6 +5239,7 @@ fn lower_expr_with_expected(
                 )?;
                 if t != expected_arg_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "arg {} for '{}' has type {:?}, expected {:?}",
@@ -5215,6 +5301,7 @@ fn lower_expr_with_expected(
                         Type::Bool => out.push(IrInstr::BoolNot { dst, src }),
                         _ => {
                             return Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!("operator ! unsupported for {:?}", ty),
                             })
@@ -5233,6 +5320,7 @@ fn lower_expr_with_expected(
                         Ok((src, ty))
                     } else {
                         Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator + unsupported for {:?}", ty),
                         })
@@ -5249,6 +5337,7 @@ fn lower_expr_with_expected(
                         ty.clone()
                     } else {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator - unsupported for {:?}", ty),
                         });
@@ -5323,6 +5412,7 @@ fn lower_expr_with_expected(
             )?;
             if lt != rt {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("operator type mismatch: {:?} vs {:?}", lt, rt),
                 });
@@ -5343,6 +5433,7 @@ fn lower_expr_with_expected(
                     }),
                     _ => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator && unsupported for {:?}", lt),
                         })
@@ -5361,6 +5452,7 @@ fn lower_expr_with_expected(
                     }),
                     _ => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator || unsupported for {:?}", lt),
                         })
@@ -5369,6 +5461,7 @@ fn lower_expr_with_expected(
                 BinaryOp::Implies => {
                     if lt != Type::Quad {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "operator '->' is allowed only for quad".to_string(),
                         });
@@ -5399,6 +5492,7 @@ fn lower_expr_with_expected(
                 BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
                     if lt != Type::I32 || rt != Type::I32 {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message:
                                 "relational lowering currently requires same-family i32 operands"
@@ -5457,12 +5551,14 @@ fn lower_expr_with_expected(
                     }
                     if matches!(lt.measured_parts(), Some((_, _))) && erased_lt != Type::F64 {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator + unsupported for {:?}", lt),
                         });
                     }
                     if erased_lt != Type::F64 {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator + unsupported for {:?}", lt),
                         });
@@ -5493,12 +5589,14 @@ fn lower_expr_with_expected(
                     }
                     if matches!(lt.measured_parts(), Some((_, _))) && erased_lt != Type::F64 {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator - unsupported for {:?}", lt),
                         });
                     }
                     if erased_lt != Type::F64 {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator - unsupported for {:?}", lt),
                         });
@@ -5529,6 +5627,7 @@ fn lower_expr_with_expected(
                     }
                     if lt.measured_parts().is_some() {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message:
                                 "*, /, % on unit-carrying values are rejected in the first-wave units surface"
@@ -5537,6 +5636,7 @@ fn lower_expr_with_expected(
                     }
                     if lt != Type::F64 {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator * unsupported for {:?}", lt),
                         });
@@ -5575,6 +5675,7 @@ fn lower_expr_with_expected(
                     }
                     if lt.measured_parts().is_some() {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message:
                                 "*, /, % on unit-carrying values are rejected in the first-wave units surface"
@@ -5583,6 +5684,7 @@ fn lower_expr_with_expected(
                     }
                     if lt != Type::F64 || *op == BinaryOp::Mod {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "operator {} unsupported for {:?}",
@@ -5603,6 +5705,7 @@ fn lower_expr_with_expected(
         }
         // M9.4 Wave 1: IfLet lowering is deferred (typecheck-only in M9.4).
         Expr::IfLet(_) => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "if-let lowering is not yet implemented in the IR backend".to_string(),
         }),
@@ -5623,12 +5726,14 @@ fn bind_tuple_items(
 ) -> Result<(), FrontendError> {
     let Type::Tuple(item_tys) = tuple_ty else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "tuple destructuring bind requires tuple value".to_string(),
         });
     };
     if item_tys.len() != items.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "tuple destructuring bind arity mismatch: expected {}, got {}",
@@ -5645,6 +5750,7 @@ fn bind_tuple_items(
             TuplePatternItem::Discard => continue,
             TuplePatternItem::QuadLiteral(_) => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "quad literal tuple patterns currently require let-else; plain tuple destructuring bind supports only name/_/ref items"
@@ -5653,6 +5759,7 @@ fn bind_tuple_items(
             }
             TuplePatternItem::Nested(_) => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "nested tuple patterns are not yet supported in plain let bindings; use let-else form"
@@ -5662,6 +5769,7 @@ fn bind_tuple_items(
         };
         let reg = alloc(next);
         let index = u16::try_from(index).map_err(|_| FrontendError {
+            detail: None,
             pos: 0,
             message: "tuple destructuring bind index exceeds v0 limit".to_string(),
         })?;
@@ -5728,6 +5836,7 @@ fn bind_record_items(
 ) -> Result<(), FrontendError> {
     if *record_ty != Type::Record(record_name) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record destructuring bind requires value of type '{}', got {:?}",
@@ -5737,6 +5846,7 @@ fn bind_record_items(
         });
     }
     let record = record_table.get(&record_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown record type '{}' in record destructuring bind",
@@ -5750,6 +5860,7 @@ fn bind_record_items(
             .enumerate()
             .find(|(_, field)| field.name == item.field)
             .ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "record type '{}' has no field named '{}' in destructuring bind",
@@ -5759,6 +5870,7 @@ fn bind_record_items(
             })?;
         let reg = alloc(next);
         let index = u16::try_from(index).map_err(|_| FrontendError {
+            detail: None,
             pos: 0,
             message: "record destructuring bind index exceeds v0 limit".to_string(),
         })?;
@@ -5800,6 +5912,7 @@ fn bind_record_items(
             RecordPatternTarget::Discard => {}
             RecordPatternTarget::QuadLiteral(_) => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "quad literal record field patterns currently require let-else; plain record destructuring bind supports only name/_ items"
@@ -5837,6 +5950,7 @@ fn bind_let_else_record_items(
 ) -> Result<(), FrontendError> {
     if *record_ty != Type::Record(record_name) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record let-else requires value of type '{}', got {:?}",
@@ -5846,6 +5960,7 @@ fn bind_let_else_record_items(
         });
     }
     let record = record_table.get(&record_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown record type '{}' in record let-else",
@@ -5862,6 +5977,7 @@ fn bind_let_else_record_items(
             .enumerate()
             .find(|(_, field)| field.name == item.field)
             .ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "record type '{}' has no field named '{}' in let-else",
@@ -5871,6 +5987,7 @@ fn bind_let_else_record_items(
             })?;
         let reg = alloc(next);
         let index = u16::try_from(index).map_err(|_| FrontendError {
+            detail: None,
             pos: 0,
             message: "record let-else index exceeds v0 limit".to_string(),
         })?;
@@ -5908,6 +6025,7 @@ fn bind_let_else_record_items(
                 saw_refutable_item = true;
                 if field.ty != Type::Quad {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "record let-else literal pattern requires quad field, got {:?}",
@@ -5958,6 +6076,7 @@ fn bind_let_else_record_items(
     }
     if !saw_refutable_item {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "record let-else requires at least one refutable quad literal field pattern"
                 .to_string(),
@@ -5988,12 +6107,14 @@ fn assign_tuple_items(
 ) -> Result<(), FrontendError> {
     let Type::Tuple(item_tys) = tuple_ty else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "tuple destructuring assignment requires tuple value".to_string(),
         });
     };
     if item_tys.len() != items.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "tuple destructuring assignment arity mismatch: expected {}, got {}",
@@ -6007,6 +6128,7 @@ fn assign_tuple_items(
             continue;
         };
         let target_ty = env.get(*name).ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "unknown tuple assignment target '{}'",
@@ -6015,6 +6137,7 @@ fn assign_tuple_items(
         })?;
         if env.is_const(*name)? {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "cannot assign to const binding '{}' in tuple destructuring assignment",
@@ -6024,6 +6147,7 @@ fn assign_tuple_items(
         }
         if target_ty != *item_ty {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "type mismatch in tuple assignment to '{}': {:?} vs {:?}",
@@ -6035,6 +6159,7 @@ fn assign_tuple_items(
         }
         let reg = alloc(next);
         let index = u16::try_from(index).map_err(|_| FrontendError {
+            detail: None,
             pos: 0,
             message: "tuple destructuring assignment index exceeds v0 limit".to_string(),
         })?;
@@ -6261,6 +6386,7 @@ fn lower_for_range_stmt(
     )?;
     if range_ty != Type::RangeI32 {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "for-range currently requires i32 range expression".to_string(),
         });
@@ -6330,6 +6456,7 @@ fn lower_while_stmt(
     )?;
     if cond_ty != Type::Bool {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "while condition must be bool".to_string(),
         });
@@ -6490,6 +6617,7 @@ fn lower_for_each_stmt(
         );
     }
     Err(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "{} (`{}` contract)",
@@ -6771,12 +6899,14 @@ fn bind_let_else_tuple_items(
 ) -> Result<(), FrontendError> {
     let Type::Tuple(item_tys) = tuple_ty else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "let-else tuple destructuring bind requires tuple value".to_string(),
         });
     };
     if item_tys.len() != items.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "let-else tuple destructuring bind arity mismatch: expected {}, got {}",
@@ -6792,6 +6922,7 @@ fn bind_let_else_tuple_items(
     for (index, (item, item_ty)) in items.iter().zip(item_tys.iter()).enumerate() {
         let reg = alloc(next);
         let index = u16::try_from(index).map_err(|_| FrontendError {
+            detail: None,
             pos: 0,
             message: "let-else tuple destructuring bind index exceeds v0 limit".to_string(),
         })?;
@@ -6829,6 +6960,7 @@ fn bind_let_else_tuple_items(
             TuplePatternItem::QuadLiteral(pat) => {
                 if *item_ty != Type::Quad {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "let-else tuple literal pattern requires quad element, got {:?}",
@@ -6878,6 +7010,7 @@ fn bind_let_else_tuple_items(
             // M9.4 Wave 1: nested tuple lowering is deferred.
             TuplePatternItem::Nested(_) => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "nested tuple lowering is not yet implemented in the IR backend"
                         .to_string(),
@@ -7230,6 +7363,7 @@ fn lower_stmt(
         }
         Stmt::Assign { name, value } => {
             let target_ty = env.get(*name).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "unknown assignment target '{}'",
@@ -7238,6 +7372,7 @@ fn lower_stmt(
             })?;
             if env.is_const(*name)? {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "cannot assign to const binding '{}'",
@@ -7376,11 +7511,13 @@ fn lower_stmt(
         ),
         Stmt::Break(None) => {
             let frame = ctx.loop_stack.last().ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "bare break is allowed only inside while or statement loop".to_string(),
             })?;
             if !matches!(frame.kind, LoopLoweringFrameKind::Control) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "bare break is allowed only inside while or statement loop"
                         .to_string(),
@@ -7394,11 +7531,13 @@ fn lower_stmt(
         Stmt::Break(Some(value)) => {
             let (expected_break, end_label, result_name, prior_result_ty) = {
                 let frame = ctx.loop_stack.last().ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "break with value is allowed only inside loop expression".to_string(),
                 })?;
                 if !matches!(frame.kind, LoopLoweringFrameKind::Expression) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "break with value is allowed only inside loop expression"
                             .to_string(),
@@ -7436,6 +7575,7 @@ fn lower_stmt(
             if let Some(expected_ty) = &prior_result_ty {
                 if *expected_ty != break_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "loop expression break type mismatch in lowering: expected {:?}, got {:?}",
@@ -7447,6 +7587,7 @@ fn lower_stmt(
                 frame.result_ty = Some(break_ty);
             } else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "break with value is allowed only inside loop expression".to_string(),
                 });
@@ -7462,11 +7603,13 @@ fn lower_stmt(
         }
         Stmt::Continue => {
             let frame = ctx.loop_stack.last().ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "continue is allowed only inside while or statement loop".to_string(),
             })?;
             if !matches!(frame.kind, LoopLoweringFrameKind::Control) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "continue is allowed only inside while or statement loop".to_string(),
                 });
@@ -7503,6 +7646,7 @@ fn lower_stmt(
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "guard clause condition must be bool".to_string(),
                 });
@@ -7614,6 +7758,7 @@ fn lower_stmt(
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "if condition must be bool".to_string(),
                 });
@@ -7715,6 +7860,7 @@ fn lower_stmt(
                     | Type::U32
             ) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "match scrutinee must be quad, enum, Option(T), Result(T, E), i32, or u32"
@@ -7734,6 +7880,7 @@ fn lower_stmt(
                     Some(_) => true,
                     None => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "match requires default arm '_'".to_string(),
                         });
@@ -8317,6 +8464,7 @@ fn lower_value_block_expr(
             }
             Stmt::LetElseRecord { .. } => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "block expression body currently does not allow record let-else"
                         .to_string(),
@@ -8378,6 +8526,7 @@ fn lower_value_block_expr(
             }
             _ => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "value-producing block currently supports only const-bindings, let-bindings, discard binds, and expression statements before the tail value".to_string(),
                 });
@@ -8440,6 +8589,7 @@ fn lower_adt_ctor_expr(
         return Ok(lowered);
     }
     let adt = adt_table.get(&ctor_expr.adt_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown enum type '{}' in constructor lowering",
@@ -8452,6 +8602,7 @@ fn lower_adt_ctor_expr(
         .enumerate()
         .find(|(_, variant)| variant.name == ctor_expr.variant_name)
         .ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "enum '{}' has no variant named '{}' in constructor lowering",
@@ -8461,6 +8612,7 @@ fn lower_adt_ctor_expr(
         })?;
     if variant.payload.len() != ctor_expr.payload.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "enum constructor '{}::{}' expects {} payload items in lowering, got {}",
@@ -8494,6 +8646,7 @@ fn lower_adt_ctor_expr(
         )?;
         if actual_ty != expected_ty {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "enum constructor '{}::{}' payload type mismatch in lowering: expected {:?}, got {:?}",
@@ -8513,6 +8666,7 @@ fn lower_adt_ctor_expr(
         adt_name: resolve_symbol_name(arena, ctor_expr.adt_name)?.to_string(),
         variant_name: resolve_symbol_name(arena, ctor_expr.variant_name)?.to_string(),
         tag: u16::try_from(tag).map_err(|_| FrontendError {
+            detail: None,
             pos: 0,
             message: "enum variant tag exceeds v0 limit".to_string(),
         })?,
@@ -8545,6 +8699,7 @@ fn lower_std_form_ctor_expr(
             "Some" => {
                 if ctor_expr.payload.len() != 1 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "Option::Some expects exactly one payload item in lowering"
                             .to_string(),
@@ -8573,6 +8728,7 @@ fn lower_std_form_ctor_expr(
                 if let Some(expected_item) = item_expected {
                     if item_ty != expected_item {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "Option::Some payload type mismatch in lowering: expected {:?}, got {:?}",
@@ -8594,6 +8750,7 @@ fn lower_std_form_ctor_expr(
             "None" => {
                 if !ctor_expr.payload.is_empty() {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "Option::None does not accept payload items in lowering"
                             .to_string(),
@@ -8601,6 +8758,7 @@ fn lower_std_form_ctor_expr(
                 }
                 let Some(Type::Option(item_ty)) = expected else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "Option::None currently requires contextual Option(T) type in v0 lowering"
@@ -8619,6 +8777,7 @@ fn lower_std_form_ctor_expr(
             }
             _ => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("Option has no variant named '{}' in lowering", variant_name),
                 })
@@ -8629,6 +8788,7 @@ fn lower_std_form_ctor_expr(
     if type_name == "Result" {
         if ctor_expr.payload.len() != 1 {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "Result::{} expects exactly one payload item in lowering",
@@ -8638,6 +8798,7 @@ fn lower_std_form_ctor_expr(
         }
         let Some(Type::Result(ok_ty, err_ty)) = expected else {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "Result::{} currently requires contextual Result(T, E) type in v0 lowering",
@@ -8650,6 +8811,7 @@ fn lower_std_form_ctor_expr(
             "Err" => ((*err_ty).clone(), 1),
             _ => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("Result has no variant named '{}' in lowering", variant_name),
                 })
@@ -8673,6 +8835,7 @@ fn lower_std_form_ctor_expr(
         )?;
         if payload_ty != payload_expected {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "Result::{} payload type mismatch in lowering: expected {:?}, got {:?}",
@@ -8726,12 +8889,14 @@ fn expect_quad_match_pattern(pat: &MatchPattern) -> Result<QuadVal, FrontendErro
     match pat {
         MatchPattern::Quad(pat) => Ok(*pat),
         MatchPattern::Adt(_) => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "enum match pattern requires enum scrutinee in lowering".to_string(),
         }),
         // M9.4 Wave 1: these patterns are typecheck-only in M9.4; lowering is deferred.
         MatchPattern::Wildcard | MatchPattern::Or(_) | MatchPattern::IntRange(_) => {
             Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "wildcard/or/range match pattern lowering is not yet implemented in the IR backend".to_string(),
             })
@@ -8757,6 +8922,7 @@ fn expect_int_match_pattern(
                 u32::try_from(range.start)
                     .map(IntMatchLiteral::U32)
                     .map_err(|_| FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "integer match pattern literal is outside u32 range".to_string(),
                     })
@@ -8764,6 +8930,7 @@ fn expect_int_match_pattern(
                 i32::try_from(range.start)
                     .map(IntMatchLiteral::I32)
                     .map_err(|_| FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "integer match pattern literal is outside i32 range".to_string(),
                     })
@@ -8774,16 +8941,19 @@ fn expect_int_match_pattern(
         // deterministic "not yet implemented" rejection as every other range
         // form lowering does not support, rather than silently miscompiling.
         MatchPattern::IntRange(_) => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "integer range match pattern lowering is not yet implemented in the IR backend"
                 .to_string(),
         }),
         MatchPattern::Adt(_) => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "enum match pattern requires enum scrutinee in lowering".to_string(),
         }),
         // M9.4 Wave 1: these patterns are typecheck-only in M9.4; lowering is deferred.
         MatchPattern::Wildcard | MatchPattern::Or(_) | MatchPattern::Quad(_) => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "wildcard/or/quad match pattern lowering is not yet implemented in the IR backend".to_string(),
         }),
@@ -8798,6 +8968,7 @@ fn resolve_match_family_for_lowering(
     match scrutinee_ty {
         Type::Adt(adt_name) => {
             let adt = adt_table.get(adt_name).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "unknown enum type '{}' in match lowering",
@@ -8810,6 +8981,7 @@ fn resolve_match_family_for_lowering(
                 variants.push(LoweredMatchFamilyVariant {
                     name: resolve_symbol_name(arena, variant.name)?.to_string(),
                     tag: i32::try_from(tag).map_err(|_| FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "enum variant tag exceeds v0 lowering limit".to_string(),
                     })?,
@@ -8869,6 +9041,7 @@ fn resolve_sum_match_pattern_for_lowering(
         let family = resolve_match_family_for_lowering(scrutinee_ty, arena, adt_table)?
             .expect("non-quad match family should resolve");
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "quad match pattern requires quad scrutinee; {} needs explicit variant patterns in lowering",
@@ -8878,6 +9051,7 @@ fn resolve_sum_match_pattern_for_lowering(
     };
     let Some(family) = resolve_match_family_for_lowering(scrutinee_ty, arena, adt_table)? else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "match scrutinee must be quad, enum, Option(T), or Result(T, E)".to_string(),
         });
@@ -8885,6 +9059,7 @@ fn resolve_sum_match_pattern_for_lowering(
     let pattern_family = resolve_symbol_name(arena, adt_pat.adt_name)?.to_string();
     if pattern_family != family.family_name {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "match arm pattern type '{}' does not match scrutinee {} in lowering",
@@ -8898,6 +9073,7 @@ fn resolve_sum_match_pattern_for_lowering(
         .iter()
         .find(|variant| variant.name == pattern_variant)
         .ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "{} has no variant named '{}' in match lowering",
@@ -8906,6 +9082,7 @@ fn resolve_sum_match_pattern_for_lowering(
         })?;
     if variant.payload.len() != adt_pat.items.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "match pattern '{}::{}' expects {} payload items in lowering, got {}",
@@ -8926,6 +9103,7 @@ fn resolve_sum_match_pattern_for_lowering(
                 name: *name,
                 ty: payload_ty,
                 index: u16::try_from(index).map_err(|_| FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "enum match payload index exceeds v0 limit".to_string(),
                 })?,
@@ -9007,6 +9185,7 @@ fn non_exhaustive_match_error(
     expression: bool,
 ) -> Result<FrontendError, FrontendError> {
     Ok(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "non-exhaustive match{} for {}; missing variants: {}",
@@ -9062,6 +9241,7 @@ fn lower_match_guard(
     )?;
     if guard_ty != Type::Bool {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "match guard condition must be bool".to_string(),
         });
@@ -9093,6 +9273,7 @@ fn lower_ensures_clauses(
     let mut contract_env = env.clone();
     if let Some(result_symbol) = contract_result_symbol {
         let (result_reg, result_ty) = result_value.ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: "ensures clause referencing result requires explicit return value".to_string(),
         })?;
@@ -9130,6 +9311,7 @@ fn lower_ensures_clauses(
         )?;
         if cond_ty != Type::Bool {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "ensures clause condition must be bool in lowering, got {:?}",
@@ -9194,6 +9376,7 @@ fn lower_invariant_clauses(
         }
         if references_result && result_value.is_none() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "invariant clause referencing result requires explicit return value"
                     .to_string(),
@@ -9216,6 +9399,7 @@ fn lower_invariant_clauses(
         )?;
         if cond_ty != Type::Bool {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "invariant clause condition must be bool in lowering, got {:?}",
@@ -9268,6 +9452,7 @@ fn lower_return_payload(
             )?;
             if ty != ret_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "return type mismatch in lowering: expected {:?}, got {:?}",
@@ -9316,6 +9501,7 @@ fn lower_return_payload(
         None => {
             if ret_ty != Type::Unit {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("return without value in non-unit function ({:?})", ret_ty),
                 });
@@ -9431,12 +9617,14 @@ fn lower_loop_expr(
 
     let frame = loop_stack.pop().expect("loop frame must exist");
     let result_ty = frame.result_ty.ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: "loop expression requires at least one break value".to_string(),
     })?;
     if let Some(expected_ty) = expected {
         if expected_ty != result_ty {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "loop expression result type mismatch in lowering: expected {:?}, got {:?}",
@@ -9470,26 +9658,32 @@ fn lower_loop_expr_stmt(
 ) -> Result<(), FrontendError> {
     match arena.stmt(stmt_id) {
         Stmt::LetElseTuple { .. } | Stmt::LetElseRecord { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow let-else".to_string(),
         }),
         Stmt::ForRange { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow for-range".to_string(),
         }),
         Stmt::While { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow while statement".to_string(),
         }),
         Stmt::Loop { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow statement loop".to_string(),
         }),
         Stmt::ForEach { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow iterable for-each".to_string(),
         }),
         Stmt::Guard { .. } | Stmt::Return(..) | Stmt::Continue => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow guard clause or return"
                 .to_string(),
@@ -9527,6 +9721,7 @@ fn lower_loop_expr_stmt(
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "if condition must be bool".to_string(),
                 });
@@ -9642,6 +9837,7 @@ fn lower_loop_expr_stmt(
                     | Type::U32
             ) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "match scrutinee must be quad, enum, Option(T), Result(T, E), i32, or u32"
@@ -9661,6 +9857,7 @@ fn lower_loop_expr_stmt(
                     Some(_) => true,
                     None => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "match requires default arm '_'".to_string(),
                         });
@@ -10108,6 +10305,7 @@ fn lower_match_expr(
         Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _) | Type::I32 | Type::U32
     ) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "match expression scrutinee must be quad, enum, Option(T), Result(T, E), i32, or u32. Got: {:?}",
@@ -10128,6 +10326,7 @@ fn lower_match_expr(
             Some(_) => true,
             None => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "match expression requires default arm '_'".to_string(),
                 });
@@ -10231,6 +10430,7 @@ fn lower_match_expr(
                 if let Some(ref expected_ty) = result_ty {
                     if *expected_ty != arm_ty {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "match expression branch type mismatch in lowering: expected {:?}, got {:?}",
@@ -10336,6 +10536,7 @@ fn lower_match_expr(
                 if let Some(ref expected_ty) = result_ty {
                     if *expected_ty != arm_ty {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "match expression branch type mismatch in lowering: expected {:?}, got {:?}",
@@ -10472,6 +10673,7 @@ fn lower_match_expr(
                 if let Some(ref expected_ty) = result_ty {
                     if *expected_ty != arm_ty {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "match expression branch type mismatch in lowering: expected {:?}, got {:?}",
@@ -10525,6 +10727,7 @@ fn lower_match_expr(
         if let Some(ref expected_ty) = result_ty {
             if *expected_ty != default_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "match expression branch type mismatch in lowering: expected {:?}, got {:?}",
@@ -10623,12 +10826,14 @@ fn lower_expr_stmt_with_parts(
         if is_builtin_assert_name(*name, arena, fn_table)? {
             if args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "assert builtin takes exactly one positional argument".to_string(),
                 });
             }
             if args.len() != 1 {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("assert builtin expects 1 arg, got {}", args.len()),
                 });
@@ -10651,6 +10856,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("assert builtin requires bool condition, got {:?}", cond_ty),
                 });
@@ -10662,6 +10868,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "len" {
             if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "builtin 'len' takes exactly one positional argument".to_string(),
                 });
@@ -10689,6 +10896,7 @@ fn lower_expr_stmt_with_parts(
                     Ok(())
                 }
                 _ => Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin 'len' expects a Sequence argument, got {:?}",
@@ -10701,6 +10909,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "is_empty" {
             if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "builtin 'is_empty' takes exactly one positional argument".to_string(),
                 });
@@ -10728,6 +10937,7 @@ fn lower_expr_stmt_with_parts(
                     Ok(())
                 }
                 _ => Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin 'is_empty' expects a Sequence argument, got {:?}",
@@ -10741,6 +10951,7 @@ fn lower_expr_stmt_with_parts(
         if name_str_stmt == "push" || name_str_stmt == "prepend" {
             if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin '{name_str_stmt}' takes exactly two positional arguments"
@@ -10765,6 +10976,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             let Type::Sequence(seq_type) = &seq_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin '{name_str_stmt}' first argument must be a Sequence, got {:?}",
@@ -10791,6 +11003,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             if val_ty != elem_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin '{name_str_stmt}' second argument type {:?} does not match \
@@ -10811,6 +11024,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "contains" {
             if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "builtin 'contains' takes exactly two positional arguments"
                         .to_string(),
@@ -10834,6 +11048,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             let Type::Sequence(seq_type) = &seq_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin 'contains' first argument must be a Sequence, got {:?}",
@@ -10860,6 +11075,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             if val_ty != elem_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin 'contains' value type {:?} does not match element type {:?}",
@@ -10875,6 +11091,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "pop" {
             if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "builtin 'pop' takes exactly one positional argument".to_string(),
                 });
@@ -10902,6 +11119,7 @@ fn lower_expr_stmt_with_parts(
                     Ok(())
                 }
                 _ => Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin 'pop' expects a Sequence argument, got {:?}",
@@ -10913,6 +11131,7 @@ fn lower_expr_stmt_with_parts(
         // builtin map_empty() as statement — rejected; result must be bound to a Map variable
         if resolve_symbol_name(arena, *name)? == "map_empty" {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "map_empty() requires a contextual Map(K, V) type and cannot be \
                           used as a statement; use 'let q: Map(K, V) = map_empty()'"
@@ -10923,6 +11142,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "map_contains" {
             if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "builtin 'map_contains' takes exactly two positional arguments"
                         .to_string(),
@@ -10946,6 +11166,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin 'map_contains' first argument must be Map, got {:?}",
@@ -10982,6 +11203,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "map_get" {
             if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "builtin 'map_get' takes exactly three positional arguments"
                         .to_string(),
@@ -11005,6 +11227,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin 'map_get' first argument must be Map, got {:?}",
@@ -11059,6 +11282,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "map_set" {
             if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "builtin 'map_set' takes exactly three positional arguments"
                         .to_string(),
@@ -11082,6 +11306,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin 'map_set' first argument must be Map, got {:?}",
@@ -11136,6 +11361,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "print" {
             if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "builtin 'print' takes exactly one positional argument (msg: text)"
                         .to_string(),
@@ -11167,6 +11393,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "random_seed" {
             if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "builtin 'random_seed' takes exactly one positional argument (seed: i32)"
@@ -11200,6 +11427,7 @@ fn lower_expr_stmt_with_parts(
         if resolve_symbol_name(arena, *name)? == "random_next_i32" {
             if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "builtin 'random_next_i32' takes exactly two positional arguments (lo: i32, hi: i32)"
@@ -11254,6 +11482,7 @@ fn lower_expr_stmt_with_parts(
             let expected_arity = if name_str == "qtruth_not" { 1 } else { 2 };
             if args.len() != expected_arity || args.iter().any(|arg| arg.name.is_some()) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "builtin '{name_str}' takes exactly {expected_arity} positional argument{}",
@@ -11281,6 +11510,7 @@ fn lower_expr_stmt_with_parts(
                 )?;
                 if arg_ty != Type::Quad {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin '{name_str}' expects quad arguments, got {:?}",
@@ -11336,6 +11566,7 @@ fn lower_expr_stmt_with_parts(
             );
         } else {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("unknown function '{}'", resolve_symbol_name(arena, *name)?),
             });
@@ -11364,6 +11595,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             if t != sig.params[slot] {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "arg {} for '{}' type mismatch",
@@ -11452,6 +11684,7 @@ impl LoweredLocalEnv {
             self.next_activation_site
                 .checked_add(1)
                 .ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "activation site id exceeds v0 limit".to_string(),
                 })?;
@@ -11466,6 +11699,7 @@ impl LoweredLocalEnv {
     fn fresh_write_site(&mut self) -> Result<WriteSiteId, FrontendError> {
         let id = self.next_write_site;
         self.next_write_site = self.next_write_site.checked_add(1).ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: "write site id exceeds v0 limit".to_string(),
         })?;
@@ -11516,6 +11750,7 @@ impl LoweredLocalEnv {
             }
         }
         Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "cannot resolve lexical binding '{}' during lowering",
@@ -12492,6 +12727,7 @@ mod opt_tests {
         assert_eq!(
             r1f_frontend_error(compile_program_to_ir(&without_generic)),
             FrontendError {
+                detail: None,
                 pos: 0,
                 message: "function 'f' may exit without returning I32".to_string(),
             }
@@ -12504,6 +12740,7 @@ mod opt_tests {
         assert_eq!(
             r1f_frontend_error(compile_program_to_ir(&with_generic)),
             FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "generic function '__impl::Show::P::show' is admitted by the frontend but is \

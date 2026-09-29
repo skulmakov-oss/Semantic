@@ -25,20 +25,34 @@ pub fn format_path(path: &Path, mode: FormatterMode) -> Result<FormatterSummary,
         ));
     }
 
-    let mut changed_paths = Vec::new();
-
+    // SSF-09 #1580: every file is formatted (or refused) before anything is
+    // written, so a refusal never leaves a tree half-formatted.
+    let mut changed = Vec::new();
+    let mut refused = Vec::new();
     for file in &files {
         let original = fs::read_to_string(file)
             .map_err(|e| format!("failed to read '{}': {}", file.display(), e))?;
-        let formatted = format_source_text(&original);
-        if formatted != original {
-            if mode == FormatterMode::Write {
-                fs::write(file, formatted.as_bytes())
-                    .map_err(|e| format!("failed to write '{}': {}", file.display(), e))?;
-            }
-            changed_paths.push(file.to_path_buf());
+        match format_source_checked(&original) {
+            Ok(formatted) if formatted != original => changed.push((file.to_path_buf(), formatted)),
+            Ok(_) => {}
+            Err(refusal) => refused.push(format!("  {}: {}", file.display(), refusal)),
         }
     }
+    if !refused.is_empty() {
+        return Err(format!(
+            "refusing to format {} file(s); the canonical formatter only applies changes proven not to alter the token stream:\n{}",
+            refused.len(),
+            refused.join("\n")
+        ));
+    }
+
+    if mode == FormatterMode::Write {
+        for (file, formatted) in &changed {
+            fs::write(file, formatted.as_bytes())
+                .map_err(|e| format!("failed to write '{}': {}", file.display(), e))?;
+        }
+    }
+    let changed_paths: Vec<PathBuf> = changed.into_iter().map(|(file, _)| file).collect();
 
     Ok(FormatterSummary {
         files_scanned: files.len(),
@@ -47,7 +61,84 @@ pub fn format_path(path: &Path, mode: FormatterMode) -> Result<FormatterSummary,
     })
 }
 
+/// Why the canonical formatter declined to change a source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormatRefusal {
+    /// The input does not lex, so semantic preservation cannot be proven.
+    SourceDoesNotLex,
+    /// The whitespace normalization would change the token stream (for
+    /// example a carriage return inside a string literal).
+    TokenStreamWouldChange,
+}
+
+impl std::fmt::Display for FormatRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FormatRefusal::SourceDoesNotLex => {
+                f.write_str("source does not lex; formatting would not be provably safe")
+            }
+            FormatRefusal::TokenStreamWouldChange => {
+                f.write_str("formatting would change the token stream")
+            }
+        }
+    }
+}
+
+/// SSF-09 #1580: the canonical formatter with its semantic-safety proof.
+///
+/// The formatter only normalizes line endings to `\n`, strips trailing
+/// spaces/tabs, and ends a non-empty file with exactly one newline. A
+/// changed result is returned only when the canonical lexer produces an
+/// identical `(kind, text)` token sequence for the input and the output -
+/// the same lexer every parser consumes - so formatting can never change
+/// what the program means. Otherwise the input is refused, never
+/// partially rewritten. The result is idempotent.
+pub fn format_source_checked(input: &str) -> Result<String, FormatRefusal> {
+    let formatted = normalize_whitespace(input);
+    if formatted == input {
+        return Ok(formatted);
+    }
+    let before = sm_front::lex(input).map_err(|_| FormatRefusal::SourceDoesNotLex)?;
+    let after = sm_front::lex(&formatted).map_err(|_| FormatRefusal::TokenStreamWouldChange)?;
+    if significant_tokens(&before) == significant_tokens(&after) {
+        Ok(formatted)
+    } else {
+        Err(FormatRefusal::TokenStreamWouldChange)
+    }
+}
+
+/// The `(kind, text)` token sequence with the end-of-file run of blank-line
+/// newline tokens collapsed to one: dropping trailing blank lines is the only
+/// newline-count change the formatter makes, and blank lines at end of file
+/// carry no meaning for either grammar. Interior newlines are compared
+/// exactly.
+fn significant_tokens(tokens: &[sm_front::Token]) -> Vec<(sm_front::TokenKind, &str)> {
+    use sm_front::TokenKind;
+    let mut out: Vec<(TokenKind, &str)> =
+        tokens.iter().map(|t| (t.kind, t.text.as_str())).collect();
+    let dedents = out
+        .iter()
+        .rev()
+        .take_while(|(kind, _)| *kind == TokenKind::Dedent)
+        .count();
+    let tail = out.split_off(out.len() - dedents);
+    while out.len() >= 2
+        && out[out.len() - 1].0 == TokenKind::Newline
+        && out[out.len() - 2].0 == TokenKind::Newline
+    {
+        out.pop();
+    }
+    out.extend(tail);
+    out
+}
+
+/// The canonical formatter as a total function: the formatted text when
+/// [`format_source_checked`] accepts it, otherwise `input` unchanged.
 pub fn format_source_text(input: &str) -> String {
+    format_source_checked(input).unwrap_or_else(|_| input.to_string())
+}
+
+fn normalize_whitespace(input: &str) -> String {
     let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
     let mut lines: Vec<String> = normalized
         .split('\n')
@@ -207,6 +298,76 @@ mod tests {
         assert_eq!(
             summary.files_changed, 0,
             "second write pass should change nothing"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn formatter_refuses_carriage_return_inside_string_literal() {
+        let input = "fn main() {\n    let s: text = \"a\rb\";\n    return;\n}\n";
+        assert_eq!(
+            format_source_checked(input),
+            Err(FormatRefusal::TokenStreamWouldChange)
+        );
+        assert_eq!(format_source_text(input), input);
+    }
+
+    #[test]
+    fn formatter_refuses_to_change_source_that_does_not_lex() {
+        let input = "fn main() {  \n    let s: text = \"open   \n}\n";
+        assert_eq!(
+            format_source_checked(input),
+            Err(FormatRefusal::SourceDoesNotLex)
+        );
+    }
+
+    #[test]
+    fn formatter_accepts_already_formatted_source_even_if_it_does_not_lex() {
+        let input = "fn main( {\n";
+        assert_eq!(format_source_checked(input), Ok(input.to_string()));
+    }
+
+    #[test]
+    fn formatter_preserves_token_stream_on_every_accepted_change() {
+        let inputs = [
+            "fn main() {    \r\n    return;\t\r\n}\r\n\r\n",
+            "Entity Sensor:  \n    state val: quad \n    prop active: bool\t\n\n",
+            "fn f(x: i32) -> i32 {\n    // comment   \n    return x;\n}",
+        ];
+        for input in inputs {
+            let formatted = format_source_checked(input).expect("accepted");
+            let before = sm_front::lex(input).unwrap();
+            let after = sm_front::lex(&formatted).unwrap();
+            assert_eq!(
+                significant_tokens(&before),
+                significant_tokens(&after),
+                "{input:?}"
+            );
+            assert_eq!(format_source_checked(&formatted), Ok(formatted.clone()));
+        }
+    }
+
+    #[test]
+    fn significant_tokens_keep_interior_blank_lines() {
+        let a = sm_front::lex("fn main() {\n\n    return;\n}\n").unwrap();
+        let b = sm_front::lex("fn main() {\n    return;\n}\n").unwrap();
+        assert_ne!(significant_tokens(&a), significant_tokens(&b));
+    }
+
+    #[test]
+    fn format_path_refusal_writes_nothing() {
+        let dir = mk_temp_dir("smc_fmt_refusal");
+        let good = dir.join("a.sm");
+        let bad = dir.join("b.sm");
+        fs::write(&good, "fn main() {  \n    return;\n}\n").expect("write good");
+        fs::write(&bad, "fn main() {  \n    let s: text = \"a\rb\";\n}\n").expect("write bad");
+
+        let err = format_path(&dir, FormatterMode::Write).expect_err("must refuse");
+        assert!(err.contains("b.sm"), "{err}");
+        assert_eq!(
+            fs::read_to_string(&good).expect("read good"),
+            "fn main() {  \n    return;\n}\n"
         );
 
         let _ = fs::remove_dir_all(&dir);
