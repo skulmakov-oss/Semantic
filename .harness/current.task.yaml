@@ -65,6 +65,12 @@ task:
     `docs/roadmap/core_quad/v1_compatibility_rollout.md`,
     `docs/roadmap/first_wave_map_surface.md`
     in `allowed_paths` for the Ledger Consolidation Phase 1 (#1966) doc reconciliation.
+    Repository owner explicit governance authorization (2026-09-29) to allow
+    exactly the root `Cargo.lock` in `allowed_paths`, solely to track a freshly
+    generated workspace lockfile so that the existing `.gitignore` policy
+    comment ("Cargo.lock intentionally tracked for reproducible workspace
+    builds") matches reality and local builds leave a clean working tree.
+    No dependency version, manifest, or `.gitignore` change is authorized.
 
 intent:
   summary: >-
@@ -96,6 +102,7 @@ scope:
     - .harness/current.task.yaml
     - .gitattributes
     - Cargo.toml
+    - Cargo.lock
     - crates/sm-diagnostic/**
     - crates/ton618-core/src/diagnostics.rs
     - docs/ERROR_CODES.md
