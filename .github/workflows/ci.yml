@@ -13,6 +13,19 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  repository-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run hygiene guard tests
+        run: python tests/hygiene_guard_test.py
+      - name: Verify repository hygiene
+        run: python scripts/check_repository_hygiene.py --strict
+
   pr-ready:
     runs-on: ubuntu-latest
     steps:
