@@ -236,5 +236,7 @@ pub fn variants(&self) -> &[AdtVariantDescriptor] {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdtDescriptorTable {
 pub fn with_builtins(user: Vec<AdtDescriptor>) -> Result<Self, AdtDescriptorError> {
+pub(crate) fn from_encoded_strict( descriptors: Vec<AdtDescriptor>, ) -> Result<Self, &'static str> {
 pub fn descriptors(&self) -> &[AdtDescriptor] {
+pub fn get(&self, name: &str) -> Option<&AdtDescriptor> {
 pub fn encode_section(&self) -> Vec<u8> {

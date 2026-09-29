@@ -196,7 +196,11 @@ fn shadowed_binding_borrow_and_write_decode_to_distinct_string_table_roots() {
 }
 
 fn find_function_code_start(bytes: &[u8], target: &str) -> usize {
-    let mut cursor = 8usize;
+    // SSF-09 D2-2: functions start after the ADT0 section.
+    let mut cursor = sm_format::semcode_decode::decode_semcode_envelope(bytes)
+        .expect("decode")
+        .1[0]
+        .name_offset;
     while cursor < bytes.len() {
         let name_len = read_u16_le(bytes, &mut cursor).expect("function name len") as usize;
         let name = read_utf8(bytes, &mut cursor, name_len)

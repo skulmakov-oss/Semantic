@@ -147,12 +147,36 @@ mod tests {
     }
 
     #[test]
-    fn compiled_artifacts_do_not_yet_use_the_d2_header() {
-        let src = format!("enum E {{\n    A,\n    B(i32),\n}}\n{MAIN}");
-        let bytes = compile_program_to_semcode(&src).expect("compile");
-        let magic: [u8; 8] = bytes[..8].try_into().expect("magic");
-        assert_ne!(magic, MAGIC22);
-        let header = header_spec_from_magic(&magic).expect("supported header");
-        assert!(header.rev < HEADER_V22.rev);
+    fn compiled_artifacts_use_the_d2_header_and_the_declared_adt0_table() {
+        // SSF-09 D2-2 (P10): SEMCOD22, then exactly the ADT0 section of the
+        // table built from the program's declarations - with or without
+        // user enums, and whether or not any ADT is ever constructed.
+        for src in [
+            format!("enum E {{\n    A,\n    B(i32),\n}}\n{MAIN}"),
+            MAIN.to_string(),
+        ] {
+            let bytes = compile_program_to_semcode(&src).expect("compile");
+            assert_eq!(bytes[..8], MAGIC22);
+            assert_eq!(
+                header_spec_from_magic(&bytes[..8].try_into().expect("magic")),
+                Some(HEADER_V22)
+            );
+            let section = table(&src).encode_section();
+            assert_eq!(bytes[8..8 + section.len()], section[..]);
+        }
+    }
+
+    #[test]
+    fn declaration_order_does_not_change_the_emitted_artifact() {
+        let z = "enum Z {\n    Z0,\n}\n";
+        let a = "enum A {\n    A0(i32),\n}\n";
+        let za = compile_program_to_semcode(&format!("{z}{a}{MAIN}")).expect("compile");
+        let az = compile_program_to_semcode(&format!("{a}{z}{MAIN}")).expect("compile");
+        assert_eq!(za, az);
+        // Repeated compilation is byte-identical.
+        assert_eq!(
+            za,
+            compile_program_to_semcode(&format!("{z}{a}{MAIN}")).expect("compile")
+        );
     }
 }

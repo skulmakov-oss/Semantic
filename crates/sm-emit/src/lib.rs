@@ -8,8 +8,9 @@ pub use sm_format::semcode_format::*;
 #[cfg(feature = "std")]
 pub use sm_ir::{
     compile_program_to_semcode, compile_program_to_semcode_with_options,
-    compile_program_to_semcode_with_options_debug, emit_ir_to_semcode, CompilePipelineError,
-    CompileProfile, ConfigurationError, IrError, OptLevel,
+    compile_program_to_semcode_with_options_debug, emit_ir_to_semcode,
+    emit_ir_to_semcode_with_adt_descriptors, CompilePipelineError, CompileProfile,
+    ConfigurationError, IrError, OptLevel,
 };
 
 #[cfg(feature = "std")]
@@ -24,7 +25,11 @@ mod tests {
     use sm_ir::{compile_program_to_ir, PathComponent};
 
     fn function_code<'a>(bytes: &'a [u8], target: &str) -> &'a [u8] {
-        let mut cursor = 8usize;
+        // SSF-09 D2-2: functions start after the ADT0 section.
+        let mut cursor = sm_format::semcode_decode::decode_semcode_envelope(bytes)
+            .expect("decode")
+            .1[0]
+            .name_offset;
         while cursor < bytes.len() {
             let name_len = read_u16_le(bytes, &mut cursor).expect("name length") as usize;
             let name = std::str::from_utf8(&bytes[cursor..cursor + name_len]).expect("utf8 name");
@@ -114,9 +119,10 @@ mod tests {
     fn sm_emit_smoke_compile_to_semcode() {
         let src = "fn main() { return; }";
         let bytes = compile_program_to_semcode(src).expect("emit");
-        // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+        // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+        // SIG0 floor described here. #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
         // artifact regardless of which opcodes it uses (was SEMCODE0).
-        assert_eq!(&bytes[0..8], &MAGIC19);
+        assert_eq!(&bytes[0..8], &MAGIC22);
     }
 
     #[test]
@@ -146,11 +152,11 @@ mod tests {
         // as of #1891 Checkpoint W2D, the Write event's own bytes gained the
         // analogous execution-mode prefix - this program's reassignment
         // would independently promote to rev21 on its own merits by then).
-        assert_eq!(&bytes[0..8], &MAGIC20);
+        assert_eq!(&bytes[0..8], &MAGIC22);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 21);
+        assert_eq!(spec.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
 
         let code = function_code(&bytes, "main");
@@ -229,11 +235,11 @@ mod tests {
         // now always carries a resolved ActivationSiteId, promoting this
         // artifact to SEMCOD20/rev21. Verified semantically unchanged: same
         // root, same field symbol, same component shape.
-        assert_eq!(&bytes[0..8], &MAGIC20);
+        assert_eq!(&bytes[0..8], &MAGIC22);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 21);
+        assert_eq!(spec.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_FIELD_PATHS, 0);
 
@@ -293,11 +299,11 @@ mod tests {
         // checkpoint (the SIG0 floor). Capability bits are unaffected by
         // this revision promotion; they remain a separate axis (item 10 of
         // the W2D brief).
-        assert_eq!(&bytes[0..8], &MAGIC20);
+        assert_eq!(&bytes[0..8], &MAGIC22);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 21);
+        assert_eq!(spec.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_FIELD_PATHS, 0);
 
@@ -351,11 +357,11 @@ mod tests {
         // as a resolved Borrow ActivationSiteId already did for other
         // programs (Checkpoint D2a). Was SEMCOD19/rev20 (the SIG0 floor)
         // before this checkpoint.
-        assert_eq!(&bytes[0..8], &MAGIC20);
+        assert_eq!(&bytes[0..8], &MAGIC22);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 21);
+        assert_eq!(spec.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_ne!(spec.capabilities & CAP_SEQUENCE_VALUES, 0);
         assert_ne!(spec.capabilities & CAP_SEQUENCE_ITERATION, 0);
 

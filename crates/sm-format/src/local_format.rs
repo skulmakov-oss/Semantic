@@ -499,9 +499,9 @@ pub const SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
 /// artifact carries the mandatory `ADT0` section immediately after the magic.
 /// Capabilities are inherited unchanged from `HEADER_V21`.
 ///
-/// D2-1 defines the vocabulary only: this header is deliberately absent from
-/// `supported_headers()` and is never emitted. The D2 artifact envelope
-/// (emission, decoding and admission) is activated as a whole in D2-2.
+/// D2-2 activates it as a whole: the compiler emits it for every artifact,
+/// the decoder requires and strictly validates its `ADT0` section, and the
+/// verifier admits descriptor-dependent ADT opcodes only against that table.
 pub const HEADER_V22: SemcodeHeaderSpec = SemcodeHeaderSpec {
     magic: MAGIC22,
     epoch: 0,
@@ -518,6 +518,7 @@ pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
         HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20, HEADER_V21,
+        HEADER_V22,
     ]
 }
 
@@ -1159,8 +1160,57 @@ impl AdtDescriptorTable {
         Ok(Self { descriptors })
     }
 
+    /// SSF-09 D2-2: the decoder-side constructor. Takes the descriptors in
+    /// exactly the order an `ADT0` section encodes them and only validates:
+    /// it never adds, drops, sorts or rewrites a descriptor, and never calls
+    /// [`AdtDescriptorTable::with_builtins`]. The artifact's table is the
+    /// artifact authority, so a missing or non-canonical built-in is a
+    /// rejection, not something to repair.
+    pub(crate) fn from_encoded_strict(
+        descriptors: Vec<AdtDescriptor>,
+    ) -> Result<Self, &'static str> {
+        if u16::try_from(descriptors.len()).is_err() {
+            return Err("ADT0 descriptor count exceeds the u16 limit");
+        }
+        for pair in descriptors.windows(2) {
+            match pair[0].name.as_bytes().cmp(pair[1].name.as_bytes()) {
+                core::cmp::Ordering::Less => {}
+                core::cmp::Ordering::Equal => return Err("ADT0 repeats a descriptor name"),
+                core::cmp::Ordering::Greater => {
+                    return Err("ADT0 descriptors are not in strictly ascending name-byte order")
+                }
+            }
+        }
+        let table = Self { descriptors };
+        for builtin in builtin_adt_descriptors() {
+            let option = builtin.name == "Option";
+            match table.get(&builtin.name) {
+                None if option => return Err("ADT0 is missing the built-in Option descriptor"),
+                None => return Err("ADT0 is missing the built-in Result descriptor"),
+                Some(found) if *found != builtin && option => {
+                    return Err("ADT0 Option descriptor is not the canonical [None/0, Some/1]")
+                }
+                Some(found) if *found != builtin => {
+                    return Err("ADT0 Result descriptor is not the canonical [Ok/1, Err/1]")
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(table)
+    }
+
     pub fn descriptors(&self) -> &[AdtDescriptor] {
         &self.descriptors
+    }
+
+    /// Looks a descriptor up by its canonical type name, the ADT's semantic
+    /// identity. Relies on the strict name-byte order both constructors
+    /// guarantee.
+    pub fn get(&self, name: &str) -> Option<&AdtDescriptor> {
+        self.descriptors
+            .binary_search_by(|d| d.name.as_bytes().cmp(name.as_bytes()))
+            .ok()
+            .map(|index| &self.descriptors[index])
     }
 
     /// Encodes the `ADT0` section, all integers little-endian:
@@ -1511,16 +1561,109 @@ mod adt_descriptor_tests {
     }
 
     #[test]
-    fn d2_header_vocabulary_is_defined_but_not_admitted() {
+    fn d2_header_vocabulary_is_defined_and_admitted() {
         assert_eq!(HEADER_V22.magic, *b"SEMCOD22");
         assert_eq!(HEADER_V22.rev, 23);
         assert_eq!(HEADER_V22.epoch, 0);
         assert_eq!(HEADER_V22.capabilities, HEADER_V21.capabilities);
         assert_eq!(SEMCODE_ADT_DESCRIPTOR_MIN_REVISION, 23);
         assert_eq!(ADT_DESCRIPTOR_SECTION_TAG, *b"ADT0");
-        // D2-2 admits the D2 envelope as a whole; until then SEMCOD22 is
-        // neither supported nor decodable.
-        assert!(!supported_headers().contains(&HEADER_V22));
-        assert_eq!(header_spec_from_magic(&MAGIC22), None);
+        // D2-2: SEMCOD22 is supported; admission additionally requires a
+        // strictly valid ADT0 section (see semcode_decode).
+        assert_eq!(supported_headers().last(), Some(&HEADER_V22));
+        assert_eq!(header_spec_from_magic(&MAGIC22), Some(HEADER_V22));
+    }
+
+    fn encoded(table: &AdtDescriptorTable) -> Vec<AdtDescriptor> {
+        table.descriptors().to_vec()
+    }
+
+    #[test]
+    fn strict_constructor_accepts_canonical_tables_exactly_as_encoded() {
+        for user in [vec![], vec![adt("E", &[("A", 0), ("B", 2)])]] {
+            let canonical = AdtDescriptorTable::with_builtins(user).expect("table");
+            assert_eq!(
+                AdtDescriptorTable::from_encoded_strict(encoded(&canonical)),
+                Ok(canonical)
+            );
+        }
+    }
+
+    #[test]
+    fn strict_constructor_never_repairs_missing_or_non_canonical_builtins() {
+        let canonical = encoded(&AdtDescriptorTable::with_builtins(vec![]).expect("table"));
+        let without = |name: &str| {
+            canonical
+                .iter()
+                .filter(|d| d.name() != name)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            AdtDescriptorTable::from_encoded_strict(without("Option")),
+            Err("ADT0 is missing the built-in Option descriptor")
+        );
+        assert_eq!(
+            AdtDescriptorTable::from_encoded_strict(without("Result")),
+            Err("ADT0 is missing the built-in Result descriptor")
+        );
+        let replace = |name: &str, variants: &[(&str, u16)]| {
+            canonical
+                .iter()
+                .map(|d| {
+                    if d.name() == name {
+                        adt(name, variants)
+                    } else {
+                        d.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        for bad in [
+            replace("Option", &[("None", 0), ("Some", 2)]),
+            replace("Option", &[("Some", 1), ("None", 0)]),
+            replace("Option", &[("Nothing", 0), ("Some", 1)]),
+        ] {
+            assert_eq!(
+                AdtDescriptorTable::from_encoded_strict(bad),
+                Err("ADT0 Option descriptor is not the canonical [None/0, Some/1]")
+            );
+        }
+        for bad in [
+            replace("Result", &[("Ok", 0), ("Err", 1)]),
+            replace("Result", &[("Err", 1), ("Ok", 1)]),
+        ] {
+            assert_eq!(
+                AdtDescriptorTable::from_encoded_strict(bad),
+                Err("ADT0 Result descriptor is not the canonical [Ok/1, Err/1]")
+            );
+        }
+    }
+
+    #[test]
+    fn strict_constructor_rejects_unsorted_or_duplicate_descriptors_without_sorting() {
+        let mut reversed = encoded(&AdtDescriptorTable::with_builtins(vec![]).expect("table"));
+        reversed.reverse();
+        assert_eq!(
+            AdtDescriptorTable::from_encoded_strict(reversed),
+            Err("ADT0 descriptors are not in strictly ascending name-byte order")
+        );
+        let mut duplicated = encoded(&AdtDescriptorTable::with_builtins(vec![]).expect("table"));
+        duplicated.insert(0, duplicated[0].clone());
+        assert_eq!(
+            AdtDescriptorTable::from_encoded_strict(duplicated),
+            Err("ADT0 repeats a descriptor name")
+        );
+    }
+
+    #[test]
+    fn get_resolves_descriptors_by_name_not_by_position() {
+        let table = AdtDescriptorTable::with_builtins(vec![adt("Z", &[("Z0", 3)]), adt("A", &[])])
+            .expect("table");
+        assert_eq!(names(&table), ["A", "Option", "Result", "Z"]);
+        assert_eq!(table.get("Z").map(|d| d.variants().len()), Some(1));
+        assert_eq!(table.get("A").map(|d| d.variants().len()), Some(0));
+        assert_eq!(table.get("Option"), Some(&table.descriptors()[1]));
+        assert_eq!(table.get("Missing"), None);
     }
 }

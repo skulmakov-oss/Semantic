@@ -10,6 +10,9 @@
 // ...)`/`assert_eq!(spec.rev, ...)` checks now assert the current
 // unconditional floor, not the historically-minimal header for that
 // feature alone.
+//
+// SSF-09 D2-2: HEADER_V22 (SEMCOD22, rev 23), which carries the mandatory
+// ADT0 descriptor section, has replaced SEMCOD19 as that unconditional floor.
 
 use semantic_language::frontend::{
     compile_program_to_semcode, compile_program_to_semcode_with_options_debug, emit_ir_to_semcode,
@@ -20,16 +23,19 @@ use semantic_language::prom_cap::{CapabilityKind, CapabilityManifest};
 use semantic_language::semcode_format::{
     header_spec_from_magic, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_EVENT_POST, CAP_F64_MATH,
     CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY,
-    CAP_STATE_UPDATE, CAP_TEXT_VALUES, MAGIC19,
+    CAP_STATE_UPDATE, CAP_TEXT_VALUES,
 };
 use semantic_language::semcode_vm::{
     disasm_semcode, run_semcode, run_verified_semcode_with_host_and_capabilities, RuntimeError,
 };
+use sm_format::semcode_format::MAGIC22;
 use sm_vm::run_verified_semcode;
 
 fn first_function_code_offset(bytes: &[u8]) -> usize {
-    let name_len = u16::from_le_bytes([bytes[8], bytes[9]]) as usize;
-    8 + 2 + name_len + 4
+    // SSF-09 D2-2: the first function starts after the ADT0 section, at the
+    // offset the canonical decoder reports.
+    let (_, functions) = sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode");
+    functions[0].code_offset
 }
 
 fn compile_cli_default_semcode(src: &str) -> Vec<u8> {
@@ -41,12 +47,12 @@ fn compile_cli_default_semcode(src: &str) -> Vec<u8> {
 fn compat_v0_header_and_run() {
     let src = "fn main() { return; }";
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     // #1773 (FA-09-005): CAP_F64_MATH absence is no longer assertable here -
     // SEMCOD19 (the unconditional floor for every compiled artifact) always
     // carries every capability through V18, including CAP_F64_MATH, even
@@ -65,12 +71,12 @@ fn compat_v1_header_and_run() {
         }
     "#;
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_F64_MATH, 0);
     run_verified_semcode(&bytes).expect("verified run");
 }
@@ -89,12 +95,12 @@ fn compat_i32_value_path_runs_under_v0_header() {
         }
     "#;
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     // #1773 (FA-09-005): CAP_F64_MATH/CAP_FX_VALUES absence is no longer
     // assertable here - see the identical comment in
     // `compat_v0_header_and_run` above.
@@ -115,12 +121,12 @@ fn compat_v2_header_and_run() {
         }
     "#;
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_FX_VALUES, 0);
     run_verified_semcode(&bytes).expect("verified run");
 }
@@ -138,12 +144,12 @@ fn compat_v3_header_and_run() {
         }
     "#;
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_FX_VALUES, 0);
     assert_ne!(spec.capabilities & CAP_FX_MATH, 0);
     run_verified_semcode(&bytes).expect("verified run");
@@ -174,12 +180,12 @@ fn compat_v4_header_and_state_query_run() {
         false,
     )
     .expect("emit");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_STATE_QUERY, 0);
     let mut manifest = CapabilityManifest::new();
     manifest.allow(CapabilityKind::StateQuery);
@@ -208,12 +214,12 @@ fn compat_v5_header_and_state_update_run() {
         false,
     )
     .expect("emit");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_STATE_UPDATE, 0);
     let mut manifest = CapabilityManifest::new();
     manifest.allow(CapabilityKind::StateUpdate);
@@ -243,12 +249,12 @@ fn compat_v6_header_and_event_post_run() {
         false,
     )
     .expect("emit");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_EVENT_POST, 0);
     let mut manifest = CapabilityManifest::new();
     manifest.allow(CapabilityKind::EventPost);
@@ -280,12 +286,12 @@ fn compat_v7_header_and_clock_read_run() {
         false,
     )
     .expect("emit");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_CLOCK_READ, 0);
     let mut manifest = CapabilityManifest::new();
     manifest.allow(CapabilityKind::ClockRead);
@@ -309,12 +315,12 @@ fn compat_v8_header_and_text_run() {
         }
     "#;
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_TEXT_VALUES, 0);
     run_verified_semcode(&bytes).expect("verified run");
 }
@@ -331,12 +337,12 @@ fn compat_v9_header_and_sequence_run() {
         }
     "#;
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_SEQUENCE_VALUES, 0);
     run_verified_semcode(&bytes).expect("verified run");
 }
@@ -353,12 +359,12 @@ fn compat_v10_header_and_closure_run() {
         }
     "#;
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[0..8]);
     let spec = header_spec_from_magic(&magic).expect("known header");
     assert_eq!(spec.epoch, 0);
-    assert_eq!(spec.rev, 20);
+    assert_eq!(spec.rev, 23);
     assert_ne!(spec.capabilities & CAP_CLOSURE_VALUES, 0);
     run_verified_semcode(&bytes).expect("verified run");
 }
@@ -372,7 +378,7 @@ fn compat_cli_o0_v1_f64_arithmetic_runs_on_verified_path() {
         }
     "#;
     let bytes = compile_cli_default_semcode(src);
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     run_verified_semcode(&bytes).expect("verified run");
 }
 
@@ -385,7 +391,7 @@ fn compat_cli_o0_v1_builtin_call_runs_on_verified_path() {
         }
     "#;
     let bytes = compile_cli_default_semcode(src);
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     run_verified_semcode(&bytes).expect("verified run");
 }
 
@@ -435,7 +441,7 @@ fn compat_cli_o0_complex_semantic_stress_runs_on_verified_path() {
         }
     "#;
     let bytes = compile_cli_default_semcode(src);
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     run_verified_semcode(&bytes).expect("verified run");
 }
 
@@ -443,7 +449,7 @@ fn compat_cli_o0_complex_semantic_stress_runs_on_verified_path() {
 fn compat_example_semantic_policy_overdrive_trace_runs_on_verified_path() {
     let src = include_str!("../examples/semantic_policy_overdrive_trace.sm");
     let bytes = compile_cli_default_semcode(src);
-    assert_eq!(&bytes[0..8], &MAGIC19);
+    assert_eq!(&bytes[0..8], &MAGIC22);
     run_verified_semcode(&bytes).expect("verified run");
 
     let disasm = disasm_semcode(&bytes).expect("disasm");

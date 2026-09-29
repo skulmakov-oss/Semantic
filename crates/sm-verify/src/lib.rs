@@ -222,6 +222,30 @@ pub enum VerificationCode {
     /// accepted for Borrow above, now shared by both domains without either
     /// one gaining authority over the other's anchors.
     InvalidOwnershipAnchor,
+    /// SSF-09 D2-2: the mandatory `ADT0` descriptor section of a revision-23+
+    /// artifact is missing, malformed, or not a strictly valid canonical
+    /// descriptor table (rejected at decode, before any function is read).
+    InvalidAdtDescriptorSection,
+    /// SSF-09 D2-2: a descriptor-dependent ADT opcode (`MAKE_ADT`, `ADT_TAG`,
+    /// `ADT_GET`) appears under a header revision that cannot carry the
+    /// `ADT0` descriptor table. No table is ever inferred for such artifacts.
+    AdtRequiresDescriptorHeader,
+    /// SSF-09 D2-2: an ADT opcode names a type absent from the artifact's
+    /// `ADT0` table (resolved by canonical type name).
+    UnknownAdtType,
+    /// SSF-09 D2-2: a `MAKE_ADT` discriminant does not name a variant of its
+    /// descriptor.
+    InvalidAdtDiscriminant,
+    /// SSF-09 D2-2: a `MAKE_ADT` variant-name operand differs from the
+    /// descriptor's variant name at that discriminant.
+    AdtVariantNameMismatch,
+    /// SSF-09 D2-2: a `MAKE_ADT` payload count differs from the descriptor
+    /// variant's payload arity.
+    AdtPayloadArityMismatch,
+    /// SSF-09 D2-2: an `ADT_GET` payload index is not below the largest
+    /// payload arity of its descriptor's variants. `ADT_GET` carries no
+    /// discriminant, so the index is bounded per type, not per variant.
+    AdtPayloadIndexOutOfRange,
 }
 
 #[cfg(feature = "std")]
@@ -696,81 +720,89 @@ pub fn verify_semcode_token_with_quotas_and_limits(
     // below, never recreated or reset. See `AnalysisWorkMeter`.
     let mut work_meter = AnalysisWorkMeter::new(limits.max_work_units);
 
-    let (header, decoded_functions) =
-        match sm_format::semcode_decode::decode_semcode_envelope(bytes) {
-            Ok(v) => v,
-            Err(err) => {
-                let diag = match err {
-                    sm_format::semcode_decode::DecodeError::BadHeader => diag(
-                        VerificationCode::BadHeader,
+    // SSF-09 D2-2: the canonical decode; `adt_descriptors` is the artifact's
+    // own strictly validated ADT0 table (None for legacy revisions).
+    let sm_format::semcode_decode::DecodedSemCode {
+        header,
+        adt_descriptors,
+        functions: decoded_functions,
+    } = match sm_format::semcode_decode::decode_semcode(bytes) {
+        Ok(v) => v,
+        Err(err) => {
+            let diag = match err {
+                sm_format::semcode_decode::DecodeError::BadHeader => diag(
+                    VerificationCode::BadHeader,
+                    None,
+                    None,
+                    "SemCode file is shorter than the 8-byte header",
+                ),
+                sm_format::semcode_decode::DecodeError::UnsupportedVersion { found, .. } => diag(
+                    VerificationCode::UnsupportedVersion,
+                    None,
+                    Some(0),
+                    format!("unsupported SemCode header '{}'", found),
+                ),
+                sm_format::semcode_decode::DecodeError::TruncatedFunction { offset, msg } => {
+                    diag(VerificationCode::TruncatedFunction, None, Some(offset), msg)
+                }
+                sm_format::semcode_decode::DecodeError::InvalidFunctionName { offset, msg } => {
+                    diag(
+                        VerificationCode::InvalidFunctionName,
                         None,
-                        None,
-                        "SemCode file is shorter than the 8-byte header",
-                    ),
-                    sm_format::semcode_decode::DecodeError::UnsupportedVersion {
-                        found, ..
-                    } => diag(
-                        VerificationCode::UnsupportedVersion,
-                        None,
-                        Some(0),
-                        format!("unsupported SemCode header '{}'", found),
-                    ),
-                    sm_format::semcode_decode::DecodeError::TruncatedFunction { offset, msg } => {
-                        diag(VerificationCode::TruncatedFunction, None, Some(offset), msg)
-                    }
-                    sm_format::semcode_decode::DecodeError::InvalidFunctionName { offset, msg } => {
-                        diag(
-                            VerificationCode::InvalidFunctionName,
-                            None,
-                            Some(offset),
-                            msg,
-                        )
-                    }
-                    sm_format::semcode_decode::DecodeError::InvalidStringTable { offset, msg } => {
-                        diag(
-                            VerificationCode::InvalidStringTable,
-                            None,
-                            Some(offset),
-                            msg,
-                        )
-                    }
-                    sm_format::semcode_decode::DecodeError::InvalidDebugSection { offset, msg } => {
-                        diag(
-                            VerificationCode::InvalidDebugSection,
-                            None,
-                            Some(offset),
-                            msg,
-                        )
-                    }
-                    sm_format::semcode_decode::DecodeError::InvalidOwnershipSection {
-                        offset,
+                        Some(offset),
                         msg,
-                    } => diag(
+                    )
+                }
+                sm_format::semcode_decode::DecodeError::InvalidStringTable { offset, msg } => diag(
+                    VerificationCode::InvalidStringTable,
+                    None,
+                    Some(offset),
+                    msg,
+                ),
+                sm_format::semcode_decode::DecodeError::InvalidDebugSection { offset, msg } => {
+                    diag(
+                        VerificationCode::InvalidDebugSection,
+                        None,
+                        Some(offset),
+                        msg,
+                    )
+                }
+                sm_format::semcode_decode::DecodeError::InvalidOwnershipSection { offset, msg } => {
+                    diag(
                         VerificationCode::InvalidOwnershipSection,
                         None,
                         Some(offset),
                         msg,
-                    ),
-                    sm_format::semcode_decode::DecodeError::InvalidSignatureSection {
-                        offset,
-                        msg,
-                    } => diag(
+                    )
+                }
+                sm_format::semcode_decode::DecodeError::InvalidSignatureSection { offset, msg } => {
+                    diag(
                         VerificationCode::InvalidSignatureSection,
                         None,
                         Some(offset),
                         msg,
-                    ),
-                    sm_format::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
-                        VerificationCode::ResourceLimitExceeded,
-                        None,
-                        Some(offset),
-                        msg,
-                    ),
-                };
-                diagnostics.push(diag);
-                return Err(RejectReport { diagnostics });
-            }
-        };
+                    )
+                }
+                sm_format::semcode_decode::DecodeError::InvalidAdtDescriptorSection {
+                    offset,
+                    msg,
+                } => diag(
+                    VerificationCode::InvalidAdtDescriptorSection,
+                    None,
+                    Some(offset),
+                    msg,
+                ),
+                sm_format::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
+                    VerificationCode::ResourceLimitExceeded,
+                    None,
+                    Some(offset),
+                    msg,
+                ),
+            };
+            diagnostics.push(diag);
+            return Err(RejectReport { diagnostics });
+        }
+    };
 
     let mut functions = Vec::new();
     let mut pending_functions = Vec::new();
@@ -790,7 +822,14 @@ pub fn verify_semcode_token_with_quotas_and_limits(
             break;
         }
 
-        match verify_function_code(env, &header, &quotas, &limits, &mut work_meter) {
+        match verify_function_code(
+            env,
+            &header,
+            adt_descriptors.as_ref(),
+            &quotas,
+            &limits,
+            &mut work_meter,
+        ) {
             Ok(function) => {
                 functions.push(function.verified.clone());
                 pending_functions.push(function);
@@ -1314,9 +1353,101 @@ fn verify_ownership_path_family_contract(
 }
 
 #[cfg(feature = "std")]
+/// SSF-09 D2-2: the descriptor laws for one ADT instruction, checked against
+/// the artifact's own ADT0 table. The type resolves by its canonical name
+/// (never by table position); a variant by its discriminant. `ADT_TAG` and
+/// `ADT_GET` carry no discriminant, so for them only the type (and, for
+/// `ADT_GET`, an index bound over all of the type's variants) is provable.
+/// Out-of-range string ids are left to the string-reference check.
+fn verify_adt_instruction(
+    name: &str,
+    env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
+    table: &sm_format::semcode_format::AdtDescriptorTable,
+    opcode: Opcode,
+    operands: &[u8],
+    offset: usize,
+) -> Result<(), RejectReport> {
+    let mut words = operands
+        .chunks_exact(2)
+        .map(|w| usize::from(u16::from_le_bytes([w[0], w[1]])));
+    let mut next = || words.next().unwrap_or(usize::MAX);
+    let reject = |code, msg: String| reject_one(name, code, offset, msg);
+    let _dst = next();
+    if opcode != Opcode::MakeAdt {
+        let _src = next();
+    }
+    let type_sid = next();
+    let Some(type_name) = env.strings.get(type_sid) else {
+        return Ok(());
+    };
+    let Some(descriptor) = table.get(type_name) else {
+        return Err(reject(
+            VerificationCode::UnknownAdtType,
+            format!("ADT type '{type_name}' is not declared in the artifact's ADT0 table"),
+        ));
+    };
+    match opcode {
+        Opcode::MakeAdt => {
+            let variant_sid = next();
+            let tag = next();
+            let count = next();
+            let Some(variant) = descriptor.variants().get(tag) else {
+                return Err(reject(
+                    VerificationCode::InvalidAdtDiscriminant,
+                    format!(
+                        "discriminant {tag} is not a variant of '{type_name}' ({} variants)",
+                        descriptor.variants().len()
+                    ),
+                ));
+            };
+            if let Some(variant_name) = env.strings.get(variant_sid) {
+                if variant_name != variant.name() {
+                    return Err(reject(
+                        VerificationCode::AdtVariantNameMismatch,
+                        format!(
+                            "'{type_name}' discriminant {tag} is variant '{}', but the instruction names '{variant_name}'",
+                            variant.name()
+                        ),
+                    ));
+                }
+            }
+            let arity = usize::from(variant.payload_arity());
+            if count != arity {
+                return Err(reject(
+                    VerificationCode::AdtPayloadArityMismatch,
+                    format!(
+                        "'{type_name}::{}' takes {arity} payload item(s), but the instruction supplies {count}",
+                        variant.name()
+                    ),
+                ));
+            }
+        }
+        Opcode::AdtGet => {
+            let index = next();
+            let max_arity = descriptor
+                .variants()
+                .iter()
+                .map(|v| usize::from(v.payload_arity()))
+                .max()
+                .unwrap_or(0);
+            if index >= max_arity {
+                return Err(reject(
+                    VerificationCode::AdtPayloadIndexOutOfRange,
+                    format!(
+                        "payload index {index} is out of range for '{type_name}' (largest variant arity {max_arity})"
+                    ),
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn verify_function_code(
     env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
     header: &SemcodeHeaderSpec,
+    adt_descriptors: Option<&sm_format::semcode_format::AdtDescriptorTable>,
     quotas: &RuntimeQuotas,
     limits: &VerificationLimits,
     work_meter: &mut AnalysisWorkMeter,
@@ -1428,6 +1559,23 @@ fn verify_function_code(
         if opcode == Opcode::MakeRecord {
             make_record_starts.push(offset);
         }
+        // SSF-09 D2-2: descriptor-dependent ADT opcodes need the artifact's
+        // own ADT0 table. A legacy header cannot carry one, so reject at the
+        // opcode byte - no table is ever inferred.
+        let is_adt_opcode = matches!(opcode, Opcode::MakeAdt | Opcode::AdtTag | Opcode::AdtGet);
+        if is_adt_opcode && adt_descriptors.is_none() {
+            return Err(reject_one(
+                name,
+                VerificationCode::AdtRequiresDescriptorHeader,
+                offset,
+                format!(
+                    "opcode {opcode:?} requires the ADT0 descriptor table of SemCode header revision >= {}, but artifact header '{}' is revision {}",
+                    sm_format::semcode_format::SEMCODE_ADT_DESCRIPTOR_MIN_REVISION,
+                    String::from_utf8_lossy(&header.magic),
+                    header.rev
+                ),
+            ));
+        }
         // #1756 Codex review round 21: `MetadataCollector` appends
         // directly into these outer `jump_targets`/`string_refs`/
         // `call_argcs` accumulators - no per-instruction `Vec` is built
@@ -1453,6 +1601,11 @@ fn verify_function_code(
             &mut NoCollect,
             &mut metadata_collector,
         )?;
+        if let (true, Some(table)) = (is_adt_opcode, adt_descriptors) {
+            // `decode_operands` has already bounds-checked this layout.
+            let operands = &code[instr_start + offset + 1..cursor];
+            verify_adt_instruction(name, env, table, opcode, operands, offset)?;
+        }
         let next_offset = cursor - instr_start;
         let jump_target = jump_targets.get(jump_targets_before).copied();
         let successors = match (opcode, jump_target) {
@@ -4348,8 +4501,8 @@ fn diag(
 mod tests {
     use super::*;
     use sm_format::semcode_format::{
-        read_u16_le, read_u32_le, CallableValueFamily, MAGIC0, MAGIC10, MAGIC11, MAGIC18, MAGIC20,
-        MAGIC21, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG,
+        read_u16_le, read_u32_le, CallableValueFamily, MAGIC0, MAGIC10, MAGIC11, MAGIC18, MAGIC22,
+        MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG,
     };
     use sm_ir::{
         compile_program_to_semcode, compile_program_to_semcode_with_options_debug,
@@ -4584,14 +4737,31 @@ mod tests {
 
         // MAKE_ADT: TWO distinct string refs from ONE instruction (enum
         // type name, enum variant name) - proves a multi-metadata opcode
-        // is not truncated to a single entry.
-        let bytes = emit_test_function(vec![IrInstr::MakeAdt {
-            dst: 0,
-            adt_name: "MyEnum".to_string(),
-            variant_name: "Variant".to_string(),
-            tag: 0,
-            items: vec![],
-        }]);
+        // is not truncated to a single entry. SSF-09 D2-2R1: a user enum
+        // needs explicit descriptor authority to be emitted at all.
+        use sm_format::semcode_format::{AdtDescriptor, AdtDescriptorTable, AdtVariantDescriptor};
+        let my_enum = AdtDescriptor::new(
+            "MyEnum",
+            vec![AdtVariantDescriptor::new("Variant", 0).expect("variant")],
+        )
+        .expect("descriptor");
+        let bytes = sm_ir::emit_ir_to_semcode_with_adt_descriptors(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![IrInstr::MakeAdt {
+                    dst: 0,
+                    adt_name: "MyEnum".to_string(),
+                    variant_name: "Variant".to_string(),
+                    tag: 0,
+                    items: vec![],
+                }],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            }],
+            &AdtDescriptorTable::with_builtins(vec![my_enum]).expect("table"),
+            false,
+        )
+        .expect("emit test function");
         let (_, string_refs, _) = decode_first_instruction_metadata(&bytes, "main");
         assert_eq!(
             string_refs
@@ -4843,9 +5013,10 @@ mod tests {
         "#;
         let bytes = compile_program_to_semcode(src).expect("compile");
         let verified = verify_semcode(&bytes).expect("verify");
-        // #1773 (FA-09-005): SEMCOD19/rev20 is now the floor for every
+        // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+        // SIG0 floor described here. #1773 (FA-09-005): SEMCOD19/rev20 is now the floor for every
         // compiled artifact - see the analogous sm-ir comment.
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
     }
 
     #[test]
@@ -4864,7 +5035,7 @@ mod tests {
         )
         .expect("compile");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
     }
 
     #[test]
@@ -4883,7 +5054,7 @@ mod tests {
         )
         .expect("compile");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
     }
 
     #[test]
@@ -4918,7 +5089,7 @@ mod tests {
         )
         .expect("emit");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -4942,7 +5113,7 @@ mod tests {
         )
         .expect("emit");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -4964,7 +5135,7 @@ mod tests {
         )
         .expect("emit");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -4981,7 +5152,7 @@ mod tests {
         )
         .expect("emit");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -4997,7 +5168,7 @@ mod tests {
         "#;
         let bytes = compile_program_to_semcode(src).expect("compile");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -5248,16 +5419,16 @@ mod tests {
         // #1726 Checkpoint D2a: this program's Borrow event now always
         // carries a resolved ActivationSiteId, promoting it to SEMCOD20/rev21
         // (was rev20/SIG0's floor before D2a).
-        assert_eq!(verified.header.rev, 21);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 2);
     }
 
     #[test]
     fn verifier_accepts_record_field_borrow_ownership_semcode() {
         let bytes = record_field_borrow_semcode_bytes();
-        assert_eq!(&bytes[..MAGIC20.len()], &MAGIC20);
+        assert_eq!(&bytes[..MAGIC22.len()], &MAGIC22);
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 21);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -5297,10 +5468,10 @@ mod tests {
         // subject), to `HEADER_V21`/rev22 - purely additive, same OWN0
         // grammar. Before #1718, ADT Borrow had no dedicated capability, so
         // this program only ever reached `MAGIC20`/rev21.
-        assert_eq!(&bytes[..MAGIC21.len()], &MAGIC21);
+        assert_eq!(&bytes[..MAGIC22.len()], &MAGIC22);
         let verified = verify_semcode(&bytes)
             .expect("D2b must admit a mixed FrameEntry+StoreVarSite artifact");
-        assert_eq!(verified.header.rev, 22);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
     }
 
     #[test]
@@ -5362,8 +5533,8 @@ mod tests {
             verify_semcode(&bytes).expect("FrameEntry-only ADT Borrow artifact must admit");
         assert_eq!(
             verified.header.rev,
-            sm_format::semcode_format::SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION,
-            "promotion here must land exactly on the ADT-Borrow capability floor, not higher"
+            sm_format::semcode_format::SEMCODE_ADT_DESCRIPTOR_MIN_REVISION,
+            "SSF-09 D2-2: the uniform HEADER_V22 floor now sits above the ADT-Borrow capability floor"
         );
         let (_, decoded) =
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
@@ -6084,9 +6255,9 @@ mod tests {
         // carries a resolved WriteSiteId (Checkpoint W2C), promoting this
         // artifact to SEMCOD20/rev21 - was SEMCOD19/rev20 before this
         // checkpoint.
-        assert_eq!(&bytes[..MAGIC20.len()], &MAGIC20);
+        assert_eq!(&bytes[..MAGIC22.len()], &MAGIC22);
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 21);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -6115,9 +6286,9 @@ mod tests {
         // (producer B), which now always carries a resolved WriteSiteId
         // (Checkpoint W2C), promoting this artifact to SEMCOD20/rev21 - was
         // SEMCOD19/rev20 (the SIG0 floor) before this checkpoint.
-        assert_eq!(&bytes[..MAGIC20.len()], b"SEMCOD20");
+        assert_eq!(&bytes[..MAGIC22.len()], b"SEMCOD22");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 21);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         assert_eq!(verified.functions.len(), 2);
     }
 
@@ -6162,7 +6333,7 @@ mod tests {
     #[test]
     fn verifier_rejects_truncated_string_table() {
         let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        let code_len_pos = 8 + 2 + 4;
+        let code_len_pos = first_function_offset(&bytes) + 2 + 4;
         bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&1u32.to_le_bytes());
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
@@ -11128,7 +11299,9 @@ mod tests {
         // this content, or the resulting artifact would understate its own
         // capability requirement and get rejected for a reason unrelated to
         // whatever the calling test actually wants to exercise.
-        bytes[0..8].copy_from_slice(&sm_format::semcode_format::MAGIC21);
+        // SSF-09 D2-2: the base fixture is now HEADER_V22, whose capability
+        // set already includes HEADER_V21's, so no header patch is needed
+        // (relabelling it to V21 would also misread its ADT0 section).
         bytes
     }
 
@@ -11224,8 +11397,19 @@ mod tests {
         compile_program_to_semcode(src).expect("compile")
     }
 
+    /// SSF-09 D2-2: offset of the first function envelope, as the canonical
+    /// decoder reports it (past the ADT0 section of a V22 artifact).
+    fn first_function_offset(bytes: &[u8]) -> usize {
+        sm_format::semcode_decode::decode_semcode_envelope(bytes)
+            .expect("decode")
+            .1
+            .first()
+            .expect("at least one function")
+            .name_offset
+    }
+
     fn function_code_span(bytes: &[u8], target: &str) -> (usize, usize, usize) {
-        let mut cursor = 8usize;
+        let mut cursor = first_function_offset(bytes);
         while cursor < bytes.len() {
             let name_len = read_u16_le(bytes, &mut cursor).expect("name length") as usize;
             let name = std::str::from_utf8(&bytes[cursor..cursor + name_len]).expect("utf8 name");
@@ -11848,7 +12032,7 @@ mod tests {
     #[test]
     fn verify_semcode_token_rejects_duplicate_function_names() {
         let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        let function_block = bytes[8..].to_vec();
+        let function_block = bytes[first_function_offset(&bytes)..].to_vec();
         bytes.extend_from_slice(&function_block);
         let report = verify_semcode_token(&bytes).expect_err("must reject");
         assert_eq!(
@@ -12105,13 +12289,14 @@ mod tests {
             false,
         )
         .expect("emit");
-        // #1773 (FA-09-005): SEMCOD19/rev20 is now the floor for every
+        // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+        // SIG0 floor described here. #1773 (FA-09-005): SEMCOD19/rev20 is now the floor for every
         // emitted artifact regardless of which opcodes it uses (was
         // SEMCODE0/rev1, this program's own promotion floor) - see the
         // analogous sm-ir comment.
-        assert_eq!(&bytes[0..8], b"SEMCOD19");
+        assert_eq!(&bytes[0..8], b"SEMCOD22");
         let verified = verify_semcode(&bytes).expect("baseline logic opcodes must verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
     }
 
     // #1732 regression matrix (6): a program mixing QTruth with an
@@ -12141,9 +12326,9 @@ mod tests {
             false,
         )
         .expect("emit");
-        assert_eq!(&bytes[0..8], b"SEMCOD19");
+        assert_eq!(&bytes[0..8], b"SEMCOD22");
         let verified = verify_semcode(&bytes).expect("mixed QTruth+f64 program must verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
     }
 
     // #1732 regression matrix (3): the canonical emitter itself must choose
@@ -12177,12 +12362,13 @@ mod tests {
             false,
         )
         .expect("emit");
-        // #1773 (FA-09-005): SEMCOD19/rev20 is now the floor (was SEMCOD18/
+        // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+        // SIG0 floor described here. #1773 (FA-09-005): SEMCOD19/rev20 is now the floor (was SEMCOD18/
         // rev19, QTruth's own promotion floor) - see the comment on
         // `emitter_selects_maximum_required_revision_for_mixed_program`.
-        assert_eq!(&bytes[0..8], b"SEMCOD19");
+        assert_eq!(&bytes[0..8], b"SEMCOD22");
         let verified = verify_semcode(&bytes).expect("emitted QTruth program must verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
     }
 
     // #1751 (FA-07-011): `pending_functions.len()` is a static count of

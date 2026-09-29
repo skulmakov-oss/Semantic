@@ -58,6 +58,10 @@ pub use adt_descriptors::adt_descriptor_table;
 pub use error::{CompilePipelineError, ConfigurationError, IrError};
 #[cfg(feature = "std")]
 pub use frontend::{CompileProfile, OptLevel};
+// SSF-09 D2-2R1: named explicitly (not only through the glob below) so the
+// public API guard accounts for the descriptor-aware emitter.
+#[cfg(feature = "std")]
+pub use legacy_lowering::emit_ir_to_semcode_with_adt_descriptors;
 #[cfg(feature = "std")]
 pub use legacy_lowering::*;
 

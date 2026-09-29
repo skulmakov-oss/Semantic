@@ -1160,6 +1160,9 @@ fn decode_and_map_errors(
         sm_format::semcode_decode::DecodeError::InvalidSignatureSection { msg, .. } => {
             RuntimeError::BadFormat(msg.to_string())
         }
+        sm_format::semcode_decode::DecodeError::InvalidAdtDescriptorSection { msg, .. } => {
+            RuntimeError::BadFormat(msg.to_string())
+        }
         sm_format::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
             RuntimeError::BadFormat(msg)
         }
@@ -6055,12 +6058,18 @@ mod tests {
         // hand-counted literal, which silently drifted out of the
         // instruction stream (and even out of the function's own code
         // region) once those sections became mandatory.
+        // SSF-09 D2-2R1: the function no longer starts at byte 8 (the ADT0
+        // section precedes it), so the offset comes entirely from the decoded
+        // envelope, and the exact message proves the byte hit was an opcode.
         let (_, functions) =
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
-        let opcode_pos = 8 + 2 + 4 + 4 + functions[0].instr_start_offset;
+        let opcode_pos = functions[0].code_offset + functions[0].instr_start_offset;
         bytes[opcode_pos] = 0xff;
         let err = run_semcode(&bytes).expect_err("must fail");
-        assert!(matches!(err, RuntimeError::BadFormat(_)));
+        assert!(
+            matches!(&err, RuntimeError::BadFormat(msg) if msg == "unknown opcode 0xff"),
+            "{err:?}"
+        );
     }
 
     fn build_qtruth_test_program(opcode: u8) -> Vec<u8> {
@@ -6104,7 +6113,7 @@ mod tests {
         let (_, functions) =
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let prefix_len = functions[0].instr_start_offset;
-        let code_len_pos = 8 + 2 + 4;
+        let code_len_pos = functions[0].name_offset + 2 + 4;
         let opcode_pos = code_len_pos + 4 + prefix_len;
         let old_instr_len = functions[0].code_slice.len() - prefix_len;
         bytes.splice(
@@ -8102,10 +8111,22 @@ mod tests {
     fn verified_run_rejects_invalid_bytecode_before_execution() {
         let src = "fn main() { return; }";
         let mut bytes = compile_program_to_semcode(src).expect("compile");
-        let opcode_pos = 8 + 2 + 4 + 4 + 2;
+        // SSF-09 D2-2R1: the hand-counted `8 + 2 + 4 + 4 + 2` had already
+        // drifted into the OWN0 section; locate the first opcode through the
+        // decoded envelope and prove the rejection is for that opcode.
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let opcode_pos = functions[0].code_offset + functions[0].instr_start_offset;
         bytes[opcode_pos] = 0xff;
         let err = run_verified_semcode(&bytes).expect_err("must fail");
-        assert!(matches!(err, RuntimeError::VerifierRejected(_)));
+        let RuntimeError::VerifierRejected(report) = &err else {
+            panic!("expected VerifierRejected, got {err:?}");
+        };
+        assert_eq!(
+            report.diagnostics[0].code,
+            sm_verify::VerificationCode::UnknownOpcode,
+            "{report}"
+        );
     }
 
     #[test]
@@ -8406,7 +8427,7 @@ mod tests {
     /// deliberate hand-authored Borrow event is added, and only real
     /// instruction bytes execute.
     fn rewrite_main_with_self_referencing_store_var_borrow(bytes: Vec<u8>) -> Vec<u8> {
-        let mut cursor = 8usize;
+        let mut cursor = first_function_offset(&bytes);
         let name_len = read_u16_le(&bytes, &mut cursor).expect("name len") as usize;
         let name = read_utf8(&bytes, &mut cursor, name_len).expect("name");
         assert_eq!(name, "main");
@@ -8517,12 +8538,23 @@ mod tests {
         ));
     }
 
+    /// SSF-09 D2-2: offset of the first function envelope, as the canonical
+    /// decoder reports it (past the ADT0 section of a V22 artifact).
+    fn first_function_offset(bytes: &[u8]) -> usize {
+        sm_format::semcode_decode::decode_semcode_envelope(bytes)
+            .expect("decode")
+            .1
+            .first()
+            .expect("at least one function")
+            .name_offset
+    }
+
     fn rewrite_adt_main_ownership_section(
         bytes: Vec<u8>,
         borrowed_adt: Option<(u32, u16)>,
         write_adt: Option<(u32, u16)>,
     ) -> Vec<u8> {
-        let mut cursor = 8usize;
+        let mut cursor = first_function_offset(&bytes);
         let name_len = read_u16_le(&bytes, &mut cursor).expect("name len") as usize;
         let name = read_utf8(&bytes, &mut cursor, name_len).expect("name");
         assert_eq!(name, "main");
@@ -8660,12 +8692,17 @@ mod tests {
     #[test]
     fn vm_rejects_synthetic_adt_payload_write_artifact_regardless_of_overlap_shape() {
         type AdtPayloadSpec = Option<(u32, u16)>;
-        let scenarios: [(AdtPayloadSpec, AdtPayloadSpec); 5] = [
+        // SSF-09 D2-2: every scenario here carries a Write(AdtPayload)
+        // event. The former fifth scenario - child AdtPayload borrow with a
+        // plain parent write - has none: it was only ever rejected because
+        // its HEADER_V20 base lacked `CAP_OWNERSHIP_ADT_BORROW_PATHS`. Under
+        // HEADER_V22 that borrow is admitted, so it is covered separately by
+        // `vm_traps_child_adt_payload_borrow_against_parent_write`.
+        let scenarios: [(AdtPayloadSpec, AdtPayloadSpec); 4] = [
             (Some((42, 0)), Some((42, 0))), // same payload
             (Some((42, 0)), Some((42, 1))), // different index
             (Some((42, 0)), Some((43, 0))), // different variant
             (None, Some((42, 0))),          // parent borrow, child write
-            (Some((42, 0)), None),          // child borrow, parent write
         ];
         for (borrowed_adt, write_adt) in scenarios {
             let bytes = adt_payload_write_overlap_bytes(borrowed_adt, write_adt);
@@ -8679,6 +8716,19 @@ mod tests {
                  borrowed={borrowed_adt:?} write={write_adt:?}"
             );
         }
+    }
+
+    #[test]
+    fn vm_traps_child_adt_payload_borrow_against_parent_write() {
+        // SSF-09 D2-2: Borrow(AdtPayload) is admitted at HEADER_V21 and newer
+        // (so under the HEADER_V22 base artifact); a plain write to its
+        // parent root overlaps that borrow and must trap at run time.
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), None);
+        let err = run_semcode(&bytes).expect_err("child borrow vs parent write must trap");
+        assert!(
+            matches!(err, RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)),
+            "{err:?}"
+        );
     }
 
     // #1718: internal overlap-mechanism tests only - these call
@@ -8768,7 +8818,7 @@ mod tests {
         borrowed_field: Option<&str>,
         write_field: Option<&str>,
     ) -> Vec<u8> {
-        let mut cursor = 8usize;
+        let mut cursor = first_function_offset(&bytes);
         let name_len = read_u16_le(&bytes, &mut cursor).expect("name len") as usize;
         let name = read_utf8(&bytes, &mut cursor, name_len).expect("name");
         assert_eq!(name, "main");
@@ -8909,7 +8959,7 @@ mod tests {
         borrowed_components: &[u16],
         write_components: &[u16],
     ) -> Vec<u8> {
-        let mut cursor = 8usize;
+        let mut cursor = first_function_offset(&bytes);
         let name_len = read_u16_le(&bytes, &mut cursor).expect("name len") as usize;
         let name = read_utf8(&bytes, &mut cursor, name_len).expect("name");
         assert_eq!(name, "main");
