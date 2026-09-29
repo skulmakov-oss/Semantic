@@ -7556,6 +7556,53 @@ impl Iterable for Numbers {
     }
 
     #[test]
+    fn generic_function_with_self_type_parameter_is_rejected_as_reserved_contextual_syntax() {
+        // FND-056 / FA-02-014 (#1646): `Self` is canonical reserved contextual type syntax,
+        // admitted strictly in trait or impl method type positions per docs/spec/syntax.md.
+        // A generic declaration attempting to use `<Self>` is deterministically rejected
+        // when `Self` is referenced outside trait/impl context.
+        let src = r#"
+            fn id<Self>(x: Self) -> Self {
+                return x;
+            }
+            fn main() { return; }
+        "#;
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err(
+                "generic function declaring <Self> must be rejected by contextual Self contract",
+            );
+        assert!(
+            err.message
+                .contains("'Self' is only admitted in trait or impl method type positions"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn contextual_self_in_trait_and_impl_parses_and_resolves_to_target_type() {
+        // Confirms contextual `Self` in trait and impl continues to resolve cleanly
+        // to the implementing target type.
+        let src = r#"
+            trait Consumer {
+                fn consume(self: Self) -> i32;
+            }
+            record Buffer { len: i32 }
+            impl Consumer for Buffer {
+                fn consume(self: Self) -> i32 {
+                    return self.len;
+                }
+            }
+            fn main() { return; }
+        "#;
+        let program = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("contextual Self in trait and impl must parse");
+        let buffer_sym = program.records[0].name;
+        let impl_method = &program.impls[0].methods[0];
+        assert_eq!(impl_method.params[0].1, Type::Record(buffer_sym));
+    }
+
+    #[test]
     fn function_with_trait_bound_is_parsed() {
         let src = r#"
 fn print_all<T: Display>(x: T) -> i32 {
