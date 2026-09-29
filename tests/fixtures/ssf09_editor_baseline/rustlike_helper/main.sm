@@ -1,0 +1,5 @@
+Import "helper.sm"
+fn main() {
+    let x: i32 = helper();
+    return;
+}

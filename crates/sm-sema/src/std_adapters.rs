@@ -440,6 +440,25 @@ fn path_contract_key(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// SSF-09 #1580: the provider-owned name of the module at `path` in
+/// diagnostic text. Legacy providers keep the id, and then the historical
+/// `Path::display` spelling is preserved byte for byte.
+fn shown_module(provider: &dyn crate::alloc_core::ModuleProvider, path: &Path) -> String {
+    let id = path_contract_key(path);
+    let display = provider.display_module(&id);
+    if display == id {
+        path.display().to_string()
+    } else {
+        display
+    }
+}
+
+/// SSF-09 #1580: the provider-owned module key used inside the select/export
+/// core checks (whose messages name modules by key).
+fn display_key(provider: &dyn crate::alloc_core::ModuleProvider, path: &Path) -> String {
+    provider.display_module(&path_contract_key(path))
+}
+
 #[derive(Debug, Clone)]
 struct VisitingImport {
     path: PathBuf,
@@ -461,14 +480,14 @@ fn load_module_recursive(
     if let Some(pos) = visiting.iter().position(|entry| entry.path == key) {
         let mut full_chain = visiting
             .iter()
-            .map(|entry| path_contract_key(&entry.path))
+            .map(|entry| display_key(provider, &entry.path))
             .collect::<Vec<_>>();
-        full_chain.push(path_contract_key(path));
+        full_chain.push(display_key(provider, path));
         let mut cycle_chain = visiting[pos..]
             .iter()
-            .map(|entry| path_contract_key(&entry.path))
+            .map(|entry| display_key(provider, &entry.path))
             .collect::<Vec<_>>();
-        cycle_chain.push(path_contract_key(path));
+        cycle_chain.push(display_key(provider, path));
         let reexport_only_cycle =
             via_reexport && visiting[(pos + 1)..].iter().all(|entry| entry.via_reexport);
         let (code, message) = if reexport_only_cycle {
@@ -497,7 +516,11 @@ fn load_module_recursive(
             diag: render_diag(
                 DiagLevel::Error,
                 "E0239",
-                format!("failed to read import '{}': {}", path.display(), e),
+                format!(
+                    "failed to read import '{}': {}",
+                    shown_module(provider, path),
+                    e
+                ),
                 SourceMark::default(),
                 "",
             ),
@@ -506,7 +529,10 @@ fn load_module_recursive(
         diag: render_diag(
             DiagLevel::Error,
             "E0239",
-            format!("module '{}' is not valid utf-8", path.display()),
+            format!(
+                "module '{}' is not valid utf-8",
+                shown_module(provider, path)
+            ),
             SourceMark::default(),
             "",
         ),
@@ -515,7 +541,11 @@ fn load_module_recursive(
         let mut diag = render_diag(
             DiagLevel::Error,
             "E0239",
-            format!("failed to parse module '{}': {}", path.display(), e.message),
+            format!(
+                "failed to parse module '{}': {}",
+                shown_module(provider, path),
+                e.message
+            ),
             source_mark_from_byte_offset(&source, e.pos),
             &source,
         );
@@ -631,26 +661,32 @@ fn validate_select_imports(
         std::collections::BTreeMap::<String, std::collections::BTreeMap<String, ExportKind>>::new();
     let mut src_by_key = std::collections::BTreeMap::<String, String>::new();
 
+    // SSF-09 #1580: the core check names modules by key in its messages,
+    // so it runs over provider display keys; `id_by_key` maps a key back to
+    // the module id for structural provenance.
+    let mut id_by_key = std::collections::BTreeMap::<String, String>::new();
     for (k, set) in export_sets {
-        let key = path_contract_key(k);
+        let key = display_key(provider, k);
         let mut syms = std::collections::BTreeSet::<String>::new();
         let mut kinds = std::collections::BTreeMap::<String, ExportKind>::new();
         for item in &set.items {
             syms.insert(item.public_name.clone());
             kinds.entry(item.public_name.clone()).or_insert(item.kind);
         }
-        export_symbols.insert(key, syms);
-        export_kinds.insert(path_contract_key(k), kinds);
+        export_symbols.insert(key.clone(), syms);
+        export_kinds.insert(key, kinds);
     }
 
     for module in modules {
         let (src, _) = loaded.get(&module).expect("module key from loaded.keys()");
         let imports = parse_import_directives(src);
-        let module_key = path_contract_key(&module);
+        let module_id = path_contract_key(&module);
+        let module_key = display_key(provider, &module);
+        id_by_key.insert(module_key.clone(), module_id.clone());
         src_by_key.insert(module_key.clone(), src.clone());
         for import in &imports {
             let dep = provider
-                .resolve_import(&module_key, &import.spec)
+                .resolve_import(&module_id, &import.spec)
                 .map(PathBuf::from)
                 .map(|path| normalize_lexical(&path))
                 .map_err(|e| SemanticError {
@@ -664,7 +700,7 @@ fn validate_select_imports(
                 })?;
             dep_lookup.insert(
                 (module_key.clone(), import.spec.clone()),
-                path_contract_key(&dep),
+                display_key(provider, &dep),
             );
         }
         core_modules.push(SelectImportModule {
@@ -680,19 +716,20 @@ fn validate_select_imports(
                 .get(&e.module_key)
                 .map(|s| s.as_str())
                 .unwrap_or_default();
-            SemanticError {
-                diag: render_diag(
-                    DiagLevel::Error,
-                    e.code,
-                    e.message,
-                    SourceMark {
-                        line: e.line,
-                        col: e.col,
-                        file_id: 0,
-                    },
-                    src,
-                ),
-            }
+            let mut diag = render_diag(
+                DiagLevel::Error,
+                e.code,
+                e.message,
+                SourceMark {
+                    line: e.line,
+                    col: e.col,
+                    file_id: 0,
+                },
+                src,
+            );
+            // SSF-09 C2: the failing import site is in this module.
+            diag.provider_module_id = id_by_key.get(&e.module_key).cloned();
+            SemanticError { diag }
         })
 }
 
@@ -704,21 +741,26 @@ fn build_export_sets(
     let mut dep_lookup = std::collections::BTreeMap::<(String, String), String>::new();
     let mut keys: Vec<PathBuf> = loaded.keys().cloned().collect();
     keys.sort();
+    // SSF-09 #1580: the core names modules by provider display key; this
+    // maps each key back to its module path.
+    let mut path_by_key = std::collections::BTreeMap::<String, PathBuf>::new();
     for module in &keys {
         let (source, logos) = loaded.get(module).ok_or_else(|| SemanticError {
             diag: render_diag(
                 DiagLevel::Error,
                 "E0239",
-                format!("unknown module '{}'", module.display()),
+                format!("unknown module '{}'", shown_module(provider, module)),
                 SourceMark::default(),
                 "",
             ),
         })?;
-        let module_key = path_contract_key(module);
+        let module_id = path_contract_key(module);
+        let module_key = display_key(provider, module);
+        path_by_key.insert(module_key.clone(), module.clone());
         let imports = parse_import_directives(source);
         for import in &imports {
             let dep = provider
-                .resolve_import(&module_key, &import.spec)
+                .resolve_import(&module_id, &import.spec)
                 .map(PathBuf::from)
                 .map(|path| normalize_lexical(&path))
                 .map_err(|e| SemanticError {
@@ -732,13 +774,13 @@ fn build_export_sets(
                 })?;
             dep_lookup.insert(
                 (module_key.clone(), import.spec.clone()),
-                path_contract_key(&dep),
+                display_key(provider, &dep),
             );
         }
         modules.push(ExportBuildModule {
+            local_exports: collect_local_exports(&shown_module(provider, module), logos),
             module_key,
             source: source.clone(),
-            local_exports: collect_local_exports(module, logos),
             imports,
         });
     }
@@ -748,28 +790,33 @@ fn build_export_sets(
             .find(|m| m.module_key == e.module_key)
             .map(|m| m.source.as_str())
             .unwrap_or_default();
-        SemanticError {
-            diag: render_diag(
-                DiagLevel::Error,
-                e.code,
-                e.message,
-                SourceMark {
-                    line: e.line,
-                    col: e.col,
-                    file_id: 0,
-                },
-                src,
-            ),
-        }
+        let mut diag = render_diag(
+            DiagLevel::Error,
+            e.code,
+            e.message,
+            SourceMark {
+                line: e.line,
+                col: e.col,
+                file_id: 0,
+            },
+            src,
+        );
+        // SSF-09 C2: bind the failure to the module it was found in.
+        diag.provider_module_id = path_by_key.get(&e.module_key).map(|p| path_contract_key(p));
+        SemanticError { diag }
     })?;
     let mut out = HashMap::<PathBuf, ExportSet>::new();
     for (key, set) in core_sets {
-        out.insert(PathBuf::from(key), set);
+        let path = path_by_key
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from(&key));
+        out.insert(path, set);
     }
     Ok(out)
 }
 
-fn collect_local_exports(module: &Path, logos: &LogosProgram) -> ExportSet {
+fn collect_local_exports(module_origin: &str, logos: &LogosProgram) -> ExportSet {
     let mut locals = Vec::<LocalExportDecl>::new();
     if let Some(system) = &logos.system {
         locals.push(LocalExportDecl {
@@ -792,7 +839,7 @@ fn collect_local_exports(module: &Path, logos: &LogosProgram) -> ExportSet {
             span: law.mark,
         });
     }
-    collect_local_exports_core(&module.display().to_string(), &locals)
+    collect_local_exports_core(module_origin, &locals)
 }
 
 pub fn analyze_logos_program(

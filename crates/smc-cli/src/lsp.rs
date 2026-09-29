@@ -31,12 +31,19 @@ use crate::formatter::format_source_checked;
 use serde_json::{json, Value};
 use sm_diagnostic::{Diagnostic, DiagnosticCause, DiagnosticSeverity};
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 
 /// Upper bound on one message body; larger frames are a fatal protocol
 /// error rather than an unbounded allocation.
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
+/// Upper bound on one header line including its `\r\n` (SSF-09 R3). LSP
+/// defines only `Content-Length` and `Content-Type`, both far shorter.
+pub const MAX_HEADER_LINE_BYTES: usize = 1024;
+
+/// Upper bound on all header bytes of one message, terminator included.
+pub const MAX_HEADER_BYTES: usize = 8 * 1024;
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -109,9 +116,15 @@ pub fn serve<R: BufRead, W: Write>(mut input: R, out: W) -> LspExit {
 pub fn read_message<R: BufRead>(input: &mut R) -> Result<Option<Vec<u8>>, String> {
     let mut content_length: Option<usize> = None;
     let mut saw_header = false;
+    let mut header_bytes = 0usize;
     loop {
+        // Bounded read: never buffer more than one maximal header line (+1
+        // byte to detect overflow), so no header shape can grow memory
+        // without limit before a framing error is returned.
         let mut line = Vec::new();
         let read = input
+            .by_ref()
+            .take((MAX_HEADER_LINE_BYTES + 1) as u64)
             .read_until(b'\n', &mut line)
             .map_err(|e| format!("read failed: {e}"))?;
         if read == 0 {
@@ -122,6 +135,15 @@ pub fn read_message<R: BufRead>(input: &mut R) -> Result<Option<Vec<u8>>, String
             };
         }
         saw_header = true;
+        if line.len() > MAX_HEADER_LINE_BYTES {
+            return Err(format!(
+                "message header line exceeds {MAX_HEADER_LINE_BYTES} bytes"
+            ));
+        }
+        header_bytes += line.len();
+        if header_bytes > MAX_HEADER_BYTES {
+            return Err(format!("message headers exceed {MAX_HEADER_BYTES} bytes"));
+        }
         if !line.ends_with(b"\r\n") {
             return Err("message header line is not CRLF-terminated".to_string());
         }

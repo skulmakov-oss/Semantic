@@ -45,6 +45,7 @@ pub fn scope_kind(&self) -> ScopeKind {
 pub trait ModuleProvider {
 fn read_module(&self, module_id: &str) -> Result<Vec<u8>, String>;
 fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String>;
+fn display_module(&self, module_id: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateInstr {
 GateRead { device_id: u16, port: u16 },

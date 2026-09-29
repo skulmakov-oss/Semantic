@@ -51,7 +51,13 @@ check reads, writes only protocol frames to stdout, and sends no telemetry.
 | `workspace/didChangeWorkspaceFolders` | recorded; all open documents are re-checked |
 
 Every open document is checked with all open documents applied as an
-in-memory overlay (so an unsaved imported module is seen by its importers).
+in-memory overlay: every project source read - the root, Logos project
+modules, and RustLike executable-helper modules - goes through one
+overlay-first source seam (`smc-cli`'s `SourceAccess`), so an unsaved
+imported module of either grammar is seen by its importers. Closing a
+document drops its overlay (the saved file is read again); reopening it
+restores the overlay
+(`lsp_unsaved_rustlike_helper_is_seen_by_its_importer_over_stdio`).
 A `file:` URI whose file does not exist yet, or any non-`file:` URI, is
 checked as a rootless standalone source (no project context, no identity).
 
@@ -86,6 +92,7 @@ while `smc check` fails.
 | request after `shutdown` | `-32600` |
 | unknown method | `-32601` |
 | missing/invalid `Content-Length`, non-CRLF header, truncated body, body over 64 MiB | session ends (exit 1) |
+| header line over 1 KiB (`MAX_HEADER_LINE_BYTES`), or headers over 8 KiB in total (`MAX_HEADER_BYTES`) | session ends (exit 1); at most one maximal line is buffered before rejection |
 | `exit` after `shutdown` / without it / end of input | exit 0 / 1 / 1 |
 
 ### Deferred, with deterministic rejection

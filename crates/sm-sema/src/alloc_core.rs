@@ -183,6 +183,16 @@ impl Default for SymbolTable {
 pub trait ModuleProvider {
     fn read_module(&self, module_id: &str) -> Result<Vec<u8>, String>;
     fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String>;
+    /// SSF-09 #1580: how diagnostic text names the module `module_id`.
+    ///
+    /// The provider owns module ids and therefore their presentation. The
+    /// default keeps the id itself (legacy behaviour). A provider whose ids
+    /// are host paths may return a checkout-independent, project-scoped
+    /// name instead, so diagnostics never embed the host's absolute paths.
+    /// Must be injective over the ids of one check.
+    fn display_module(&self, module_id: &str) -> String {
+        String::from(module_id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

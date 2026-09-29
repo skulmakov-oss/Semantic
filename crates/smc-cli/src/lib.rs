@@ -34,6 +34,8 @@ mod package_manifest;
 #[cfg(feature = "std")]
 mod schema_versioning;
 #[cfg(feature = "std")]
+mod source_access;
+#[cfg(feature = "std")]
 mod ui_event_script;
 #[cfg(feature = "std")]
 mod ui_frame_inspect;

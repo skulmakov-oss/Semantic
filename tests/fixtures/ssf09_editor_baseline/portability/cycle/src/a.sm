@@ -1,0 +1,4 @@
+Import "b.sm"
+Law "A" [priority 1]:
+    When true ->
+        System.recovery()

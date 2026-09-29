@@ -3,8 +3,12 @@
 Status: completion evidence for the one-PR `#1580` completion. `#1580` stays
 OPEN until that PR is merged under owner MERGE GO; SSF-10 has **not** started.
 
-Base: `main` at `05613f9d874bc5d7099fcb8f237c3ad76bc8bcde` (includes PR #1966,
-the Ledger Phase 1 frontend/semantic-core closure).
+Base: implemented on `main` at `05613f9d874bc5d7099fcb8f237c3ad76bc8bcde`
+(includes PR #1966, the Ledger Phase 1 frontend/semantic-core closure), then
+integrated by a normal merge with `main` at
+`f6b5f6d60230c7ff2229fef441df14562836fc5a` (PR #1971, which tracks the root
+`Cargo.lock`; this PR's lockfile delta is exactly the six authorized
+`sm-diagnostic` dependency edges).
 
 Governing records: `ssf09_diagnostic_authority_decision.md` (Decisions A-F),
 `ssf09_canonical_carrier_contract.md` (carrier contract + implementation
@@ -16,7 +20,7 @@ addendum), `docs/spec/diagnostics_machine_schema_v1.md`,
 | AC | Criterion | Evidence | Result |
 |---|---|---|---|
 | AC1 | Machine-readable diagnostics have a versioned stable schema | `semantic.diagnostics` v1 with a written versioning policy; `smc check --format json`; byte-exact goldens (`tests/golden_snapshots/ssf09_editor_baseline/*.json`), `schema_output_is_byte_deterministic`, `schema_header_and_top_level_shape_are_stable`, `host_failure_is_a_schema_document_not_a_diagnostic` | SATISFIED |
-| AC2 | Diagnostics preserve code, severity, file and range where source information exists | producer adapters C1B/C2/C3B/C4; `frontend_syntax_error_carries_code_severity_source_and_token_range`, `lexer_error_keeps_lexer_code_and_exact_range`, `logos_grammar_errors_keep_their_own_codes_and_recovered_errors`, `imported_module_failure_is_attributed_to_that_module`, `unprovable_ranges_are_absent_never_fabricated`, `retired_generic_code_is_never_emitted`, `utf8_multibyte_prefix_does_not_skew_byte_ranges`, `crlf_source_ranges_stay_exact`, `canonical_json_contains_no_absolute_fixture_path_anywhere` | SATISFIED |
+| AC2 | Diagnostics preserve code, severity, file and range where source information exists | producer adapters C1B/C2/C3B/C4; `frontend_syntax_error_carries_code_severity_source_and_token_range`, `lexer_error_keeps_lexer_code_and_exact_range`, `logos_grammar_errors_keep_their_own_codes_and_recovered_errors`, `imported_module_failure_is_attributed_to_that_module`, `unprovable_ranges_are_absent_never_fabricated`, `retired_generic_code_is_never_emitted`, `utf8_multibyte_prefix_does_not_skew_byte_ranges`, `crlf_source_ranges_stay_exact`, `canonical_json_contains_no_absolute_fixture_path_anywhere`, `canonical_json_is_byte_identical_across_checkout_roots`, `portable_messages_name_modules_by_project_relative_path` | SATISFIED |
 | AC3 | Formatter is deterministic and idempotent | `format_source_checked` token-stream proof; `formatter_is_idempotent_and_deterministic_on_all_fixtures` (fixtures + `examples/canonical`), `formatter_preserves_check_result_of_messy_sources`, formatter unit tests (refusals, no partial writes) | SATISFIED |
 | AC4 | LSP/editor results derive from canonical tooling and cannot silently disagree with CLI truth | one shared `check_canonical`; `cli_lsp_parity_rootless_matrix`, `cli_lsp_parity_project_matrix`, `lsp_routes_imported_module_diagnostics_to_that_module_uri`, `lsp_formatting_bridge_equals_cli_formatter_including_refusals`, host failures published (never a clean editor while `smc check` fails) | SATISFIED |
 | AC5 | Project-root awareness works | identity from package admission; `nested_module_identity_keeps_module_root_relative_path` (M11), `project_root_directory_resolves_like_its_entry`, `lsp_overlay_of_imported_module_changes_importer_result`, `lsp_workspace_folder_change_republishes_deterministically`, `rootless_source_has_no_fabricated_identity` | SATISFIED |
@@ -111,6 +115,41 @@ count):
 
 Result on the final tree: recorded in the completion PR.
 
+## R3 review repairs (2026-09-30)
+
+The independent R3 adversarial review and the Copilot review of PR #1972
+found four defects, all repaired before merge (earlier drafts of this record
+understated the first two as P3 limitations):
+
+1. **Host paths in canonical machine output (was blocking).** Import cycle
+   (`E0238`), failed import read (`E0239`, including rootless sources),
+   missing selected symbol (`E0244`) and executable-bundle composition
+   (`E0009`) messages embedded absolute checkout paths and OS error text,
+   so the same project produced different JSON per checkout. Now module
+   names come from the provider-owned `ModuleProvider::display_module`
+   (relative to the checked root's directory) and failures are described by
+   structured code / `io::ErrorKind`; the selected-helper prefix is derived
+   from the same display name. Evidence:
+   `canonical_json_is_byte_identical_across_checkout_roots`,
+   `portable_messages_name_modules_by_project_relative_path`,
+   `legacy_check_output_keeps_host_detail`.
+2. **RustLike helpers ignored editor overlays (was blocking).** The
+   executable bundler read helpers straight from disk. All project source
+   reads now go through one overlay-first seam (`SourceAccess`). Evidence:
+   `lsp_unsaved_rustlike_helper_is_seen_by_its_importer_over_stdio`,
+   `lsp_rustlike_overlay_matches_cli_on_the_same_effective_sources`.
+3. **Unbounded LSP header reads.** Header lines are capped at 1 KiB and all
+   headers at 8 KiB, enforced before buffering. Evidence:
+   `lsp_rejects_oversized_header_line_before_buffering_it`,
+   `lsp_rejects_too_many_header_bytes`,
+   `lsp_accepts_normal_headers_within_limits`.
+4. **Mutation runner accepted unknown selectors.** Selection now fails
+   closed (unknown ids or an empty selection exit 2). Evidence:
+   `mutation_campaign_selection_fails_closed`.
+
+Import select/export failures (`E0244`, `E0242`, `E0243` re-export) are now
+also bound structurally to the module they were found in.
+
 ## Known limitations (P3, non-blocking)
 
 1. RustLike type-checker errors have no position authority (`pos` is always
@@ -119,18 +158,11 @@ Result on the final tree: recorded in the completion PR.
 2. The Logos parser reuses `E0201` for "expected 'System'", colliding with
    the type checker's `E0201` (pre-existing producer assignment, preserved
    per Decision B).
-3. Some producer messages still embed host paths the producer itself was
-   given (for example `E0239` "failed to read import '<path>'", bundle
-   composition errors). Structural schema fields never do, and the parse
-   failure case (`E0239` + frontend cause) is fully structural.
-4. RustLike executable-helper modules composed into a bundle are read from
-   disk even when open unsaved in the editor (Logos project modules honour
-   overlays).
-5. `smc check` without `--format` keeps its legacy human output, including a
+3. `smc check` without `--format` keeps its legacy human output, including a
    `1:1` header for positionless errors; only `--format` output is canonical.
-6. `sm-sema` ranges cover the reported token (for example `state` of
+4. `sm-sema` ranges cover the reported token (for example `state` of
    `state x: quad`), not the whole construct.
-7. Hover, go-to-definition, document symbols, code actions, completion and
+5. Hover, go-to-definition, document symbols, code actions, completion and
    incremental sync are deferred (not advertised, `-32601`).
 
 ## SSF-10 entry conditions

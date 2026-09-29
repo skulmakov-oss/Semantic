@@ -7,7 +7,13 @@ failure line is observed); a mutant that fails to compile is reported as
 INVALID, never as killed. Every source file is restored after each mutant,
 also on interruption.
 
-Usage: python3 tests/ssf09_mutation_campaign.py [M1 M2 ...]
+Usage: python3 tests/ssf09_mutation_campaign.py [--dry-run] [M1 M2 ...]
+
+Selection fails closed: every selector must name a known mutant, and an
+empty effective selection is an error (exit 2) - a typo can never report
+a vacuous "0/0 KILLED" success. With no selectors, all mutants run.
+`--dry-run` validates the selection and that every selected mutant's
+anchor occurs exactly once, without mutating or running anything.
 """
 
 import pathlib
@@ -163,14 +169,42 @@ def run(mutant):
         path.write_text(original, encoding="utf-8")
 
 
+def select(selectors):
+    """The mutants named by `selectors` (all when empty), or an error."""
+    known = [m[0] for m in MUTANTS]
+    unknown = [sel for sel in selectors if sel not in known]
+    if unknown:
+        return None, f"unknown mutant id(s): {' '.join(unknown)} (known: {' '.join(known)})"
+    chosen = [m for m in MUTANTS if not selectors or m[0] in selectors]
+    if not chosen:
+        return None, "empty mutant selection"
+    return chosen, None
+
+
 def main(argv):
-    wanted = set(argv[1:])
-    results = [run(m) for m in MUTANTS if not wanted or m[0] in wanted]
+    args = argv[1:]
+    dry_run = "--dry-run" in args
+    selectors = [a for a in args if a != "--dry-run"]
+    chosen, error = select(selectors)
+    if error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+    if dry_run:
+        bad = []
+        for mid, _law, rel, find, _replace, _cmd in chosen:
+            count = (ROOT / rel).read_text(encoding="utf-8").count(find)
+            if count != 1:
+                bad.append(f"{mid} anchor found {count}x")
+        for line in bad:
+            print(f"ERROR: {line}", file=sys.stderr)
+        print(f"dry run: {len(chosen)} mutant(s) selected: {' '.join(m[0] for m in chosen)}")
+        return 2 if bad else 0
+    results = [run(m) for m in chosen]
     for mid, law, verdict, test in results:
         print(f"{mid:5} {verdict:10} {law}  [{test}]")
     killed = sum(1 for r in results if r[2] == "KILLED")
     print(f"\n{killed}/{len(results)} KILLED")
-    return 0 if killed == len(results) else 1
+    return 0 if results and killed == len(results) else 1
 
 
 if __name__ == "__main__":

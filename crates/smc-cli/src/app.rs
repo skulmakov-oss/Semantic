@@ -12,6 +12,7 @@ use crate::package_manifest::{
     reset_pinned_dependency_fingerprint_cache, resolve_package_import_path,
     resolve_project_root_check_entry,
 };
+use crate::source_access::{DiskSources, SourceAccess};
 use crate::{format_path, FormatterMode};
 use prom_audit::hello_observation_audit::{
     apply_controlled_observation_audit_policy, ControlledObservationAuditDecision,
@@ -176,7 +177,15 @@ fn check_root_with_project_authority(
     provider: &dyn ModuleProvider,
     parser_profile: &ParserProfile,
 ) -> Result<sm_sema::SemanticReport, sm_sema::SemanticError> {
-    check_root_with_attribution(root_canon, raw_source, prepared, provider, parser_profile).0
+    check_root_with_attribution(
+        root_canon,
+        raw_source,
+        prepared,
+        provider,
+        parser_profile,
+        &DiskSources,
+    )
+    .0
 }
 
 /// SSF-09 #1580: which source text the diagnostics of one
@@ -203,6 +212,7 @@ pub(crate) fn check_root_with_attribution(
     prepared: PreparedSource,
     provider: &dyn ModuleProvider,
     parser_profile: &ParserProfile,
+    access: &dyn SourceAccess,
 ) -> (
     Result<sm_sema::SemanticReport, sm_sema::SemanticError>,
     CheckAttribution,
@@ -213,7 +223,13 @@ pub(crate) fn check_root_with_attribution(
             CheckAttribution::ProviderModules,
         ),
         PreparedSource::RustLikeOwned(Ok(program)) => {
-            match rustlike_effective_program(root_canon, raw_source, program, parser_profile) {
+            match rustlike_effective_program(
+                root_canon,
+                raw_source,
+                program,
+                parser_profile,
+                access,
+            ) {
                 Ok((effective_source, effective_program)) => {
                     let attribution = if effective_source == raw_source {
                         CheckAttribution::RawRoot
@@ -484,8 +500,13 @@ fn cmd_work_prove(subject: &str, _profile: Option<&str>) -> Result<(), String> {
         PreparedSource::LogosOwned(Ok(_)) => (raw_source, CompileProfile::Logos),
         PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
         PreparedSource::RustLikeOwned(Ok(program)) => {
-            let effective =
-                compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+            let effective = compose_executable_bundle(
+                &root,
+                &raw_source,
+                &program,
+                &parser_profile,
+                &DiskSources,
+            )?;
             (effective, CompileProfile::RustLike)
         }
         PreparedSource::RustLikeOwned(Err(_))
@@ -613,8 +634,13 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
             if profile == CompileProfile::RustLike {
                 let program = parse_program_with_profile(&raw_source, &parser_profile)
                     .map_err(|e| e.to_string())?;
-                let effective =
-                    compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+                let effective = compose_executable_bundle(
+                    &root,
+                    &raw_source,
+                    &program,
+                    &parser_profile,
+                    &DiskSources,
+                )?;
                 (effective, CompileProfile::RustLike)
             } else {
                 (raw_source, CompileProfile::Logos)
@@ -626,8 +652,13 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
                 PreparedSource::LogosOwned(Ok(_)) => (raw_source, CompileProfile::Logos),
                 PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
                 PreparedSource::RustLikeOwned(Ok(program)) => {
-                    let effective =
-                        compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+                    let effective = compose_executable_bundle(
+                        &root,
+                        &raw_source,
+                        &program,
+                        &parser_profile,
+                        &DiskSources,
+                    )?;
                     (effective, CompileProfile::RustLike)
                 }
                 PreparedSource::RustLikeOwned(Err(_))
@@ -1478,7 +1509,7 @@ fn render_and_cache_ast_rustlike(
     parser_profile: &ParserProfile,
 ) -> Result<String, String> {
     let (effective_source, effective_program) =
-        rustlike_effective_program(root, raw_source, program, parser_profile)?;
+        rustlike_effective_program(root, raw_source, program, parser_profile, &DiskSources)?;
     let ast_key = ast_pack_key(root, &effective_source)?;
     let ast_pack = cache_ast_file_for_key(ast_key)?;
     if let Some(cached) = load_text_pack(&ast_pack, PACK_KIND_AST)? {
@@ -1582,7 +1613,8 @@ fn render_and_cache_ir_rustlike(
     opt: OptLevel,
     parser_profile: &ParserProfile,
 ) -> Result<String, String> {
-    let effective_source = compose_executable_bundle(root, raw_source, program, parser_profile)?;
+    let effective_source =
+        compose_executable_bundle(root, raw_source, program, parser_profile, &DiskSources)?;
     let ir_key = ir_pack_key(root, &effective_source, profile, opt)?;
     let ir_pack = cache_ir_file_for_key(ir_key)?;
     if let Some(cached) = load_text_pack(&ir_pack, PACK_KIND_IR)? {
@@ -1743,7 +1775,8 @@ fn render_and_cache_semcode_rustlike(
     debug_symbols: bool,
     parser_profile: &ParserProfile,
 ) -> Result<Vec<u8>, String> {
-    let effective_source = compose_executable_bundle(root, raw_source, program, parser_profile)?;
+    let effective_source =
+        compose_executable_bundle(root, raw_source, program, parser_profile, &DiskSources)?;
     let exb_key = smc_pack_key(
         root,
         &effective_source,
@@ -2709,8 +2742,13 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
             let raw_source = read_raw_source(&root)?;
             let program = parse_program_with_profile(&raw_source, &parser_profile)
                 .map_err(|e| e.to_string())?;
-            let effective =
-                compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+            let effective = compose_executable_bundle(
+                &root,
+                &raw_source,
+                &program,
+                &parser_profile,
+                &DiskSources,
+            )?;
             (effective, CompileProfile::RustLike)
         }
         CompileProfile::Auto => {
@@ -2719,8 +2757,13 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
                 PreparedSource::LogosOwned(Ok(_)) => (raw_source, CompileProfile::Logos),
                 PreparedSource::LogosOwned(Err(e)) => return Err(e.to_string()),
                 PreparedSource::RustLikeOwned(Ok(program)) => {
-                    let effective =
-                        compose_executable_bundle(&root, &raw_source, &program, &parser_profile)?;
+                    let effective = compose_executable_bundle(
+                        &root,
+                        &raw_source,
+                        &program,
+                        &parser_profile,
+                        &DiskSources,
+                    )?;
                     (effective, CompileProfile::RustLike)
                 }
                 // Owner-caught F02: a terminal Auto outcome must never
@@ -3766,8 +3809,9 @@ fn score(value: i32) -> i32 {
             _ => panic!("expected RustLikeOwned(Ok), fixture must be genuinely RustLikeOwns"),
         };
         let parser_profile = cli_profile();
-        let bundled = compose_executable_bundle(&root, &raw_source, &program, &parser_profile)
-            .expect("bundle");
+        let bundled =
+            compose_executable_bundle(&root, &raw_source, &program, &parser_profile, &DiskSources)
+                .expect("bundle");
         assert!(bundled.contains("Import \"helper.sm\""));
         assert!(bundled.contains("fn score(value: i32) -> i32"));
         assert!(bundled.contains("fn main()"));
@@ -3808,8 +3852,9 @@ fn score(value: i32) -> i32 {
             _ => panic!("expected RustLikeOwned(Ok), fixture must be genuinely RustLikeOwns"),
         };
         let parser_profile = cli_profile();
-        let bundled = compose_executable_bundle(&root, &raw_source, &program, &parser_profile)
-            .expect("bundle selected import");
+        let bundled =
+            compose_executable_bundle(&root, &raw_source, &program, &parser_profile, &DiskSources)
+                .expect("bundle selected import");
         assert!(bundled.contains("Import \"helper.sm\" { score }"));
         assert!(bundled.contains("fn execsel_"));
         assert!(bundled.contains("fn score(value: i32) -> i32"));
@@ -4554,7 +4599,7 @@ fn effective_rustlike_source(
     let raw_source = read_raw_source(root)?;
     let program =
         parse_program_with_profile(&raw_source, parser_profile).map_err(|e| e.to_string())?;
-    compose_executable_bundle(root, &raw_source, &program, parser_profile)
+    compose_executable_bundle(root, &raw_source, &program, parser_profile, &DiskSources)
 }
 
 fn cmd_run(args: &[String]) -> Result<(), String> {

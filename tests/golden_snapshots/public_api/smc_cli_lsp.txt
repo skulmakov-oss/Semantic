@@ -1,5 +1,7 @@
 source: crates/smc-cli/src/lsp.rs
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_HEADER_LINE_BYTES: usize = 1024;
+pub const MAX_HEADER_BYTES: usize = 8 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LspExit {
 Clean,

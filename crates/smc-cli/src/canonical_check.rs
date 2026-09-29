@@ -17,13 +17,13 @@
 //! identity. Host paths are kept for transport routing only and are never
 //! part of the external schema.
 
-use crate::app::{
-    check_root_with_attribution, cli_profile, ensure_package_module_admission, CheckAttribution,
-};
+use crate::app::{check_root_with_attribution, cli_profile, CheckAttribution};
 use crate::executable_bundle::{prepare_source_text, PrepareSourceError};
 use crate::package_manifest::{
-    admit_package_entry_module, resolve_package_import_path, resolve_project_root_check_entry,
+    admit_package_entry_module, resolve_package_import_path,
+    resolve_project_root_check_entry_portable,
 };
+use crate::source_access::{CanonicalSources, SourceAccess};
 use sm_diagnostic::{Diagnostic, DiagnosticSeverity, SourceId, SourceRegistry};
 use sm_sema::{check_source_with_profile, ModuleProvider, SemanticDiagnostic};
 use std::cell::RefCell;
@@ -166,7 +166,7 @@ pub struct CheckRequest {
 /// Runs the canonical check.
 pub fn check_canonical(request: &CheckRequest) -> Result<CanonicalCheckReport, HostCheckFailure> {
     let root = if request.entry.is_dir() {
-        resolve_project_root_check_entry(&request.entry).map_err(HostCheckFailure::new)?
+        resolve_project_root_check_entry_portable(&request.entry).map_err(HostCheckFailure::new)?
     } else {
         request.entry.clone()
     };
@@ -189,14 +189,31 @@ pub fn check_canonical(request: &CheckRequest) -> Result<CanonicalCheckReport, H
         return session.finish(result, CheckAttribution::RawRoot, root_id, &BTreeMap::new());
     }
 
-    ensure_package_module_admission(&root).map_err(HostCheckFailure::new)?;
+    // SSF-09 #1580 (R3): host failures name the root as the caller gave it
+    // and describe the failure by structured code / `io::ErrorKind` only.
     let root_canon = root.canonicalize().map_err(|e| {
-        HostCheckFailure::new(format!("failed to resolve '{}': {}", root.display(), e))
+        HostCheckFailure::new(format!(
+            "failed to resolve '{}': {}",
+            root.display(),
+            e.kind()
+        ))
+    })?;
+    let anchor = root_canon
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| root_canon.clone());
+    let access = CanonicalSources::new(&request.overlay, &anchor);
+    admit_package_entry_module(&root).map_err(|e| {
+        HostCheckFailure::new(format!(
+            "package module admission failed for '{}': {}",
+            root.display(),
+            access.describe_admission_error(&e)
+        ))
     })?;
     let raw_source = match request.overlay.get(&root_canon) {
         Some(text) => text.to_string(),
         None => std::fs::read_to_string(&root_canon).map_err(|e| {
-            HostCheckFailure::new(format!("failed to read '{}': {}", root.display(), e))
+            HostCheckFailure::new(format!("failed to read '{}': {}", root.display(), e.kind()))
         })?,
     };
     let root_id = session.register(
@@ -207,13 +224,18 @@ pub fn check_canonical(request: &CheckRequest) -> Result<CanonicalCheckReport, H
     );
 
     let provider = OverlayModuleProvider {
-        overlay: &request.overlay,
+        access: &access,
         served: RefCell::new(BTreeMap::new()),
     };
     let (result, attribution) = match prepare_source_text(raw_source) {
-        Ok((source, prepared)) => {
-            check_root_with_attribution(&root_canon, &source, prepared, &provider, &parser_profile)
-        }
+        Ok((source, prepared)) => check_root_with_attribution(
+            &root_canon,
+            &source,
+            prepared,
+            &provider,
+            &parser_profile,
+            &access,
+        ),
         Err(PrepareSourceError::Lex { source, .. }) => (
             check_source_with_profile(&source, &parser_profile),
             CheckAttribution::RawRoot,
@@ -384,29 +406,25 @@ impl Session {
     }
 }
 
-/// The project mechanism's module provider with editor overlays applied,
-/// recording the exact text served for every module so diagnostics can be
-/// bound to the bytes the producer analyzed. Admission and import
-/// resolution are the unmodified canonical package authority.
+/// The project mechanism's module provider over the canonical
+/// [`SourceAccess`] seam (editor overlay first), recording the exact text
+/// served for every module so diagnostics can be bound to the bytes the
+/// producer analyzed. Admission and import resolution are the unmodified
+/// canonical package authority; only their failure *text* is portable.
 struct OverlayModuleProvider<'a> {
-    overlay: &'a SourceOverlay,
+    access: &'a CanonicalSources<'a>,
     served: RefCell<BTreeMap<String, String>>,
 }
 
 impl ModuleProvider for OverlayModuleProvider<'_> {
     fn read_module(&self, module_id: &str) -> Result<Vec<u8>, String> {
         let path = Path::new(module_id);
-        ensure_package_module_admission(path)?;
-        let bytes = match self.overlay.get(path) {
-            Some(text) => text.as_bytes().to_vec(),
-            None => std::fs::read(path).map_err(|e| e.to_string())?,
-        };
-        if let Ok(text) = std::str::from_utf8(&bytes) {
-            self.served
-                .borrow_mut()
-                .insert(module_id.to_string(), text.to_string());
-        }
-        Ok(bytes)
+        admit_package_entry_module(path).map_err(|e| self.access.describe_admission_error(&e))?;
+        let text = self.access.read_source(path)?;
+        self.served
+            .borrow_mut()
+            .insert(module_id.to_string(), text.clone());
+        Ok(text.into_bytes())
     }
 
     fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String> {
@@ -419,7 +437,11 @@ impl ModuleProvider for OverlayModuleProvider<'_> {
                     text.into_owned()
                 }
             })
-            .map_err(|e| e.to_string())
+            .map_err(|e| self.access.describe_resolution_error(&e))
+    }
+
+    fn display_module(&self, module_id: &str) -> String {
+        self.access.display_path(Path::new(module_id))
     }
 }
 

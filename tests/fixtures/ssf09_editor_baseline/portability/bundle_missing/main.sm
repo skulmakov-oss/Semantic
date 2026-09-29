@@ -1,0 +1,4 @@
+Import "helper.sm"
+fn main() {
+    return;
+}

@@ -833,6 +833,32 @@ fn resolve_project_root_check_entry_structured(
 pub(crate) fn resolve_project_root_check_entry(root: &Path) -> Result<PathBuf, String> {
     resolve_project_root_check_entry_structured(root).map_err(|e| e.to_string())
 }
+
+/// SSF-09 #1580 (R3): the same project-root resolution, with failure text
+/// built only from the structured code and the root as the caller gave it,
+/// so canonical machine output never embeds host paths or OS error text.
+pub(crate) fn resolve_project_root_check_entry_portable(root: &Path) -> Result<PathBuf, String> {
+    resolve_project_root_check_entry_structured(root).map_err(|e| {
+        let reason = match e.code {
+            ProjectRootResolutionCode::SemanticTomlReadFailed => "semantic.toml cannot be read",
+            ProjectRootResolutionCode::SemanticTomlManifest(_) => "semantic.toml is invalid",
+            ProjectRootResolutionCode::SemanticTomlEntryMissing => {
+                "the semantic.toml entry file does not exist"
+            }
+            ProjectRootResolutionCode::EntrySymlinkOrReparse => {
+                "the project entry is a symlink or reparse point"
+            }
+            ProjectRootResolutionCode::MissingProjectManifest => {
+                "the directory has no semantic.toml or Semantic.package project manifest"
+            }
+        };
+        format!(
+            "failed to resolve project root '{}': {}",
+            root.display(),
+            reason
+        )
+    })
+}
 pub fn resolve_package_import_path(
     importer_module: &Path,
     spec: &str,

@@ -1383,3 +1383,319 @@ fn copy_tree(from: &Path, to: &Path) {
         }
     }
 }
+
+// ---------------------------------------------------------------- R3 repairs
+
+/// The same project checked from two different absolute checkout roots.
+const PORTABILITY_CASES: [(&str, &str, &str); 5] = [
+    ("cycle", "src/a.sm", "E0238"),
+    ("missing_import", "src/main.sm", "E0239"),
+    ("select_missing", "src/main.sm", "E0244"),
+    ("bundle_missing", "main.sm", "E0009"),
+    ("rootless", "missing_import.sm", "E0239"),
+];
+
+#[test]
+fn canonical_json_is_byte_identical_across_checkout_roots() {
+    // R3 blocker #1: canonical machine output must not depend on where the
+    // checkout lives - no absolute host path, no OS-specific I/O wording.
+    let fixture = fixture_dir("portability");
+    let shallow = tempdir("portable_a");
+    let deep = tempdir("portable_b")
+        .join("much")
+        .join("deeper")
+        .join("checkout");
+    fs::create_dir_all(&deep).unwrap();
+    copy_tree(&fixture, &shallow);
+    copy_tree(&fixture, &deep);
+    for (case, entry, code) in PORTABILITY_CASES {
+        let (_, a) = check(&shallow.join(case), entry, "json");
+        let (_, b) = check(&deep.join(case), entry, "json");
+        assert_eq!(
+            a, b,
+            "{case}: canonical JSON differs between checkout roots"
+        );
+        let parsed: Value = serde_json::from_str(&a).unwrap();
+        assert_eq!(parsed["diagnostics"][0]["code"], code, "{case}: {a}");
+        for root in [&shallow, &deep] {
+            let root = root.canonicalize().unwrap();
+            let root = root.to_string_lossy().replace('\\', "/");
+            assert!(!a.contains(&root), "{case}: host path leaked: {a}");
+        }
+        assert!(!a.contains("os error"), "{case}: OS error text leaked: {a}");
+        assert!(
+            !a.contains("No such file"),
+            "{case}: OS error text leaked: {a}"
+        );
+    }
+    let _ = fs::remove_dir_all(&shallow);
+    let _ = fs::remove_dir_all(deep.ancestors().nth(3).unwrap());
+}
+
+#[test]
+fn portable_messages_name_modules_by_project_relative_path() {
+    let dir = fixture_dir("portability");
+    let cases = [
+        (
+            "cycle",
+            "src/a.sm",
+            "cyclic import detected: a.sm -> b.sm -> a.sm",
+        ),
+        (
+            "missing_import",
+            "src/main.sm",
+            "failed to read import 'gone.sm': module file does not exist or cannot be resolved",
+        ),
+        (
+            "select_missing",
+            "src/main.sm",
+            "selected import symbol 'Zed' not found in 'b.sm'",
+        ),
+        (
+            "bundle_missing",
+            "main.sm",
+            "module 'helper.sm': module file does not exist or cannot be resolved",
+        ),
+    ];
+    for (case, entry, message) in cases {
+        let (_, json) = check_json(&dir.join(case), entry);
+        assert_eq!(json["diagnostics"][0]["message"], message, "{case}");
+    }
+    // A select failure is bound to the importing module's own source.
+    let (_, json) = check_json(&dir.join("select_missing"), "src/main.sm");
+    assert_eq!(json["diagnostics"][0]["source"], 0);
+}
+
+#[test]
+fn legacy_check_output_keeps_host_detail() {
+    // Outside the canonical path the legacy rendering is unchanged.
+    let dir = fixture_dir("portability").join("missing_import");
+    let (code, _, stderr) = smc(&dir, &["check", "src/main.sm"]);
+    assert_eq!(code, 1);
+    let root = dir.canonicalize().unwrap();
+    assert!(
+        stderr.contains(&*root.to_string_lossy().replace('\\', "/"))
+            || stderr.contains(&*root.to_string_lossy()),
+        "{stderr}"
+    );
+}
+
+/// Drives the real `smc lsp` binary over stdio with `messages`.
+fn run_binary_lsp(messages: &[Value]) -> (Option<i32>, Vec<Value>) {
+    use std::io::Write as _;
+    use std::process::Stdio;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .args(["lsp", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn smc lsp");
+    let input: Vec<u8> = messages.iter().flat_map(frame).collect();
+    child.stdin.take().unwrap().write_all(&input).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let mut values = Vec::new();
+    let mut rest = out.stdout.as_slice();
+    while !rest.is_empty() {
+        let header_end = rest.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        let length: usize = std::str::from_utf8(&rest[16..header_end])
+            .unwrap()
+            .parse()
+            .unwrap();
+        values
+            .push(serde_json::from_slice(&rest[header_end + 4..header_end + 4 + length]).unwrap());
+        rest = &rest[header_end + 4 + length..];
+    }
+    (out.status.code(), values)
+}
+
+fn codes_of(publish: &Value) -> Vec<String> {
+    publish["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["code"].as_str().unwrap_or("<none>").to_string())
+        .collect()
+}
+
+#[test]
+fn lsp_unsaved_rustlike_helper_is_seen_by_its_importer_over_stdio() {
+    // R3 blocker #2: RustLike executable helpers are read through the same
+    // overlay-aware seam as every other project source.
+    let dir = fixture_dir("rustlike_helper");
+    let main = dir.join("main.sm");
+    let helper = dir.join("helper.sm");
+    let main_uri = file_uri(&main);
+    let helper_uri = file_uri(&helper);
+    let broken_helper = "fn helper() -> i32 {\n    return true;\n}\n";
+    let close = |uri: &str| {
+        json!({"jsonrpc": "2.0", "method": "textDocument/didClose",
+               "params": {"textDocument": {"uri": uri}}})
+    };
+    let mut msgs = init(Some(&dir));
+    msgs.push(open(&main_uri, 1, &fs::read_to_string(&main).unwrap()));
+    msgs.push(open(&helper_uri, 1, broken_helper));
+    msgs.push(close(&helper_uri));
+    msgs.push(open(&helper_uri, 2, broken_helper));
+    msgs.extend(shutdown_exit(9));
+    let (code, out) = run_binary_lsp(&msgs);
+    assert_eq!(code, Some(0));
+    let main_publishes: Vec<Vec<String>> = publishes(&out)
+        .into_iter()
+        .filter(|p| p["uri"] == main_uri)
+        .map(codes_of)
+        .collect();
+    assert_eq!(
+        main_publishes,
+        vec![
+            vec![],                    // saved helper: clean
+            vec!["E0201".to_string()], // unsaved helper error seen by importer
+            vec![],                    // helper closed: back to disk truth
+            vec!["E0201".to_string()], // reopened: overlay restored
+        ],
+        "{out:#?}"
+    );
+    let with_error = publishes(&out)
+        .into_iter()
+        .find(|p| p["uri"] == main_uri && !codes_of(p).is_empty())
+        .unwrap();
+    assert!(with_error["diagnostics"][0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("return type mismatch"));
+}
+
+#[test]
+fn lsp_rustlike_overlay_matches_cli_on_the_same_effective_sources() {
+    // Parity against the same effective source state: the LSP result with
+    // an unsaved helper equals the CLI result once that text is on disk.
+    let broken_helper = "fn helper() -> i32 {\n    return true;\n}\n";
+    let dir = tempdir("rl_parity");
+    copy_tree(&fixture_dir("rustlike_helper"), &dir);
+    let mut msgs = init(Some(&dir));
+    let main_uri = file_uri(&dir.join("main.sm"));
+    msgs.push(open(
+        &main_uri,
+        1,
+        &fs::read_to_string(dir.join("main.sm")).unwrap(),
+    ));
+    msgs.push(open(&file_uri(&dir.join("helper.sm")), 1, broken_helper));
+    msgs.extend(shutdown_exit(9));
+    let (_, out) = run_lsp(&msgs);
+    let lsp = last_publish_for(&out, &main_uri)["diagnostics"][0].clone();
+    fs::write(dir.join("helper.sm"), broken_helper).unwrap();
+    let (_, cli) = check_json(&dir, "main.sm");
+    let cli = &cli["diagnostics"][0];
+    assert_eq!(lsp["code"], cli["code"]);
+    assert_eq!(lsp["message"], cli["message"]);
+    assert_eq!(lsp["data"]["family"], cli["family"]);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn lsp_rejects_oversized_header_line_before_buffering_it() {
+    // Copilot #1: one unterminated header line far beyond the limit. The
+    // framing error must arrive after reading at most one maximal line, not
+    // after buffering the whole oversized line.
+    let prefix = b"Content-Length: 2\r\nX-Pad: ";
+    let mut input = prefix.to_vec();
+    input.extend(std::iter::repeat_n(b'a', 10 * 1024 * 1024));
+    let mut cursor = std::io::Cursor::new(input);
+    let error = smc_cli::lsp::read_message(&mut cursor).expect_err("must be rejected");
+    assert!(
+        error.contains(&format!(
+            "header line exceeds {}",
+            smc_cli::lsp::MAX_HEADER_LINE_BYTES
+        )),
+        "{error}"
+    );
+    let consumed = cursor.position() as usize;
+    assert!(
+        consumed <= prefix.len() + smc_cli::lsp::MAX_HEADER_LINE_BYTES + 1,
+        "read {consumed} bytes before rejecting an oversized header line"
+    );
+    // The session-level result is the same deterministic framing error.
+    let mut input = prefix.to_vec();
+    input.extend(std::iter::repeat_n(b'a', 64 * 1024));
+    assert!(matches!(run_lsp_raw(input).0, LspExit::Framing(_)));
+}
+
+#[test]
+fn lsp_rejects_too_many_header_bytes() {
+    let mut input = Vec::new();
+    for i in 0..200 {
+        input.extend(format!("X-Header-{i}: {}\r\n", "v".repeat(60)).into_bytes());
+    }
+    input.extend(b"Content-Length: 2\r\n\r\n{}");
+    match run_lsp_raw(input).0 {
+        LspExit::Framing(message) => assert!(
+            message.contains(&format!(
+                "headers exceed {}",
+                smc_cli::lsp::MAX_HEADER_BYTES
+            )),
+            "{message}"
+        ),
+        other => panic!("expected framing error, got {other:?}"),
+    }
+}
+
+#[test]
+fn lsp_accepts_normal_headers_within_limits() {
+    let body = serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                          "params": {"capabilities": {}}}))
+    .unwrap();
+    let mut input = format!(
+        "Content-Length: {}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    input.extend(body);
+    for m in shutdown_exit(9) {
+        input.extend(frame(&m));
+    }
+    let (exit, out) = run_lsp_raw(input);
+    assert_eq!(exit, LspExit::Clean);
+    assert!(response(&out, 1)["result"]["capabilities"].is_object());
+}
+
+fn mutation_runner(args: &[&str]) -> (i32, String) {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ssf09_mutation_campaign.py");
+    for python in ["python3", "python"] {
+        if let Ok(out) = Command::new(python).arg(&script).args(args).output() {
+            return (
+                out.status.code().unwrap_or(-1),
+                format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                ),
+            );
+        }
+    }
+    panic!("no python interpreter (python3/python) available for the mutation runner test");
+}
+
+#[test]
+fn mutation_campaign_selection_fails_closed() {
+    // Copilot #2: an unknown selector never yields a vacuous success.
+    let (code, out) = mutation_runner(&["M13"]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("unknown mutant id(s): M13"), "{out}");
+    let (code, out) = mutation_runner(&["M1", "M13"]);
+    assert_eq!(code, 2, "M1 must not run alone when M13 is unknown: {out}");
+    assert!(!out.contains("KILLED"), "{out}");
+    let (code, out) = mutation_runner(&["--dry-run", "M13"]);
+    assert_eq!(code, 2, "{out}");
+    // The full, known set still resolves, with every anchor present once.
+    let (code, out) = mutation_runner(&["--dry-run"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("13 mutant(s) selected"), "{out}");
+    let (code, out) = mutation_runner(&["--dry-run", "M1"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("1 mutant(s) selected: M1"), "{out}");
+}

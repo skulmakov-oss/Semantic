@@ -118,6 +118,27 @@ Identical inputs produce byte-identical documents
 (`tests/ssf09_editor_baseline.rs::schema_output_is_byte_deterministic`,
 golden files under `tests/golden_snapshots/ssf09_editor_baseline/`).
 
+## Reproducibility across checkouts
+
+The same project, checked with the same arguments from the same relative
+working directory, produces byte-identical documents wherever the checkout
+lives on the host
+(`tests/ssf09_editor_baseline.rs::canonical_json_is_byte_identical_across_checkout_roots`):
+
+- diagnostic text names modules relative to the checked root's directory
+  (for example `cyclic import detected: a.sm -> b.sm -> a.sm`), through the
+  provider-owned `ModuleProvider::display_module` and the smc-cli source
+  seam - never by absolute host path;
+- package admission, import resolution and I/O failures are described by
+  their structured code or `std::io::ErrorKind` (for example `module file
+  does not exist or cannot be resolved`, `entity not found`), never by
+  OS-specific error wording;
+- `failure.message` names the root exactly as the caller supplied it.
+
+`path` is relative to the working directory, so it is reproducible for the
+same relative invocation. The legacy `smc check` output (without `--format`)
+keeps its historical host detail.
+
 ## Versioning policy
 
 - `schema_version` is incremented for any change that removes or renames a
