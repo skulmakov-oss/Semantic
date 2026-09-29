@@ -385,7 +385,7 @@ Reserved for command-line and workflow vocabulary.
 
 ### 5.14 `stdout`
 
-- canonical term: `stdout`
+- canonical term: none / host implementation detail only
 - category: Observation / Controlled effects
 - meaning: host / process channel wording
 - accepted forms: implementation / host-channel term only
@@ -411,18 +411,18 @@ Reserved for command-line and workflow vocabulary.
 
 | concept | preferred direction | legacy / weak direction | proposed category | current status | notes |
 |---|---|---|---|---|---|
-| entrypoint | `entry` | `main` / `fn main` | Entry and lifecycle | planned / refined by `LEXICON-B` | Bridge entrypoint spelling remains in current executable fixtures, but it is not canonical. |
+| entrypoint | `entry` | `main` / `fn main` | Entry and lifecycle | planned | Bridge entrypoint spelling remains in current executable fixtures, but it is not canonical. |
 | observable event | `observe` | `print` | Observation | planned | Observation must remain controlled and not collapse into generic stdout. |
-| completion | `complete` | `return` | Transition and completion | planned / refined by `LEXICON-B` | Current completion spelling is bridge syntax in fixtures, not a final decision. |
-| requirement | `require` | `assert` | Verification and admission | planned / refined by `LEXICON-C` | Requirement vocabulary needs to stay distinct from diagnostics-only assertions. |
-| admission | `admit` / `verify` | unchecked `run` | Verification and admission | planned / refined by `LEXICON-C` | Execution must remain verifier-gated. |
+| completion | `complete` | `return` | Transition and completion | planned | Current completion spelling is bridge syntax in fixtures, not a final decision. |
+| requirement | `require` | `assert` | Verification and admission | planned | Requirement vocabulary needs to stay distinct from diagnostics-only assertions. |
+| admission | `admit` / `verify` | unchecked `run` | Verification and admission | planned | Execution must remain verifier-gated. |
 | output target | observation sink | `stdout` | Controlled effects / capability boundary | implementation-detail | Host output channel wording is not canonical source vocabulary. |
 | external interaction | controlled effect | `I/O` | Controlled effects / capability boundary | implementation-detail | Keep effect admission explicit and bounded. |
 | execution | `transition` / `evaluate` / `execute` | `run everywhere` | Transition and completion | undecided | The runtime meaning needs a clean surface split from CLI wording. |
 | semantic state | `state` | variable-only model | State declaration | planned | State should carry meaning beyond a plain mutable variable story. |
 | contradiction | `conflict` / `S` | boolean error | Quad values and quad relations | undecided | `S` remains a bridge/pattern term; future relation vocabulary still needs decision. |
 | unknown | `unknown` / `N` | null-like value | Quad values and quad relations | undecided | Unknown-state vocabulary remains directional, not frozen. |
-| text output proof | controlled observation proof | Hello World via `print` | Observation | planned / refined by `LEXICON-D` | Proof-of-life must stay controlled, not generic output. |
+| text output proof | controlled observation proof | Hello World via `print` | Observation | planned | Proof-of-life must stay controlled, not generic output. |
 | command-line check | `check` | source truth claim | CLI / tooling terms | implementation-detail | CLI verbs are tooling surface, not canonical source vocabulary. |
 | SemCode execution | `run-smc` | generic `run` | CLI / tooling terms | implementation-detail | Persisted artifact execution must remain verifier-admitted. |
 

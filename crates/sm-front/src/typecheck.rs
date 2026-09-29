@@ -85,6 +85,7 @@ fn is_numeric_literal_like_expr(expr_id: ExprId, arena: &AstArena) -> bool {
         Expr::Unary(UnaryOp::Pos | UnaryOp::Neg, inner) => {
             is_numeric_literal_like_expr(*inner, arena)
         }
+        Expr::Block(block) => is_numeric_literal_like_expr(block.tail, arena),
         _ => false,
     }
 }
@@ -1353,6 +1354,23 @@ fn check_stmt(
                     ),
                 });
             }
+            for item in items.iter() {
+                match item {
+                    TuplePatternItem::Bind { .. } | TuplePatternItem::Discard => {}
+                    TuplePatternItem::QuadLiteral(_) => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: "quad literal tuple patterns currently require let-else; plain tuple destructuring bind supports only name/_/ref items".to_string(),
+                        });
+                    }
+                    TuplePatternItem::Nested(_) => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: "nested tuple patterns are not yet supported in plain let bindings; use let-else form".to_string(),
+                        });
+                    }
+                }
+            }
             // M9.10 Wave B: build BindingPlan so path-state is tracked on the source variable.
             let tuple_ty = Type::Tuple(item_tys);
             let mut plan = BindingPlan::default();
@@ -1608,20 +1626,8 @@ fn check_stmt(
                 loop_stack,
                 impl_list,
             )?;
-            // M9.10 Wave B: validate QuadLiteral items before building plan.
-            for (item, item_ty) in items.iter().zip(item_tys.iter()) {
-                if let TuplePatternItem::QuadLiteral(_) = item {
-                    if *item_ty != Type::Quad {
-                        return Err(FrontendError {
-                            pos: 0,
-                            message: format!(
-                                "let-else tuple literal pattern requires quad element, got {:?}",
-                                item_ty
-                            ),
-                        });
-                    }
-                }
-            }
+            // M9.10 Wave B: validate QuadLiteral items before building plan (recursing into nested tuples).
+            validate_tuple_pattern_quad_literals(items, &item_tys)?;
             // M9.10 Wave B: build BindingPlan so path-state is tracked on the source variable.
             let tuple_ty = Type::Tuple(item_tys);
             let mut plan = BindingPlan::default();
@@ -13667,6 +13673,131 @@ mod tests {
             err.message
         );
     }
+
+    #[test]
+    fn fnd_037_let_else_nested_tuple_quad_literal_typechecked_and_validated() {
+        let bad = r#"
+            fn main() {
+                let pair: (i32, (bool, i32)) = (1, (true, 2));
+                let (a, (T, b)) = pair else return;
+                return;
+            }
+        "#;
+        let err = typecheck_source(bad)
+            .expect_err("nested bool matched against quad literal T must reject");
+        assert!(
+            err.message
+                .contains("let-else tuple literal pattern requires quad element"),
+            "got: {}",
+            err.message
+        );
+
+        let good = r#"
+            fn main() {
+                let pair: (i32, (quad, i32)) = (1, (T, 2));
+                let (a, (T, b)) = pair else return;
+                return;
+            }
+        "#;
+        typecheck_source(good).expect("nested quad literal T matching quad element must typecheck");
+    }
+
+    #[test]
+    fn fnd_039_let_tuple_ast_rejects_refutable_quad_and_nested_items() {
+        let mut program = parse_program("fn main() { return; }").expect("parse");
+        let lit_expr = program.arena.alloc_expr(Expr::QuadLiteral(QuadVal::T));
+        let val_expr = program.arena.alloc_expr(Expr::Tuple(vec![lit_expr]));
+        let let_tuple = program.arena.alloc_stmt(Stmt::LetTuple {
+            items: vec![TuplePatternItem::QuadLiteral(QuadVal::T)],
+            ty: Some(Type::Tuple(vec![Type::Quad])),
+            value: val_expr,
+        });
+        program.functions[0].body.insert(0, let_tuple);
+        let err = type_check_program(&program).expect_err("LetTuple with quad literal must reject");
+        assert!(
+            err.message
+                .contains("quad literal tuple patterns currently require let-else"),
+            "got: {}",
+            err.message
+        );
+
+        let mut program2 = parse_program("fn main() { return; }").expect("parse");
+        let inner_tuple = program2.arena.alloc_expr(Expr::Tuple(vec![]));
+        let val_expr2 = program2.arena.alloc_expr(Expr::Tuple(vec![inner_tuple]));
+        let let_tuple_nested = program2.arena.alloc_stmt(Stmt::LetTuple {
+            items: vec![TuplePatternItem::Nested(vec![TuplePatternItem::Discard])],
+            ty: Some(Type::Tuple(vec![Type::Tuple(vec![])])),
+            value: val_expr2,
+        });
+        program2.functions[0].body.insert(0, let_tuple_nested);
+        let err2 =
+            type_check_program(&program2).expect_err("LetTuple with nested pattern must reject");
+        assert!(
+            err2.message
+                .contains("nested tuple patterns are not yet supported in plain let bindings"),
+            "got: {}",
+            err2.message
+        );
+    }
+
+    #[test]
+    fn fnd_067_loop_expression_statement_with_semicolon_typechecks() {
+        let src = r#"
+            fn main() {
+                loop {
+                    break 1.0;
+                };
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("loop expression in statement position with semicolon must typecheck");
+    }
+
+    #[test]
+    fn fnd_001_fx_coercion_preserves_block_expression_tails() {
+        let src = r#"
+            fn take_fx(x: fx) {
+                return;
+            }
+            fn test_ret() -> fx {
+                return { 1.0 };
+            }
+            fn main() {
+                let x: fx = { 1.0 };
+                take_fx({ 1.0 });
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("fx coercion must work on block expression tails");
+    }
+
+    #[test]
+    fn fnd_018_const_initializer_safe_permits_text_literal() {
+        let src = r#"
+            fn main() {
+                const GREETING: text = "hello";
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("const text literal must be safe initializer");
+    }
+
+    #[test]
+    fn fnd_073_map_empty_rejects_invalid_key_type() {
+        let src = r#"
+            fn main() {
+                let m: Map(Sequence(i32), bool) = map_empty();
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("map_empty with sequence key must reject");
+        assert!(
+            err.message.contains("does not support key type"),
+            "got: {}",
+            err.message
+        );
+    }
 }
 
 fn is_builtin_assert_name(
@@ -16027,7 +16158,20 @@ fn infer_expr_type_with_expected(
             if let Ok("map_empty") = resolve_symbol_name(arena, *name).as_deref() {
                 if args.is_empty() {
                     match expected.as_ref() {
-                        Some(ty @ Type::Map(_)) => return Ok(ty.clone()),
+                        Some(ty @ Type::Map(map_ty)) => match map_ty.key.as_ref() {
+                            Type::I32 | Type::U32 | Type::Bool | Type::Text | Type::Quad => {
+                                return Ok(ty.clone());
+                            }
+                            invalid_key => {
+                                return Err(FrontendError {
+                                        pos: 0,
+                                        message: format!(
+                                            "map_empty() does not support key type {:?}; admitted key types are i32, u32, bool, text, quad",
+                                            invalid_key
+                                        ),
+                                    });
+                            }
+                        },
                         _ => {
                             return Err(FrontendError {
                                 pos: 0,
@@ -16666,7 +16810,10 @@ fn ensure_const_initializer_safe(
     env: &mut ScopeEnv,
 ) -> Result<(), FrontendError> {
     match arena.expr(expr_id) {
-        Expr::QuadLiteral(_) | Expr::BoolLiteral(_) | Expr::NumericLiteral(_) => Ok(()),
+        Expr::QuadLiteral(_)
+        | Expr::BoolLiteral(_)
+        | Expr::NumericLiteral(_)
+        | Expr::TextLiteral(_) => Ok(()),
         Expr::Range(range_expr) => {
             ensure_const_initializer_safe(range_expr.start, arena, env)?;
             ensure_const_initializer_safe(range_expr.end, arena, env)
@@ -16782,6 +16929,34 @@ pub(crate) fn apply_binding_plan(env: &mut ScopeEnv, plan: &BindingPlan) {
     for item in &plan.items {
         env.insert(item.name, item.ty.clone());
     }
+}
+
+fn validate_tuple_pattern_quad_literals(
+    items: &[TuplePatternItem],
+    item_tys: &[Type],
+) -> Result<(), FrontendError> {
+    for (item, item_ty) in items.iter().zip(item_tys.iter()) {
+        match item {
+            TuplePatternItem::QuadLiteral(_) => {
+                if *item_ty != Type::Quad {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "let-else tuple literal pattern requires quad element, got {:?}",
+                            item_ty
+                        ),
+                    });
+                }
+            }
+            TuplePatternItem::Nested(inner_items) => {
+                if let Type::Tuple(inner_tys) = item_ty {
+                    validate_tuple_pattern_quad_literals(inner_items, inner_tys)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Build a `BindingPlan` from tuple pattern items against a known tuple type.

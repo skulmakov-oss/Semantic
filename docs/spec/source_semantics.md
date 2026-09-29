@@ -203,8 +203,7 @@ Function-call resolution is lexical and deterministic.
 Current rules:
 
 - ordinary user-defined functions are resolved from the program function table
-- builtin math calls are resolved only when no user-defined function of the
-  same name exists
+- standard library and builtin math/logic names cannot be shadowed by user-defined functions
 - there is no overload resolution
 - there is no dynamic dispatch
 - named arguments reorder only after the target function resolves successfully
@@ -218,6 +217,10 @@ Current builtin names in the Rust-like surface are:
 - `abs`
 - `pow`
 - `assert`
+- `qtruth_and`
+- `qtruth_or`
+- `qtruth_not`
+- `qtruth_impl`
 
 Current named-argument call semantics:
 
@@ -950,6 +953,10 @@ Current builtin signatures:
 - `abs(f64) -> f64`
 - `pow(f64, f64) -> f64`
 - `assert(bool);` as a statement-level builtin contract
+- `qtruth_and(quad, quad) -> quad`
+- `qtruth_or(quad, quad) -> quad`
+- `qtruth_not(quad) -> quad`
+- `qtruth_impl(quad, quad) -> quad`
 
 ## Pipeline
 

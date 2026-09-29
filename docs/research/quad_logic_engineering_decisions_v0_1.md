@@ -32,6 +32,8 @@ q = (e_f, e_t)
 | `T` | `(0, 1)` | true evidence only |
 | `S` | `(1, 1)` | both false and true evidence / conflict |
 
+When mapped to a packed 2-bit integer representation `packed = (e_t << 1) | e_f`, the values correspond to `N = 0`, `F = 1`, `T = 2`, `S = 3`.
+
 This model is powerful because it turns reasoning states into compact evidence planes.
 
 Important caution:

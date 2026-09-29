@@ -46,7 +46,7 @@ Map(K, V)
 Admitted construction candidate:
 
 ```semantic
-let q: Map(Text, i32) = map_empty();
+let q: Map(text, i32) = map_empty();
 ```
 
 PR-D2 must choose one canonical construction spelling. If the repository later

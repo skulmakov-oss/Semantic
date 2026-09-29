@@ -12,8 +12,8 @@ The canonical `QuadTile128` type defines the in-memory semantic storage layout:
 - Asserted alignment: 16 bytes
 - Asserted field offsets: `t` at 0, `f` at 16
 
-## Stable Semantic Properties
-The following semantic properties are frozen and tested:
+## Layout Boundary Invariants
+The following layout-boundary invariants are frozen and tested (wider semantic properties remain governed by `docs/spec/quad_logic_frame_v1.md`):
 - Lane count (128 lanes)
 - Lane numbering (0-127)
 - Plane meanings (`t` for truth, `f` for falsity)

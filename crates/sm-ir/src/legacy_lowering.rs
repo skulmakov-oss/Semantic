@@ -11246,6 +11246,72 @@ fn lower_expr_stmt_with_parts(
             });
             return Ok(());
         }
+        let name_str = resolve_symbol_name(arena, *name)?;
+        if matches!(
+            name_str,
+            "qtruth_and" | "qtruth_or" | "qtruth_not" | "qtruth_impl"
+        ) {
+            let expected_arity = if name_str == "qtruth_not" { 1 } else { 2 };
+            if args.len() != expected_arity || args.iter().any(|arg| arg.name.is_some()) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "builtin '{name_str}' takes exactly {expected_arity} positional argument{}",
+                        if expected_arity == 1 { "" } else { "s" }
+                    ),
+                });
+            }
+            let mut regs = Vec::with_capacity(expected_arity);
+            for arg in args {
+                let (reg, arg_ty) = lower_expr_with_expected(
+                    arg.value,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(Type::Quad),
+                    ret_ty.clone(),
+                    closure_state,
+                    ownership_events,
+                    lowered_locals,
+                )?;
+                if arg_ty != Type::Quad {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin '{name_str}' expects quad arguments, got {:?}",
+                            arg_ty
+                        ),
+                    });
+                }
+                regs.push(reg);
+            }
+            let dst = alloc(next);
+            match name_str {
+                "qtruth_and" => out.push(IrInstr::QTruthAnd {
+                    dst,
+                    lhs: regs[0],
+                    rhs: regs[1],
+                }),
+                "qtruth_or" => out.push(IrInstr::QTruthOr {
+                    dst,
+                    lhs: regs[0],
+                    rhs: regs[1],
+                }),
+                "qtruth_not" => out.push(IrInstr::QTruthNot { dst, src: regs[0] }),
+                "qtruth_impl" => out.push(IrInstr::QTruthImpl {
+                    dst,
+                    lhs: regs[0],
+                    rhs: regs[1],
+                }),
+                _ => unreachable!("qtruth intrinsic was checked above"),
+            }
+            return Ok(());
+        }
         let sig = if let Some(s) = fn_table.get(name) {
             s.clone()
         } else if let Some(s) = builtin_sig(resolve_symbol_name(arena, *name)?) {
@@ -11605,6 +11671,12 @@ fn find_named_var_symbol(
             Ok(None)
         }
         Expr::RecordField(field_expr) => find_named_var_symbol(field_expr.base, arena, name),
+        Expr::SequenceIndex(index_expr) => {
+            if let Some(symbol) = find_named_var_symbol(index_expr.base, arena, name)? {
+                return Ok(Some(symbol));
+            }
+            find_named_var_symbol(index_expr.index, arena, name)
+        }
         Expr::Unary(_, inner) => find_named_var_symbol(*inner, arena, name),
         Expr::Binary(lhs, _, rhs) => {
             if let Some(symbol) = find_named_var_symbol(*lhs, arena, name)? {
@@ -19128,5 +19200,56 @@ mod opt_tests {
             err.message,
             "RustLike profile is disabled at compile time (enable feature 'profile-rust')"
         );
+    }
+
+    #[test]
+    fn fnd_022_contract_result_in_sequence_index_lowers_successfully() {
+        let src = r#"
+            fn first(items: Sequence(i32)) -> Sequence(i32)
+                ensures(result[0] == items[0])
+            {
+                return items;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        compile_program_to_ir(src)
+            .expect("contract clause with sequence index on result should lower");
+    }
+
+    #[test]
+    fn fnd_346_qtruth_statement_call_lowers_to_explicit_instr() {
+        let src = r#"
+            fn main() {
+                qtruth_and(T, F);
+                qtruth_or(T, F);
+                qtruth_not(T);
+                qtruth_impl(T, F);
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("qtruth statement calls should lower");
+        let main = ir.iter().find(|f| f.name == "main").expect("main fn");
+        assert!(main
+            .instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::QTruthAnd { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::QTruthOr { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::QTruthNot { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::QTruthImpl { .. })));
+        assert!(!main
+            .instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::Call { name, .. } if name.starts_with("qtruth_"))));
     }
 }

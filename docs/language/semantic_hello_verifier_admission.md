@@ -103,7 +103,7 @@ This is a future rule decision, not implemented.
 - verifier must not invent capability
 - verifier checks effective capability context
 - capability policy remains separate from verifier implementation
-- missing capability should fail admission or trap according to later policy
+- missing capability must fail admission
 - verifier must not silently downgrade to stdout / print
 
 ## 8. Audit Interaction
