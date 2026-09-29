@@ -73,6 +73,57 @@ collide with the start of an instruction the way `DBG0`'s tag byte (`0x44`
 = `TupleGet`) can; this ambiguity is specific to `DBG0`, not a general
 property of the tagged-section scheme.
 
+### Top-Level Artifact Framing
+
+An artifact is the 8-byte header magic followed by its top-level content:
+
+- header revision `>= 23` (`SEMCOD22` and newer,
+  `SEMCODE_ADT_DESCRIPTOR_MIN_REVISION`): the magic, then exactly one
+  mandatory `ADT0` descriptor section, then the function envelopes running
+  to the end of the artifact;
+- header revision `<= 22` (`SEMCOD21` and older): the magic, then the
+  function envelopes running to the end of the artifact. These artifacts
+  have no descriptor section and no ADT descriptor authority.
+
+`ADT0` presence is derived from the header revision alone, on both the
+encode and decode side. It is never content-sniffed: under a revision
+`<= 22` the bytes after the magic are always read as a function envelope,
+even if they happen to spell `ADT0` (such an artifact fails the legacy
+function-envelope grammar), and under a revision `>= 23` a missing `ADT0`
+section is a decode rejection. A second `ADT0` section immediately after the
+first is rejected explicitly.
+
+### `ADT0` Descriptor Section
+
+All integers are unsigned little-endian; all names are UTF-8 prefixed by
+their `u16` byte length.
+
+```text
+ADT0 section   := tag:"ADT0"(4 bytes) descriptor_count:u16 descriptor*
+descriptor     := name_len:u16 name:utf8[name_len]
+                  variant_count:u16 variant*
+variant        := name_len:u16 name:utf8[name_len] payload_arity:u16
+```
+
+Canonical-form rules, each a decode rejection when violated:
+
+- descriptor names are non-empty, unique, and appear in strictly ascending
+  raw UTF-8 byte order;
+- variant names are non-empty and unique within their descriptor; variants
+  keep declaration order, and a variant's discriminant (tag) is its index in
+  that order;
+- the built-in descriptors `Option = [None/0, Some/1]` and
+  `Result = [Ok/1, Err/1]` (variant/payload arity) are always present,
+  exactly in that canonical form; a source enum may not use either name;
+- the section is read exactly as encoded: the decoder never sorts, adds,
+  drops or rewrites a descriptor, and never repairs a missing or
+  non-canonical built-in (the artifact's own table is the only descriptor
+  authority; decoding never calls `AdtDescriptorTable::with_builtins`).
+
+ADT identity is the canonical type name. A descriptor's position in the
+table is only a lookup ordinal: it is not identity and is not stable across
+artifacts.
+
 ## Versioned Header Family
 
 Current supported header family:
@@ -95,6 +146,7 @@ Current supported header family:
 - `SEMCOD18`
 - `SEMCOD19`
 - `SEMCOD21`
+- `SEMCOD22`
 
 `SEMCOD15`, `SEMCOD16`, `SEMCOD17`, and `SEMCOD20` are also currently
 emitted/admitted by the toolchain but are not yet documented in this
@@ -121,6 +173,7 @@ Observed runtime support in the current toolchain:
 - `SEMCOD18`: epoch `0`, revision `19`
 - `SEMCOD19`: epoch `0`, revision `20`
 - `SEMCOD21`: epoch `0`, revision `22`
+- `SEMCOD22`: epoch `0`, revision `23`
 
 Header responsibilities:
 
@@ -139,7 +192,9 @@ Compatibility rules:
 
 Discipline rules:
 
-- existing admitted header families remain fixed once they ship on `main`
+- existing admitted header families remain fixed once they ship on `main`;
+  a change to what their artifacts mean is made only through the
+  `## Backward Compatibility Rule` (see its recorded `SEMCOD22` change)
 - capability widening stays additive in the current baseline and must not
   repurpose existing bits
 - release-facing documents must distinguish the published stable line from the
@@ -383,6 +438,22 @@ at a callee before execution.
   separately authorized contract change, never an incidental relaxation of
   this revision's own grammar
 
+`SEMCOD22`
+
+- ADT descriptor contract (SSF-09 D2-2), revision `23`
+  (`SEMCODE_ADT_DESCRIPTOR_MIN_REVISION`)
+- every artifact carries the mandatory `ADT0` descriptor section between the
+  magic and the function envelopes (see `### Top-Level Artifact Framing` and
+  `### ADT0 Descriptor Section` above)
+- the artifact's `ADT0` table is the only ADT descriptor authority for its
+  `MAKE_ADT`, `ADT_TAG`, and `ADT_GET` instructions; the verifier checks each
+  of them against that table (see `verifier.md`)
+- uses the fixed-width 8-byte header magic form `SEMCOD22`
+- inherits the `SEMCOD21` capability set unchanged; adds no capability bit
+  and does not change the function-envelope, `DBG0`, `OWN0`, or `SIG0` layout
+- is the floor of every artifact the current compiler emits (see
+  `## Opcode Vocabulary And Header Identity`)
+
 ## Opcode Vocabulary And Header Identity
 
 SemCode header identity constrains the executable opcode vocabulary. Every
@@ -408,16 +479,27 @@ capability bit at all - currently only `QTruth` (see #1732 / FA-05-002 for
 the full audit and rationale). See `docs/spec/verifier.md` for the
 enforcement mechanism.
 
+The descriptor-dependent ADT opcodes `MAKE_ADT`, `ADT_TAG`, and `ADT_GET`
+remain baseline (revision `1`) in `Opcode::minimum_semcode_revision()`, but
+are subject to a separate, independent rule: they are admitted only under a
+header that carries the `ADT0` descriptor section (revision `>= 23`). Under
+any older header they are rejected with `AdtRequiresDescriptorHeader`, not
+`OpcodeRequiresNewerHeader` (see `docs/spec/verifier.md` and
+`## Backward Compatibility Rule`).
+
 Important rule:
 
 - header selection is derived from actual emitted usage, not from profile
-  permission alone
+  permission alone, above a fixed floor: every artifact the current compiler
+  emits carries the mandatory `ADT0` section, so it is emitted under
+  `SEMCOD22` (revision `23`) or newer regardless of which opcodes it uses; a
+  program that needs a newer revision still promotes above that floor
 
 That means:
 
 - a profile may allow `f64`
-- if the program does not actually use the `f64` family, the producer may still
-  emit `SEMCODE0`
+- if the program does not actually use the `f64` family, that family does not
+  raise the header; the program is still emitted at the `SEMCOD22` floor
 
 ## Capability Contract
 
@@ -456,6 +538,8 @@ Contract rule:
 Current SemCode admission validates:
 
 - header magic and supported version
+- at revision `>= 23`, presence and canonical validity of the single `ADT0`
+  descriptor section (see `### ADT0 Descriptor Section`)
 - section and function-layout integrity
 - opcode validity against the public opcode admission matrix in `verifier.md`
 - opcode/header-revision consistency (see
@@ -572,6 +656,28 @@ Required follow-up:
 4. update verifier compatibility tests
 5. update VM compatibility tests
 6. update golden or compatibility fixtures if public behavior changed
+
+### Recorded Change: `SEMCOD22` ADT Descriptor Authority (SSF-09 D2-2)
+
+`SEMCOD22` (revision `23`) is a header and section layout change, and it is
+an intentional verifier interpretation change for existing artifacts:
+
+- a `SEMCODE0`..`SEMCOD21` artifact containing `MAKE_ADT`, `ADT_TAG`, or
+  `ADT_GET` was previously verifier-admissible without any descriptor
+  authority; it is now rejected with `AdtRequiresDescriptorHeader`. No
+  descriptor table is inferred from its instructions, reconstructed from its
+  strings, or synthesized from the built-ins for it;
+- `SEMCODE0`..`SEMCOD21` artifacts without those opcodes keep their existing
+  contract, and all legacy artifacts remain structurally decodable exactly
+  as before (descriptor-less, no `ADT0` sniffing);
+- historical bytes are never silently upgraded: decoding a legacy artifact
+  does not add a descriptor section or change its header;
+- the only supported migration for an affected artifact is recompilation
+  with the current toolchain, which emits `SEMCOD22` with its `ADT0` table.
+
+The follow-up above is recorded in `docs/roadmap/compatibility_statement.md`,
+`docs/roadmap/v1_readiness.md`, and `docs/spec/verifier.md`, with verifier,
+VM, and golden fixture coverage in the same change.
 
 ## No Silent Mutation Rule
 

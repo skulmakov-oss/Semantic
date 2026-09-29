@@ -199,9 +199,10 @@ mod tests {
         let src = "fn main() { return; }";
         let bytes = CliPipeline::compile_source(src, CompileProfile::RustLike, OptLevel::O0, false)
             .expect("compile");
-        // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+        // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+        // SIG0 floor described here. #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
         // artifact regardless of which opcodes it uses (was SEMCODE0).
-        assert_eq!(&bytes[0..8], b"SEMCOD19");
+        assert_eq!(&bytes[0..8], b"SEMCOD22");
     }
 
     #[test]

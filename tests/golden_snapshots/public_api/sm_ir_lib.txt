@@ -21,4 +21,6 @@ pub use error::{CompilePipelineError, ConfigurationError, IrError};
 #[cfg(feature = "std")]
 pub use frontend::{CompileProfile, OptLevel};
 #[cfg(feature = "std")]
+pub use legacy_lowering::emit_ir_to_semcode_with_adt_descriptors;
+#[cfg(feature = "std")]
 pub use legacy_lowering::*;

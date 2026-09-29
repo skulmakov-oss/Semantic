@@ -2,14 +2,15 @@ use super::*;
 use crate::semcode_decode::MAX_SIGNATURE_PARAMETERS_PER_FUNCTION;
 use crate::semcode_format::{
     header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
-    CallableValueFamily, Opcode, ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE,
-    MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17,
-    MAGIC18, MAGIC19, MAGIC2, MAGIC20, MAGIC21, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8,
-    MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+    AdtDescriptorTable, CallableValueFamily, Opcode, ACTIVATION_MODE_FRAME_ENTRY,
+    ACTIVATION_MODE_STORE_VAR_SITE, MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14,
+    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC20, MAGIC21, MAGIC22, MAGIC3, MAGIC4, MAGIC5,
+    MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
-    SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, SEMCODE_SIGNATURE_MIN_REVISION, SIGNATURE_SECTION_TAG,
-    WRITE_EXECUTION_MODE_MAKE_RECORD_SITE, WRITE_EXECUTION_MODE_STORE_VAR_SITE,
+    SEMCODE_ADT_DESCRIPTOR_MIN_REVISION, SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION,
+    SEMCODE_SIGNATURE_MIN_REVISION, SIGNATURE_SECTION_TAG, WRITE_EXECUTION_MODE_MAKE_RECORD_SITE,
+    WRITE_EXECUTION_MODE_STORE_VAR_SITE,
 };
 use sm_front::types::{
     AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
@@ -1434,6 +1435,24 @@ pub fn compile_program_to_ir_with_options_and_profile(
     opt: OptLevel,
     parser_profile: &ParserProfile,
 ) -> Result<Vec<IrFunction>, CompilePipelineError> {
+    compile_rustlike_program(
+        input,
+        profile,
+        opt,
+        parser_profile,
+        lower_rustlike_program_to_ir,
+    )
+}
+
+/// Surface selection and parsing shared by the IR and SemCode pipelines;
+/// `lower` receives the selected RustLike program.
+fn compile_rustlike_program<T>(
+    input: &str,
+    profile: CompileProfile,
+    opt: OptLevel,
+    parser_profile: &ParserProfile,
+    lower: impl FnOnce(Program, OptLevel) -> Result<T, CompilePipelineError>,
+) -> Result<T, CompilePipelineError> {
     match profile {
         CompileProfile::RustLike if !cfg!(feature = "profile-rust") => {
             return Err(CompilePipelineError::Configuration(ConfigurationError {
@@ -1459,7 +1478,7 @@ pub fn compile_program_to_ir_with_options_and_profile(
         // F) - there is nothing to classify, so nothing is classified.
         CompileProfile::RustLike => {
             let program = parse_program_with_profile_probe(input, parser_profile)?;
-            lower_rustlike_program_to_ir(program, opt)
+            lower(program, opt)
         }
         // Explicit Logos: authority is already explicitly selected by the
         // caller - never routed through `resolve_surface_authority`, and
@@ -1507,7 +1526,7 @@ pub fn compile_program_to_ir_with_options_and_profile(
                     }
                     // Decision F's `Program` is already authoritative -
                     // lower it directly, never re-parse it.
-                    lower_rustlike_program_to_ir(program, opt)
+                    lower(program, opt)
                 }
                 // Symmetric to LogosOwns(Err): authoritative, unconditional,
                 // never routed through Logos.
@@ -1602,18 +1621,90 @@ pub fn compile_program_to_semcode_with_options_debug(
                 .to_string(),
         }));
     }
-    let ir = compile_program_to_immutable_ir(input, profile, opt)?;
+    // SSF-09 D2-2: the ADT0 table comes from the program's own enum
+    // declarations (plus the built-ins), never from the emitted instructions.
+    // Lowering errors keep precedence over descriptor-table errors.
+    let (funcs, adt_descriptors) = compile_rustlike_program(
+        input,
+        profile,
+        opt,
+        &ParserProfile::foundation_default(),
+        |program, opt| {
+            let adt_descriptors = adt_descriptor_table(&program);
+            let funcs = lower_rustlike_program_to_ir(program, opt)?;
+            Ok((funcs, adt_descriptors?))
+        },
+    )?;
+    let ir = ImmutableIrProgram::from_vec(funcs);
     for f in ir.functions() {
         validate_ir(f)?;
     }
-    Ok(emit_semcode(ir.functions(), debug_symbols)?)
+    Ok(emit_semcode(
+        ir.functions(),
+        &adt_descriptors,
+        debug_symbols,
+    )?)
 }
 
+/// Emits IR as SemCode. IR carries no enum declarations, so the only ADT
+/// descriptor authority available here is the built-in `Option` and
+/// `Result`, and the artifact's `ADT0` table holds exactly those.
+///
+/// IR whose ADT instructions (`MakeAdt`, `AdtTag`, `AdtGet`) name any other
+/// type is rejected with an [`IrError`] before any bytes are produced: its
+/// descriptors are never inferred from the instructions. Emit such IR with
+/// [`emit_ir_to_semcode_with_adt_descriptors`] instead.
 pub fn emit_ir_to_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, IrError> {
-    emit_semcode(funcs, debug_symbols)
+    let builtins_only = AdtDescriptorTable::with_builtins(vec![]).map_err(|e| IrError {
+        message: e.to_string(),
+    })?;
+    // SSF-09 D2-2R1: a gate, not a reconstruction - it only asks whether the
+    // table this emitter has can describe each named type.
+    for f in funcs {
+        for instr in &f.instrs {
+            let (IrInstr::MakeAdt { adt_name, .. }
+            | IrInstr::AdtTag { adt_name, .. }
+            | IrInstr::AdtGet { adt_name, .. }) = instr
+            else {
+                continue;
+            };
+            if builtins_only.get(adt_name).is_none() {
+                return Err(IrError {
+                    message: format!(
+                        "function '{}' uses ADT type '{adt_name}', which has no descriptor \
+                         authority in bare IR emission; emit it with \
+                         emit_ir_to_semcode_with_adt_descriptors",
+                        f.name
+                    ),
+                });
+            }
+        }
+    }
+    emit_semcode(funcs, &builtins_only, debug_symbols)
 }
 
-fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, IrError> {
+/// Emits IR as SemCode with an explicit ADT descriptor authority.
+///
+/// `adt_descriptors` becomes the artifact's `ADT0` table verbatim: it is the
+/// only source of ADT descriptors, never checked against or completed from
+/// the IR's instructions. Build it from the program's enum declarations with
+/// [`adt_descriptor_table`](crate::adt_descriptor_table), or with
+/// `AdtDescriptorTable::with_builtins`. An ADT instruction naming a type,
+/// variant or arity the table does not describe yields an artifact the
+/// verifier rejects.
+pub fn emit_ir_to_semcode_with_adt_descriptors(
+    funcs: &[IrFunction],
+    adt_descriptors: &AdtDescriptorTable,
+    debug_symbols: bool,
+) -> Result<Vec<u8>, IrError> {
+    emit_semcode(funcs, adt_descriptors, debug_symbols)
+}
+
+fn emit_semcode(
+    funcs: &[IrFunction],
+    adt_descriptors: &AdtDescriptorTable,
+    debug_symbols: bool,
+) -> Result<Vec<u8>, IrError> {
     // #1718: fail closed at the single producer boundary every public
     // emission entrypoint converges on (`compile_program_to_semcode_*` and
     // `emit_ir_to_semcode` both call this function) - before any header is
@@ -1719,13 +1810,19 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Ir
     // opcode needing an even newer revision still promotes correctly on top
     // of it (mirrors the #1732 precedent: a new header revision closing a
     // version-identity gap, not a capability gap).
+    //
+    // SSF-09 D2-2: every artifact also carries the mandatory ADT0 section,
+    // which only `SEMCODE_ADT_DESCRIPTOR_MIN_REVISION` (HEADER_V22) and newer
+    // can carry, so that revision is now the floor. It is above the
+    // signature floor, which it therefore subsumes.
     let (chosen_magic, require_ownership_section) =
-        if opcode_driven_header.rev < SEMCODE_SIGNATURE_MIN_REVISION {
-            (MAGIC19, true)
+        if opcode_driven_header.rev < SEMCODE_ADT_DESCRIPTOR_MIN_REVISION {
+            (MAGIC22, true)
         } else {
             (opcode_driven_magic, opcode_driven_require_ownership_section)
         };
     out.extend_from_slice(&chosen_magic);
+    out.extend_from_slice(&adt_descriptors.encode_section());
     // #1732 (FA-05-002): the `has_vN_*_instr` chain above is a hand-written
     // promotion decision, independent of `Opcode::minimum_semcode_revision`
     // (sm-format's actual admission authority). This is the mechanical
@@ -13424,10 +13521,10 @@ mod opt_tests {
         let bytes = compile_program_to_semcode(src).expect("trivial baseline should emit");
         assert_eq!(
             &bytes[0..8],
-            b"SEMCOD19",
+            b"SEMCOD22",
             "baseline and SIG0-only rows are observably identical today: SIG0's floor is \
              unconditional, so even a program using no promoting opcode at all is emitted \
-             under HEADER_V19 (rev 20), not HEADER_V0"
+             under HEADER_V22 (rev 23, the SSF-09 D2-2 floor), not HEADER_V0"
         );
     }
 
@@ -13460,12 +13557,12 @@ mod opt_tests {
         let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
         assert_eq!(
             &bytes[0..8],
-            b"SEMCOD20",
-            "a site-backed Borrow event must promote the artifact to HEADER_V20 (rev 21)"
+            b"SEMCOD22",
+            "a site-backed Borrow event needs HEADER_V20 (rev 21) or newer; SSF-09 D2-2 emits HEADER_V22"
         );
         let (header, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes)
             .expect("rev21 artifact must decode");
-        assert_eq!(header.rev, 21);
+        assert_eq!(header.rev, 23); // SSF-09 D2-2: HEADER_V22 is the emitter floor
         let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
         assert_eq!(decoded_main.borrowed_paths.len(), 1);
         assert_eq!(
@@ -13515,7 +13612,7 @@ mod opt_tests {
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
         let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
-        assert_eq!(&bytes[0..8], b"SEMCOD21");
+        assert_eq!(&bytes[0..8], b"SEMCOD22");
         let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
         assert_eq!(decoded_main.borrowed_paths.len(), 2);
@@ -14420,10 +14517,11 @@ mod opt_tests {
         // #1773 (FA-09-005): every compiled artifact now carries a canonical
         // callable-signature record per function, which only a header at or
         // above SEMCODE_SIGNATURE_MIN_REVISION can structurally carry - so
-        // SEMCOD19 is now the floor regardless of which lesser opcodes this
+        // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+        // SIG0 floor described here. SEMCOD19 is now the floor regardless of which lesser opcodes this
         // program happens to use (was SEMCODE8, text's own promotion floor).
         let bytes = compile_program_to_semcode(src).expect("text semcode should emit");
-        assert_eq!(&bytes[0..8], b"SEMCOD19");
+        assert_eq!(&bytes[0..8], b"SEMCOD22");
     }
 
     #[test]
@@ -14459,11 +14557,12 @@ mod opt_tests {
             .iter()
             .any(|instr| matches!(instr, IrInstr::SequenceGet { .. })));
 
-        // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+        // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+        // SIG0 floor described here. #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
         // artifact (was SEMCODE9, sequences' own promotion floor) - see the
         // comment in `text_literals_lower_to_load_text_and_semcod19` above.
         let bytes = compile_program_to_semcode(src).expect("ordered sequence semcode should emit");
-        assert_eq!(&bytes[0..8], b"SEMCOD19");
+        assert_eq!(&bytes[0..8], b"SEMCOD22");
     }
 
     #[test]
@@ -14497,11 +14596,12 @@ mod opt_tests {
             .iter()
             .any(|instr| matches!(instr, IrInstr::AddF64 { .. })));
 
-        // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+        // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+        // SIG0 floor described here. #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
         // artifact (was SEMCOD10, closures' own promotion floor) - see the
         // comment in `text_literals_lower_to_load_text_and_semcod19` above.
         let bytes = compile_program_to_semcode(src).expect("closure semcode should emit");
-        assert_eq!(&bytes[0..8], b"SEMCOD19");
+        assert_eq!(&bytes[0..8], b"SEMCOD22");
     }
 
     // #1773 (FA-09-005) permanent regressions: callable-signature contract

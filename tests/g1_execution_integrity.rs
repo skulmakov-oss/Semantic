@@ -106,8 +106,10 @@ fn execution_summary(rel: &str) -> String {
 }
 
 fn first_function_code_offset(bytes: &[u8]) -> usize {
-    let name_len = u16::from_le_bytes([bytes[8], bytes[9]]) as usize;
-    8 + 2 + name_len + 4
+    // SSF-09 D2-2: the first function starts after the ADT0 section, at the
+    // offset the canonical decoder reports.
+    let (_, functions) = sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode");
+    functions[0].code_offset
 }
 
 #[test]
@@ -139,11 +141,15 @@ fn g1_execution_integrity_stage_summaries_match_current_baseline() {
     // no write-site-carrying event and stay at the SEMCOD19/rev20 SIG0
     // floor. Every other stage (sema, ir names, verify, disasm, run) is
     // unaffected - only the OWN0 grammar/header revision changed.
+    //
+    // SSF-09 D2-2: all five programs now use HEADER_V22 (SEMCOD22/rev23), the
+    // uniform floor that carries the mandatory ADT0 section; no other stage
+    // changed.
     let expected = "\
 program=cli_batch_core
 sema:warnings=0 laws=0
 ir:names=classify_exit,main
-semcode:magic=SEMCOD20 rev=21
+semcode:magic=SEMCOD22 rev=23
 verify:names=classify_exit,main
 disasm:names=classify_exit,main
 run=ok
@@ -151,7 +157,7 @@ run=ok
 program=rule_state_decision
 sema:warnings=0 laws=0
 ir:names=decide,main
-semcode:magic=SEMCOD19 rev=20
+semcode:magic=SEMCOD22 rev=23
 verify:names=decide,main
 disasm:names=decide,main
 run=ok
@@ -159,7 +165,7 @@ run=ok
 program=data_audit_record_iterable
 sema:warnings=0 laws=0
 ir:names=__impl::Iterable::Samples::next,main,summarize
-semcode:magic=SEMCOD20 rev=21
+semcode:magic=SEMCOD22 rev=23
 verify:names=__impl::Iterable::Samples::next,main,summarize
 disasm:names=__impl::Iterable::Samples::next,main,summarize
 run=ok
@@ -167,7 +173,7 @@ run=ok
 program=wave2_local_helper_import
 sema:warnings=0 laws=0
 ir:names=main,score
-semcode:magic=SEMCOD19 rev=20
+semcode:magic=SEMCOD22 rev=23
 verify:names=main,score
 disasm:names=main,score
 run=ok
@@ -175,7 +181,7 @@ run=ok
 program=positive_selected_import
 sema:warnings=0 laws=0
 ir:names=execsel_<stable>_scale,execsel_<stable>_score,main,score
-semcode:magic=SEMCOD19 rev=20
+semcode:magic=SEMCOD22 rev=23
 verify:names=execsel_<stable>_scale,execsel_<stable>_score,main,score
 disasm:names=execsel_<stable>_scale,execsel_<stable>_score,main,score
 run=ok

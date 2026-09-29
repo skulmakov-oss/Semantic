@@ -2,11 +2,12 @@
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
     header_spec_from_magic, read_u16_le, read_u32_le, read_u8, read_utf8,
-    ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE, MAGIC20, MAGIC21,
+    ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE, HEADER_V21, MAGIC21, MAGIC22,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
-    SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, WRITE_EXECUTION_MODE_STORE_VAR_SITE,
+    SEMCODE_ADT_DESCRIPTOR_MIN_REVISION, SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION,
+    WRITE_EXECUTION_MODE_STORE_VAR_SITE,
 };
 
 // #1726 Checkpoint D2a: a Tuple/Record Borrow event now always carries a
@@ -23,6 +24,17 @@ fn header_rev_of(bytes: &[u8]) -> u16 {
     header_spec_from_magic(&magic)
         .expect("known header magic")
         .rev
+}
+
+/// SSF-09 D2-2: offset of the first function envelope, as the canonical
+/// decoder reports it (past the ADT0 section of a V22 artifact).
+fn first_function_offset(bytes: &[u8]) -> usize {
+    sm_ir::semcode_decode::decode_semcode_envelope(bytes)
+        .expect("decode")
+        .1
+        .first()
+        .expect("at least one function")
+        .name_offset
 }
 
 /// Reads a Borrow event's activation-mode prefix or a Write event's
@@ -88,7 +100,7 @@ fn runtime_ownership_sibling_write_passes_on_verified_path() {
     // events now always carry a resolved WriteSiteId (Checkpoint W2C),
     // promoting this artifact to SEMCOD20/rev21 - was SEMCOD19/rev20 before
     // this checkpoint.
-    assert_eq!(&bytes[..8], &MAGIC20);
+    assert_eq!(&bytes[..8], &MAGIC22);
 
     let rewritten = rewrite_function_ownership_events(
         &bytes,
@@ -366,7 +378,7 @@ fn runtime_ownership_sequence_parent_borrow_conflicts_with_dynamic_write() {
 #[test]
 fn runtime_ownership_inner_frame_borrow_does_not_leak_after_exit() {
     let bytes = compile_program_to_semcode(multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC20);
+    assert_eq!(&bytes[..8], &MAGIC22);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -386,7 +398,7 @@ fn runtime_ownership_inner_frame_borrow_does_not_leak_after_exit() {
 #[test]
 fn runtime_ownership_record_sibling_field_write_passes_on_verified_path() {
     let bytes = compile_program_to_semcode(record_assignment_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC20);
+    assert_eq!(&bytes[..8], &MAGIC22);
     assert!(function_has_ownership_section(&bytes, "main"));
     let (camera_field, quality_field) = record_field_component_ids(&bytes, "main");
 
@@ -602,7 +614,7 @@ fn runtime_ownership_conflict_surface_is_stable_across_tuple_and_record_cases() 
 #[test]
 fn runtime_ownership_record_inner_frame_borrow_does_not_leak_after_exit() {
     let bytes = compile_program_to_semcode(record_multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC20);
+    assert_eq!(&bytes[..8], &MAGIC22);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -735,7 +747,7 @@ fn runtime_ownership_multi_frame_cleanup_is_stable_across_runs() {
 #[test]
 fn runtime_ownership_record_sibling_write_is_stable_across_runs() {
     let bytes = compile_program_to_semcode(record_assignment_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC20);
+    assert_eq!(&bytes[..8], &MAGIC22);
     let (camera_field, quality_field) = record_field_component_ids(&bytes, "main");
     let rewritten = rewrite_function_ownership_events(
         &bytes,
@@ -832,7 +844,7 @@ fn runtime_ownership_record_child_parent_rejects_identically_across_runs() {
 #[test]
 fn runtime_ownership_record_multi_frame_cleanup_is_stable_across_runs() {
     let bytes = compile_program_to_semcode(record_multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC20);
+    assert_eq!(&bytes[..8], &MAGIC22);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -1008,7 +1020,7 @@ fn assert_repeated_write_overlap_rejects(bytes: &[u8], _symbol_name: &str, runs:
 // borrow/write events, or is it structurally empty.
 fn any_function_has_nonempty_ownership_section(bytes: &[u8]) -> bool {
     let header_rev = header_rev_of(bytes);
-    let mut cursor = 8usize;
+    let mut cursor = first_function_offset(bytes);
     while cursor < bytes.len() {
         let (name, code, next) = next_function(bytes, cursor);
         let _ = name;
@@ -1058,7 +1070,7 @@ fn required_header_magic(original_bytes: &[u8], events: &[OwnershipEventSpec<'_>
                 && matches!(component, OwnershipPathComponentSpec::AdtPayload(_, _)))
         })
     });
-    if needs_v21 {
+    if needs_v21 && header_rev_of(original_bytes) < HEADER_V21.rev {
         MAGIC21
     } else {
         let mut magic = [0u8; 8];
@@ -1098,8 +1110,11 @@ fn rewrite_function_ownership_events(
     };
     let mut out = Vec::with_capacity(bytes.len());
     out.extend_from_slice(&final_magic);
+    // SSF-09 D2-2: carry the artifact's ADT0 section through unchanged.
+    assert!(encode_rev >= SEMCODE_ADT_DESCRIPTOR_MIN_REVISION);
+    out.extend_from_slice(&bytes[8..first_function_offset(bytes)]);
 
-    let mut cursor = 8usize;
+    let mut cursor = first_function_offset(bytes);
     let mut rewrote = false;
     while cursor < bytes.len() {
         let (name, code, next) = next_function(bytes, cursor);
@@ -1489,7 +1504,7 @@ fn parse_function_layout(code: &[u8], header_rev: u16) -> FunctionLayout {
 }
 
 fn find_function<'a>(bytes: &'a [u8], target: &str) -> (String, &'a [u8], usize) {
-    let mut cursor = 8usize;
+    let mut cursor = first_function_offset(bytes);
     while cursor < bytes.len() {
         let (name, code, next) = next_function(bytes, cursor);
         if name == target {

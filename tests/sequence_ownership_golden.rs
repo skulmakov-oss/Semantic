@@ -1,6 +1,6 @@
 use sm_emit::compile_program_to_semcode;
 use sm_format::semcode_decode::{decode_semcode_envelope, DecodedAccessPathComponent};
-use sm_format::semcode_format::{MAGIC20, MAGIC21};
+use sm_format::semcode_format::{MAGIC20, MAGIC21, MAGIC22};
 use sm_verify::verify_semcode_token;
 use sm_vm::run_verified_entry_semcode;
 
@@ -78,13 +78,17 @@ fn positive_sequence_ownership_e2e_golden() {
 fn v21_sequence_artifact_cannot_be_relabeled_to_v20_and_still_verify() {
     let src = include_str!("fixtures/pcc_sequence_ownership/positive_sequence_ownership.sm");
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_eq!(
-        &bytes[..8],
-        &MAGIC21,
-        "this fixture must genuinely require HEADER_V21 for this audit to be meaningful"
-    );
+    // SSF-09 D2-2: the compiler now emits HEADER_V22. The audit runs on the
+    // same artifact's legacy HEADER_V21 wire form (its functions without the
+    // ADT0 section), which must itself be admitted - proving the content
+    // genuinely requires V21 - before the relabel below is meaningful.
+    assert_eq!(&bytes[..8], &MAGIC22);
+    let (_, functions) = decode_semcode_envelope(&bytes).expect("decode");
+    let v21 = [&MAGIC21[..], &bytes[functions[0].name_offset..]].concat();
+    verify_semcode_token(&v21)
+        .expect("this fixture's HEADER_V21 form must be admitted for this audit to be meaningful");
 
-    let mut downgraded = bytes.clone();
+    let mut downgraded = v21.clone();
     downgraded[..8].copy_from_slice(&MAGIC20);
 
     let err = verify_semcode_token(&downgraded)

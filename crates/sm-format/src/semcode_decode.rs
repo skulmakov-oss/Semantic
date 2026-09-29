@@ -9,14 +9,44 @@ pub const MAX_SIGNATURE_PARAMETERS_PER_FUNCTION: usize = 4096;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
     BadHeader,
-    UnsupportedVersion { found: String, supported: String },
-    TruncatedFunction { offset: usize, msg: &'static str },
-    InvalidFunctionName { offset: usize, msg: &'static str },
-    InvalidStringTable { offset: usize, msg: &'static str },
-    InvalidDebugSection { offset: usize, msg: &'static str },
-    InvalidOwnershipSection { offset: usize, msg: &'static str },
-    InvalidSignatureSection { offset: usize, msg: &'static str },
-    ResourceLimit { offset: usize, msg: String },
+    UnsupportedVersion {
+        found: String,
+        supported: String,
+    },
+    TruncatedFunction {
+        offset: usize,
+        msg: &'static str,
+    },
+    InvalidFunctionName {
+        offset: usize,
+        msg: &'static str,
+    },
+    InvalidStringTable {
+        offset: usize,
+        msg: &'static str,
+    },
+    InvalidDebugSection {
+        offset: usize,
+        msg: &'static str,
+    },
+    InvalidOwnershipSection {
+        offset: usize,
+        msg: &'static str,
+    },
+    InvalidSignatureSection {
+        offset: usize,
+        msg: &'static str,
+    },
+    /// SSF-09 D2-2: the mandatory `ADT0` section of a revision-23+ artifact is
+    /// missing, malformed, or not a strictly valid canonical descriptor table.
+    InvalidAdtDescriptorSection {
+        offset: usize,
+        msg: &'static str,
+    },
+    ResourceLimit {
+        offset: usize,
+        msg: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,9 +164,32 @@ struct StringTableDebugOwnershipParse {
     instr_start_offset: usize,
 }
 
+/// SSF-09 D2-2: a decoded SemCode artifact, the one canonical decode result.
+///
+/// `adt_descriptors` is `Some` exactly when the header revision is at least
+/// `SEMCODE_ADT_DESCRIPTOR_MIN_REVISION`: it is then the artifact's own
+/// strictly validated `ADT0` table, the unique ADT authority for this
+/// artifact. Legacy revisions cannot carry a descriptor table and decode to
+/// `None`; no table is ever synthesized for them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedSemCode<'a> {
+    pub header: SemcodeHeaderSpec,
+    pub adt_descriptors: Option<AdtDescriptorTable>,
+    pub functions: Vec<DecodedFunctionEnvelope<'a>>,
+}
+
+/// Compatibility projection of [`decode_semcode`]: header and function
+/// envelopes only. It does not parse anything itself.
 pub fn decode_semcode_envelope<'a>(
     bytes: &'a [u8],
 ) -> Result<(SemcodeHeaderSpec, Vec<DecodedFunctionEnvelope<'a>>), DecodeError> {
+    let decoded = decode_semcode(bytes)?;
+    Ok((decoded.header, decoded.functions))
+}
+
+/// The canonical SemCode decoder: every other decode entry point delegates
+/// here.
+pub fn decode_semcode(bytes: &[u8]) -> Result<DecodedSemCode<'_>, DecodeError> {
     if bytes.len() < 8 {
         return Err(DecodeError::BadHeader);
     }
@@ -153,6 +206,13 @@ pub fn decode_semcode_envelope<'a>(
     };
 
     let mut cursor = 8usize;
+    // Revision-derived, never sniffed: legacy bytes at this position are the
+    // first function envelope, exactly as before.
+    let adt_descriptors = if header.rev >= SEMCODE_ADT_DESCRIPTOR_MIN_REVISION {
+        Some(decode_adt_descriptor_section(bytes, &mut cursor)?)
+    } else {
+        None
+    };
     let mut functions = Vec::new();
 
     while cursor < bytes.len() {
@@ -227,7 +287,93 @@ pub fn decode_semcode_envelope<'a>(
         });
     }
 
-    Ok((header, functions))
+    Ok(DecodedSemCode {
+        header,
+        adt_descriptors,
+        functions,
+    })
+}
+
+/// SSF-09 D2-2: strict `ADT0` decoding. Reads the descriptors exactly as
+/// encoded (no sorting, no built-in injection) and hands them to
+/// `AdtDescriptorTable::from_encoded_strict`, which only validates.
+fn decode_adt_descriptor_section(
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> Result<AdtDescriptorTable, DecodeError> {
+    let section_offset = *cursor;
+    let invalid =
+        |offset: usize, msg: &'static str| DecodeError::InvalidAdtDescriptorSection { offset, msg };
+    let tag_end = checked_end(*cursor, ADT_DESCRIPTOR_SECTION_TAG.len(), bytes.len())
+        .ok_or_else(|| invalid(section_offset, "missing ADT0 descriptor section"))?;
+    if bytes[*cursor..tag_end] != ADT_DESCRIPTOR_SECTION_TAG {
+        return Err(invalid(section_offset, "missing ADT0 descriptor section"));
+    }
+    *cursor = tag_end;
+
+    let read_u16 = |cursor: &mut usize, msg: &'static str| {
+        let at = *cursor;
+        read_u16_le(bytes, cursor).map_err(|_| invalid(at, msg))
+    };
+    let read_name = |cursor: &mut usize, len_msg: &'static str, utf8_msg: &'static str| {
+        let len = read_u16(cursor, len_msg)? as usize;
+        let at = *cursor;
+        read_utf8(bytes, cursor, len).map_err(|err| match err {
+            SemcodeFormatError::InvalidUtf8 => invalid(at, utf8_msg),
+            _ => invalid(at, "truncated ADT0 name"),
+        })
+    };
+
+    let count = read_u16(cursor, "truncated ADT0 descriptor count")?;
+    let mut descriptors = Vec::with_capacity(usize::from(count));
+    for _ in 0..count {
+        let descriptor_offset = *cursor;
+        let name = read_name(
+            cursor,
+            "truncated ADT0 descriptor name length",
+            "invalid utf8 in ADT0 descriptor name",
+        )?;
+        let variant_count = read_u16(cursor, "truncated ADT0 variant count")?;
+        let mut variants = Vec::with_capacity(usize::from(variant_count));
+        for _ in 0..variant_count {
+            let variant_offset = *cursor;
+            let variant_name = read_name(
+                cursor,
+                "truncated ADT0 variant name length",
+                "invalid utf8 in ADT0 variant name",
+            )?;
+            let arity = read_u16(cursor, "truncated ADT0 variant payload arity")?;
+            variants.push(
+                AdtVariantDescriptor::new(&variant_name, arity)
+                    .map_err(|_| invalid(variant_offset, "empty ADT0 variant name"))?,
+            );
+        }
+        descriptors.push(AdtDescriptor::new(&name, variants).map_err(|err| {
+            invalid(
+                descriptor_offset,
+                match err {
+                    AdtDescriptorError::DuplicateVariant { .. } => {
+                        "ADT0 descriptor repeats a variant name"
+                    }
+                    _ => "empty ADT0 descriptor name",
+                },
+            )
+        })?);
+    }
+    let table = AdtDescriptorTable::from_encoded_strict(descriptors)
+        .map_err(|msg| invalid(section_offset, msg))?;
+
+    // Structural law: an artifact has exactly one ADT0 section, and it is
+    // never followed by another. This explicit check owns that rejection; it
+    // does not depend on `MAX_STRING_LEN` (which today would also reject the
+    // bytes, as a 0x4441-byte function name, but only incidentally).
+    if bytes
+        .get(*cursor..)
+        .is_some_and(|rest| rest.starts_with(&ADT_DESCRIPTOR_SECTION_TAG))
+    {
+        return Err(invalid(*cursor, "duplicate ADT0 descriptor section"));
+    }
+    Ok(table)
 }
 
 /// #1736 (FA-05-006): `diag_offset(base_offset, cursor)` for a diagnostic error-offset

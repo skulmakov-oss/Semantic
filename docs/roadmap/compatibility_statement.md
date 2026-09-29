@@ -63,6 +63,26 @@ Those surfaces must be read as:
 They are not erased, but they also do not inherit compatibility promises
 automatically.
 
+### SemCode `SEMCOD22` ADT descriptor migration (SSF-09 D2-2)
+
+Recorded under `docs/spec/semcode.md` `## Backward Compatibility Rule`:
+
+- SemCode `SEMCOD22` (revision `23`) introduces the mandatory, canonical
+  `ADT0` descriptor section; the current compiler emits `SEMCOD22` for every
+  artifact.
+- This is an intentional verifier interpretation change: a `SEMCODE0` to
+  `SEMCOD21` artifact that contains `MAKE_ADT`, `ADT_TAG`, or `ADT_GET` is no
+  longer verifier-admissible (`AdtRequiresDescriptorHeader`), although it was
+  admitted before.
+- No descriptor authority is inferred, reconstructed, or synthesized for such
+  an artifact. The supported migration is recompilation with the current
+  toolchain.
+- `SEMCODE0` to `SEMCOD21` artifacts remain structurally decodable, and those
+  without these ADT opcodes keep their existing compatibility.
+
+This statement does not claim that every `SEMCODE0` to `SEMCOD21` binary keeps
+its previous verifier outcome.
+
 ## Explicit Non-Commitments
 
 The repository does not currently claim final compatibility guarantees for:

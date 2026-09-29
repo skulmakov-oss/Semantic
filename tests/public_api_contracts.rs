@@ -4351,6 +4351,13 @@ fn verification_code_contract_name(code: sm_verify::VerificationCode) -> &'stati
         VerificationCode::AnalysisStateLimitExceeded => "AnalysisStateLimitExceeded",
         VerificationCode::AnalysisWorkLimitExceeded => "AnalysisWorkLimitExceeded",
         VerificationCode::InvalidOwnershipAnchor => "InvalidOwnershipAnchor",
+        VerificationCode::InvalidAdtDescriptorSection => "InvalidAdtDescriptorSection",
+        VerificationCode::AdtRequiresDescriptorHeader => "AdtRequiresDescriptorHeader",
+        VerificationCode::UnknownAdtType => "UnknownAdtType",
+        VerificationCode::InvalidAdtDiscriminant => "InvalidAdtDiscriminant",
+        VerificationCode::AdtVariantNameMismatch => "AdtVariantNameMismatch",
+        VerificationCode::AdtPayloadArityMismatch => "AdtPayloadArityMismatch",
+        VerificationCode::AdtPayloadIndexOutOfRange => "AdtPayloadIndexOutOfRange",
     }
 }
 
@@ -4384,6 +4391,13 @@ fn verification_code_variants_match_public_contract() {
         VerificationCode::AnalysisStateLimitExceeded,
         VerificationCode::AnalysisWorkLimitExceeded,
         VerificationCode::InvalidOwnershipAnchor,
+        VerificationCode::InvalidAdtDescriptorSection,
+        VerificationCode::AdtRequiresDescriptorHeader,
+        VerificationCode::UnknownAdtType,
+        VerificationCode::InvalidAdtDiscriminant,
+        VerificationCode::AdtVariantNameMismatch,
+        VerificationCode::AdtPayloadArityMismatch,
+        VerificationCode::AdtPayloadIndexOutOfRange,
     ];
 
     for variant in variants {
@@ -5735,6 +5749,7 @@ fn supported_headers_match_canonical_contract() {
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
         HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20, HEADER_V21,
+        HEADER_V22,
     ];
 
     let actual = supported_headers();

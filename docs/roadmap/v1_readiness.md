@@ -116,6 +116,16 @@ High-signal landed families include:
 These surfaces must stay explicitly unpromoted until a later scope decision and
 qualification or release decision promotes them.
 
+SemCode compatibility migration (SSF-09 D2-2, PR #1963): `SEMCOD22`
+(revision `23`) activates the mandatory `ADT0` descriptor section, and the
+compiler emits it for every artifact. Legacy (`SEMCODE0` to `SEMCOD21`)
+artifacts that use descriptor-dependent ADT opcodes are no longer
+verifier-admissible; recompilation is the migration, and non-ADT legacy
+artifacts are unaffected (`docs/roadmap/compatibility_statement.md`). Evidence:
+verifier/VM/decoder admission and rejection tests, re-blessed golden
+fixtures, mutations M1-M17 killed, and two adversarial reviews. This does not
+promote any surface to the stable line.
+
 ## Current Known Limits
 
 The following release-facing limits remain explicit:

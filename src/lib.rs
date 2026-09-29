@@ -23,6 +23,7 @@ pub mod semcode_format {
     pub use sm_emit::{
         header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8,
         read_utf8, supported_headers, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
+        AdtDescriptor, AdtDescriptorError, AdtDescriptorTable, AdtVariantDescriptor,
         CallableSignature, CallableValueFamily, Opcode, SemcodeFormatError, SemcodeHeaderSpec,
         CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS, CAP_EVENT_POST, CAP_F64_MATH,
         CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY,
@@ -132,8 +133,8 @@ pub mod semantics {
 pub mod frontend {
     pub use sm_emit::{
         compile_program_to_semcode, compile_program_to_semcode_with_options,
-        compile_program_to_semcode_with_options_debug, emit_ir_to_semcode, CompilePipelineError,
-        ConfigurationError, IrError,
+        compile_program_to_semcode_with_options_debug, emit_ir_to_semcode,
+        emit_ir_to_semcode_with_adt_descriptors, CompilePipelineError, ConfigurationError, IrError,
     };
     pub use sm_front::{
         build_fn_table, builtin_sig, derive_validation_plan_table, lex, parse_logos_program,
@@ -207,7 +208,8 @@ pub mod frontend {
         pub use super::{
             compile_program_to_semcode, compile_program_to_semcode_with_options,
             compile_program_to_semcode_with_options_debug, emit_ir_to_semcode,
-            CompilePipelineError, ConfigurationError, IrError,
+            emit_ir_to_semcode_with_adt_descriptors, CompilePipelineError, ConfigurationError,
+            IrError,
         };
     }
 

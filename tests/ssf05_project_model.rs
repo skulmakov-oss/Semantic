@@ -53,9 +53,10 @@ fn project_verify_and_tests_use_the_canonical_root() {
         "verify failed: {}",
         String::from_utf8_lossy(&verify.stderr)
     );
-    // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+    // SSF-09 D2-2: HEADER_V22 (SEMCOD22/rev23, carrying ADT0) now replaces the
+    // SIG0 floor described here. #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
     // artifact regardless of which opcodes it uses (was SEMCODE0).
-    assert!(String::from_utf8_lossy(&verify.stdout).contains("header=SEMCOD19"));
+    assert!(String::from_utf8_lossy(&verify.stdout).contains("header=SEMCOD22"));
 
     let first = smc(&["test", &root_arg]);
     let second = smc(&["test", &root_arg]);
