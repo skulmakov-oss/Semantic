@@ -301,6 +301,7 @@ fn ton618_content_inventory_is_explicit() {
 
     let expected: BTreeSet<String> = [
         "./.harness/reports/CORE-QUAD-LOGIC-FRAME-V1-SPEC.md",
+        "./Cargo.lock",
         "./Cargo.toml",
         "./README.md",
         "./crates/sm-front/Cargo.toml",
