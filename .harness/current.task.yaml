@@ -71,6 +71,10 @@ task:
     comment ("Cargo.lock intentionally tracked for reproducible workspace
     builds") matches reality and local builds leave a clean working tree.
     No dependency version, manifest, or `.gitignore` change is authorized.
+    Repository owner explicit governance authorization (2026-09-29) to also
+    allow exactly `tests/legacy_guards.rs`, solely to add `./Cargo.lock` to the
+    `ton618_content_inventory_is_explicit` expected inventory, because the
+    tracked lockfile names the `ton618-core` package.
 
 intent:
   summary: >-
@@ -103,6 +107,7 @@ scope:
     - .gitattributes
     - Cargo.toml
     - Cargo.lock
+    - tests/legacy_guards.rs
     - crates/sm-diagnostic/**
     - crates/ton618-core/src/diagnostics.rs
     - docs/ERROR_CODES.md
