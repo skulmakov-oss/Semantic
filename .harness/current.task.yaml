@@ -108,6 +108,21 @@ task:
     REM-018, REM-019, REM-020, REM-021, REM-024, and REM-026. It does not
     authorize UI remediation packages, workflow changes, stable-promotion claims,
     or historical audit evidence rewrites.
+    Repository owner explicit governance authorization (2026-09-30, Issue #1969,
+    "OWNER AUTHORIZATION — Issue #1969 Harness Envelope Update") to widen the
+    task envelope only by the exact paths the #1969 diff requires and that the
+    prior envelope did not cover: the REM-022 script files listed under
+    `allowed_paths`, `ARCHITECTURE.md`, `CONTRIBUTING.md`,
+    `docs/wiki/current_status.md`, the `docs/workbench/*.md` retirement banners,
+    `docs/architecture/ui_boundary_index.md`, and the machine-local path
+    redaction in `reports/cold_start_rehearsal_2026-04-24.md`. #1969 is
+    unblocked by the owner's retirement of native Semantic UI, Workbench, and
+    Semantic Studio (#1968 and #1862 closed not planned), not by #1968
+    implementation. Native UI implementation paths are added to
+    `forbidden_paths` and remain forbidden. This does not authorize disabling or
+    weakening Harness enforcement, Workbench repair or CI reinstatement,
+    self-hosting (#1910) implementation, workflow changes, stable-promotion
+    claims, or rewrites of the immutable historical audit CSV/JSON.
 
 intent:
   summary: >-
@@ -193,10 +208,28 @@ scope:
     - reports/security/**
     - tools/generate_health_dashboard.py
     - tools/generate_macro_issues.py
+    - scripts/admission_guard.ps1
+    - scripts/admission_guard_lib.ps1
+    - scripts/release_asset_output.ps1
+    - scripts/verify_release_assets.ps1
+    - scripts/check_repository_hygiene.py
+    - scripts/workbench_native_launch_smoke.ps1
+    - ARCHITECTURE.md
+    - CONTRIBUTING.md
+    - docs/wiki/current_status.md
+    - docs/workbench/*.md
+    - docs/architecture/ui_boundary_index.md
+    - reports/cold_start_rehearsal_2026-04-24.md
 
   forbidden_paths:
     - .github/**
     - apps/**
+    - crates/prom-ui/**
+    - crates/prom-ui-runtime/**
+    - crates/prom-ui-backend-native/**
+    - crates/prom-ui-iced-adapter/**
+    - crates/prom-ui-demo/**
+    - examples/workbench_semantic/**
     - experiments/**
     - src/bin/svm.rs
     - src/bin/ton618_core.rs
@@ -220,7 +253,12 @@ constraints:
   one_active_ssf_phase: true
   active_phase: SSF-09
   issue: 1580
-  ledger_macro_issue: 1967
+  ledger_macro_issue: 1969
+  owner_authorized: true
+  reason: >
+    Final CI/governance/repository-state closure requires REM-022 script
+    changes, REM-027 current-facing governance reconciliation, and explicit
+    retirement documentation for Native UI / Workbench / Semantic Studio.
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
