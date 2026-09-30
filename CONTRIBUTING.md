@@ -50,7 +50,7 @@ Changes must remain within the repository's ownership boundaries:
 - `sm-vm` — deterministic VM execution.
 - `smc-cli` — public CLI and authorized host I/O; it must not redefine language or verifier semantics.
 - `prom-*` — PROMETHEUS host ABI, capabilities, gates, runtime sessions, rules, and audit boundaries.
-- `prom-ui*` — UI orchestration and presentation boundaries.
+- `prom-ui*` — UI orchestration and presentation boundaries (retired contour: preserved, not remediated or extended; see `docs/roadmap/ui_workbench_studio_retirement.md`).
 
 Do not duplicate authority across layers. For example, the CLI must not become a second parser or verifier, and the VM must not silently reinterpret a verifier contract.
 

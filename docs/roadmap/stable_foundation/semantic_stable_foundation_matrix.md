@@ -174,7 +174,7 @@ that wording drift; it does not delete or rewrite historical evidence.
 | Canonical examples pack | F/I/V/R/C/D | **Landed and qualified on `main`** | Twelve executable positives, one rejection boundary, one honest Logos example. | Rebuild against final contour in SSF-11. |
 | External clean-clone onboarding | C/D | **Landed but unqualified** | README/cold-start evidence exists, but final Foundation procedure and artifacts do not. | SSF-11/12. |
 | Benchmark-class application logic | F/I/V/R/C | **Landed and qualified on `main`** | Snake core and learning benchmark verdict. | Canonical proof in SSF-11. |
-| Native Workbench/UI | R/C/D | **Landed but unqualified** | Separate beta/current-main evidence; DNA says UI is projection, never language authority. | Evidence-only path in SSF-11; not Foundation authority. |
+| Native Workbench/UI | R/C/D | **Landed but unqualified** | Separate beta/current-main evidence; DNA says UI is projection, never language authority. Updated 2026-09-30 (#1969): the native UI / Workbench / Semantic Studio contour is **retired** (#1968 and #1862 closed as not planned; `docs/roadmap/ui_workbench_studio_retirement.md`). Code is preserved; known historical defects are not fixed. | Retired: no SSF phase, gate, or evidence path; not Foundation authority. |
 
 ## Explicitly out of scope
 
@@ -190,7 +190,7 @@ that wording drift; it does not delete or rewrite historical evidence.
 | public registry/remote solver/build scripts/install hooks | C/D | **Out of scope** | Explicit package-baseline non-goals. | Separate ecosystem track. |
 | plugin marketplace | C/D | **Out of scope** | Explicit #1569 non-goal. | Separate ecosystem track. |
 | ALM/autonomous source mutation | C/D | **Out of scope** | Explicit #1569 non-goal. | Separate governed track. |
-| Semantic Studio completion | C/D | **Out of scope** | Explicit #1569 non-goal. | Separate product track. |
+| Semantic Studio completion | C/D | **Out of scope** | Explicit #1569 non-goal; retired from the roadmap 2026-09-30 (`docs/roadmap/ui_workbench_studio_retirement.md`). | Retired; no product track. |
 | Andromeda implementation | R/C/D | **Out of scope** | Explicit #1569 non-goal. | Separate roadmap. |
 | broad permanent ABI/ISA guarantee | I/V/R/D | **Out of scope** | Only the explicitly selected compatibility window may be promised. | SSF-10 defines the bounded window. |
 

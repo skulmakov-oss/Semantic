@@ -170,6 +170,23 @@ If behavior is not supported anywhere, mark it `out of scope`.
 If behavior is landed on `main` but unpromoted, do not erase it by calling it
 `out of scope`.
 
+### Rule E — Retired Contours Stay Honest
+
+A contour can be retired from the active roadmap by an explicit repository-owner
+decision. Retirement is a routing decision, not a fifth status family:
+
+- landed code of a retired contour keeps its factual reading
+  (`landed on main, not yet promised`) and is additionally marked `retired`;
+- a retired contour is `out of scope` for every current release contour and
+  readiness-critical track, and no gate may depend on it;
+- retirement is never a promotion: retired work must not be described as
+  fixed, completed, qualified, or stable;
+- historical documents about a retired contour remain historical evidence and
+  are marked, not rewritten.
+
+Current retired contours: native Semantic UI, Workbench, and Semantic Studio
+(`docs/roadmap/ui_workbench_studio_retirement.md`).
+
 ## Placement Rules
 
 ### `README.md`

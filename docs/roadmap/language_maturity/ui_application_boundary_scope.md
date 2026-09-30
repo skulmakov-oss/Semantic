@@ -1,6 +1,13 @@
 # UI Application Boundary Scope
 
-Status: completed M7 first-wave post-stable track
+Status: completed M7 first-wave post-stable track — **retired** (historical record)
+
+> Retired contour. This track's native UI line was retired from the active
+> roadmap together with Workbench and Semantic Studio
+> (`docs/roadmap/ui_workbench_studio_retirement.md`; #1968 and #1862 closed as
+> not planned). The text below is preserved as written for its era; it is not
+> an active roadmap commitment, and "completed" here never meant qualified or
+> stable.
 Related backlog item: `UI application boundary for Semantic desktop applications`
 
 ## Goal

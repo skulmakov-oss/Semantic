@@ -30,11 +30,18 @@ Current repository limits that remain within the published stable `v1` line:
 
 Current release-line state:
 
-- `main` carries the active narrow `v1` stable line
+- `main` carries the qualified limited-release contour plus wider landed work;
+  no line is currently evidenced as published stable (`docs/roadmap/v1_readiness.md`)
 - release validation runs through boundary guards, public API inventory, runtime matrix/goldens, and the release-bundle verifier
 - published stable releases are expected to ship `smc.exe`, `svm.exe`, and a bundled Windows archive
 
-Planned post-stable UI application boundary:
+Retired post-stable UI application boundary (historical):
+
+> Retired. Native Semantic UI, Workbench, and Semantic Studio are no longer on
+> the active roadmap (`docs/roadmap/ui_workbench_studio_retirement.md`). The
+> plan below is kept as the historical design record for the landed `prom-ui*`
+> crates; it is not an active commitment.
+
 
 - UI is treated as a host/runtime boundary product, not as an extension of the
   compiler core
@@ -69,8 +76,9 @@ Non-negotiable architecture rules:
 - determinism is mandatory across all stages;
 - VM mechanics and semantic state/rule logic must stay separate;
 - all host effects must cross a formal ABI boundary;
-- desktop UI, if admitted, must stay behind an explicit host/runtime boundary
-  and must not leak backend ownership into compiler or VM crates.
+- UI code that remains in the repository (retired contour) must stay behind an
+  explicit host/runtime boundary and must not leak backend ownership into
+  compiler or VM crates.
 
 ## Runtime Ownership (Execution Contract)
 

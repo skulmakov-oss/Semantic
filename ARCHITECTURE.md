@@ -70,7 +70,9 @@ Public rule:
 - `prom-rules` - rule and agenda ownership
 - `prom-runtime` - orchestration over verified entrypoints
 - `prom-audit` - audit and replay metadata
-- `prom-ui`, `prom-ui-runtime`, `prom-ui-demo` - narrow UI boundary layer
+- `prom-ui`, `prom-ui-runtime`, `prom-ui-backend-native`, `prom-ui-iced-adapter`,
+  `prom-ui-demo` - narrow UI boundary layer (retired contour: code preserved,
+  not on the active roadmap; see `docs/roadmap/ui_workbench_studio_retirement.md`)
 
 ## Architecture Rules
 
