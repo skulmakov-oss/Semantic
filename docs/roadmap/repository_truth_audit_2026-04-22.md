@@ -1,6 +1,7 @@
 # Repository Truth Audit 2026-04-22
 
-Status: active cleanup baseline
+Status: historical cleanup baseline (2026-04-22); superseded by later
+repository-truth and Stable Foundation audits
 
 ## Goal
 
@@ -14,7 +15,11 @@ introducing new drift.
 ## Canonical Inputs
 
 - `origin/main` at `99b02833d791119c413ba1e28299ea2be6b2b6e8`
-- `C:\Users\said3\Desktop\Codex_Checkpoint\CHECKPOINT_2026-04-22.md`
+- a private operator checkpoint note, `CHECKPOINT_2026-04-22.md`, that was never
+  committed to the repository (its machine-local path is redacted by Issue
+  #1969, FND-060); it cannot be reproduced from repository state, so the
+  `origin/main` SHA above and the repository contents are the reproducible
+  inputs for this audit
 - current GitHub PR, issue, and milestone state
 - current repository code, tests, and `docs/spec/*` contract bundle
 

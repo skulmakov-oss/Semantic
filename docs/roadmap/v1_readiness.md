@@ -106,15 +106,21 @@ High-signal landed families include:
 - schema/boundary-core work
 - package baseline work
 - ordered sequence surface
-- iterable surface
+- iterable surface beyond the qualified built-in `Sequence(T)` iteration and
+  direct-record `Iterable` dispatch
 - first-wave closures
 - first-wave generics
 - runtime ownership for tuple + direct record-field paths
-- first-wave UI application boundary
-- selected-import executable module entry
+- module and import work beyond the qualified direct local-path bare/selected
+  helper-module slice (the selected-import slice itself is qualified above)
 
 These surfaces must stay explicitly unpromoted until a later scope decision and
 qualification or release decision promotes them.
+
+The first-wave UI application boundary is also landed on `main`, but it belongs
+to the retired native UI / Workbench / Semantic Studio contour
+(`docs/roadmap/ui_workbench_studio_retirement.md`): it is not awaiting
+promotion and is not on the active roadmap.
 
 SemCode compatibility migration (SSF-09 D2-2, PR #1963): `SEMCOD22`
 (revision `23`) activates the mandatory `ADT0` descriptor section, and the
@@ -134,7 +140,8 @@ The following release-facing limits remain explicit:
   is not currently qualified
 - full CLI application authoring with admitted argv/stdout/file IO is not
   currently qualified
-- UI remains outside the current qualified contour
+- native UI, Workbench, and Semantic Studio are retired and outside every
+  current contour (`docs/roadmap/ui_workbench_studio_retirement.md`)
 - broader generalized iterable dispatch remains outside the current qualified
   contour
 - landed-on-`main` widenings beyond the above admitted contour are not

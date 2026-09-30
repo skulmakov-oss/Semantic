@@ -45,8 +45,9 @@ Milestones can be completed in code while still remaining only:
   - source frontend
   - type completeness work
   - SemCode family growth
-  - current reading: mixed between published stable and landed-on-`main`
-    widenings
+  - current reading: mixed between qualified limited release and
+    landed-on-`main` widenings (no line is currently evidenced as published
+    stable; see `docs/roadmap/v1_readiness.md`)
 
 - `M3 Toolchain Formalization`
   - spec bundle
@@ -76,10 +77,13 @@ Milestones can be completed in code while still remaining only:
   - closures
   - generics
   - runtime ownership
-  - UI application boundary
+  - UI application boundary (retired with the native UI / Workbench /
+    Semantic Studio contour; see
+    `docs/roadmap/ui_workbench_studio_retirement.md`)
   - selected-import executable module entry
   - current reading: landed on `main`, not automatically published stable and
-    not automatically qualified
+    not automatically qualified; the retired UI family is not awaiting
+    promotion
 
 ## Operational Reading
 

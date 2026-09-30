@@ -7,12 +7,14 @@ Read this document using the canonical status vocabulary in:
 - `docs/roadmap/public_status_model.md`
 
 This backlog is not a promise to open a new language track by default.
-It exists to keep the published stable line, the qualified limited-release
+It exists to keep the stable-line reading, the qualified limited-release
 reading, and current-`main` reality aligned without silent scope widening.
 
 ## Current Release-Control Wave
 
-- keep the published stable line `v1.1.1` honest
+- keep the stable-line reading honest: there is no currently evidenced
+  published stable line, and the `v1.1.1` tag remains an unresolved
+  stable-tag checkpoint (`docs/roadmap/v1_readiness.md`)
 - keep the current practical-programming verdict honest:
   `qualified limited release`, not `public release`
 - keep current-`main` landed widenings described as landed, not silently
@@ -24,7 +26,7 @@ reading, and current-`main` reality aligned without silent scope widening.
   `compatibility_statement.md`, and `stable_release_policy.md` aligned with:
   - `docs/roadmap/public_status_model.md`
   - `reports/g1_release_scope_statement.md`
-  - the actual published stable line
+  - the actual stable-line evidence (tags, GitHub Releases, validated assets)
 - keep release bundle guidance and smoke validation aligned with the current
   stable asset story
 - keep qualification reports and release-facing docs in sync after each
@@ -50,12 +52,13 @@ Still explicitly outside the current qualified contour:
 
 - broader executable-module authoring beyond the admitted bare/selected slice
 - full CLI application authoring with admitted argv/stdout/file IO
-- UI
 - broader generalized iterable dispatch
+- native UI, Workbench, and Semantic Studio, which are retired
+  (`docs/roadmap/ui_workbench_studio_retirement.md`)
 
 ## Landed On `main`, Not Yet Promised
 
-Current `main` contains widened surfaces beyond the published stable line.
+Current `main` contains widened surfaces beyond the qualified contour.
 These remain landed and unpromoted unless a later explicit decision qualifies
 or publishes them.
 
@@ -64,12 +67,17 @@ High-signal landed post-stable families include:
 - schema/boundary-core work
 - package baseline work
 - ordered sequence surface
-- built-in iterable surface and direct-record iterable dispatch
+- iterable surface beyond the qualified built-in `Sequence(T)` iteration and
+  direct-record `Iterable` dispatch
 - first-wave closures
 - first-wave generics
 - runtime ownership for tuple + direct record-field paths
-- first-wave UI application boundary
-- selected-import executable module entry
+- module and import work beyond the qualified direct local-path bare/selected
+  helper-module slice
+
+The first-wave UI application boundary is landed on `main` but retired with
+the native UI / Workbench / Semantic Studio contour; it is not awaiting
+promotion.
 
 ## Default Rule For New Work
 
@@ -79,10 +87,12 @@ High-signal landed post-stable families include:
   - a new explicit scope decision
   - and a Gate amendment or new qualification cycle
 
-Current explicit next-track proposal, if the repository chooses to widen from
-the completed readiness cycle:
+The application-completeness benchmark track
+(`docs/roadmap/application_completeness_pr_ledger.md`) is closed by PR-F4.
 
-- `docs/roadmap/application_completeness_pr_ledger.md`
+The active strategic direction is Semantic self-hosting
+([#1910](https://github.com/skulmakov-oss/Semantic/issues/1910)); it is an
+architecture track, not a release promise, and it does not depend on any UI.
 
 ## Execution Rule
 

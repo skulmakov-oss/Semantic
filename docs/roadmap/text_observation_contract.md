@@ -1,9 +1,17 @@
 # Text Observation Contract
 
-Status: PR-E1 scope document
+Status: historical PR-E1 scope document; implementation landed in PR-E1a
 Program: Semantic application-completeness / observation boundary
-Implementation target: PR-E1
+Implementation target: PR-E1a (landed; see
+`docs/roadmap/application_completeness_pr_ledger.md`, where `PR-E1` is the
+docs-only scope step and `PR-E1a` the implementation)
 Scope type: docs-only contract
+
+Reconciliation note (Issue #1969, FND-077): the body below was written before
+the ledger split `PR-E1` (this docs-only contract) from `PR-E1a` (the
+implementation). Read "PR-E1" in the implementation requirements below as the
+implementation step, which landed as `PR-E1a`; statements such as "PR-E1
+remains not implemented" describe the state when this contract was frozen.
 
 ## Purpose
 

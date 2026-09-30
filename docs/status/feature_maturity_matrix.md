@@ -47,8 +47,13 @@ spelling.
 - Named `std.*` modules, the controlled application capability set, lock and
   provenance records, a canonical language server, and Foundation migration
   tooling remain roadmap work.
-- UI and Workbench evidence stays separate from language, verifier, VM, and
-  release authority.
+- Native UI, Workbench, and Semantic Studio are retired from the active
+  roadmap (`docs/roadmap/ui_workbench_studio_retirement.md`). Their code and
+  evidence are preserved but not remediated, qualified, or promoted, and they
+  stay separate from language, verifier, VM, and release authority.
+- The active strategic direction is Semantic self-hosting
+  ([#1910](https://github.com/skulmakov-oss/Semantic/issues/1910)); it is
+  architecture work, not a release status.
 
 ## Supporting authorities
 

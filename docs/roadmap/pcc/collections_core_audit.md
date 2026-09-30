@@ -24,9 +24,9 @@ contract is split across layers:
 
 Observed practical anchors:
 
-- [examples/canonical/cli_batch_core/](C:\Users\said3\Desktop\EXOcode\EXOcode\examples\canonical\cli_batch_core\README.md)
-- [examples/canonical/text_collections_toolbox/](C:\Users\said3\Desktop\EXOcode\EXOcode\examples\canonical\text_collections_toolbox\README.md)
-- [examples/canonical/collections_core/](C:\Users\said3\Desktop\EXOcode\EXOcode\examples\canonical\collections_core\README.md)
+- [examples/canonical/cli_batch_core/](../../../examples/canonical/cli_batch_core/README.md)
+- [examples/canonical/text_collections_toolbox/](../../../examples/canonical/text_collections_toolbox/README.md)
+- [examples/canonical/collections_core/](../../../examples/canonical/collections_core/README.md)
 - `tests/fixtures/snake_benchmark/README.md`
 - `tests/fixtures/snake_benchmark/positive_sequence_len.sm`
 - `tests/fixtures/snake_benchmark/positive_sequence_indexing.sm`
