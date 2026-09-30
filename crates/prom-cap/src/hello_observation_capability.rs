@@ -117,6 +117,7 @@ pub fn require_hello_observation_sink_capability<C: CapabilityChecker>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CapabilityManifest;
 
     #[test]
     fn unknown_host_channel_is_denied() {
@@ -128,6 +129,15 @@ mod tests {
 
         assert_eq!(
             evaluate_hello_observation_capability(&context),
+            HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::GenericIoNotAllowed
+            )
+        );
+
+        let mut manifest = CapabilityManifest::new();
+        manifest.allow(CapabilityKind::ControlledObservationSink);
+        assert_eq!(
+            require_hello_observation_sink_capability(&manifest, &context),
             HelloObservationCapabilityDecision::Deny(
                 HelloObservationCapabilityDenial::GenericIoNotAllowed
             )

@@ -353,6 +353,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "compile"
             | "check"
             | "lint"
+            | "watch"
             | "dump-ast"
             | "dump-ir"
             | "dump-bytecode"

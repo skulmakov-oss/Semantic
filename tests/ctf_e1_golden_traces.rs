@@ -7,7 +7,7 @@ use semantic_language::{
     semcode_verify::verify_semcode,
 };
 use sm_verify::verify_semcode_token;
-use sm_vm::{run_semcode_collecting_hello_observations, run_verified_entry_semcode};
+use sm_vm::run_verified_entry_semcode_collecting_hello_observations;
 
 const UPDATE_ENV: &str = "SM_UPDATE_CTF_E1_TRACES";
 
@@ -204,13 +204,12 @@ fn render_trace_artifact(case: &TraceCase) -> String {
     verify_semcode(&semcode).expect("verify semcode");
     let token = verify_semcode_token(&semcode).expect("token admission");
     let entry_token = token.require_entry("main").expect("entry resolution");
-    run_verified_entry_semcode(&entry_token).expect("run verified semcode");
+    let observations = run_verified_entry_semcode_collecting_hello_observations(&entry_token)
+        .expect("run verified semcode and collect observations");
 
     let source_hash = hash_hex(&src);
     let ir_hash = hash_hex(&format!("{ir:#?}"));
     let semcode_hash = hash_hex_bytes(&semcode);
-    let observations = run_semcode_collecting_hello_observations(&semcode)
-        .expect("collect VM observations from admitted SemCode");
     let observed_output = observations
         .iter()
         .map(|event| event.text.as_str())

@@ -1365,7 +1365,7 @@ fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenH
     let (line, column) = extract_error_location(first_line);
 
     let (stage, kind, category) = match code.as_str() {
-        c if c.starts_with("E02") => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
+        "E0201" => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
         c if c.starts_with('E') => (
             "syntax",
             SevenHellDiagnosticKind::SyntaxDiagnostic,
@@ -1649,13 +1649,27 @@ mod tests {
     }
 
     #[test]
-    fn semantic_check_codes_are_type_hell_diagnostics() {
-        let diagnostic =
-            diagnostic_from_check_error("Error [E0243]: invalid match at line 2:3", "program.sm");
+    fn type_mismatch_is_a_type_hell_diagnostic() {
+        let diagnostic = diagnostic_from_check_error(
+            "Error [E0201]: mismatched types at line 2:3",
+            "program.sm",
+        );
 
         assert_eq!(diagnostic.stage, "type");
         assert_eq!(diagnostic.kind, SevenHellDiagnosticKind::CheckDiagnostic);
         assert_eq!(diagnostic.category, "type");
+    }
+
+    #[test]
+    fn parser_e02_codes_stay_syntax_hell_diagnostics() {
+        let diagnostic = diagnostic_from_check_error(
+            "Error [E0200]: expected declaration at line 2:3",
+            "program.sm",
+        );
+
+        assert_eq!(diagnostic.stage, "syntax");
+        assert_eq!(diagnostic.kind, SevenHellDiagnosticKind::SyntaxDiagnostic);
+        assert_eq!(diagnostic.category, "syntax");
     }
 
     #[test]

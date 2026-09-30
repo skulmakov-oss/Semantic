@@ -106,6 +106,7 @@ pub fn run_verified_semcode_with_application_host_and_capabilities_and_config< H
 pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config< H: PrometheusHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_config< H: ApplicationHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode( token: &VerifiedEntrySemCode<'_, '_>, ) -> Result<(), RuntimeError> {
+pub fn run_verified_entry_semcode_collecting_hello_observations( token: &VerifiedEntrySemCode<'_, '_>, ) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
 pub fn run_verified_entry_semcode_with_config( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_function_semcode_with_args( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, ) -> Result<Value, RuntimeError> {
 pub fn run_verified_function_semcode_with_args_and_config( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, config: ExecutionConfig, ) -> Result<Value, RuntimeError> {

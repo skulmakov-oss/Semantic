@@ -51,7 +51,7 @@ Rules:
 | PCC-6 | Option / Result        | skip | pass | pass | pass | pass | pass | pass | standard forms only |
 | PCC-7 | Collections            | skip | pass | pass | pass | pass | pass | pass | Sequence and admitted Map baseline only |
 | PCC-8 | Stdlib helpers         | skip | pass | skip | pass | pass | pass | pass | assert/print/to_text admitted helper surface only |
-| PCC-9 | Project Model baseline | pass | pass | pass | pass | pass | pass | pass | qualified project-root baseline |
+| PCC-9 | Project Model baseline | not_implemented | not_implemented | not_implemented | not_implemented | not_implemented | not_implemented | pass | manifest diagnostics only; project-root execution remains future work |
 
 Status vocabulary:
 

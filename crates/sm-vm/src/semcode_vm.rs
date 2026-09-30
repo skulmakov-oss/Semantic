@@ -924,6 +924,22 @@ pub fn run_verified_entry_semcode(
     )
 }
 
+/// Canonical verified token execution path that returns controlled observations.
+pub fn run_verified_entry_semcode_collecting_hello_observations(
+    token: &VerifiedEntrySemCode<'_, '_>,
+) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
+    let program = prepare_verified_execution(token)?;
+    let mut events = Vec::new();
+    let collected = run_vm_program_view_with_entry_and_config_with_observation_runtime(
+        program,
+        token.entry(),
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        HelloObservationRuntime::collect(&mut events),
+    )?;
+    debug_assert!(events.is_empty());
+    Ok(collected)
+}
+
 /// Canonical verified token execution path.
 ///
 /// This is the canonical and preferred path for internal verified execution.

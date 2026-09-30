@@ -1,6 +1,6 @@
 # Issue 1967 Reconciliation
 
-Baseline: `origin/main` at `f6b5f6d60230c7ff2229fef441df14562836fc5a`.
+Baseline: revalidated after rebase against `origin/main` at `c3ac7a63b27852161f948149878c7c14260dcad4`.
 Scope: 13 remediation packages and 82 findings from GitHub issue 1967.
 Historical audit CSV/JSON remain immutable; this is derived current-state evidence.
 
@@ -33,7 +33,7 @@ Historical audit CSV/JSON remain immutable; this is derived current-state eviden
 | FND-371 | REM-010 | FIXED_LATER_CONFIRMED | test discovery sorts losslessly or rejects invalid names |
 | FND-157 | REM-011 | FIXED_LATER_CONFIRMED | 7hell is wired through shared CLI dispatch |
 | FND-159 | REM-011 | FIXED_LATER_CONFIRMED | type-check failures map to Type Hell |
-| FND-160 | REM-011 | FIXED_BY_THIS_PR | all E02 semantic check codes map to Type Hell |
+| FND-160 | REM-011 | FIXED_BY_THIS_PR | E0201 type mismatches map to Type Hell without misclassifying E02 parser diagnostics |
 | FND-161 | REM-011 | FIXED_LATER_CONFIRMED | VM blocker graph contains no self-cycle |
 | FND-162 | REM-011 | FIXED_LATER_CONFIRMED | verifier failure report matches blocked VM behavior |
 | FND-163 | REM-011 | FIXED_LATER_CONFIRMED | successful 7hell execution does not rerun SemCode |
