@@ -1391,8 +1391,8 @@ fn diagnostic_from_check_error(error: &SemanticError, target_display: &str) -> S
         severity: Some("error"),
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
-            line: (diagnostic.mark.line > 0).then_some(diagnostic.mark.line),
-            column: (diagnostic.mark.col > 0).then_some(diagnostic.mark.col),
+            line: Some(diagnostic.mark.line.max(1)),
+            column: Some(diagnostic.mark.col.max(1)),
         },
     }
 }
