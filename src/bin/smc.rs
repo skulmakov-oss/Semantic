@@ -1366,11 +1366,6 @@ fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenH
 
     let (stage, kind, category) = match code.as_str() {
         "E0201" => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
-        "E0000" => (
-            "syntax",
-            SevenHellDiagnosticKind::SyntaxDiagnostic,
-            "syntax",
-        ),
         c if c.starts_with('E') => (
             "syntax",
             SevenHellDiagnosticKind::SyntaxDiagnostic,
@@ -1650,12 +1645,13 @@ mod tests {
     }
 
     fn syntax_diagnostic() -> SevenHellDiagnostic {
-        diagnostic_from_check_error("[E0000]: syntax failed at line 1:1", "program.sm")
+        diagnostic_from_check_error("[E0005]: syntax failed at line 1:1", "program.sm")
     }
 
     #[test]
     fn frontend_compile_error_stays_coded_lowering_diagnostic() {
         let error = CompilePipelineError::Frontend(sm_front::FrontendError {
+            detail: None,
             pos: 0,
             message: "lowering rejected".to_string(),
         });
@@ -1760,7 +1756,7 @@ mod tests {
     fn evaluator_rejects_absent_code_or_severity_on_diagnostic_kind() {
         for (code, severity, expected) in [
             (None, Some("error"), "D001 code is absent"),
-            (Some("E0000".to_string()), None, "D001 severity is absent"),
+            (Some("E0005".to_string()), None, "D001 severity is absent"),
         ] {
             let mut diagnostic = syntax_diagnostic();
             diagnostic.code = code;
@@ -1996,7 +1992,7 @@ fn main() {
             execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Human);
         assert!(outcome.rendered.contains("Syntax Hell"));
         assert!(outcome.rendered.contains("FAIL"));
-        assert!(outcome.rendered.contains("code: E0000"));
+        assert!(outcome.rendered.contains("code: E0005"));
         assert!(outcome.rendered.contains("category: syntax"));
         assert!(outcome.rendered.contains("summary:"));
         assert!(!outcome.rendered.contains(&*entry.to_string_lossy()));

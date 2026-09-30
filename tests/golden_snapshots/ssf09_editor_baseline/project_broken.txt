@@ -1,0 +1,13 @@
+error[E0239]: failed to parse module
+  --> src/util/helper.sm:3:19
+   |
+ 3 | Law "L" [priority x]:
+   |                   ^
+   = caused by:
+     error[E0224]: expected priority number
+       --> src/util/helper.sm:3:19
+        |
+      3 | Law "L" [priority x]:
+        |                   ^
+
+check failed: 1 error(s), 0 warning(s)

@@ -1,0 +1,4 @@
+Import "util/helper.sm"
+Law "Root" [priority 1]:
+    When true ->
+        System.recovery()

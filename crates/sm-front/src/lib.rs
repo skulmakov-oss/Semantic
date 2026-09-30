@@ -46,6 +46,8 @@ pub use types::{
     Expr,
     ExprId,
     FrontendError,
+    FrontendErrorDetail,
+    FrontendErrorItem,
     FrontendErrorKind,
     Function,
     GrammarAdmission,
@@ -106,6 +108,8 @@ pub use types::{
     ValidationVariantPlan,
 };
 
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub mod diagnostic_authority;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod lexer;
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -346,6 +350,7 @@ impl ScopeEnv {
     ) -> Result<&ScopeBinding, crate::types::FrontendError> {
         self.binding(name)
             .ok_or_else(|| crate::types::FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "internal ownership state: required binding {} is missing",
@@ -366,6 +371,7 @@ impl ScopeEnv {
             }
         }
         Err(crate::types::FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "internal ownership state: required binding {} is missing",
@@ -424,6 +430,7 @@ impl ScopeEnv {
         // Whole-variable consumed takes priority.
         if binding.consumed {
             return Err(crate::types::FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("use of moved value '{}'", name.0),
             });
@@ -448,6 +455,7 @@ impl ScopeEnv {
                         )
                     };
                     return Err(crate::types::FrontendError {
+                        detail: None,
                         pos: 0,
                         message: msg,
                     });
@@ -487,6 +495,7 @@ impl ScopeEnv {
 
         if binding.consumed {
             return Err(crate::types::FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("cannot capture moved value '{}'", name.0),
             });
@@ -510,6 +519,7 @@ impl ScopeEnv {
             };
             if let Some(m) = msg {
                 return Err(crate::types::FrontendError {
+                    detail: None,
                     pos: 0,
                     message: m.to_string(),
                 });
@@ -610,6 +620,7 @@ impl ScopeEnv {
         for successor in successors {
             if successor.scopes.len() != self.scopes.len() {
                 return Err(crate::types::FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "internal ownership state: branch successor scope depth does not match predecessor".to_string(),
                 });
@@ -634,6 +645,7 @@ impl ScopeEnv {
                 for successor in successors {
                     let Some(binding) = successor.scopes[depth].get(&name) else {
                         return Err(crate::types::FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "internal ownership state: required binding {} is missing from a branch successor",
@@ -679,12 +691,14 @@ pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
         let name = resolve_symbol_name(&program.arena, f.name)?;
         if APPLICATION_BUILTIN_NAMES.contains(&name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("function name '{name}' is reserved for the application boundary"),
             });
         }
         if out.contains_key(&f.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("duplicate function '{name}'"),
             });
@@ -729,6 +743,7 @@ pub fn build_record_table(program: &Program) -> Result<RecordTable, FrontendErro
     for record in &program.records {
         if out.contains_key(&record.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "duplicate record '{}'",
@@ -756,6 +771,7 @@ pub fn build_record_table(program: &Program) -> Result<RecordTable, FrontendErro
         // zero-arity precedent #1635 established for traits.
         if !record.type_params.is_empty() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "generic record '{}' is not part of the current Stable Foundation \
@@ -777,12 +793,14 @@ pub fn build_adt_table(program: &Program) -> Result<AdtTable, FrontendError> {
         let name = resolve_symbol_name(&program.arena, adt.name)?;
         if BUILTIN_ADT_NAMES.contains(&name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("enum name '{name}' is reserved for the built-in ADT"),
             });
         }
         if out.contains_key(&adt.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "duplicate enum '{}'",
@@ -799,6 +817,7 @@ pub fn build_adt_table(program: &Program) -> Result<AdtTable, FrontendError> {
         // #1634's ">1" check with this stricter zero-arity contract.
         if !adt.type_params.is_empty() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "generic enum '{}' is not part of the current Stable Foundation \
@@ -842,6 +861,7 @@ pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError>
     for t in &program.traits {
         if out.contains_key(&t.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "duplicate trait '{}'",
@@ -859,6 +879,7 @@ pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError>
         // erasing the parameters and treating the trait as non-generic.
         if !t.type_params.is_empty() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "trait '{}' declares type parameters; generic traits are not supported",
@@ -939,6 +960,7 @@ pub fn build_schema_table(program: &Program) -> Result<SchemaTable, FrontendErro
     for schema in &program.schemas {
         if out.contains_key(&schema.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "duplicate schema '{}'",
@@ -992,6 +1014,7 @@ pub fn canonicalize_declared_type(
             let canonical_base = canonicalize_declared_type(base, record_table, adt_table, arena)?;
             if !canonical_base.is_core_numeric_scalar() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unit annotation '{}' is allowed only on i32, u32, f64, or fx in v0",
@@ -1048,6 +1071,7 @@ pub fn canonicalize_declared_type(
                 (true, false) => Ok(Type::Record(*name)),
                 (false, true) => Ok(Type::Adt(*name)),
                 (true, true) => Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "top-level name '{}' is ambiguously declared as both record and enum",
@@ -1055,6 +1079,7 @@ pub fn canonicalize_declared_type(
                     ),
                 }),
                 (false, false) => Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unknown nominal type '{}'",
@@ -1068,6 +1093,7 @@ pub fn canonicalize_declared_type(
                 Ok(Type::Adt(*name))
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("unknown enum type '{}'", resolve_symbol_name(arena, *name)?),
                 })
@@ -1151,6 +1177,7 @@ pub fn canonicalize_declared_type_generic(
             )?;
             if !canonical_base.is_core_numeric_scalar() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unit annotation '{}' is allowed only on i32, u32, f64, or fx in v0",
@@ -1208,6 +1235,7 @@ pub fn canonicalize_declared_type_generic(
                 (true, false) => Ok(Type::Record(*name)),
                 (false, true) => Ok(Type::Adt(*name)),
                 (true, true) => Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "top-level name '{}' is ambiguously declared as both record and enum",
@@ -1215,6 +1243,7 @@ pub fn canonicalize_declared_type_generic(
                     ),
                 }),
                 (false, false) => Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unknown nominal type '{}'",
@@ -1228,6 +1257,7 @@ pub fn canonicalize_declared_type_generic(
                 Ok(Type::Adt(*name))
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("unknown enum type '{}'", resolve_symbol_name(arena, *name)?),
                 })
@@ -1374,6 +1404,7 @@ fn validate_fn_sig_call_metadata(
     if let Some(param_names) = sig.param_names.as_ref() {
         if param_names.len() != sig.params.len() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "function '{}' has malformed signature: {} parameter name(s) declared for {} parameter(s)",
@@ -1387,6 +1418,7 @@ fn validate_fn_sig_call_metadata(
     if let Some(param_defaults) = sig.param_defaults.as_ref() {
         if param_defaults.len() != sig.params.len() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "function '{}' has malformed signature: {} parameter default(s) declared for {} parameter(s)",
@@ -1413,6 +1445,7 @@ pub fn reorder_call_args(
     if !has_named {
         if args.len() > sig.params.len() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "function '{}' expects {} args, got {}",
@@ -1433,6 +1466,7 @@ pub fn reorder_call_args(
 
     let Some(param_names) = sig.param_names.as_ref() else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "named arguments are not supported for builtin '{}'",
@@ -1450,6 +1484,7 @@ pub fn reorder_call_args(
             named_seen = true;
             let Some(param_index) = param_names.iter().position(|name| *name == arg_name) else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "function '{}' has no parameter named '{}'",
@@ -1460,6 +1495,7 @@ pub fn reorder_call_args(
             };
             if ordered[param_index].is_some() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "duplicate named argument '{}' in call to '{}'",
@@ -1473,12 +1509,14 @@ pub fn reorder_call_args(
         } else {
             if named_seen {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "positional arguments cannot follow named arguments".to_string(),
                 });
             }
             if positional_index >= ordered.len() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "function '{}' expects {} args, got {}",
@@ -1523,6 +1561,7 @@ fn finalize_ordered_call_args(
         }
         if let Some(param_names) = param_names {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "function '{}' is missing argument for parameter '{}'",
@@ -1532,6 +1571,7 @@ fn finalize_ordered_call_args(
             });
         }
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "function '{}' expects {} args, got {}",
@@ -1553,6 +1593,7 @@ pub fn resolve_symbol_name<'a>(
     id: SymbolId,
 ) -> Result<&'a str, FrontendError> {
     arena.try_symbol_name(id).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!("invalid symbol id {}", id.0),
     })
@@ -2010,6 +2051,7 @@ fn main() {
             let src = format!("enum {name} {{ A, B }}\nfn main() {{ return; }}\n");
             let program = parse_program(&src).expect("parse");
             let expected = FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("enum name '{name}' is reserved for the built-in ADT"),
             };
@@ -2292,6 +2334,7 @@ fn main() {
 
     fn d1_unknown_nope(context: &str) -> FrontendError {
         FrontendError {
+            detail: None,
             pos: 0,
             message: format!("unknown record type 'Nope' in {context}"),
         }

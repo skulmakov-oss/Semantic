@@ -5,3 +5,4 @@ tests/fixtures/ui_frame_inspection/** text eol=lf
 tests/fixtures/hub/** text eol=lf
 tests/fixtures/7hell_e1/** text eol=lf
 examples/canonical/** text eol=lf
+tests/fixtures/ssf09_editor_baseline/** text eol=lf

@@ -16,7 +16,17 @@ use crate::frontend::{
     FrontendErrorKind, LogosEntity, LogosEntityFieldKind, LogosProgram, ParserProfile, Program,
     SourceMark, SurfaceAuthority, Token, Type,
 };
+use sm_diagnostic::{
+    Diagnostic as CanonicalDiagnostic, DiagnosticCause, DiagnosticCode, DiagnosticFamily,
+    DiagnosticMessage, DiagnosticSeverity, SourceContext, SourceId, SourceRange,
+};
+use sm_front::diagnostic_authority::{
+    token_anchor_range_at_mark, FrontendDiagnostic, FrontendRelated, FrontendStage,
+    FRONTEND_AMBIGUOUS_SURFACE_CODE, FRONTEND_NO_SURFACE_CLAIM_CODE,
+};
+use sm_front::lexer::lex_tokens_with_authority;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use ton618_core::diagnostics::{
     append_help_line, format_diagnostic_header, render_context_with_caret,
@@ -72,6 +82,100 @@ pub struct SemanticDiagnostic {
     /// Optional frontend-boundary provenance for a direct RustLike admission
     /// error. This is not a complete diagnostic taxonomy or external schema.
     pub frontend_error_kind: Option<FrontendErrorKind>,
+    /// SSF-09 C2: everything the producer-owned canonical projection needs
+    /// beyond the legacy fields, boxed so the error type stays small.
+    pub canonical: Box<CanonicalAttachment>,
+}
+
+/// SSF-09 C2: canonical-projection data attached to a [`SemanticDiagnostic`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalAttachment {
+    /// Originating canonical stage. `Frontend` when this
+    /// diagnostic relays an `sm-front` failure (lexer, parser, surface
+    /// resolution, type checker) under the frontend's own code; `Semantic`
+    /// for every diagnostic `sm-sema` itself originates.
+    pub family: DiagnosticFamily,
+    /// Genuine UTF-8 byte range `[start, end)` within the source
+    /// text this diagnostic was produced from, or `None` when no producer
+    /// authority proves one. Never derived from a default/zero mark.
+    pub range: Option<Range<usize>>,
+    /// The presentation-free message for the canonical carrier
+    /// when `message` still carries transitional legacy presentation (a
+    /// relayed Logos parser block, or a module path). `None` means
+    /// `message` is already presentation-free.
+    pub canonical_message: Option<String>,
+    /// Further recovered frontend errors of a relayed parse
+    /// failure, in producer order (same source as this diagnostic).
+    pub related: Vec<FrontendRelated>,
+    /// The structured frontend failure this diagnostic wraps
+    /// (for example `E0239` wrapping the imported module's parse error).
+    pub frontend_cause: Option<Box<FrontendDiagnostic>>,
+}
+
+impl CanonicalAttachment {
+    /// A `sm-sema`-originated diagnostic with no proven range and a
+    /// presentation-free legacy message.
+    pub fn semantic(range: Option<Range<usize>>) -> Self {
+        Self {
+            family: DiagnosticFamily::Semantic,
+            range,
+            canonical_message: None,
+            related: Vec::new(),
+            frontend_cause: None,
+        }
+    }
+}
+
+impl SemanticDiagnostic {
+    /// SSF-09 C2: producer-owned lossless projection into the canonical
+    /// carrier. Code, severity and family are relayed unchanged; the range
+    /// is attached only when both a `source` token and a proven range exist.
+    /// Returns `None` only if the code or message violates the carrier's
+    /// non-empty invariants - never a substituted placeholder.
+    pub fn to_canonical(&self, source: Option<SourceId>) -> Option<CanonicalDiagnostic> {
+        let code = DiagnosticCode::try_from_static(self.code).ok()?;
+        let message = DiagnosticMessage::new(
+            self.canonical
+                .canonical_message
+                .clone()
+                .unwrap_or_else(|| self.message.clone()),
+        )
+        .ok()?;
+        let severity = match self.level {
+            DiagLevel::Error => DiagnosticSeverity::Error,
+            DiagLevel::Warning => DiagnosticSeverity::Warning,
+        };
+        let mut diagnostic =
+            CanonicalDiagnostic::new(code, severity, self.canonical.family, message);
+        diagnostic.source_context = source.map(|source| SourceContext {
+            source,
+            range: self
+                .canonical
+                .range
+                .clone()
+                .and_then(|r| SourceRange::try_from_bounds(r.start, r.end)),
+        });
+        if !self.canonical.related.is_empty() {
+            // Relayed frontend failure: its recovered errors project exactly
+            // as the frontend's own adapter projects them.
+            let relay = FrontendDiagnostic {
+                stage: FrontendStage::Parse,
+                code: self.code,
+                message: self.message.clone(),
+                range: None,
+                related: self.canonical.related.clone(),
+            };
+            let projected = relay.to_canonical(source)?;
+            diagnostic.related_locations = projected.related_locations;
+            diagnostic.notes = projected.notes;
+        }
+        if let Some(cause) = &self.canonical.frontend_cause {
+            diagnostic.cause = Some(Box::new(DiagnosticCause::Diagnostic(Box::new(
+                cause.to_canonical(source)?,
+            ))));
+        }
+        Some(diagnostic)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,10 +225,8 @@ fn ambiguous_surface_error<L, R>(
         describe_outcome(rustlike),
     );
     SemanticError {
-        diag: render_diag(
-            DiagLevel::Error,
-            "E0000",
-            message,
+        diag: render_frontend_diag(
+            FrontendDiagnostic::surface_resolution(FRONTEND_AMBIGUOUS_SURFACE_CODE, message),
             SourceMark::default(),
             input,
         ),
@@ -133,10 +235,11 @@ fn ambiguous_surface_error<L, R>(
 
 fn no_surface_claim_error(input: &str) -> SemanticError {
     SemanticError {
-        diag: render_diag(
-            DiagLevel::Error,
-            "E0000",
-            "NO SURFACE CLAIM: this input establishes no top-level evidence for either the Logos or RustLike grammar".to_string(),
+        diag: render_frontend_diag(
+            FrontendDiagnostic::surface_resolution(
+                FRONTEND_NO_SURFACE_CLAIM_CODE,
+                "NO SURFACE CLAIM: this input establishes no top-level evidence for either the Logos or RustLike grammar".to_string(),
+            ),
             SourceMark::default(),
             input,
         ),
@@ -171,10 +274,8 @@ pub fn check_rustlike_program(
     source: &str,
 ) -> Result<SemanticReport, SemanticError> {
     type_check_program(program).map_err(|e| SemanticError {
-        diag: render_diag(
-            DiagLevel::Error,
-            "E0201",
-            e.message,
+        diag: render_frontend_diag(
+            FrontendDiagnostic::from_type_check_error(&e),
             SourceMark::default(),
             source,
         ),
@@ -196,25 +297,21 @@ pub fn check_source_with_profile(
     // not a surface-admission outcome for either grammar. Preserve the
     // lexer's own deterministic failure instead of feeding either
     // `admit_*` function anything.
-    let tokens = lex(input).map_err(|e| SemanticError {
-        diag: render_diag(
-            DiagLevel::Error,
-            "E0000",
-            e.message,
-            SourceMark::default(),
-            input,
-        ),
+    let tokens = lex_tokens_with_authority(input).map_err(|failure| {
+        let mark = source_mark_from_byte_offset(input, failure.error.pos);
+        SemanticError {
+            diag: render_frontend_diag(FrontendDiagnostic::from_lex_failure(&failure), mark, input),
+        }
     })?;
     let logos = admit_logos_program_with_profile(input, &tokens, profile);
     let rustlike = admit_program_with_profile(input, &tokens, profile);
     match resolve_surface_authority(logos, rustlike) {
         SurfaceAuthority::LogosOwns(Ok(program)) => analyze_logos_program(&program, input),
         SurfaceAuthority::LogosOwns(Err(e)) => Err(SemanticError {
-            diag: render_diag(
-                DiagLevel::Error,
-                "E0000",
-                e.message,
-                SourceMark::default(),
+            diag: render_frontend_diag_with_legacy(
+                FrontendDiagnostic::from_parse_error(input, &tokens, &e),
+                Some(e.message.clone()),
+                frontend_error_mark(&tokens, input, e.pos),
                 input,
             ),
         }),
@@ -229,10 +326,9 @@ pub fn check_source_with_profile(
 
 fn rustlike_frontend_error(input: &str, tokens: &[Token], error: FrontendError) -> SemanticError {
     let kind = error.kind();
-    let mut diag = render_diag(
-        DiagLevel::Error,
-        "E0000",
-        error.message,
+    let mut diag = render_frontend_diag_with_legacy(
+        FrontendDiagnostic::from_parse_error(input, tokens, &error),
+        Some(error.message.clone()),
         frontend_error_mark(tokens, input, error.pos),
         input,
     );
@@ -293,12 +389,21 @@ pub fn check_file_with_provider_and_profile(
         let (src, logos) = loaded
             .get(&module_path)
             .expect("module key from loaded.keys()");
+        let module_key = path_contract_key(&module_path);
         let mut report = analyze_logos_program(logos, src).map_err(|mut e| {
+            // SSF-09 C2: the host-path prefix below is legacy presentation;
+            // the canonical message stays the analyzer's own text and the
+            // module is bound structurally through `provider_module_id`.
+            if e.diag.canonical.canonical_message.is_none() {
+                e.diag.canonical.canonical_message = Some(e.diag.message.clone());
+            }
             e.diag.message = format!("{}: {}", module_path.display(), e.diag.message);
             e.diag.rendered = format!("in module '{}'\n{}", module_path.display(), e.diag.rendered);
+            // SSF-09 C2: the failing module is known structurally; attach it
+            // as provenance instead of leaving file attribution to the text.
+            e.diag.provider_module_id = Some(module_key.clone());
             e
         })?;
-        let module_key = path_contract_key(&module_path);
         for warning in &mut report.warnings {
             warning.provider_module_id = Some(module_key.clone());
         }
@@ -335,6 +440,25 @@ fn path_contract_key(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// SSF-09 #1580: the provider-owned name of the module at `path` in
+/// diagnostic text. Legacy providers keep the id, and then the historical
+/// `Path::display` spelling is preserved byte for byte.
+fn shown_module(provider: &dyn crate::alloc_core::ModuleProvider, path: &Path) -> String {
+    let id = path_contract_key(path);
+    let display = provider.display_module(&id);
+    if display == id {
+        path.display().to_string()
+    } else {
+        display
+    }
+}
+
+/// SSF-09 #1580: the provider-owned module key used inside the select/export
+/// core checks (whose messages name modules by key).
+fn display_key(provider: &dyn crate::alloc_core::ModuleProvider, path: &Path) -> String {
+    provider.display_module(&path_contract_key(path))
+}
+
 #[derive(Debug, Clone)]
 struct VisitingImport {
     path: PathBuf,
@@ -356,14 +480,14 @@ fn load_module_recursive(
     if let Some(pos) = visiting.iter().position(|entry| entry.path == key) {
         let mut full_chain = visiting
             .iter()
-            .map(|entry| path_contract_key(&entry.path))
+            .map(|entry| display_key(provider, &entry.path))
             .collect::<Vec<_>>();
-        full_chain.push(path_contract_key(path));
+        full_chain.push(display_key(provider, path));
         let mut cycle_chain = visiting[pos..]
             .iter()
-            .map(|entry| path_contract_key(&entry.path))
+            .map(|entry| display_key(provider, &entry.path))
             .collect::<Vec<_>>();
-        cycle_chain.push(path_contract_key(path));
+        cycle_chain.push(display_key(provider, path));
         let reexport_only_cycle =
             via_reexport && visiting[(pos + 1)..].iter().all(|entry| entry.via_reexport);
         let (code, message) = if reexport_only_cycle {
@@ -392,7 +516,11 @@ fn load_module_recursive(
             diag: render_diag(
                 DiagLevel::Error,
                 "E0239",
-                format!("failed to read import '{}': {}", path.display(), e),
+                format!(
+                    "failed to read import '{}': {}",
+                    shown_module(provider, path),
+                    e
+                ),
                 SourceMark::default(),
                 "",
             ),
@@ -401,19 +529,38 @@ fn load_module_recursive(
         diag: render_diag(
             DiagLevel::Error,
             "E0239",
-            format!("module '{}' is not valid utf-8", path.display()),
+            format!(
+                "module '{}' is not valid utf-8",
+                shown_module(provider, path)
+            ),
             SourceMark::default(),
             "",
         ),
     })?;
-    let logos = parse_logos_program_with_profile(&source, profile).map_err(|e| SemanticError {
-        diag: render_diag(
+    let logos = parse_logos_program_with_profile(&source, profile).map_err(|e| {
+        let mut diag = render_diag(
             DiagLevel::Error,
             "E0239",
-            format!("failed to parse module '{}': {}", path.display(), e.message),
+            format!(
+                "failed to parse module '{}': {}",
+                shown_module(provider, path),
+                e.message
+            ),
             source_mark_from_byte_offset(&source, e.pos),
             &source,
-        ),
+        );
+        diag.provider_module_id = Some(module_id.clone());
+        // SSF-09 C2: canonically this is sm-sema's module-load failure,
+        // bound to the module's own source, wrapping the frontend's
+        // structured parse error as its cause - no host path and no
+        // rendered caret block in the canonical message.
+        diag.canonical.canonical_message = Some("failed to parse module".to_string());
+        if let Ok(tokens) = lex(&source) {
+            diag.canonical.frontend_cause = Some(Box::new(FrontendDiagnostic::from_parse_error(
+                &source, &tokens, &e,
+            )));
+        }
+        SemanticError { diag }
     })?;
 
     visiting.push(VisitingImport {
@@ -422,18 +569,23 @@ fn load_module_recursive(
     });
     let importer_module_id = path_contract_key(&key);
     let imports = parse_import_directives(&source);
-    validate_import_namespace_rules(&imports, &logos, &source)?;
+    validate_import_namespace_rules(&imports, &logos, &source).map_err(|mut e| {
+        e.diag.provider_module_id = Some(importer_module_id.clone());
+        e
+    })?;
     for import in imports {
         let resolved = provider
             .resolve_import(&importer_module_id, &import.spec)
-            .map_err(|e| SemanticError {
-                diag: render_diag(
+            .map_err(|e| {
+                let mut diag = render_diag(
                     DiagLevel::Error,
                     "E0239",
                     format!("failed to resolve import '{}': {}", import.spec, e),
                     SourceMark::default(),
                     &source,
-                ),
+                );
+                diag.provider_module_id = Some(importer_module_id.clone());
+                SemanticError { diag }
             })?;
         let import_path = normalize_lexical(Path::new(&resolved));
         load_module_recursive(
@@ -509,26 +661,32 @@ fn validate_select_imports(
         std::collections::BTreeMap::<String, std::collections::BTreeMap<String, ExportKind>>::new();
     let mut src_by_key = std::collections::BTreeMap::<String, String>::new();
 
+    // SSF-09 #1580: the core check names modules by key in its messages,
+    // so it runs over provider display keys; `id_by_key` maps a key back to
+    // the module id for structural provenance.
+    let mut id_by_key = std::collections::BTreeMap::<String, String>::new();
     for (k, set) in export_sets {
-        let key = path_contract_key(k);
+        let key = display_key(provider, k);
         let mut syms = std::collections::BTreeSet::<String>::new();
         let mut kinds = std::collections::BTreeMap::<String, ExportKind>::new();
         for item in &set.items {
             syms.insert(item.public_name.clone());
             kinds.entry(item.public_name.clone()).or_insert(item.kind);
         }
-        export_symbols.insert(key, syms);
-        export_kinds.insert(path_contract_key(k), kinds);
+        export_symbols.insert(key.clone(), syms);
+        export_kinds.insert(key, kinds);
     }
 
     for module in modules {
         let (src, _) = loaded.get(&module).expect("module key from loaded.keys()");
         let imports = parse_import_directives(src);
-        let module_key = path_contract_key(&module);
+        let module_id = path_contract_key(&module);
+        let module_key = display_key(provider, &module);
+        id_by_key.insert(module_key.clone(), module_id.clone());
         src_by_key.insert(module_key.clone(), src.clone());
         for import in &imports {
             let dep = provider
-                .resolve_import(&module_key, &import.spec)
+                .resolve_import(&module_id, &import.spec)
                 .map(PathBuf::from)
                 .map(|path| normalize_lexical(&path))
                 .map_err(|e| SemanticError {
@@ -542,7 +700,7 @@ fn validate_select_imports(
                 })?;
             dep_lookup.insert(
                 (module_key.clone(), import.spec.clone()),
-                path_contract_key(&dep),
+                display_key(provider, &dep),
             );
         }
         core_modules.push(SelectImportModule {
@@ -558,19 +716,20 @@ fn validate_select_imports(
                 .get(&e.module_key)
                 .map(|s| s.as_str())
                 .unwrap_or_default();
-            SemanticError {
-                diag: render_diag(
-                    DiagLevel::Error,
-                    e.code,
-                    e.message,
-                    SourceMark {
-                        line: e.line,
-                        col: e.col,
-                        file_id: 0,
-                    },
-                    src,
-                ),
-            }
+            let mut diag = render_diag(
+                DiagLevel::Error,
+                e.code,
+                e.message,
+                SourceMark {
+                    line: e.line,
+                    col: e.col,
+                    file_id: 0,
+                },
+                src,
+            );
+            // SSF-09 C2: the failing import site is in this module.
+            diag.provider_module_id = id_by_key.get(&e.module_key).cloned();
+            SemanticError { diag }
         })
 }
 
@@ -582,21 +741,26 @@ fn build_export_sets(
     let mut dep_lookup = std::collections::BTreeMap::<(String, String), String>::new();
     let mut keys: Vec<PathBuf> = loaded.keys().cloned().collect();
     keys.sort();
+    // SSF-09 #1580: the core names modules by provider display key; this
+    // maps each key back to its module path.
+    let mut path_by_key = std::collections::BTreeMap::<String, PathBuf>::new();
     for module in &keys {
         let (source, logos) = loaded.get(module).ok_or_else(|| SemanticError {
             diag: render_diag(
                 DiagLevel::Error,
                 "E0239",
-                format!("unknown module '{}'", module.display()),
+                format!("unknown module '{}'", shown_module(provider, module)),
                 SourceMark::default(),
                 "",
             ),
         })?;
-        let module_key = path_contract_key(module);
+        let module_id = path_contract_key(module);
+        let module_key = display_key(provider, module);
+        path_by_key.insert(module_key.clone(), module.clone());
         let imports = parse_import_directives(source);
         for import in &imports {
             let dep = provider
-                .resolve_import(&module_key, &import.spec)
+                .resolve_import(&module_id, &import.spec)
                 .map(PathBuf::from)
                 .map(|path| normalize_lexical(&path))
                 .map_err(|e| SemanticError {
@@ -610,13 +774,13 @@ fn build_export_sets(
                 })?;
             dep_lookup.insert(
                 (module_key.clone(), import.spec.clone()),
-                path_contract_key(&dep),
+                display_key(provider, &dep),
             );
         }
         modules.push(ExportBuildModule {
+            local_exports: collect_local_exports(&shown_module(provider, module), logos),
             module_key,
             source: source.clone(),
-            local_exports: collect_local_exports(module, logos),
             imports,
         });
     }
@@ -626,28 +790,33 @@ fn build_export_sets(
             .find(|m| m.module_key == e.module_key)
             .map(|m| m.source.as_str())
             .unwrap_or_default();
-        SemanticError {
-            diag: render_diag(
-                DiagLevel::Error,
-                e.code,
-                e.message,
-                SourceMark {
-                    line: e.line,
-                    col: e.col,
-                    file_id: 0,
-                },
-                src,
-            ),
-        }
+        let mut diag = render_diag(
+            DiagLevel::Error,
+            e.code,
+            e.message,
+            SourceMark {
+                line: e.line,
+                col: e.col,
+                file_id: 0,
+            },
+            src,
+        );
+        // SSF-09 C2: bind the failure to the module it was found in.
+        diag.provider_module_id = path_by_key.get(&e.module_key).map(|p| path_contract_key(p));
+        SemanticError { diag }
     })?;
     let mut out = HashMap::<PathBuf, ExportSet>::new();
     for (key, set) in core_sets {
-        out.insert(PathBuf::from(key), set);
+        let path = path_by_key
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from(&key));
+        out.insert(path, set);
     }
     Ok(out)
 }
 
-fn collect_local_exports(module: &Path, logos: &LogosProgram) -> ExportSet {
+fn collect_local_exports(module_origin: &str, logos: &LogosProgram) -> ExportSet {
     let mut locals = Vec::<LocalExportDecl>::new();
     if let Some(system) = &logos.system {
         locals.push(LocalExportDecl {
@@ -670,7 +839,7 @@ fn collect_local_exports(module: &Path, logos: &LogosProgram) -> ExportSet {
             span: law.mark,
         });
     }
-    collect_local_exports_core(&module.display().to_string(), &locals)
+    collect_local_exports_core(module_origin, &locals)
 }
 
 pub fn analyze_logos_program(
@@ -952,6 +1121,57 @@ pub fn analyze_logos_program(
     })
 }
 
+/// SSF-09 C2: sm-sema's own range authority. A diagnostic mark is a legacy
+/// `(line, col)` point; it only proves a byte range when it is the mark of a
+/// lexical token of `source` itself (the tokens the analyzed AST was built
+/// from), in which case the range is that token's exact extent. A default
+/// mark, an empty source, or a mark between tokens yields `None`.
+fn mark_token_range(source: &str, mark: SourceMark) -> Option<Range<usize>> {
+    if source.is_empty() || mark.line == 0 || mark.col == 0 {
+        return None;
+    }
+    let tokens = lex(source).ok()?;
+    token_anchor_range_at_mark(source, &tokens, mark.line, mark.col)
+}
+
+/// SSF-09 C2: renders an `sm-front` failure under the frontend's own code,
+/// family and range. The human `rendered` text keeps the legacy caret
+/// presentation anchored at `mark`.
+fn render_frontend_diag(
+    frontend: FrontendDiagnostic,
+    mark: SourceMark,
+    source: &str,
+) -> SemanticDiagnostic {
+    render_frontend_diag_with_legacy(frontend, None, mark, source)
+}
+
+/// As [`render_frontend_diag`], keeping `legacy_message` (a relayed
+/// parser's transitional rendered text) as the legacy `message` while the
+/// frontend's bare message becomes the canonical message.
+fn render_frontend_diag_with_legacy(
+    frontend: FrontendDiagnostic,
+    legacy_message: Option<String>,
+    mark: SourceMark,
+    source: &str,
+) -> SemanticDiagnostic {
+    let canonical_message = legacy_message
+        .as_ref()
+        .filter(|legacy| **legacy != frontend.message)
+        .map(|_| frontend.message.clone());
+    let mut diag = render_diag(
+        DiagLevel::Error,
+        frontend.code,
+        legacy_message.unwrap_or(frontend.message),
+        mark,
+        source,
+    );
+    diag.canonical.family = DiagnosticFamily::Frontend;
+    diag.canonical.range = frontend.range;
+    diag.canonical.related = frontend.related;
+    diag.canonical.canonical_message = canonical_message;
+    diag
+}
+
 fn render_diag(
     level: DiagLevel,
     code: &'static str,
@@ -974,6 +1194,7 @@ fn render_diag(
         mark.col.max(1),
     );
     let rendered = format!("{header}\n{body}");
+    let range = mark_token_range(source, mark);
     SemanticDiagnostic {
         level,
         code,
@@ -982,6 +1203,7 @@ fn render_diag(
         rendered,
         provider_module_id: None,
         frontend_error_kind: None,
+        canonical: Box::new(CanonicalAttachment::semantic(range)),
     }
 }
 
@@ -1319,7 +1541,13 @@ Law "L" [priority 1]:
             "expected imported-module error to contain module path; got: {}",
             err.diag.message
         );
-        assert!(err.diag.provider_module_id.is_none());
+        // SSF-09 #1580 AC2: the failing module is structurally known here,
+        // so the error now carries that module's provider identity (it is
+        // still never the *warning* provenance of another module).
+        assert_eq!(
+            err.diag.provider_module_id.as_deref(),
+            Some(expected_helper.as_ref())
+        );
     }
 
     const MALFORMED_MODULE_SRC: &str =
@@ -1371,7 +1599,15 @@ Law "L" [priority 1]:
             .diag
             .rendered
             .contains(&format!("at line {}:{}", expected.line, expected.col)));
-        assert_eq!(err.diag.provider_module_id, None);
+        // SSF-09 #1580 AC2: module parse errors carry the failing module's
+        // provider identity instead of leaving attribution to message text.
+        assert_eq!(
+            err.diag
+                .provider_module_id
+                .as_deref()
+                .map(|m| m.replace('\\', "/")),
+            Some(module.to_string())
+        );
         assert_eq!(err.diag.frontend_error_kind, None);
     }
 
@@ -2146,9 +2382,18 @@ Law "Alpha" [priority 7]:
         assert_ne!(expected_mark, SourceMark::default());
 
         let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
-        assert_eq!(via_sema.diag.code, "E0000");
+        // SSF-09 C1A: the frontend's own syntax code replaces retired E0000.
+        assert_eq!(via_sema.diag.code, "E0005");
+        assert_eq!(via_sema.diag.canonical.family, DiagnosticFamily::Frontend);
         assert_eq!(via_sema.diag.message, direct.message);
         assert_eq!(via_sema.diag.mark, expected_mark);
+        let range = via_sema
+            .diag
+            .canonical
+            .range
+            .clone()
+            .expect("anchored at a token");
+        assert_eq!(range.start, direct.pos);
         assert_eq!(via_sema.diag.provider_module_id, None);
         assert_eq!(
             via_sema.diag.frontend_error_kind,
@@ -2174,7 +2419,9 @@ Law "Alpha" [priority 7]:
         assert!(expected_mark.col > 1);
 
         let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
-        assert_eq!(via_sema.diag.code, "E0000");
+        // SSF-09 C1A: the frontend's own policy-violation code.
+        assert_eq!(via_sema.diag.code, "E0006");
+        assert_eq!(via_sema.diag.canonical.family, DiagnosticFamily::Frontend);
         assert_eq!(via_sema.diag.message, direct.message);
         assert_eq!(via_sema.diag.mark, expected_mark);
         assert_eq!(
@@ -2226,7 +2473,11 @@ Law "Alpha" [priority 7]:
         );
 
         let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
-        assert_eq!(via_sema.diag.code, "E0000");
+        assert_eq!(via_sema.diag.code, "E0005");
+        assert_eq!(
+            via_sema.diag.canonical.range.clone().map(|r| r.start),
+            Some(expected_pos)
+        );
         assert_eq!(via_sema.diag.message, direct.message);
         assert_eq!(via_sema.diag.mark, expected_mark);
         assert_eq!(

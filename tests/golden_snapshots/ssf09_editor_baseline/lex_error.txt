@@ -1,0 +1,7 @@
+error[E0004]: unterminated string literal
+  --> lex_error.sm:2:19
+   |
+ 2 |     let s: text = "open
+   |                   ^^^^^
+
+check failed: 1 error(s), 0 warning(s)

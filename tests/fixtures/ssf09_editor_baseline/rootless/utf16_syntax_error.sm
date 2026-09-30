@@ -1,0 +1,3 @@
+fn main() {
+    let s: text = "日本語🎉"; let = 2;
+}

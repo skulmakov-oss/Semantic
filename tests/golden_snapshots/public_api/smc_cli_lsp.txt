@@ -1,0 +1,21 @@
+source: crates/smc-cli/src/lsp.rs
+pub const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_HEADER_LINE_BYTES: usize = 1024;
+pub const MAX_HEADER_BYTES: usize = 8 * 1024;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LspExit {
+Clean,
+Unclean,
+Framing(String),
+pub fn code(&self) -> u8 {
+pub struct LspServer<W: Write> {
+pub fn serve_stdio() -> LspExit {
+pub fn serve<R: BufRead, W: Write>(mut input: R, out: W) -> LspExit {
+pub fn read_message<R: BufRead>(input: &mut R) -> Result<Option<Vec<u8>>, String> {
+pub fn write_message<W: Write>(out: &mut W, value: &Value) -> io::Result<()> {
+pub fn new(out: W) -> Self {
+pub fn handle_body(&mut self, body: &[u8]) -> Option<LspExit> {
+pub fn lsp_position(text: &str, offset: usize) -> Value {
+pub fn utf16_position(text: &str, offset: usize) -> (usize, usize) {
+pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
+pub fn path_to_uri(path: &Path) -> String {

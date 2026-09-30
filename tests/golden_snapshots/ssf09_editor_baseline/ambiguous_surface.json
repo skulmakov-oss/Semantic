@@ -1,0 +1,31 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "failed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "ambiguous_surface.sm",
+      "identity": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "E0007",
+      "severity": "error",
+      "family": "frontend",
+      "message": "AMBIGUOUS / CONFLICTING SOURCE SURFACE\n\nEvidence:\nLogos     -> accepted\nRustLike  -> accepted",
+      "source": 0,
+      "range": null,
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": null
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "failure": null
+}

@@ -116,37 +116,53 @@ fn assert_cargo_metadata_isolation() {
         "sm-diagnostic id must be present in workspace_members in cargo metadata"
     );
 
+    // SSF-09 #1580 (post-C0): the producer adapters (C1B/C2/C3B/C4) and the
+    // canonical CLI/LSP host are the ONLY authorized consumers of the
+    // diagnostic contract leaf. Every other workspace package must stay
+    // independent of it, so a new edge is a deliberate governance change.
     for pkg in packages {
         let pkg_name = pkg["name"].as_str().unwrap_or_default();
         if pkg_name == "sm-diagnostic" {
             continue;
         }
+        let authorized = SM_DIAGNOSTIC_AUTHORIZED_CONSUMERS.contains(&pkg_name);
         if let Some(deps) = pkg["dependencies"].as_array() {
             for dep in deps {
                 let dep_name = dep["name"].as_str().unwrap_or_default();
                 let dep_rename = dep["rename"].as_str();
                 let dep_path = dep["path"].as_str().unwrap_or_default();
-
-                assert_ne!(
-                    dep_name, "sm-diagnostic",
-                    "package {pkg_name} depends on sm-diagnostic in cargo metadata"
-                );
-                if let Some(rename) = dep_rename {
-                    assert_ne!(
-                        rename, "sm-diagnostic",
-                        "package {pkg_name} renames dependency to sm-diagnostic in cargo metadata"
-                    );
-                }
                 let norm_path = dep_path.replace('\\', "/");
+                let references_leaf = dep_name == "sm-diagnostic"
+                    || dep_rename == Some("sm-diagnostic")
+                    || norm_path.ends_with("crates/sm-diagnostic")
+                    || norm_path.contains("/crates/sm-diagnostic/");
+                if !references_leaf {
+                    continue;
+                }
                 assert!(
-                    !norm_path.ends_with("crates/sm-diagnostic")
-                        && !norm_path.contains("/crates/sm-diagnostic/"),
-                    "package {pkg_name} depends on path referencing sm-diagnostic in cargo metadata: {dep_path}"
+                    authorized,
+                    "package {pkg_name} depends on sm-diagnostic but is not an authorized consumer"
+                );
+                assert_eq!(
+                    dep_rename, None,
+                    "package {pkg_name} must not rename the sm-diagnostic dependency"
                 );
             }
         }
     }
 }
+
+/// SSF-09 #1580: the exact set of packages allowed to depend on
+/// `sm-diagnostic` (producer adapters, the canonical host, and the root
+/// facade crate whose tests exercise the carrier).
+const SM_DIAGNOSTIC_AUTHORIZED_CONSUMERS: [&str; 6] = [
+    "sm-front",
+    "sm-sema",
+    "sm-verify",
+    "sm-vm",
+    "smc-cli",
+    "semantic_language",
+];
 
 fn assert_sm_diagnostic_manifest_zero_dependencies(manifest: &str) {
     let mut current_section = "";
@@ -234,8 +250,9 @@ fn assert_root_manifest_sm_diagnostic_isolation(root_manifest: &str) {
 
         if trimmed.contains("sm-diagnostic") {
             assert!(
-                in_workspace_members,
-                "root Cargo.toml line {}: sm-diagnostic is only authorized in [workspace].members, found: {trimmed}",
+                in_workspace_members
+                    || trimmed == r#"sm-diagnostic = { path = "crates/sm-diagnostic" }"#,
+                "root Cargo.toml line {}: sm-diagnostic is only authorized in [workspace].members and as the plain root path dependency, found: {trimmed}",
                 line_idx + 1
             );
         }
@@ -243,7 +260,7 @@ fn assert_root_manifest_sm_diagnostic_isolation(root_manifest: &str) {
 }
 
 #[test]
-fn sm_diagnostic_c0_has_zero_dependencies_and_is_isolated() {
+fn sm_diagnostic_has_zero_dependencies_and_only_authorized_consumers() {
     // Layer A: Authoritative semantic dependency graph inspection via Cargo metadata
     assert_cargo_metadata_isolation();
 

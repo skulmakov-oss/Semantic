@@ -12,6 +12,16 @@ pub mark: SourceMark,
 pub rendered: String,
 pub provider_module_id: Option<String>,
 pub frontend_error_kind: Option<FrontendErrorKind>,
+pub canonical: Box<CanonicalAttachment>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalAttachment {
+pub family: DiagnosticFamily,
+pub range: Option<Range<usize>>,
+pub canonical_message: Option<String>,
+pub related: Vec<FrontendRelated>,
+pub frontend_cause: Option<Box<FrontendDiagnostic>>,
+pub fn semantic(range: Option<Range<usize>>) -> Self {
+pub fn to_canonical(&self, source: Option<SourceId>) -> Option<CanonicalDiagnostic> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticError {
 pub diag: SemanticDiagnostic,

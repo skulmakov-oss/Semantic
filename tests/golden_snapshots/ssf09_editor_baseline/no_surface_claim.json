@@ -1,0 +1,31 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "failed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "no_surface_claim.sm",
+      "identity": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "E0008",
+      "severity": "error",
+      "family": "frontend",
+      "message": "NO SURFACE CLAIM: this input establishes no top-level evidence for either the Logos or RustLike grammar",
+      "source": 0,
+      "range": null,
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": null
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "failure": null
+}

@@ -14,3 +14,4 @@ alloc = ["ton618-core/alloc"]
 [dependencies]
 ton618-core = { path = "../ton618-core", default-features = false, features = ["alloc"] }
 sm-profile = { path = "../sm-profile", default-features = false, features = ["std"] }
+sm-diagnostic = { path = "../sm-diagnostic" }

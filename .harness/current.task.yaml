@@ -75,6 +75,31 @@ task:
     allow exactly `tests/legacy_guards.rs`, solely to add `./Cargo.lock` to the
     `ton618_content_inventory_is_explicit` expected inventory, because the
     tracked lockfile names the `ton618-core` package.
+    Repository owner explicit governance authorization (2026-09-29, "CONTINUE
+    GO - SSF-09 #1580 ONE-PR COMPLETION") to complete #1580 end to end in one
+    PR from base 05613f9d874bc5d7099fcb8f237c3ad76bc8bcde. This supersedes the
+    C0-only limits recorded above for exactly the following, and nothing else:
+    1. carrier phases C1A/C1B (sm-front), C2 (sm-sema), C3A/C3B (sm-verify),
+       C4 (sm-vm runtime admission), C5 (human renderer), C6 (versioned
+       external machine schema), all inside already-allowed crate paths;
+    2. dependency edges onto `sm-diagnostic` from exactly sm-front, sm-sema,
+       sm-verify, sm-vm, smc-cli and the root `semantic_language` package
+       (guarded by `tests/dependency_boundaries.rs`); `sm-diagnostic` itself
+       keeps zero dependencies;
+    3. the `smc check --format human|json` canonical path, the `smc lsp`
+       diagnostics-first stdio server, and the canonical formatter's
+       semantic-safety guard, all in `crates/smc-cli/**`;
+    4. catalog/mirror entries in the already-allowed
+       `crates/ton618-core/src/diagnostics.rs` and `docs/ERROR_CODES.md`.
+    It does NOT authorize SSF-10 work, prom-* changes, new external
+    dependencies, stable promotion, or merging without owner MERGE GO.
+    Repository owner explicit governance authorization (2026-09-30, "GO SSF-09
+    R3 REPAIR + MAIN INTEGRATION") to integrate main
+    f6b5f6d60230c7ff2229fef441df14562836fc5a into the #1580 branch by a
+    normal merge commit and to include the tracked `Cargo.lock` delta that
+    ordinary Cargo resolution produces for the `sm-diagnostic` dependency
+    edges authorized above (no other dependency or version change), together
+    with the R3 review repairs inside the paths already listed.
 
 intent:
   summary: >-
@@ -180,7 +205,7 @@ constraints:
   ownership_position: A
   ownership_position_decision_record: >-
     docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md
-  sm_diagnostic_c0_scope: crate_creation_only
+  sm_diagnostic_c0_scope: superseded_by_1580_completion_authorization
   sm_diagnostic_c0_dependency_rule: >-
     During C0, `dependency_changes: true` authorizes only creation of
     `crates/sm-diagnostic`, its root workspace membership in `Cargo.toml`, and its own

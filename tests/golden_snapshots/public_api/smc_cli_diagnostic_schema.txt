@@ -1,0 +1,9 @@
+source: crates/smc-cli/src/diagnostic_schema.rs
+pub const DIAGNOSTIC_SCHEMA_NAME: &str = "semantic.diagnostics";
+pub const DIAGNOSTIC_SCHEMA_VERSION: u32 = 1;
+pub fn render_json_report(report: &CanonicalCheckReport) -> String {
+pub fn render_json_failure(failure: &HostCheckFailure) -> String {
+pub(crate) fn severity_name(severity: DiagnosticSeverity) -> &'static str {
+pub(crate) fn family_name(family: DiagnosticFamily) -> &'static str {
+pub fn render_human_report(report: &CanonicalCheckReport) -> String {
+pub fn render_human_failure(failure: &HostCheckFailure) -> String {

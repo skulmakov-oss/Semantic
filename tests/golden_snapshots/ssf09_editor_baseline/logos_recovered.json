@@ -1,0 +1,86 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "failed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "logos_recovered.sm",
+      "identity": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "E0239",
+      "severity": "error",
+      "family": "semantic",
+      "message": "failed to parse module",
+      "source": 0,
+      "range": {
+        "start": {
+          "offset": 13,
+          "line": 1,
+          "column": 14
+        },
+        "end": {
+          "offset": 14,
+          "line": 2,
+          "column": 1
+        }
+      },
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": {
+        "kind": "diagnostic",
+        "diagnostics": [
+          {
+            "code": "E0211",
+            "severity": "error",
+            "family": "frontend",
+            "message": "expected ':'",
+            "source": 0,
+            "range": {
+              "start": {
+                "offset": 13,
+                "line": 1,
+                "column": 14
+              },
+              "end": {
+                "offset": 14,
+                "line": 2,
+                "column": 1
+              }
+            },
+            "related": [
+              {
+                "source": 0,
+                "range": {
+                  "start": {
+                    "offset": 31,
+                    "line": 2,
+                    "column": 18
+                  },
+                  "end": {
+                    "offset": 32,
+                    "line": 3,
+                    "column": 1
+                  }
+                },
+                "message": "E0211: expected ':'"
+              }
+            ],
+            "notes": [],
+            "fix": null,
+            "cause": null
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "failure": null
+}

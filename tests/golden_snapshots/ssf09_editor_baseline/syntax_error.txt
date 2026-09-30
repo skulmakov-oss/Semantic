@@ -1,0 +1,7 @@
+error[E0005]: expected identifier
+  --> syntax_error.sm:2:9
+   |
+ 2 |     let = 1;
+   |         ^
+
+check failed: 1 error(s), 0 warning(s)

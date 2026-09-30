@@ -1,0 +1,65 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "passed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "logos_warnings.sm",
+      "identity": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "W0240",
+      "severity": "warning",
+      "family": "semantic",
+      "message": "dead law branch detected in 'L': condition is always false",
+      "source": 0,
+      "range": {
+        "start": {
+          "offset": 54,
+          "line": 4,
+          "column": 5
+        },
+        "end": {
+          "offset": 58,
+          "line": 4,
+          "column": 9
+        }
+      },
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": null
+    },
+    {
+      "code": "W0252",
+      "severity": "warning",
+      "family": "semantic",
+      "message": "unused state 'A.x'",
+      "source": 0,
+      "range": {
+        "start": {
+          "offset": 14,
+          "line": 2,
+          "column": 5
+        },
+        "end": {
+          "offset": 19,
+          "line": 2,
+          "column": 10
+        }
+      },
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": null
+    }
+  ],
+  "summary": {
+    "errors": 0,
+    "warnings": 2
+  },
+  "failure": null
+}

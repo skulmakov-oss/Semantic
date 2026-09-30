@@ -190,7 +190,7 @@ fn pcc6_option_none_payload_rejects_and_does_not_verify() {
 fn pcc6_option_some_wrong_arity_rejects_and_does_not_verify() {
     assert_invalid_option_result_source_does_not_verify(
         "negative_option_some_wrong_arity.sm",
-        "E0000",
+        "E0005",
         "enum constructor payload cannot be empty parentheses; omit '()' for unit variant",
     );
 }

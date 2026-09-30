@@ -89,6 +89,7 @@ debug-symbols = []
 [dependencies]
 ton618-core = { path = "crates/ton618-core", default-features = false, features = ["alloc"] }
 sm-front = { path = "crates/sm-front", default-features = false, features = ["std"] }
+sm-diagnostic = { path = "crates/sm-diagnostic" }
 sm-profile = { path = "crates/sm-profile", default-features = false, features = ["std"] }
 sm-sema = { path = "crates/sm-sema", default-features = false, features = ["std"] }
 sm-ir = { path = "crates/sm-ir", default-features = false, features = ["std", "profile-rust", "profile-logos", "debug-symbols"] }

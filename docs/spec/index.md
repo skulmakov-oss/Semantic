@@ -26,6 +26,8 @@ Current documents in this PR:
 - `types.md` - source-level type contract and current type-family limits
 - `source_semantics.md` - source-level execution and binding semantics
 - `diagnostics.md` - source-facing parse, policy, type, and module diagnostics
+- `diagnostics_machine_schema_v1.md` - versioned machine-readable diagnostics schema (`smc check --format json`)
+- `editor_lsp_baseline.md` - `smc lsp` language-server baseline, formatter contract, and documented editor path
 - `modules.md` - module, import, and re-export contract
 - `logos.md` - declarative Logos source-surface contract
 - `source_style.md` - Semantic Canonical Source Style v0: presentation, layout,

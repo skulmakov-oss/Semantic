@@ -103,6 +103,7 @@ mod tests {
             assert_eq!(
                 adt_descriptor_table(&program),
                 Err(CompilePipelineError::Frontend(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("enum name '{name}' is reserved for the built-in ADT"),
                 }))

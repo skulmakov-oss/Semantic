@@ -1,0 +1,8 @@
+error[E0007]: AMBIGUOUS / CONFLICTING SOURCE SURFACE
+
+Evidence:
+Logos     -> accepted
+RustLike  -> accepted
+  --> ambiguous_surface.sm
+
+check failed: 1 error(s), 0 warning(s)

@@ -1,0 +1,18 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "passed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "ok.sm",
+      "identity": null
+    }
+  ],
+  "diagnostics": [],
+  "summary": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "failure": null
+}

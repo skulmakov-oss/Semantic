@@ -8,4 +8,6 @@ F,
 T,
 S,
 #[cfg(feature = "std")]
+pub mod diagnostic_admission;
+#[cfg(feature = "std")]
 pub use semcode_vm::*;

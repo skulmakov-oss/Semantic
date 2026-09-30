@@ -249,6 +249,7 @@ fn display_generated_api_type(ty: &Type, arena: &AstArena) -> Result<String, Fro
         ),
         Type::Sequence(_) => {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "ordered sequence types are not part of the current M8.3 Wave 1 generated API contract surface"
@@ -257,6 +258,7 @@ fn display_generated_api_type(ty: &Type, arena: &AstArena) -> Result<String, Fro
         }
         Type::Closure(_) => {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "first-class closure types are not part of the current M8.4 Wave 1 generated API contract surface"
@@ -265,6 +267,7 @@ fn display_generated_api_type(ty: &Type, arena: &AstArena) -> Result<String, Fro
         }
         Type::Map(_) => {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "Map types are not part of the current Wave 1 generated API contract surface"

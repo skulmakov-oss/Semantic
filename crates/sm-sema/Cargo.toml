@@ -15,3 +15,4 @@ alloc = ["ton618-core/alloc", "sm-front/alloc", "sm-profile/alloc"]
 ton618-core = { path = "../ton618-core", default-features = false, features = ["alloc"] }
 sm-front = { path = "../sm-front", default-features = false }
 sm-profile = { path = "../sm-profile", default-features = false }
+sm-diagnostic = { path = "../sm-diagnostic" }

@@ -1,0 +1,7 @@
+error[E0005]: expected identifier
+  --> utf16_syntax_error.sm:2:31
+   |
+ 2 |     let s: text = "日本語🎉"; let = 2;
+   |                               ^
+
+check failed: 1 error(s), 0 warning(s)

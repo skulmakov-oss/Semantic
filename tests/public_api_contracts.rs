@@ -22,6 +22,11 @@ fn semantic_diagnostic_public_shape_is_explicitly_qualified() {
         rendered: "rendered".to_string(),
         provider_module_id: Some("/virtual/module.sm".to_string()),
         frontend_error_kind: Some(FrontendErrorKind::Syntax),
+        canonical: Box::new(sm_sema::CanonicalAttachment {
+            family: sm_diagnostic::DiagnosticFamily::Frontend,
+            range: Some(3..7),
+            ..sm_sema::CanonicalAttachment::semantic(None)
+        }),
     };
 
     assert_eq!(
@@ -42,6 +47,14 @@ const TARGETS: &[(&str, &str)] = &[
     (
         "crates/sm-front/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_front_lib.txt",
+    ),
+    (
+        "crates/sm-front/src/diagnostic_authority.rs",
+        "tests/golden_snapshots/public_api/sm_front_diagnostic_authority.txt",
+    ),
+    (
+        "crates/sm-front/src/lexer.rs",
+        "tests/golden_snapshots/public_api/sm_front_lexer.txt",
     ),
     (
         "crates/sm-sema/src/lib.rs",
@@ -96,6 +109,10 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/sm_runtime_core_lib.txt",
     ),
     (
+        "crates/sm-verify/src/diagnostic_authority.rs",
+        "tests/golden_snapshots/public_api/sm_verify_diagnostic_authority.txt",
+    ),
+    (
         "crates/sm-verify/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_verify_lib.txt",
     ),
@@ -106,6 +123,10 @@ const TARGETS: &[(&str, &str)] = &[
     (
         "crates/sm-verify/src/hello_real_semcode_admission.rs",
         "tests/golden_snapshots/public_api/sm_verify_hello_real_semcode_admission.txt",
+    ),
+    (
+        "crates/sm-vm/src/diagnostic_admission.rs",
+        "tests/golden_snapshots/public_api/sm_vm_diagnostic_admission.txt",
     ),
     (
         "crates/sm-vm/src/lib.rs",
@@ -130,6 +151,22 @@ const TARGETS: &[(&str, &str)] = &[
     (
         "crates/prom-runtime/src/lib.rs",
         "tests/golden_snapshots/public_api/prom_runtime_lib.txt",
+    ),
+    (
+        "crates/smc-cli/src/canonical_check.rs",
+        "tests/golden_snapshots/public_api/smc_cli_canonical_check.txt",
+    ),
+    (
+        "crates/smc-cli/src/diagnostic_schema.rs",
+        "tests/golden_snapshots/public_api/smc_cli_diagnostic_schema.txt",
+    ),
+    (
+        "crates/smc-cli/src/lsp.rs",
+        "tests/golden_snapshots/public_api/smc_cli_lsp.txt",
+    ),
+    (
+        "crates/smc-cli/src/formatter.rs",
+        "tests/golden_snapshots/public_api/smc_cli_formatter.txt",
     ),
     (
         "crates/smc-cli/src/lib.rs",

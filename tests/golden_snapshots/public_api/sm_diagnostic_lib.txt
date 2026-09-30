@@ -18,6 +18,12 @@ Verification,
 Runtime,
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId();
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SourceRegistry {
+pub const fn new() -> Self {
+pub fn mint(&mut self) -> SourceId {
+pub const fn len(&self) -> u64 {
+pub const fn is_empty(&self) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OffsetOverflow;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -27,6 +33,7 @@ pub const fn as_u64(self) -> u64 {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceRange {
 pub fn new(start: ByteOffset, end: ByteOffset) -> Option<Self> {
+pub fn try_from_bounds(start: usize, end: usize) -> Option<Self> {
 pub const fn start(&self) -> ByteOffset {
 pub const fn end(&self) -> ByteOffset {
 pub const fn is_empty(&self) -> bool {
@@ -65,3 +72,4 @@ pub related_locations: Vec<RelatedLocation>,
 pub notes: Vec<DiagnosticNote>,
 pub fix_proposal: Option<FixProposal>,
 pub cause: Option<Box<DiagnosticCause>>,
+pub fn new( code: DiagnosticCode, severity: DiagnosticSeverity, family: DiagnosticFamily, message: DiagnosticMessage, ) -> Self {

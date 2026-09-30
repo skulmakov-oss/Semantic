@@ -1,0 +1,33 @@
+source: crates/sm-front/src/diagnostic_authority.rs
+pub const FRONTEND_SYNTAX_CODE: &str = "E0005";
+pub const FRONTEND_POLICY_VIOLATION_CODE: &str = "E0006";
+pub const FRONTEND_AMBIGUOUS_SURFACE_CODE: &str = "E0007";
+pub const FRONTEND_NO_SURFACE_CLAIM_CODE: &str = "E0008";
+pub const FRONTEND_TYPE_CHECK_CODE: &str = "E0201";
+pub const FRONTEND_DIAGNOSTIC_CODES: [&str; 9] = [ "E0001", "E0002", "E0004", FRONTEND_SYNTAX_CODE, FRONTEND_POLICY_VIOLATION_CODE, FRONTEND_AMBIGUOUS_SURFACE_CODE, FRONTEND_NO_SURFACE_CLAIM_CODE, "E0101", FRONTEND_TYPE_CHECK_CODE, ];
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FrontendStage {
+Lex,
+Parse,
+SurfaceResolution,
+TypeCheck,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendDiagnostic {
+pub stage: FrontendStage,
+pub code: &'static str,
+pub message: String,
+pub range: Option<Range<usize>>,
+pub related: Vec<FrontendRelated>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontendRelated {
+pub code: &'static str,
+pub message: String,
+pub range: Option<Range<usize>>,
+pub fn from_lex_failure(failure: &LexFailure) -> Self {
+pub fn from_parse_error(source: &str, tokens: &[Token], error: &FrontendError) -> Self {
+pub fn from_type_check_error(error: &FrontendError) -> Self {
+pub fn surface_resolution(code: &'static str, message: String) -> Self {
+pub const fn severity(&self) -> DiagnosticSeverity {
+pub fn to_canonical(&self, source: Option<SourceId>) -> Option<Diagnostic> {
+pub fn token_anchor_range(source: &str, tokens: &[Token], offset: usize) -> Option<Range<usize>> {
+pub fn token_anchor_range_at_mark( source: &str, tokens: &[Token], line: u32, col: u32, ) -> Option<Range<usize>> {

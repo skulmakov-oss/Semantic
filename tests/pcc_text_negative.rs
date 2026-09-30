@@ -49,7 +49,7 @@ fn pcc_text_negative_fixtures_fail_with_expected_markers() {
         },
         NegativeFixture {
             path: "tests/fixtures/pcc/text/fail/multiline_text.sm",
-            expected_markers: &["E0000", "unterminated string literal"],
+            expected_markers: &["E0004", "unterminated string literal"],
         },
         NegativeFixture {
             path: "tests/fixtures/pcc/text/fail/text_ordering.sm",

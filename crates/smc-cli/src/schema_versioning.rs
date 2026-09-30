@@ -746,6 +746,7 @@ fn display_schema_compatibility_type(ty: &Type, arena: &AstArena) -> Result<Stri
         ),
         Type::Sequence(_) => {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "ordered sequence types are not part of the current M8.3 Wave 1 schema compatibility surface"
@@ -754,6 +755,7 @@ fn display_schema_compatibility_type(ty: &Type, arena: &AstArena) -> Result<Stri
         }
         Type::Closure(_) => {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "first-class closure types are not part of the current M8.4 Wave 1 schema compatibility surface"
@@ -762,6 +764,7 @@ fn display_schema_compatibility_type(ty: &Type, arena: &AstArena) -> Result<Stri
         }
         Type::Map(_) => {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "Map types are not part of the current Wave 1 schema compatibility surface"

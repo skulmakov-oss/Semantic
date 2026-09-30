@@ -18,6 +18,8 @@ use sm_runtime_core::RuntimeQuotas;
 use std::collections::HashSet;
 
 #[cfg(feature = "std")]
+pub mod diagnostic_authority;
+#[cfg(feature = "std")]
 pub mod hello_pending_admission;
 #[cfg(feature = "std")]
 pub mod hello_real_semcode_admission;

@@ -1,0 +1,4 @@
+error[E0008]: NO SURFACE CLAIM: this input establishes no top-level evidence for either the Logos or RustLike grammar
+  --> no_surface_claim.sm
+
+check failed: 1 error(s), 0 warning(s)

@@ -1,6 +1,7 @@
 use crate::package_manifest::{
     admit_package_entry_module, resolve_package_import_path, PACKAGE_IMPORT_SEPARATOR,
 };
+use crate::source_access::SourceAccess;
 use sm_front::types::{
     AstArena, ExecutableImport, Expr, ExprId, Function, Stmt, StmtId, SymbolId, TokenKind, Type,
 };
@@ -85,6 +86,16 @@ impl From<PrepareSourceError> for String {
 /// rendering contract.
 pub(crate) fn prepare_source(path: &Path) -> Result<(String, PreparedSource), PrepareSourceError> {
     let source = read_raw_source(path).map_err(PrepareSourceError::Read)?;
+    prepare_source_text(source)
+}
+
+/// SSF-09 #1580: the same authority-freezing classification as
+/// [`prepare_source`], over root text the caller already holds (an editor
+/// overlay for an open document). The caller remains responsible for
+/// package admission of the root path, exactly as `read_raw_source` does.
+pub(crate) fn prepare_source_text(
+    source: String,
+) -> Result<(String, PreparedSource), PrepareSourceError> {
     let parser_profile = ParserProfile::foundation_default();
     let tokens = lex(&source).map_err(|error| PrepareSourceError::Lex {
         source: source.clone(),
@@ -121,13 +132,18 @@ pub(crate) fn compose_executable_bundle(
     raw_source: &str,
     root_program: &Program,
     parser_profile: &ParserProfile,
+    access: &dyn SourceAccess,
 ) -> Result<String, String> {
     if root_program.imports.is_empty() {
         return Ok(raw_source.to_string());
     }
-    let canonical = path
-        .canonicalize()
-        .map_err(|e| format!("failed to resolve '{}': {}", path.display(), e))?;
+    let canonical = path.canonicalize().map_err(|e| {
+        format!(
+            "failed to resolve '{}': {}",
+            access.display_path(path),
+            access.describe_io_error(&e)
+        )
+    })?;
     let mut visiting = Vec::<PathBuf>::new();
     let mut planned = BTreeMap::<PathBuf, ExecutableBundleModule>::new();
     let mut order = Vec::<PathBuf>::new();
@@ -138,13 +154,14 @@ pub(crate) fn compose_executable_bundle(
         &mut visiting,
         &mut planned,
         &mut order,
+        access,
     )?;
     let mut bundle = String::new();
     for (idx, module_path) in order.into_iter().enumerate() {
         let module = planned.get(&module_path).ok_or_else(|| {
             format!(
                 "missing executable bundle module '{}'",
-                module_path.display()
+                access.display_path(&module_path)
             )
         })?;
         let module_source = render_executable_bundle_module(module)?;
@@ -176,12 +193,13 @@ pub(crate) fn rustlike_effective_program(
     raw_source: &str,
     root_program: Program,
     parser_profile: &ParserProfile,
+    access: &dyn SourceAccess,
 ) -> Result<(String, Program), String> {
     if root_program.imports.is_empty() {
         return Ok((raw_source.to_string(), root_program));
     }
     let effective_source =
-        compose_executable_bundle(path, raw_source, &root_program, parser_profile)?;
+        compose_executable_bundle(path, raw_source, &root_program, parser_profile, access)?;
     let effective_program =
         parse_program_with_profile(&effective_source, parser_profile).map_err(|e| e.to_string())?;
     Ok((effective_source, effective_program))
@@ -243,7 +261,9 @@ impl ExecutableBundleMode {
 
 #[derive(Debug, Clone)]
 struct ExecutableBundleModule {
-    path: PathBuf,
+    /// SSF-09 #1580: the module's name in diagnostic text (and the seed of
+    /// its selected-import prefix), owned by the `SourceAccess` seam.
+    display: String,
     source: String,
     program: sm_front::Program,
     mode: ExecutableBundleMode,
@@ -256,13 +276,19 @@ fn collect_executable_bundle_plan(
     visiting: &mut Vec<PathBuf>,
     planned: &mut BTreeMap<PathBuf, ExecutableBundleModule>,
     order: &mut Vec<PathBuf>,
+    access: &dyn SourceAccess,
 ) -> Result<(), String> {
     admit_package_entry_module(path)
         .map(|_| ())
-        .map_err(|e| e.to_string())?;
-    let canonical = path
-        .canonicalize()
-        .map_err(|e| format!("failed to resolve '{}': {}", path.display(), e))?;
+        .map_err(|e| access.describe_admission_error_at(path, &e))?;
+    let canonical = path.canonicalize().map_err(|e| {
+        format!(
+            "failed to resolve '{}': {}",
+            access.display_path(path),
+            access.describe_io_error(&e)
+        )
+    })?;
+    let display = access.display_path(&canonical);
     if let Some(existing) = planned.get_mut(&canonical) {
         existing.mode.merge(requested_mode);
         return Ok(());
@@ -270,28 +296,28 @@ fn collect_executable_bundle_plan(
     if let Some(pos) = visiting.iter().position(|entry| entry == &canonical) {
         let mut chain = visiting[pos..]
             .iter()
-            .map(|entry| entry.to_string_lossy().replace('\\', "/"))
+            .map(|entry| access.display_path(entry).replace('\\', "/"))
             .collect::<Vec<_>>();
-        chain.push(canonical.to_string_lossy().replace('\\', "/"));
+        chain.push(display.replace('\\', "/"));
         return Err(format!(
             "cyclic executable helper import detected: {}",
             chain.join(" -> ")
         ));
     }
-    let source = std::fs::read_to_string(&canonical)
-        .map_err(|e| format!("failed to read '{}': {}", canonical.display(), e))?;
+    // SSF-09 #1580: the one source-reading seam (editor overlay first in
+    // the canonical check, disk otherwise).
+    let source = access.read_source(&canonical)?;
     let program = parse_program_with_profile(&source, parser_profile).map_err(|e| {
         format!(
             "executable helper module '{}' must parse on the Rust-like source path: {}",
-            canonical.display(),
-            e
+            display, e
         )
     })?;
     visiting.push(canonical.clone());
     for import in &program.imports {
-        validate_executable_bundle_import(&canonical, import)?;
+        validate_executable_bundle_import(Path::new(&display), import)?;
         let child = resolve_package_import_path(&canonical, &import.spec)
-            .map_err(|e| format!("{}: {}", canonical.display(), e))?;
+            .map_err(|e| format!("{}: {}", display, access.describe_resolution_error(&e)))?;
         let child_mode = requested_bundle_mode_for_import(&program.arena, import);
         collect_executable_bundle_plan(
             &child,
@@ -300,13 +326,14 @@ fn collect_executable_bundle_plan(
             visiting,
             planned,
             order,
+            access,
         )?;
     }
     let _ = visiting.pop();
     planned.insert(
         canonical.clone(),
         ExecutableBundleModule {
-            path: canonical.clone(),
+            display,
             source,
             program,
             mode: requested_mode,
@@ -420,9 +447,8 @@ fn synthesize_selected_executable_module(
         || !module.program.impls.is_empty()
     {
         return Err(selected_executable_import_function_only_message(
-            &module.path,
-            &module
-                .path
+            Path::new(&module.display),
+            &Path::new(&module.display)
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy(),
@@ -439,9 +465,8 @@ fn synthesize_selected_executable_module(
     for selected in bindings.selected_names() {
         if !functions_by_name.contains_key(&selected) {
             return Err(selected_executable_import_missing_symbol_message(
-                &module.path,
-                &module
-                    .path
+                Path::new(&module.display),
+                &Path::new(&module.display)
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy(),
@@ -455,10 +480,7 @@ fn synthesize_selected_executable_module(
         &functions_by_name,
         &bindings.selected_names(),
     );
-    let prefix = format!(
-        "execsel_{:016x}_",
-        fnv1a64(module.path.to_string_lossy().as_bytes())
-    );
+    let prefix = format!("execsel_{:016x}_", fnv1a64(module.display.as_bytes()));
     let mut rename_map = BTreeMap::<String, String>::new();
     for name in &required {
         rename_map.insert(name.clone(), format!("{prefix}{name}"));
@@ -468,9 +490,8 @@ fn synthesize_selected_executable_module(
     for (_original, public_name) in bindings.public_bindings() {
         if !public_names.insert(public_name.clone()) {
             return Err(selected_executable_import_public_collision_message(
-                &module.path,
-                &module
-                    .path
+                Path::new(&module.display),
+                &Path::new(&module.display)
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy(),
@@ -489,9 +510,8 @@ fn synthesize_selected_executable_module(
     for (original, public_name) in bindings.public_bindings() {
         let func = functions_by_name.get(&original).ok_or_else(|| {
             selected_executable_import_missing_symbol_message(
-                &module.path,
-                &module
-                    .path
+                Path::new(&module.display),
+                &Path::new(&module.display)
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy(),
@@ -501,16 +521,14 @@ fn synthesize_selected_executable_module(
         let internal = rename_map.get(&original).ok_or_else(|| {
             format!(
                 "missing internal executable selected-import binding for '{}' in '{}'",
-                original,
-                module.path.display()
+                original, module.display
             )
         })?;
         pieces.push(render_selected_import_wrapper(
-            &module.path,
+            Path::new(&module.display),
             &module.program.arena,
             func,
-            &module
-                .path
+            &Path::new(&module.display)
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy(),

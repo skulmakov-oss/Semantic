@@ -1,0 +1,17 @@
+source: crates/smc-cli/src/formatter.rs
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormatterMode {
+Write,
+Check,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormatterSummary {
+pub files_scanned: usize,
+pub files_changed: usize,
+pub changed_paths: Vec<PathBuf>,
+pub fn format_path(path: &Path, mode: FormatterMode) -> Result<FormatterSummary, String> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormatRefusal {
+SourceDoesNotLex,
+TokenStreamWouldChange,
+pub fn format_source_checked(input: &str) -> Result<String, FormatRefusal> {
+pub fn format_source_text(input: &str) -> String {

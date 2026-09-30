@@ -3581,6 +3581,7 @@ dependencies = [
  "prom-ui",
  "serde",
  "serde_json",
+ "sm-diagnostic",
  "sm-emit",
  "sm-format",
  "sm-front",
@@ -3770,6 +3771,7 @@ version = "0.1.0"
 name = "sm-front"
 version = "0.1.0"
 dependencies = [
+ "sm-diagnostic",
  "sm-profile",
  "ton618-core",
 ]
@@ -3799,6 +3801,7 @@ version = "0.1.0"
 name = "sm-sema"
 version = "0.1.0"
 dependencies = [
+ "sm-diagnostic",
  "sm-front",
  "sm-profile",
  "ton618-core",
@@ -3808,6 +3811,7 @@ dependencies = [
 name = "sm-verify"
 version = "0.1.0"
 dependencies = [
+ "sm-diagnostic",
  "sm-format",
  "sm-ir",
  "sm-runtime-core",
@@ -3820,6 +3824,7 @@ dependencies = [
  "prom-abi",
  "prom-cap",
  "semantic-core-quad",
+ "sm-diagnostic",
  "sm-emit",
  "sm-format",
  "sm-ir",
@@ -3846,6 +3851,7 @@ dependencies = [
  "semantic-hub-turbovec",
  "serde",
  "serde_json",
+ "sm-diagnostic",
  "sm-emit",
  "sm-front",
  "sm-ir",

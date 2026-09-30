@@ -18,25 +18,45 @@ fn push_tok(out: &mut Vec<Token>, kind: TokenKind, text: &str, pos: usize, line:
     });
 }
 
+/// SSF-09 C1A: the lexer's own producer-owned failure record. The lexer is
+/// the sole authority for its diagnostic code (`E0001`/`E0002`/`E0004`/
+/// `E0101`), its bare diagnostic detail, and the genuine UTF-8 byte range of
+/// the offending source text. `error` is the legacy rendered
+/// [`FrontendError`] every pre-existing `lex` caller still receives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LexFailure {
+    pub code: &'static str,
+    pub detail: String,
+    pub range: Option<core::ops::Range<usize>>,
+    pub error: FrontendError,
+}
+
 fn fmt_mark_error(
-    code: &str,
+    code: &'static str,
     line: u32,
     col: u32,
     line_text: &str,
     detail: &str,
     pos: usize,
-) -> FrontendError {
+    range: Option<core::ops::Range<usize>>,
+) -> LexFailure {
     let mut caret = String::new();
     let spaces = col.saturating_sub(1) as usize;
     for _ in 0..spaces {
         caret.push(' ');
     }
     caret.push('^');
-    FrontendError {
-        pos,
-        message: format!(
-            "error[{code}]: {detail}\n --> <input>:{line}:{col}\n  |\n{line:>2} | {line_text}\n  | {caret}"
-        ),
+    LexFailure {
+        code,
+        detail: detail.to_string(),
+        range,
+        error: FrontendError {
+            detail: None,
+            pos,
+            message: format!(
+                "error[{code}]: {detail}\n --> <input>:{line}:{col}\n  |\n{line:>2} | {line_text}\n  | {caret}"
+            ),
+        },
     }
 }
 
@@ -45,7 +65,7 @@ fn tokenize_line(
     line_no: u32,
     line_start: usize,
     out: &mut Vec<Token>,
-) -> Result<(), FrontendError> {
+) -> Result<(), LexFailure> {
     let bytes = line_text.as_bytes();
     let mut i = 0usize;
     while i < bytes.len() {
@@ -182,6 +202,7 @@ fn tokenize_line(
                         line_text,
                         "expected '&&'",
                         abs_pos,
+                        Some(abs_pos..abs_pos + 1),
                     ));
                 }
             }
@@ -264,6 +285,7 @@ fn tokenize_line(
                         line_text,
                         "unterminated string literal",
                         abs_pos,
+                        Some(abs_pos..line_start + line_text.trim_end_matches('\r').len()),
                     ));
                 }
                 i += 1;
@@ -363,13 +385,16 @@ fn tokenize_line(
                 push_tok(out, kind, text, abs_pos, line_no, col);
             }
             _ => {
+                // Decode the whole UTF-8 scalar: `c` is only its first byte.
+                let unexpected = line_text.get(start..).and_then(|rest| rest.chars().next());
                 return Err(fmt_mark_error(
                     "E0001",
                     line_no,
                     col,
                     line_text,
-                    &format!("unexpected character '{}'", c as char),
+                    &format!("unexpected character '{}'", unexpected.unwrap_or(c as char)),
                     abs_pos,
+                    unexpected.map(|ch| abs_pos..abs_pos + ch.len_utf8()),
                 ));
             }
         }
@@ -391,12 +416,24 @@ fn compute_indent(line: &str) -> usize {
     n
 }
 
+fn leading_indent_bytes(line: &str) -> usize {
+    line.bytes()
+        .take_while(|b| *b == b' ' || *b == b'\t')
+        .count()
+}
+
 fn line_is_blank_or_comment(line: &str) -> bool {
     let t = line.trim_start_matches([' ', '\t', '\r']);
     t.is_empty() || t.starts_with("//") || t.starts_with('#')
 }
 
 pub fn lex_tokens(input: &str) -> Result<Vec<Token>, FrontendError> {
+    lex_tokens_with_authority(input).map_err(|failure| failure.error)
+}
+
+/// SSF-09 C1A: the one lexer, exposing its producer-owned failure record
+/// instead of only the legacy rendered [`FrontendError`].
+pub fn lex_tokens_with_authority(input: &str) -> Result<Vec<Token>, LexFailure> {
     let mut out = Vec::new();
     let mut indent_stack: Vec<usize> = vec![0];
     let mut line_no: u32 = 1;
@@ -446,6 +483,7 @@ pub fn lex_tokens(input: &str) -> Result<Vec<Token>, FrontendError> {
                         line_text,
                         "Bad Indent",
                         line_start,
+                        Some(line_start..line_start + leading_indent_bytes(line_text)),
                     ));
                 }
             }
@@ -504,6 +542,15 @@ mod tests {
         let toks = lex_tokens(src).expect("frontend lexer");
         assert!(toks.iter().any(|t| t.kind == TokenKind::KwEntity));
         assert!(toks.iter().any(|t| t.kind == TokenKind::Indent));
+    }
+
+    #[test]
+    fn unexpected_non_ascii_character_is_reported_whole() {
+        let src = "fn main() {\n    let \u{e9} = 1;\n}\n";
+        let failure = lex_tokens_with_authority(src).unwrap_err();
+        assert_eq!(failure.code, "E0001");
+        assert_eq!(failure.detail, "unexpected character '\u{e9}'");
+        assert_eq!(&src[failure.range.unwrap()], "\u{e9}");
     }
 
     #[test]

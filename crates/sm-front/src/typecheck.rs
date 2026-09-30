@@ -45,6 +45,7 @@ fn validate_executable_imports(program: &Program) -> Result<(), FrontendError> {
             || (import.spec.contains("::") && !import.select_items.is_empty())
         {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: executable_import_wave2_out_of_scope_message().to_string(),
             });
@@ -68,6 +69,7 @@ pub(crate) fn validate_function_generic_arity(
     if func.type_params.len() > 1 {
         let name = resolve_symbol_name(arena, func.name)?;
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "function '{name}' declares {} type parameters; first-wave generic \
@@ -134,6 +136,7 @@ fn resolve_explicit_iterable_loop_item_type(
             .iter()
             .find(|method| resolve_symbol_name(arena, method.name).ok() == Some("next"))
             .ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: iterable_for_impl_contract_message().to_string(),
             })?;
@@ -142,12 +145,14 @@ fn resolve_explicit_iterable_loop_item_type(
             || method.params[1].1 != Type::I32
         {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: iterable_for_impl_contract_message().to_string(),
             });
         }
         let Type::Option(item_ty) = &method.ret else {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: iterable_for_impl_contract_message().to_string(),
             });
@@ -201,6 +206,7 @@ pub fn type_check_function(program: &Program) -> Result<(), FrontendError> {
     validate_executable_imports(program)?;
     if program.functions.len() != 1 {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "type_check_function expects exactly one function in program".to_string(),
         });
@@ -258,15 +264,18 @@ pub fn type_check_program(p: &Program) -> Result<(), FrontendError> {
         .get("main")
         .copied()
         .ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: "program must define fn main()".to_string(),
         })?;
     let main_sig = table.get(&main_id).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: "program must define fn main()".to_string(),
     })?;
     if !main_sig.params.is_empty() || main_sig.ret != Type::Unit {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "main must have signature fn main()".to_string(),
         });
@@ -311,6 +320,7 @@ pub fn derive_validation_plan_table(
     let mut plans = ValidationPlanTable::new();
     for schema in &program.schemas {
         let _ = schema_table.get(&schema.name).ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "missing schema '{}' in canonical schema table",
@@ -373,6 +383,7 @@ fn type_check_function_with_tables(
     validate_function_generic_arity(func, arena)?;
     if func.params.len() != func.param_defaults.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "function parameter/default metadata length mismatch".to_string(),
         });
@@ -462,6 +473,7 @@ fn type_check_function_with_tables(
             )?;
             if let Err(err) = ensure_const_initializer_safe(*default_expr, arena, &mut empty_env) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: err.pos,
                     message: format!(
                         "default parameter '{}' {}",
@@ -566,6 +578,7 @@ fn check_requires_clauses(
         )?;
         if condition_ty != Type::Bool {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "requires clause condition must be bool, got {:?}",
@@ -628,6 +641,7 @@ fn check_ensures_clauses(
         )?;
         if condition_ty != Type::Bool {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "ensures clause condition must be bool, got {:?}",
@@ -691,6 +705,7 @@ fn check_invariant_clauses(
         )?;
         if condition_ty != Type::Bool {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "invariant clause condition must be bool, got {:?}",
@@ -724,6 +739,7 @@ fn ensure_contract_result_name_available(
                 (true, true) => unreachable!("contract result reservation requires contract clauses"),
             };
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: message.to_string(),
             });
@@ -739,6 +755,7 @@ fn ensure_invariant_result_usage(func: &Function, arena: &AstArena) -> Result<()
     for condition in &func.invariants {
         if contract_clause_references_result(*condition, arena)? {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "invariant clause may reference 'result' only in non-unit return functions"
@@ -828,6 +845,7 @@ fn check_if_branches_joined(
     )?;
     if ct != Type::Bool {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "if condition must be bool; explicit compare is required for quad".to_string(),
         });
@@ -926,6 +944,7 @@ fn apply_arm_pattern_capture(
     let Some((root, base_path)) = expr_access_path(scrutinee_expr, arena) else {
         if !plan.items.is_empty() && expr_is_projection_shaped(scrutinee_expr, arena) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "pattern capture against a projected scrutinee that is not an admitted static path (e.g. a dynamically-computed index) cannot be tracked; bind the scrutinee to a local first or use a supported static path".to_string(),
             });
@@ -987,6 +1006,7 @@ fn check_match_arms_joined(
         Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _) | Type::I32 | Type::U32
     ) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "match is allowed only for quad, enum, Option(T), Result(T, E), i32, or u32 scrutinee"
@@ -1048,6 +1068,7 @@ fn check_match_arms_joined(
             Some(_) => {}
             None => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "match requires default arm '_'".to_string(),
                 });
@@ -1149,6 +1170,7 @@ fn run_loop_body_to_fixed_point(
         candidate = next_candidate;
     }
     Err(FrontendError {
+        detail: None,
         pos: 0,
         message:
             "internal ownership state: loop body ownership analysis did not reach a fixed point"
@@ -1340,12 +1362,14 @@ fn check_stmt(
             };
             let Type::Tuple(item_tys) = final_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "tuple destructuring bind requires tuple value".to_string(),
                 });
             };
             if item_tys.len() != items.len() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "tuple destructuring bind arity mismatch: expected {}, got {}",
@@ -1359,12 +1383,14 @@ fn check_stmt(
                     TuplePatternItem::Bind { .. } | TuplePatternItem::Discard => {}
                     TuplePatternItem::QuadLiteral(_) => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "quad literal tuple patterns currently require let-else; plain tuple destructuring bind supports only name/_/ref items".to_string(),
                         });
                     }
                     TuplePatternItem::Nested(_) => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "nested tuple patterns are not yet supported in plain let bindings; use let-else form".to_string(),
                         });
@@ -1404,6 +1430,7 @@ fn check_stmt(
             )?;
             if value_ty != Type::Record(*record_name) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "record destructuring bind requires value of type '{}', got {:?}",
@@ -1415,6 +1442,7 @@ fn check_stmt(
             for item in items {
                 if matches!(item.target, RecordPatternTarget::QuadLiteral(_)) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "quad literal record field patterns currently require let-else; plain record destructuring bind supports only name/_ items"
@@ -1462,6 +1490,7 @@ fn check_stmt(
             )?;
             if value_ty != Type::Record(*record_name) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "record let-else requires value of type '{}', got {:?}",
@@ -1484,6 +1513,7 @@ fn check_stmt(
             let mut saw_refutable_item = false;
             for item in items {
                 let record = record_table.get(record_name).ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unknown record type '{}' in record let-else",
@@ -1495,6 +1525,7 @@ fn check_stmt(
                     .iter()
                     .find(|field| field.name == item.field)
                     .ok_or(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "record type '{}' has no field named '{}' in let-else",
@@ -1511,6 +1542,7 @@ fn check_stmt(
                             != Type::Quad
                         {
                             return Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!(
                                     "record let-else literal pattern requires quad field, got {:?}",
@@ -1528,6 +1560,7 @@ fn check_stmt(
             }
             if !saw_refutable_item {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "record let-else requires at least one refutable quad literal field pattern"
@@ -1601,12 +1634,14 @@ fn check_stmt(
             };
             let Type::Tuple(item_tys) = final_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "let-else tuple destructuring bind requires tuple value".to_string(),
                 });
             };
             if item_tys.len() != items.len() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "let-else tuple destructuring bind arity mismatch: expected {}, got {}",
@@ -1684,6 +1719,7 @@ fn check_stmt(
         }
         Stmt::Assign { name, value } => {
             let target_ty = env.get(*name).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "unknown assignment target '{}'",
@@ -1692,6 +1728,7 @@ fn check_stmt(
             })?;
             if env.is_const(*name)? {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "cannot assign to const binding '{}'",
@@ -1733,12 +1770,14 @@ fn check_stmt(
             )?;
             let Type::Tuple(item_tys) = value_ty else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "tuple destructuring assignment requires tuple value".to_string(),
                 });
             };
             if item_tys.len() != items.len() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "tuple destructuring assignment arity mismatch: expected {}, got {}",
@@ -1752,6 +1791,7 @@ fn check_stmt(
                     continue;
                 };
                 let target_ty = env.get(*name).ok_or(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unknown tuple assignment target '{}'",
@@ -1760,6 +1800,7 @@ fn check_stmt(
                 })?;
                 if env.is_const(*name)? {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "cannot assign to const binding '{}' in tuple destructuring assignment",
@@ -1794,6 +1835,7 @@ fn check_stmt(
             )?;
             if range_ty != Type::RangeI32 {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "for-range currently requires i32 range expression".to_string(),
                 });
@@ -1826,6 +1868,7 @@ fn check_stmt(
             )?;
             if condition_ty != Type::Bool {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "while condition must be bool; explicit compare is required for quad"
                         .to_string(),
@@ -1961,6 +2004,7 @@ fn check_stmt(
                 _ => iterable_for_gap_message().to_string(),
             };
             Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "{} (`{}` contract)",
@@ -1971,11 +2015,13 @@ fn check_stmt(
         }
         Stmt::Break(None) => {
             let frame = loop_stack.last().ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "bare break is allowed only inside while or statement loop".to_string(),
             })?;
             if !matches!(frame.kind, LoopTypeFrameKind::Control) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "bare break is allowed only inside while or statement loop"
                         .to_string(),
@@ -1996,11 +2042,13 @@ fn check_stmt(
                 impl_list,
             )?;
             let frame = loop_stack.last_mut().ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "break with value is allowed only inside loop expression".to_string(),
             })?;
             if !matches!(frame.kind, LoopTypeFrameKind::Expression) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "break with value is allowed only inside loop expression".to_string(),
                 });
@@ -2008,6 +2056,7 @@ fn check_stmt(
             if let Some(expected) = &frame.break_ty {
                 if *expected != break_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "loop expression break type mismatch: expected {:?}, got {:?}",
@@ -2022,11 +2071,13 @@ fn check_stmt(
         }
         Stmt::Continue => {
             let frame = loop_stack.last().ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "continue is allowed only inside while or statement loop".to_string(),
             })?;
             if !matches!(frame.kind, LoopTypeFrameKind::Control) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "continue is allowed only inside while or statement loop".to_string(),
                 });
@@ -2050,6 +2101,7 @@ fn check_stmt(
             )?;
             if condition_ty != Type::Bool {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "guard clause condition must be bool; explicit compare is required for quad"
@@ -2230,6 +2282,7 @@ fn ensure_typevars_declared(
                 Ok(())
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "type variable '{}' is not declared as one of this function's type parameters",
@@ -2319,6 +2372,7 @@ fn collect_generic_constraints(
             }
             Some(existing) if existing == actual => Ok(()),
             Some(existing) => Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "conflicting generic constraints for type parameter '{}': {:?} vs {:?}",
@@ -2527,6 +2581,7 @@ fn infer_expr_type(
             )?;
             if start_ty != Type::I32 || end_ty != Type::I32 {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "range literal currently requires i32 bounds, got {:?}..{:?}",
@@ -2552,6 +2607,7 @@ fn infer_expr_type(
                 )?;
                 if item_ty == Type::RangeI32 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "range literal is not yet part of the stable tuple/user-data surface"
@@ -2621,6 +2677,7 @@ fn infer_expr_type(
         Expr::Var(v) => {
             // M9.9: path check moved to top of infer_expr_type via expr_access_path.
             env.get(*v).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("unknown variable '{}'", resolve_symbol_name(arena, *v)?),
             })
@@ -2657,6 +2714,7 @@ fn infer_expr_type(
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "if expression condition must be bool; explicit compare is required for quad"
@@ -2691,6 +2749,7 @@ fn infer_expr_type(
             )?;
             if then_ty != else_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "if expression branch type mismatch: then {:?}, else {:?}",
@@ -2780,6 +2839,7 @@ fn infer_expr_type(
             )?;
             if then_ty != else_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "if-let branch type mismatch: then is {:?}, else is {:?}",
@@ -2793,6 +2853,7 @@ fn infer_expr_type(
         Expr::Call(name, args) => {
             if is_builtin_assert_name(*name, arena, table)? {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message:
                         "assert builtin is statement-only and cannot be used as expression value"
@@ -2803,6 +2864,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "len" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'len' takes exactly one positional argument".to_string(),
                     });
@@ -2821,6 +2883,7 @@ fn infer_expr_type(
                 return match &arg_ty {
                     Type::Sequence(_) => Ok(Type::I32),
                     _ => Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'len' expects a Sequence argument, got {:?}",
@@ -2836,6 +2899,7 @@ fn infer_expr_type(
                 let builtin_name = resolve_symbol_name(arena, *name)?;
                 if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin '{builtin_name}' takes exactly two positional arguments"
@@ -2855,6 +2919,7 @@ fn infer_expr_type(
                 )?;
                 let Type::Sequence(seq_type) = &seq_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin '{builtin_name}' first argument must be a Sequence, got {:?}",
@@ -2876,6 +2941,7 @@ fn infer_expr_type(
                 )?;
                 if val_ty != elem_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin '{builtin_name}' second argument type {:?} does not match \
@@ -2890,6 +2956,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "contains" {
                 if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'contains' takes exactly two positional arguments"
                             .to_string(),
@@ -2908,6 +2975,7 @@ fn infer_expr_type(
                 )?;
                 let Type::Sequence(seq_type) = &seq_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'contains' first argument must be a Sequence, got {:?}",
@@ -2921,6 +2989,7 @@ fn infer_expr_type(
                     Type::I32 | Type::U32 | Type::Bool | Type::Text | Type::Quad => {}
                     other => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "builtin 'contains' does not yet support element type {:?}; \
@@ -2943,6 +3012,7 @@ fn infer_expr_type(
                 )?;
                 if val_ty != elem_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'contains' second argument type {:?} does not match \
@@ -2957,6 +3027,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "is_empty" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'is_empty' takes exactly one positional argument"
                             .to_string(),
@@ -2976,6 +3047,7 @@ fn infer_expr_type(
                 return match &arg_ty {
                     Type::Sequence(_) => Ok(Type::Bool),
                     _ => Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'is_empty' expects a Sequence argument, got {:?}",
@@ -2988,6 +3060,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "pop" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'pop' takes exactly one positional argument".to_string(),
                     });
@@ -3006,6 +3079,7 @@ fn infer_expr_type(
                 return match &arg_ty {
                     Type::Sequence(_) => Ok(arg_ty),
                     _ => Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'pop' expects a Sequence argument, got {:?}",
@@ -3018,6 +3092,7 @@ fn infer_expr_type(
             // infer_expr_type_with_expected. If we reach here, context is absent.
             if resolve_symbol_name(arena, *name)? == "map_empty" {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "map_empty() requires a contextual Map(K, V) type; \
                          use 'let q: Map(K, V) = map_empty()'"
@@ -3028,6 +3103,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "map_contains" {
                 if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'map_contains' takes exactly two positional arguments"
                             .to_string(),
@@ -3046,6 +3122,7 @@ fn infer_expr_type(
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_contains' first argument must be Map, got {:?}",
@@ -3058,6 +3135,7 @@ fn infer_expr_type(
                     Type::I32 | Type::U32 | Type::Bool | Type::Text | Type::Quad => {}
                     other => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "builtin 'map_contains' does not support key type {:?}; \
@@ -3080,6 +3158,7 @@ fn infer_expr_type(
                 )?;
                 if actual_key_ty != key_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_contains' key type {:?} does not match map key type {:?}",
@@ -3093,6 +3172,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "map_get" {
                 if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "builtin 'map_get' takes exactly three positional arguments (map, key, default)"
@@ -3112,6 +3192,7 @@ fn infer_expr_type(
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_get' first argument must be Map, got {:?}",
@@ -3125,6 +3206,7 @@ fn infer_expr_type(
                     Type::I32 | Type::U32 | Type::Bool | Type::Text | Type::Quad => {}
                     other => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "builtin 'map_get' does not support key type {:?}; \
@@ -3147,6 +3229,7 @@ fn infer_expr_type(
                 )?;
                 if actual_key_ty != key_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_get' key type {:?} does not match map key type {:?}",
@@ -3167,6 +3250,7 @@ fn infer_expr_type(
                 )?;
                 if actual_default_ty != val_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_get' default type {:?} does not match map value type {:?}",
@@ -3180,6 +3264,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "map_set" {
                 if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "builtin 'map_set' takes exactly three positional arguments (map, key, value)"
@@ -3199,6 +3284,7 @@ fn infer_expr_type(
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_set' first argument must be Map, got {:?}",
@@ -3212,6 +3298,7 @@ fn infer_expr_type(
                     Type::I32 | Type::U32 | Type::Bool | Type::Text | Type::Quad => {}
                     other => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "builtin 'map_set' does not support key type {:?}; \
@@ -3234,6 +3321,7 @@ fn infer_expr_type(
                 )?;
                 if actual_key_ty != key_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_set' key type {:?} does not match map key type {:?}",
@@ -3254,6 +3342,7 @@ fn infer_expr_type(
                 )?;
                 if actual_val_ty != val_ty {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'map_set' value type {:?} does not match map value type {:?}",
@@ -3269,6 +3358,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "print" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "builtin 'print' takes exactly one positional argument (msg: text)"
@@ -3288,6 +3378,7 @@ fn infer_expr_type(
                 )?;
                 if arg_ty != Type::Text {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!("builtin 'print' expects text, got {:?}", arg_ty),
                     });
@@ -3297,6 +3388,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "to_text" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "builtin 'to_text' takes exactly one positional argument"
                             .to_string(),
@@ -3320,6 +3412,7 @@ fn infer_expr_type(
                     Type::Record(sym) => {
                         let name_str = resolve_symbol_name(arena, *sym).unwrap_or("<unknown>");
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "builtin 'to_text' does not yet support record type '{name_str}'"
@@ -3328,6 +3421,7 @@ fn infer_expr_type(
                     }
                     other => {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "builtin 'to_text' currently supports text, bool, i32, u32, and quad; got {:?}",
@@ -3340,6 +3434,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "random_seed" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "builtin 'random_seed' takes exactly one positional argument (seed: i32)"
@@ -3359,6 +3454,7 @@ fn infer_expr_type(
                 )?;
                 if seed_ty != Type::I32 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'random_seed' expects i32 seed, got {:?}",
@@ -3372,6 +3468,7 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "random_next_i32" {
                 if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "builtin 'random_next_i32' takes exactly two positional arguments (lo: i32, hi: i32)"
@@ -3402,6 +3499,7 @@ fn infer_expr_type(
                 )?;
                 if lo_ty != Type::I32 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'random_next_i32' lo must be i32, got {:?}",
@@ -3411,6 +3509,7 @@ fn infer_expr_type(
                 }
                 if hi_ty != Type::I32 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "builtin 'random_next_i32' hi must be i32, got {:?}",
@@ -3429,6 +3528,7 @@ fn infer_expr_type(
                     || closure_ty.capture != ClosureCapturePolicy::Immutable
                 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "direct invocation currently admits only the UnaryDirect immutable closure family in M8.4 Wave 3"
@@ -3437,6 +3537,7 @@ fn infer_expr_type(
                 }
                 if args.len() != 1 || args.iter().any(|arg| arg.name.is_some()) {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "direct invocation of first-class closure values currently requires exactly one positional argument in M8.4 Wave 3"
@@ -3468,6 +3569,7 @@ fn infer_expr_type(
                 return Ok(closure_ty.ret.as_ref().clone());
             } else {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("unknown function '{}'", resolve_symbol_name(arena, *name)?),
                 });
@@ -3492,6 +3594,7 @@ fn infer_expr_type(
                 for bound in &sig.trait_bounds {
                     if !sig.type_params.contains(&bound.param) {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "trait bound references type parameter '{}' which is not declared on '{}'",
@@ -3530,6 +3633,7 @@ fn infer_expr_type(
                 for tp in &sig.type_params {
                     if !subst.contains_key(tp) {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "cannot infer type for type parameter '{}' in call to '{}': no argument constrains it",
@@ -3550,6 +3654,7 @@ fn infer_expr_type(
                         });
                         if !satisfied {
                             return Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!(
                                     "type {:?} does not implement trait '{}' required by '{}'",
@@ -3584,6 +3689,7 @@ fn infer_expr_type(
                         if expected_ty == Type::Fx && is_numeric_for_fx_gap(&at) {
                             if !is_fx_literal_expr(*arg, arena) {
                                 return Err(FrontendError {
+                                    detail: None,
                                     pos: 0,
                                     message: format!(
                                         "{}; arg {} for '{}' currently requires an fx literal or an existing fx-typed value",
@@ -3595,6 +3701,7 @@ fn infer_expr_type(
                             }
                         } else {
                             return Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!(
                                     "arg {} for '{}' has type {:?}, expected {:?}",
@@ -3624,6 +3731,7 @@ fn infer_expr_type(
                     if expected_ty == Type::Fx && is_numeric_for_fx_gap(&at) {
                         if !is_fx_literal_expr(*arg, arena) {
                             return Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!(
                                     "{}; arg {} for '{}' currently requires an fx literal or an existing fx-typed value",
@@ -3635,6 +3743,7 @@ fn infer_expr_type(
                         }
                     } else {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "arg {} for '{}' has type {:?}, expected {:?}",
@@ -3666,6 +3775,7 @@ fn infer_expr_type(
                 UnaryOp::Not => match t {
                     Type::Quad | Type::Bool => Ok(t),
                     _ => Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!("operator ! unsupported for {:?}", t),
                     }),
@@ -3682,17 +3792,20 @@ fn infer_expr_type(
                             Ok(t)
                         } else if *base == Type::Fx {
                             Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: fx_measured_arithmetic_gap_message().to_string(),
                             })
                         } else {
                             Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!("operator +/- unsupported for {:?}", t),
                             })
                         }
                     } else {
                         Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator +/- unsupported for {:?}", t),
                         })
@@ -3727,6 +3840,7 @@ fn infer_expr_type(
                 BinaryOp::Eq | BinaryOp::Ne => {
                     if lt == Type::RangeI32 && rt == Type::RangeI32 {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "range equality is not part of the stable v0 range surface"
                                 .to_string(),
@@ -3739,6 +3853,7 @@ fn infer_expr_type(
                             "equality is allowed only when the value family already supports stable equality"
                         };
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: message.to_string(),
                         });
@@ -3747,6 +3862,7 @@ fn infer_expr_type(
                         Ok(Type::Bool)
                     } else {
                         Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("cannot compare {:?} and {:?}", lt, rt),
                         })
@@ -3757,11 +3873,13 @@ fn infer_expr_type(
                         Ok(Type::Bool)
                     } else if lt == rt {
                         Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: first_wave_relational_gap_message().to_string(),
                         })
                     } else {
                         Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("cannot compare {:?} and {:?}", lt, rt),
                         })
@@ -3770,6 +3888,7 @@ fn infer_expr_type(
                 BinaryOp::AndAnd | BinaryOp::OrOr => {
                     if lt != rt {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator type mismatch: {:?} vs {:?}", lt, rt),
                         });
@@ -3777,6 +3896,7 @@ fn infer_expr_type(
                     match lt {
                         Type::Quad | Type::Bool => Ok(lt),
                         _ => Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator unsupported for {:?}", lt),
                         }),
@@ -3787,6 +3907,7 @@ fn infer_expr_type(
                         Ok(Type::Quad)
                     } else {
                         Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "operator '->' is allowed only for quad".to_string(),
                         })
@@ -3795,6 +3916,7 @@ fn infer_expr_type(
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     if matches!(lt, Type::Sequence(_)) || matches!(rt, Type::Sequence(_)) {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: "ordered sequence values are not part of the current M8.3 Wave 1 operator surface"
                                 .to_string(),
@@ -3805,6 +3927,7 @@ fn infer_expr_type(
                             return Ok(Type::Text);
                         }
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message:
                                 "text concatenation currently admits only text + text operands"
@@ -3826,11 +3949,13 @@ fn infer_expr_type(
                     {
                         if lt != rt {
                             return Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!("operator type mismatch: {:?} vs {:?}", lt, rt),
                             });
                         }
                         let (base, _) = measured_numeric_parts(&lt).ok_or(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!("operator unsupported for {:?}", lt),
                         })?;
@@ -3838,17 +3963,20 @@ fn infer_expr_type(
                             BinaryOp::Add | BinaryOp::Sub if *base == Type::F64 => Ok(lt),
                             BinaryOp::Add | BinaryOp::Sub if *base == Type::Fx => {
                                 Err(FrontendError {
+                                    detail: None,
                                     pos: 0,
                                     message: fx_measured_arithmetic_gap_message().to_string(),
                                 })
                             }
                             BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message:
                                     "*, /, % on unit-carrying values are rejected in the first-wave units surface"
                                         .to_string(),
                             }),
                             _ => Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!("operator unsupported for {:?}", lt),
                             }),
@@ -3857,6 +3985,7 @@ fn infer_expr_type(
                     if lt == Type::Fx && rt == Type::Fx {
                         return match op {
                             BinaryOp::Mod => Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!("operator % unsupported for {:?}", lt),
                             }),
@@ -3866,6 +3995,7 @@ fn infer_expr_type(
                     if lt == Type::F64 && rt == Type::F64 {
                         match op {
                             BinaryOp::Mod => Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!("operator % unsupported for {:?}", lt),
                             }),
@@ -3873,6 +4003,7 @@ fn infer_expr_type(
                         }
                     } else {
                         Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "f64 arithmetic requires f64 operands, got {:?} and {:?}",
@@ -13827,12 +13958,14 @@ fn check_builtin_assert_stmt(
     }
     if args.iter().any(|a| a.name.is_some()) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "assert builtin takes exactly one positional argument".to_string(),
         });
     }
     if args.len() != 1 {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!("assert builtin expects 1 arg, got {}", args.len()),
         });
@@ -13850,6 +13983,7 @@ fn check_builtin_assert_stmt(
     )?;
     if cond_ty != Type::Bool {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!("assert builtin requires bool condition, got {:?}", cond_ty),
         });
@@ -13898,6 +14032,7 @@ fn infer_value_block_type(
             }
             _ => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "value-producing block currently supports only const-bindings, let-bindings, discard binds, and expression statements before the tail value".to_string(),
                 });
@@ -13942,6 +14077,7 @@ fn build_pattern_arm_env(
 ) -> Result<ScopeEnv, FrontendError> {
     if matches!(pattern, MatchPattern::Or(_)) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "or-pattern match arms ('A | B') are not supported; split into separate arms with identical bodies instead".to_string(),
         });
@@ -13993,6 +14129,7 @@ fn infer_match_expr_type(
         Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _) | Type::I32 | Type::U32
     ) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "match expression is allowed only for quad, enum, Option(T), Result(T, E), i32, or u32 scrutinee"
@@ -14044,6 +14181,7 @@ fn infer_match_expr_type(
         if let Some(ref expected) = result_ty {
             if *expected != arm_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "match expression branch type mismatch: expected {:?}, got {:?}",
@@ -14072,6 +14210,7 @@ fn infer_match_expr_type(
         if let Some(expected) = result_ty {
             if expected != default_ty {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "match expression branch type mismatch: expected {:?}, got {:?}",
@@ -14099,6 +14238,7 @@ fn infer_match_expr_type(
             }
             None => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "match expression requires default arm '_'".to_string(),
                 })
@@ -14146,6 +14286,7 @@ fn infer_loop_expr_type(
     let frame = loop_stack.pop().expect("loop frame must exist");
     result?;
     frame.break_ty.ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: "loop expression requires at least one break value".to_string(),
     })
@@ -14164,26 +14305,32 @@ fn check_loop_expr_stmt(
 ) -> Result<(), FrontendError> {
     match arena.stmt(stmt_id) {
         Stmt::LetElseTuple { .. } | Stmt::LetElseRecord { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow let-else".to_string(),
         }),
         Stmt::ForRange { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow for-range".to_string(),
         }),
         Stmt::While { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow while statement".to_string(),
         }),
         Stmt::Loop { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow statement loop".to_string(),
         }),
         Stmt::ForEach { .. } => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow iterable for-each".to_string(),
         }),
         Stmt::Guard { .. } | Stmt::Return(..) | Stmt::Continue => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "loop expression body currently does not allow guard clause or return"
                 .to_string(),
@@ -14252,6 +14399,7 @@ fn validate_trait_coherence(impls: &[ImplDecl], arena: &AstArena) -> Result<(), 
     for imp in impls {
         if !imp.type_params.is_empty() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "impl of trait '{}' for type '{}' declares type parameters; \
@@ -14264,6 +14412,7 @@ fn validate_trait_coherence(impls: &[ImplDecl], arena: &AstArena) -> Result<(), 
         let key = (imp.trait_name, imp.for_type);
         if !seen.insert(key) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "duplicate impl of trait '{}' for type '{}'",
@@ -14292,6 +14441,7 @@ fn validate_impl_conformance(
             validate_function_generic_arity(method, arena)?;
             if !seen_methods.insert(method.name) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "impl of '{}' for '{}' defines duplicate method '{}'",
@@ -14306,6 +14456,7 @@ fn validate_impl_conformance(
             Some(t) => t,
             None => {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "impl references unknown trait '{}'",
@@ -14333,6 +14484,7 @@ fn validate_impl_conformance(
             &[],
         )
         .map_err(|err| FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "impl of trait '{}' for '{}': {}",
@@ -14343,6 +14495,7 @@ fn validate_impl_conformance(
             match imp.methods.iter().find(|m| m.name == trait_method.name) {
                 None => {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "impl of '{}' for '{}' is missing method '{}'",
@@ -14355,6 +14508,7 @@ fn validate_impl_conformance(
                 Some(m) => {
                     if m.params.len() != trait_method.params.len() {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "impl method '{}' has {} parameter(s), expected {} from trait '{}'",
@@ -14391,6 +14545,7 @@ fn validate_impl_conformance(
                         );
                         if actual_ty != expected_ty {
                             return Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: format!(
                                     "impl method '{}' parameter type {:?} does not match expected {:?} from trait '{}'",
@@ -14416,6 +14571,7 @@ fn validate_impl_conformance(
                     );
                     if actual_ret != expected_ret {
                         return Err(FrontendError {
+                            detail: None,
                             pos: 0,
                             message: format!(
                                 "impl method '{}' has return type {:?}, expected {:?} from trait '{}'",
@@ -14432,6 +14588,7 @@ fn validate_impl_conformance(
         for method in &imp.methods {
             if !trait_decl.methods.iter().any(|tm| tm.name == method.name) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "impl of trait '{}' for '{}' defines method '{}' not declared by the trait",
@@ -14562,6 +14719,7 @@ fn validate_top_level_name_collisions(
     for record in &program.records {
         if fn_table.contains_key(&record.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both record and function",
@@ -14571,6 +14729,7 @@ fn validate_top_level_name_collisions(
         }
         if adt_table.contains_key(&record.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both record and enum",
@@ -14580,6 +14739,7 @@ fn validate_top_level_name_collisions(
         }
         if schema_table.contains_key(&record.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both record and schema",
@@ -14591,6 +14751,7 @@ fn validate_top_level_name_collisions(
     for adt in &program.adts {
         if fn_table.contains_key(&adt.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both enum and function",
@@ -14600,6 +14761,7 @@ fn validate_top_level_name_collisions(
         }
         if record_table.contains_key(&adt.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both enum and record",
@@ -14609,6 +14771,7 @@ fn validate_top_level_name_collisions(
         }
         if schema_table.contains_key(&adt.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both enum and schema",
@@ -14620,6 +14783,7 @@ fn validate_top_level_name_collisions(
     for schema in &program.schemas {
         if fn_table.contains_key(&schema.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both schema and function",
@@ -14629,6 +14793,7 @@ fn validate_top_level_name_collisions(
         }
         if record_table.contains_key(&schema.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both schema and record",
@@ -14638,6 +14803,7 @@ fn validate_top_level_name_collisions(
         }
         if adt_table.contains_key(&schema.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "top-level name '{}' cannot be used for both schema and enum",
@@ -14657,6 +14823,7 @@ fn validate_record_declarations(
     for record in &program.records {
         if record.fields.is_empty() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "record '{}' must declare at least 1 field",
@@ -14668,6 +14835,7 @@ fn validate_record_declarations(
         for field in &record.fields {
             if !seen.insert(field.name) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "record '{}' cannot repeat field '{}'",
@@ -14730,6 +14898,7 @@ fn validate_adt_declarations(
     for adt in &program.adts {
         if adt.variants.is_empty() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "enum '{}' must declare at least 1 variant",
@@ -14741,6 +14910,7 @@ fn validate_adt_declarations(
         for variant in &adt.variants {
             if !seen.insert(variant.name) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "enum '{}' cannot repeat variant '{}'",
@@ -14802,6 +14972,7 @@ fn validate_schema_declarations(
 ) -> Result<(), FrontendError> {
     for schema in &program.schemas {
         let _ = schema_table.get(&schema.name).ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "missing schema '{}' in canonical schema table",
@@ -14837,6 +15008,7 @@ fn validate_record_shaped_schema(
 ) -> Result<(), FrontendError> {
     if fields.is_empty() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "schema '{}' must declare at least 1 field",
@@ -14848,6 +15020,7 @@ fn validate_record_shaped_schema(
     for field in fields {
         if !seen.insert(field.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "schema '{}' cannot repeat field '{}'",
@@ -14954,6 +15127,7 @@ fn validate_tagged_union_schema(
 ) -> Result<(), FrontendError> {
     if variants.is_empty() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "schema '{}' must declare at least 1 variant",
@@ -14965,6 +15139,7 @@ fn validate_tagged_union_schema(
     for variant in variants {
         if !seen_variants.insert(variant.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "schema '{}' cannot repeat variant '{}'",
@@ -14977,6 +15152,7 @@ fn validate_tagged_union_schema(
         for field in &variant.fields {
             if !seen_fields.insert(field.name) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "schema '{}::{}' cannot repeat field '{}'",
@@ -15016,6 +15192,7 @@ fn validate_record_acyclic(
     }
     if !active.insert(record_name) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record declarations currently do not allow recursive field graph involving '{}'",
@@ -15024,6 +15201,7 @@ fn validate_record_acyclic(
         });
     }
     let record = record_table.get(&record_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown record type '{}'",
@@ -15051,6 +15229,7 @@ fn validate_adt_acyclic(
     }
     if !active.insert(adt_name) {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "enum declarations currently do not allow recursive payload graph involving '{}'",
@@ -15059,6 +15238,7 @@ fn validate_adt_acyclic(
         });
     }
     let adt = adt_table.get(&adt_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown enum type '{}'",
@@ -15138,6 +15318,7 @@ fn ensure_type_resolved(
                 Ok(())
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unit annotation is allowed only on i32, u32, f64, or fx in {}",
@@ -15151,6 +15332,7 @@ fn ensure_type_resolved(
                 Ok(())
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unknown record type '{}' in {}",
@@ -15165,6 +15347,7 @@ fn ensure_type_resolved(
                 Ok(())
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "unknown enum type '{}' in {}",
@@ -15299,6 +15482,7 @@ pub(crate) fn ensure_executable_type_supported(
                 Ok(())
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "type variable '{}' is not admitted as an executable type in {}",
@@ -15309,6 +15493,7 @@ pub(crate) fn ensure_executable_type_supported(
             }
         }
         Type::QVec(_) => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "qvec is a reserved type and is not yet admitted as an executable type in {}",
@@ -15432,6 +15617,7 @@ fn ensure_storage_type_supported(
             Ok(())
         }
         Type::TypeVar(name) => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "type variable '{}' is not admitted as a storage type in {}",
@@ -15440,10 +15626,12 @@ fn ensure_storage_type_supported(
             ),
         }),
         Type::RangeI32 => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!("range values are not admitted as a storage type in {context}"),
         }),
         Type::QVec(_) => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "qvec is a reserved type and is not admitted as a storage type in {context}"
@@ -15517,6 +15705,7 @@ fn ensure_contract_expr_supported(
             ensure_contract_expr_supported(*rhs, arena, clause_name, binding_desc)
         }
         _ => Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "{clause_name} clause currently allows only {binding_desc}, tuple literals, record/sequence reads, and pure unary/binary operator expressions"
@@ -15628,6 +15817,7 @@ fn supports_stable_equality_type_inner(
                 return Ok(false);
             }
             let record = record_table.get(name).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: "record equality subset references unknown record type".to_string(),
             })?;
@@ -15674,6 +15864,7 @@ fn infer_record_literal_type(
     let record = record_table
         .get(&record_literal.name)
         .ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "unknown record type '{}' in record literal",
@@ -15692,6 +15883,7 @@ fn infer_record_literal_type(
     for field in &record_literal.fields {
         if !seen.insert(field.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "record literal '{}' cannot repeat field '{}'",
@@ -15701,6 +15893,7 @@ fn infer_record_literal_type(
             });
         }
         let expected_ty = field_types.get(&field.name).ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record literal '{}' has no field named '{}'",
@@ -15735,6 +15928,7 @@ fn infer_record_literal_type(
     for decl_field in &record.fields {
         if !seen.contains(&decl_field.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "record literal '{}' is missing field '{}'",
@@ -15772,6 +15966,7 @@ fn infer_record_field_access_type(
     )?;
     let Type::Record(record_name) = base_ty else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record field access requires record value before '.{}', got {:?}",
@@ -15781,6 +15976,7 @@ fn infer_record_field_access_type(
         });
     };
     let record = record_table.get(&record_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown record type '{}' in field access",
@@ -15792,6 +15988,7 @@ fn infer_record_field_access_type(
         .iter()
         .find(|field| field.name == field_expr.field)
         .ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record type '{}' has no field named '{}'",
@@ -15827,6 +16024,7 @@ fn infer_sequence_index_type(
     )?;
     let Type::Sequence(sequence_ty) = base_ty else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "sequence indexing requires Sequence(type) base before '[...]', got {:?}",
@@ -15847,6 +16045,7 @@ fn infer_sequence_index_type(
     )?;
     if index_ty != Type::I32 {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "sequence indexing currently requires i32 index, got {:?}",
@@ -15881,6 +16080,7 @@ fn infer_record_update_type(
     )?;
     let Type::Record(record_name) = base_ty else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record copy-with requires record base before 'with', got {:?}",
@@ -15889,6 +16089,7 @@ fn infer_record_update_type(
         });
     };
     let record = record_table.get(&record_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown record type '{}' in record copy-with",
@@ -15898,6 +16099,7 @@ fn infer_record_update_type(
     let record_name_text = resolve_symbol_name(arena, record_name)?;
     if update_expr.fields.is_empty() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: "record copy-with requires at least one explicit override field".to_string(),
         });
@@ -15913,6 +16115,7 @@ fn infer_record_update_type(
     for field in &update_expr.fields {
         if !seen.insert(field.name) {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "record copy-with '{}' cannot repeat field '{}'",
@@ -15922,6 +16125,7 @@ fn infer_record_update_type(
             });
         }
         let expected_ty = field_types.get(&field.name).ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record copy-with '{}' has no field named '{}'",
@@ -15983,6 +16187,7 @@ fn infer_adt_ctor_type(
         return Ok(ty);
     }
     let adt = adt_table.get(&ctor_expr.adt_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown enum type '{}' in constructor",
@@ -15994,6 +16199,7 @@ fn infer_adt_ctor_type(
         .iter()
         .find(|variant| variant.name == ctor_expr.variant_name)
         .ok_or(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "enum '{}' has no variant named '{}'",
@@ -16003,6 +16209,7 @@ fn infer_adt_ctor_type(
         })?;
     if variant.payload.len() != ctor_expr.payload.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "enum constructor '{}::{}' expects {} payload items, got {}",
@@ -16070,6 +16277,7 @@ fn infer_expr_type_with_expected(
             if let Some(types) = expected_items {
                 if types.len() != items.len() {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "tuple arity mismatch in typed position: expected {}, got {}",
@@ -16096,6 +16304,7 @@ fn infer_expr_type_with_expected(
                 )?;
                 if item_ty == Type::RangeI32 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message:
                             "range literal is not yet part of the stable tuple/user-data surface"
@@ -16164,6 +16373,7 @@ fn infer_expr_type_with_expected(
                             }
                             invalid_key => {
                                 return Err(FrontendError {
+                                        detail: None,
                                         pos: 0,
                                         message: format!(
                                             "map_empty() does not support key type {:?}; admitted key types are i32, u32, bool, text, quad",
@@ -16174,6 +16384,7 @@ fn infer_expr_type_with_expected(
                         },
                         _ => {
                             return Err(FrontendError {
+                                detail: None,
                                 pos: 0,
                                 message: "map_empty() requires a contextual Map(K, V) type; \
                                      use 'let q: Map(K, V) = map_empty()'"
@@ -16243,6 +16454,7 @@ fn infer_sequence_literal_type(
     if sequence.items.is_empty() {
         let Some(expected_item) = expected_item else {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "empty ordered sequence literal currently requires contextual Sequence(type) in M8.3 Wave 2"
@@ -16332,6 +16544,7 @@ fn infer_closure_literal_type(
 ) -> Result<Type, FrontendError> {
     let Some(Type::Closure(expected_closure)) = expected else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "first-class closure literals currently require contextual Closure(T -> U) type in M8.4 Wave 2"
@@ -16341,6 +16554,7 @@ fn infer_closure_literal_type(
 
     if expected_closure.family != closure.family || expected_closure.capture != closure.capture {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "first-class closure literal does not match the current Wave 2 closure family/capture contract"
@@ -16351,6 +16565,7 @@ fn infer_closure_literal_type(
     for capture in &closure.captures {
         if env.get(*capture).is_none() {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "unknown captured value '{}' in first-class closure literal",
@@ -16405,6 +16620,7 @@ fn infer_std_form_ctor_type(
             "Some" => {
                 if ctor_expr.payload.len() != 1 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "Option::Some expects exactly one payload item".to_string(),
                     });
@@ -16449,6 +16665,7 @@ fn infer_std_form_ctor_type(
             "None" => {
                 if !ctor_expr.payload.is_empty() {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "Option::None does not accept payload items".to_string(),
                     });
@@ -16458,6 +16675,7 @@ fn infer_std_form_ctor_type(
                         Ok(Some(Type::Option(Box::new((**item_ty).clone()))))
                     }
                     _ => Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "Option::None currently requires contextual Option(T) type in v0"
                             .to_string(),
@@ -16465,6 +16683,7 @@ fn infer_std_form_ctor_type(
                 }
             }
             _ => Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("Option has no variant named '{}'", variant_name),
             }),
@@ -16476,6 +16695,7 @@ fn infer_std_form_ctor_type(
             "Ok" | "Err" => {
                 if ctor_expr.payload.len() != 1 {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "Result::{} expects exactly one payload item",
@@ -16485,6 +16705,7 @@ fn infer_std_form_ctor_type(
                 }
                 let Some(Type::Result(ok_ty, err_ty)) = expected else {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "Result::{} currently requires contextual Result(T, E) type in v0",
@@ -16522,6 +16743,7 @@ fn infer_std_form_ctor_type(
                 )))
             }
             _ => Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("Result has no variant named '{}'", variant_name),
             }),
@@ -16553,6 +16775,7 @@ fn resolve_match_family_spec(
     match scrutinee_ty {
         Type::Adt(adt_name) => {
             let adt = adt_table.get(adt_name).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "unknown enum type '{}' in match resolution",
@@ -16674,6 +16897,7 @@ fn non_exhaustive_match_error(
     expression: bool,
 ) -> Result<FrontendError, FrontendError> {
     Ok(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "non-exhaustive match{} for {}; missing variants: {}",
@@ -16709,6 +16933,7 @@ fn check_match_guard(
         )?;
         if guard_ty != Type::Bool {
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message:
                     "match guard condition must be bool; explicit compare is required for quad"
@@ -16754,6 +16979,7 @@ fn check_return_payload(
                 }
             }
             return Err(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "{}; function return currently requires an fx literal or an existing fx-typed value",
@@ -16762,6 +16988,7 @@ fn check_return_payload(
             });
         }
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!("return type mismatch: expected {:?}, got {:?}", ret_ty, got),
         });
@@ -16787,6 +17014,7 @@ fn ensure_binding_value_type(
             return Ok(());
         }
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "{}; {} currently accepts only fx literals or existing fx-typed values",
@@ -16796,6 +17024,7 @@ fn ensure_binding_value_type(
         });
     }
     Err(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "type mismatch in {}: {:?} vs {:?}",
@@ -16834,6 +17063,7 @@ fn ensure_const_initializer_safe(
             // diagnostic first.
             if env.get(*name).is_none() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!("unknown variable '{}'", resolve_symbol_name(arena, *name)?),
                 });
@@ -16842,6 +17072,7 @@ fn ensure_const_initializer_safe(
                 Ok(())
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "const initializer currently allows only literals, unary/binary operations, and references to earlier const bindings; '{}' is not const",
@@ -16856,6 +17087,7 @@ fn ensure_const_initializer_safe(
             ensure_const_initializer_safe(*rhs, arena, env)
         }
         _ => Err(FrontendError {
+            detail: None,
             pos: 0,
             message:
                 "const initializer currently supports only pure literal/const expression forms"
@@ -16902,6 +17134,7 @@ pub(crate) fn validate_binding_plan_conflicts(plan: &BindingPlan) -> Result<(), 
             }
             if captures_conflict(a.capture, b.capture) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "conflicting captures on overlapping pattern paths for '{}' and '{}'",
@@ -16940,6 +17173,7 @@ fn validate_tuple_pattern_quad_literals(
             TuplePatternItem::QuadLiteral(_) => {
                 if *item_ty != Type::Quad {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: format!(
                             "let-else tuple literal pattern requires quad element, got {:?}",
@@ -16968,6 +17202,7 @@ pub(crate) fn build_tuple_pattern_plan(
 ) -> Result<(), FrontendError> {
     let Type::Tuple(tuple_items) = expected_ty else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "tuple pattern requires tuple scrutinee, got {:?}",
@@ -16977,6 +17212,7 @@ pub(crate) fn build_tuple_pattern_plan(
     };
     if items.len() != tuple_items.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "tuple pattern arity mismatch: pattern has {} items, value has {}",
@@ -17017,6 +17253,7 @@ pub(crate) fn build_record_pattern_plan(
 ) -> Result<(), FrontendError> {
     let Type::Record(record_name) = expected_ty else {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "record pattern requires record scrutinee, got {:?}",
@@ -17025,6 +17262,7 @@ pub(crate) fn build_record_pattern_plan(
         });
     };
     let record = record_table.get(record_name).ok_or(FrontendError {
+        detail: None,
         pos: 0,
         message: format!(
             "unknown record type '{}' in record pattern",
@@ -17037,6 +17275,7 @@ pub(crate) fn build_record_pattern_plan(
             .iter()
             .find(|field| field.name == item.field)
             .ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!(
                     "record type '{}' has no field named '{}' in record pattern",
@@ -17068,6 +17307,7 @@ pub(crate) fn build_adt_pattern_plan(
 ) -> Result<(), FrontendError> {
     let family = resolve_match_family_spec(expected_ty, arena, record_table, adt_table)?
         .ok_or_else(|| FrontendError {
+            detail: None,
             pos: 0,
             message: "ADT pattern plan: scrutinee is not a sum type".to_string(),
         })?;
@@ -17075,6 +17315,7 @@ pub(crate) fn build_adt_pattern_plan(
     let pattern_family_name = resolve_symbol_name(arena, pat.adt_name)?.to_string();
     if pattern_family_name != family.family_name {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "match arm pattern type '{}' does not match scrutinee {}",
@@ -17088,6 +17329,7 @@ pub(crate) fn build_adt_pattern_plan(
         .iter()
         .find(|v| v.name == variant_name_str)
         .ok_or_else(|| FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "{} has no variant named '{}' in match pattern",
@@ -17097,6 +17339,7 @@ pub(crate) fn build_adt_pattern_plan(
 
     if pat.items.len() != variant.payload.len() {
         return Err(FrontendError {
+            detail: None,
             pos: 0,
             message: format!(
                 "ADT pattern '{}::{}' arity mismatch: pattern has {} items, variant has {}",
@@ -17146,6 +17389,7 @@ pub(crate) fn build_match_pattern_plan(
                 Ok(())
             } else {
                 Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "quad match pattern requires quad scrutinee, got {:?}",
@@ -17157,6 +17401,7 @@ pub(crate) fn build_match_pattern_plan(
         MatchPattern::IntRange(range) => {
             if !matches!(expected_ty, Type::I32 | Type::U32) {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "integer match pattern requires i32 or u32 scrutinee, got {:?}",
@@ -17166,6 +17411,7 @@ pub(crate) fn build_match_pattern_plan(
             }
             if range.start > range.end {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: format!(
                         "int range pattern start ({}) must be <= end ({})",
@@ -17187,6 +17433,7 @@ pub(crate) fn build_match_pattern_plan(
         MatchPattern::Or(alts) => {
             if alts.is_empty() {
                 return Err(FrontendError {
+                    detail: None,
                     pos: 0,
                     message: "or-pattern must contain at least one alternative".to_string(),
                 });
@@ -17230,6 +17477,7 @@ pub(crate) fn build_match_pattern_plan(
 
                 if shape != baseline {
                     return Err(FrontendError {
+                        detail: None,
                         pos: 0,
                         message: "all or-pattern alternatives must bind the same names with the same capture modes".to_string(),
                     });
@@ -17330,6 +17578,7 @@ fn infer_expr_type_no_check(
             // No path check here; the outer infer_expr_type call for the full
             // field/index expression already checked the correct sub-path.
             env.get(*v).ok_or(FrontendError {
+                detail: None,
                 pos: 0,
                 message: format!("unknown variable '{}'", resolve_symbol_name(arena, *v)?),
             })

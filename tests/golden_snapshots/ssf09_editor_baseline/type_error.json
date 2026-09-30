@@ -1,0 +1,31 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "failed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "type_error.sm",
+      "identity": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "E0201",
+      "severity": "error",
+      "family": "frontend",
+      "message": "type mismatch in let 'x': I32 vs Bool",
+      "source": 0,
+      "range": null,
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": null
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "failure": null
+}

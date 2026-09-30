@@ -399,3 +399,26 @@ This document does not yet claim stable support for:
 Any public change to source-facing diagnostic families, stable source error
 codes, or policy/type/module diagnostic boundaries should update this document
 in the same change series.
+
+## Canonical carrier and machine schema (SSF-09 `#1580`)
+
+Every source-stage diagnostic above is also projected, by its producer's own
+adapter, into the canonical internal carrier `sm-diagnostic`, and from there
+into the versioned external schema `semantic.diagnostics` v1
+(`diagnostics_machine_schema_v1.md`, `smc check --format json`) and the
+canonical human renderer (`smc check --format human`). In that projection:
+
+- the retired generic code `E0000` is never emitted: lexer failures keep the
+  lexer's own `E0001`-`E0004`/`E0101`; RustLike parse failures use `E0005`
+  (syntax) or `E0006` (profile policy); the Logos parser's own `E02xx` codes
+  are relayed from its structured error detail; surface resolution uses
+  `E0007` (ambiguous) or `E0008` (no claim); executable-bundle composition
+  uses `E0009`; the RustLike type checker keeps `E0201`;
+- a source range is present only when producer authority proves it and is
+  otherwise absent (never `1:1`, never zero-width from a legacy point);
+- imported-module diagnostics are bound to that module's own source and its
+  package identity (`package`, module-root-relative `module` path).
+
+The legacy default `smc check` rendering described above is unchanged
+transitional presentation.
+

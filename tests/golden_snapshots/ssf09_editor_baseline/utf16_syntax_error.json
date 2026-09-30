@@ -1,0 +1,42 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 1,
+  "status": "failed",
+  "sources": [
+    {
+      "index": 0,
+      "path": "utf16_syntax_error.sm",
+      "identity": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "E0005",
+      "severity": "error",
+      "family": "frontend",
+      "message": "expected identifier",
+      "source": 0,
+      "range": {
+        "start": {
+          "offset": 51,
+          "line": 2,
+          "column": 31
+        },
+        "end": {
+          "offset": 52,
+          "line": 2,
+          "column": 32
+        }
+      },
+      "related": [],
+      "notes": [],
+      "fix": null,
+      "cause": null
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "failure": null
+}
