@@ -271,7 +271,7 @@ Rules:
 | PCC-6 Option/Result | skip | pass | pass | pass | pass | pass | pass | pass |
 | PCC-7 Collections   | skip | pass | pass | pass | pass | pass | pass | pass |
 | PCC-8 Stdlib        | skip | pass | skip | pass | pass | pass | pass | pass |
-| PCC-9 Project Model | pass | pass | pass | pass | pass | pass | pass | pass |
+| PCC-9 Project Model | not_implemented | not_implemented | not_implemented | not_implemented | not_implemented | not_implemented | pass | not_implemented |
 
 Use only the canonical report status tokens: `pass`, `fail`, `blocked`,
 `skip`, or `not_implemented`.

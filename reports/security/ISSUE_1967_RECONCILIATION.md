@@ -33,10 +33,10 @@ Historical audit CSV/JSON remain immutable; this is derived current-state eviden
 | FND-371 | REM-010 | FIXED_LATER_CONFIRMED | test discovery sorts losslessly or rejects invalid names |
 | FND-157 | REM-011 | FIXED_LATER_CONFIRMED | 7hell is wired through shared CLI dispatch |
 | FND-159 | REM-011 | FIXED_LATER_CONFIRMED | type-check failures map to Type Hell |
-| FND-160 | REM-011 | FIXED_BY_THIS_PR | structured producer origin separates parser and semantic diagnostics even when both use E0221 |
+| FND-160 | REM-011 | FIXED_BY_THIS_PR | parser Law-name syntax uses E0217 while semantic duplicate Law retains E0221; structured origin remains authoritative |
 | FND-161 | REM-011 | FIXED_LATER_CONFIRMED | VM blocker graph contains no self-cycle |
 | FND-162 | REM-011 | FIXED_LATER_CONFIRMED | verifier failure report matches blocked VM behavior |
-| FND-163 | REM-011 | FIXED_LATER_CONFIRMED | successful 7hell execution does not rerun SemCode |
+| FND-163 | REM-011 | FIXED_BY_THIS_PR | successful 7hell executes the verified entry once and qualifies the observations returned by that execution |
 | FND-167 | REM-011 | FIXED_LATER_CONFIRMED | report quality validates blocked_by targets |
 | FND-069 | REM-012 | FIXED_BY_THIS_PR | call argument register addition is checked |
 | FND-070 | REM-012 | FIXED_BY_THIS_PR | scalar-only backend hot paths no longer reprobe CPU caps |

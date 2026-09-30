@@ -4492,6 +4492,13 @@ fn collect_controlled_observation_envelope(
 
     let events = run_semcode_collecting_hello_observations_with_config(bytes, execution_config)
         .map_err(|e| e.to_string())?;
+    qualify_collected_observation_events(events, execution_config)
+}
+
+fn qualify_collected_observation_events(
+    events: Vec<sm_runtime_core::hello_observation_sink::HelloObservationEvent>,
+    execution_config: ExecutionConfig,
+) -> Result<ControlledObservationInternalEnvelope, String> {
     let mut capability_manifest = CapabilityManifest::new();
     capability_manifest.allow(CapabilityKind::ControlledObservationSink);
 
@@ -4573,11 +4580,27 @@ fn collect_controlled_observation_envelope(
     })
 }
 
+pub(crate) fn qualify_controlled_observation_events(
+    events: Vec<sm_runtime_core::hello_observation_sink::HelloObservationEvent>,
+) -> Result<ControlledObservationQualificationEnvelope, String> {
+    let internal = qualify_collected_observation_events(
+        events,
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+    )?;
+    Ok(qualification_envelope(internal))
+}
+
 pub(crate) fn qualify_controlled_observation_envelope(
     bytes: &[u8],
 ) -> Result<ControlledObservationQualificationEnvelope, String> {
     let internal = collect_controlled_observation_envelope(bytes)?;
-    Ok(ControlledObservationQualificationEnvelope {
+    Ok(qualification_envelope(internal))
+}
+
+fn qualification_envelope(
+    internal: ControlledObservationInternalEnvelope,
+) -> ControlledObservationQualificationEnvelope {
+    ControlledObservationQualificationEnvelope {
         capability_decision: internal.capability_decision,
         audit_results: internal.audit_results,
         observations: internal
@@ -4589,7 +4612,7 @@ pub(crate) fn qualify_controlled_observation_envelope(
                 text_hash: event.text_hash,
             })
             .collect(),
-    })
+    }
 }
 
 fn render_controlled_observation_envelope(
