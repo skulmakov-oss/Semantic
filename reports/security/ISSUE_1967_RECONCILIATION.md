@@ -91,8 +91,8 @@ Historical audit CSV/JSON remain immutable; this is derived current-state eviden
 
 ## Totals
 
-- `FIXED_BY_THIS_PR`: 44
-- `FIXED_LATER_CONFIRMED`: 38
+- `FIXED_BY_THIS_PR`: 45
+- `FIXED_LATER_CONFIRMED`: 37
 - `ARCHITECTURALLY_SUPERSEDED_WITH_EVIDENCE`: 0
 - `FALSE_POSITIVE_CONFIRMED`: 0
 - unresolved or unverified: 0
