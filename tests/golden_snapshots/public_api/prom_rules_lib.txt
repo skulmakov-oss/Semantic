@@ -15,14 +15,16 @@ pub key: String,
 pub value: FactValue,
 pub context: String,
 pub reason: String,
-pub fn new(
+pub fn new( key: impl Into<String>, value: FactValue, context: impl Into<String>, reason: impl Into<String>, ) -> Self {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleAuditNoteEffect {
 pub message: String,
 pub fn new(message: impl Into<String>) -> Self {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleEffect {
-pub fn state_write(
+StateWrite(RuleStateWriteEffect),
+AuditNote(RuleAuditNoteEffect),
+pub fn state_write( key: impl Into<String>, value: FactValue, context: impl Into<String>, reason: impl Into<String>, ) -> Self {
 pub fn audit_note(message: impl Into<String>) -> Self {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuleEffectPlan {
@@ -50,6 +52,14 @@ pub fn entries(&self) -> &[AgendaEntry] {
 pub fn pop_next(&mut self) -> Option<AgendaEntry> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleValidationCode {
+EmptyRuleId,
+DuplicateRuleId,
+EmptyConditionKey,
+EmptyConditionSet,
+EmptyEffectKey,
+EmptyEffectContext,
+EmptyEffectReason,
+EmptyAuditNoteMessage,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleValidationError {
 pub code: RuleValidationCode,

@@ -342,6 +342,7 @@ fn profile_quad_logic_storm() {
     assert!(summary.total_instructions > 0);
     assert!(summary.quad_logic.count > 0);
     assert!(summary.quad_family.count > 0);
+    assert!(profile.count(Opcode::LoadQ) > 0);
     assert!(summary.control_flow.count > 0);
 }
 
@@ -354,6 +355,7 @@ fn profile_quad_match_dispatch() {
 
     assert!(summary.total_instructions > 0);
     assert!(summary.quad_family.count > 0);
+    assert!(profile.count(Opcode::LoadQ) > 0);
     assert!(summary.control_flow.count > 0);
 }
 
@@ -366,6 +368,7 @@ fn profile_fact_merge_kernel() {
 
     assert!(summary.total_instructions > 0);
     assert!(summary.quad_family.count > 0);
+    assert!(profile.count(Opcode::LoadQ) > 0);
     assert!(profile.count(Opcode::QOr) > 0);
 }
 
@@ -378,6 +381,7 @@ fn profile_fact_intersect_kernel() {
 
     assert!(summary.total_instructions > 0);
     assert!(summary.quad_family.count > 0);
+    assert!(profile.count(Opcode::LoadQ) > 0);
     assert!(profile.count(Opcode::QAnd) > 0);
 }
 
@@ -390,6 +394,7 @@ fn profile_delta_like_kernel() {
 
     assert!(summary.total_instructions > 0);
     assert!(summary.quad_family.count > 0);
+    assert!(profile.count(Opcode::LoadQ) > 0);
     assert!(summary.control_flow.count > 0);
     assert!(summary.scalar_movement.count > 0);
 }
@@ -403,6 +408,7 @@ fn profile_andromeda_fact_wave_64() {
 
     assert!(summary.total_instructions > 0);
     assert!(summary.quad_family.count > 0);
+    assert!(profile.count(Opcode::LoadQ) > 0);
     assert!(summary.control_flow.count > 0);
     assert!(summary.scalar_movement.count > 0);
 }
@@ -417,6 +423,7 @@ fn profile_andromeda_fact_wave_256_local() {
 
     assert!(summary.total_instructions > 0);
     assert!(summary.quad_family.count > 0);
+    assert!(profile.count(Opcode::LoadQ) > 0);
     assert!(summary.control_flow.count > 0);
     assert!(summary.scalar_movement.count > 0);
 }

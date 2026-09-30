@@ -38,7 +38,8 @@ In that reading:
 
 The current `main` already includes:
 
-- verified-only public VM entrypoints
+- verifier-first canonical public VM entrypoints, alongside explicitly named
+  raw diagnostic and compatibility APIs that are not trusted execution routes
 - explicit `ExecutionConfig` / `ExecutionContext` runtime wiring
 - runtime quota enforcement in `sm-vm`
 - frame-local runtime ownership tracking and `BorrowWriteConflict`

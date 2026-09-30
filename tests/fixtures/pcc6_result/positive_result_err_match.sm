@@ -2,7 +2,10 @@ fn main() {
     let res: Result(i32, text) = Result::Err("fail");
     let value: i32 = match res {
         Result::Ok(v) => { v }
-        Result::Err(e) => { 0 }
+        Result::Err(e) => {
+            assert(e == "fail");
+            0
+        }
     };
     assert(value == 0);
     return;

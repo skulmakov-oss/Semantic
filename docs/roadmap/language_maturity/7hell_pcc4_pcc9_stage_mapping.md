@@ -46,21 +46,20 @@ Rules:
 
 | PCC   | Surface                | Syntax  | Type               | Lowering      | Verifier      | VM            | Practical            | Diagnostics | Notes                                             |
 | ----- | ---------------------- | ------- | ------------------ | ------------- | ------------- | ------------- | -------------------- | ----------- | ------------------------------------------------- |
-| PCC-4 | Records                | partial | yes                | yes           | yes           | if covered    | yes                  | yes         | fixture-backed, not full release gate            |
-| PCC-5 | ADT + Match            | partial | yes                | yes           | yes           | yes           | yes                  | yes         | basic match only                                  |
-| PCC-6 | Option / Result        | partial | yes                | yes           | yes           | yes           | yes                  | yes         | standard forms only                               |
-| PCC-7 | Collections            | partial | yes                | yes           | yes           | yes           | yes                  | yes         | Sequence and admitted Map baseline only           |
-| PCC-8 | Stdlib helpers         | partial | yes                | if applicable | yes           | yes           | yes                  | yes         | assert/print/to_text admitted helper surface only |
-| PCC-9 | Project Model baseline | partial | project-diagnostic | no public run | no public run | no public run | project-adjacent only | yes         | Semantic.package baseline only                    |
+| PCC-4 | Records                | skip | pass | pass | pass | skip | pass | pass | fixture-backed, not full release gate |
+| PCC-5 | ADT + Match            | skip | pass | pass | pass | pass | pass | pass | basic match only |
+| PCC-6 | Option / Result        | skip | pass | pass | pass | pass | pass | pass | standard forms only |
+| PCC-7 | Collections            | skip | pass | pass | pass | pass | pass | pass | Sequence and admitted Map baseline only |
+| PCC-8 | Stdlib helpers         | skip | pass | skip | pass | pass | pass | pass | assert/print/to_text admitted helper surface only |
+| PCC-9 | Project Model baseline | pass | pass | pass | pass | pass | pass | pass | qualified project-root baseline |
 
 Status vocabulary:
 
-- `yes`
-- `partial`
-- `not-covered`
-- `not-applicable`
-- `future`
+- `pass`
+- `fail`
 - `blocked`
+- `skip`
+- `not_implemented`
 
 Do not use `complete`.
 
@@ -79,7 +78,6 @@ Evidence anchors:
 - `tests/pcc4_records_acceptance.rs`
 - `tests/pcc4_records_diagnostics.rs`
 - `tests/fixtures/pcc4_records/`
-- `tests/fixtures/pcc4_records_diagnostics/`
 
 Stage mapping:
 
@@ -268,18 +266,18 @@ Rules:
 
 | PCC                 | Syntax        | Type             | Lowering | Verifier     | VM                           | Practical      | Diagnostics | Status       |
 | ------------------- | ------------- | ---------------- | -------- | ------------ | ---------------------------- | -------------- | ----------- | ------------ |
-| PCC-4 Records       | mapped        | mapped           | mapped   | mapped       | partial                      | mapped         | mapped      | mapping only |
-| PCC-5 ADT/Match     | mapped        | mapped           | mapped   | mapped       | partial                      | mapped         | mapped      | mapping only |
-| PCC-6 Option/Result | mapped        | mapped           | mapped   | mapped       | partial                      | mapped         | mapped      | mapping only |
-| PCC-7 Collections   | mapped        | mapped           | mapped   | mapped       | mapped for selected baseline | mapped         | mapped      | mapping only |
-| PCC-8 Stdlib        | n/a or mapped | mapped           | n/a      | n/a/implicit | mapped                       | mapped         | mapped      | mapping only |
-| PCC-9 Project Model | future        | project-adjacent | future   | future       | future                       | partial/future | mapped      | mapping only |
+| PCC-4 Records       | skip | pass | pass | pass | skip | pass | pass | pass |
+| PCC-5 ADT/Match     | skip | pass | pass | pass | pass | pass | pass | pass |
+| PCC-6 Option/Result | skip | pass | pass | pass | pass | pass | pass | pass |
+| PCC-7 Collections   | skip | pass | pass | pass | pass | pass | pass | pass |
+| PCC-8 Stdlib        | skip | pass | skip | pass | pass | pass | pass | pass |
+| PCC-9 Project Model | pass | pass | pass | pass | pass | pass | pass | pass |
 
-Use `mapped`, `partial`, `future`, `n/a`, or `open`.
+Use only the canonical report status tokens: `pass`, `fail`, `blocked`,
+`skip`, or `not_implemented`.
 
 Important:
 
-- Do not use `pass`.
 - Do not use `complete`.
 - Do not imply 7hell command currently executes those stages.
 

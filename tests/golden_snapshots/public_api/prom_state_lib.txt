@@ -1,8 +1,14 @@
 source: crates/prom-state/src/lib.rs
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FactValue {
+Bool(bool),
+I32(i32),
+Text(String),
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FactResolution {
+Certain(FactValue),
+Uncertain(Vec<FactValue>),
+Conflicted(Vec<FactValue>),
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextWindow {
 pub name: String,
@@ -28,7 +34,7 @@ pub key: String,
 pub resolution: FactResolution,
 pub context: ContextWindow,
 pub reason: String,
-pub fn new(
+pub fn new( key: impl Into<String>, resolution: FactResolution, context: ContextWindow, reason: impl Into<String>, ) -> Self {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateSnapshot {
 pub epoch: StateEpoch,
@@ -54,6 +60,14 @@ pub struct StateSnapshotArchiveFormatError {
 pub message: String,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StateRollbackCode {
+UnsupportedFormatVersion,
+StoreHistoryMismatch,
+HeadEpochMismatch,
+MissingCheckpoint,
+NonMonotonicCheckpointOrdinal,
+NonMonotonicTransitionCount,
+SnapshotEpochMismatch,
+TransitionCountOutOfRange,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateRollbackError {
 pub code: StateRollbackCode,
@@ -67,6 +81,12 @@ pub retained_transition_count: usize,
 pub dropped_transition_count: usize,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StateValidationCode {
+EmptyKey,
+EmptyContext,
+EmptyReason,
+EmptyAlternatives,
+DuplicateAlternatives,
+NotEnoughAlternatives,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateValidationError {
 pub code: StateValidationCode,
@@ -82,12 +102,12 @@ pub fn get(&self, key: &str) -> Option<&StateRecord> {
 pub fn records(&self) -> &BTreeMap<String, StateRecord> {
 pub fn transitions(&self) -> &[TransitionMetadata] {
 pub fn snapshot(&self) -> StateSnapshot {
-pub fn apply(&mut self, update: StateUpdate) -> Result<TransitionMetadata, StateValidationError> {
+pub fn apply( &mut self, update: StateUpdate, ) -> Result<TransitionMetadata, StateValidationError> {
 pub fn restore(&mut self, snapshot: StateSnapshot) {
-pub fn apply_rollback(
+pub fn apply_rollback( &mut self, artifact: &StateRollbackArtifact, checkpoint_ordinal: u32, ) -> Result<StateRollbackAdvance, StateRollbackError> {
 pub fn archive(&self) -> StateSnapshotArchive {
 pub fn new(snapshot: StateSnapshot) -> Self {
 pub fn to_canonical_text(&self) -> String {
 pub fn from_canonical_text(src: &str) -> Result<Self, StateSnapshotArchiveFormatError> {
-pub fn new(
+pub fn new( checkpoint_ordinal: u32, snapshot: StateSnapshotArchive, applied_transition_count: usize, ) -> Self {
 pub fn new(head_epoch: StateEpoch, checkpoints: Vec<StateRollbackCheckpoint>) -> Self {

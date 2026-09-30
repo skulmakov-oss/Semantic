@@ -348,6 +348,26 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     if args.is_empty() {
         return Err(usage());
     }
+    if matches!(
+        args[0].as_str(),
+        "compile"
+            | "check"
+            | "lint"
+            | "dump-ast"
+            | "dump-ir"
+            | "dump-bytecode"
+            | "hash-ast"
+            | "hash-ir"
+            | "hash-smc"
+            | "verify"
+            | "run"
+            | "run-smc"
+            | "disasm"
+    ) {
+        if let Some(input) = args.get(1) {
+            reject_leading_unknown_flag(input)?;
+        }
+    }
     match args[0].as_str() {
         "compile" => cmd_compile(&args[1..]),
         "check" => cmd_check(&args[1..]),

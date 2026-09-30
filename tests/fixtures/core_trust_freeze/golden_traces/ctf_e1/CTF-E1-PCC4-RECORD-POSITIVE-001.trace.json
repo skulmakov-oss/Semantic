@@ -8,11 +8,11 @@
   "stage": "selected",
   "expected_status": "accept",
   "source_hash": "ab07713734d22976",
-  "ir_hash": "b419ef35fb669085",
+  "ir_hash": "5ec94accb6489378",
   "semcode_hash": "88205d2f4b42553d",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "4122685ccf14f106",
+  "expected_output_hash": "cbf29ce484222325",
   "notes": "Selected representative record fixture only; no project-root, Map, or 7hell coverage."
 }

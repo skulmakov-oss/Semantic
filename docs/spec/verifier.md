@@ -65,6 +65,7 @@ Current SemCode verification checks include:
   string value program-wide - not a per-function string-table entry count;
   also checked against the caller-selected `RuntimeQuotas` profile)
 - call-target validity
+- unique function names (duplicate declarations are rejected)
 - capability consistency with actual opcode usage
 
 ## Opcode Admission Matrix
@@ -79,7 +80,7 @@ without turning this document into a stable bytecode ISA promise.
 | --- | --- | --- | --- |
 | Ordinary source-derived families: control flow, data movement, literal loading, arithmetic, comparison, calls, and returns | Admitted when produced by supported SemCode and consistent with the emitted contract | No extra capability beyond the artifact contract | Baseline verifier-admitted surface; this document intentionally does not stabilize binary opcode numbers. |
 | `SEQUENCE_LEN` | Admitted only when the emitted contract carries `CAP_SEQUENCE_ITERATION` and the header family supports the sequence-iteration contract | Capability-gated | Built-in sequence lowering opcode for the admitted `Sequence(T)` iteration slice. |
-| Effect-oriented host-boundary families such as `GateRead`, `GateWrite`, and `PulseEmit` | Admitted only when the emitted contract matches the required capability envelope | Capability-gated / host-boundary | These opcodes do not define capability policy semantics by themselves. |
+| Effect-oriented host-boundary families: `GateRead`, `GateWrite`, `PulseEmit`, `StateQuery`, `StateUpdate`, `EventPost`, and `ClockRead` | Admitted only when the emitted contract matches the required capability envelope | Capability-gated / host-boundary | These opcodes do not define capability policy semantics by themselves. |
 | Ownership transport payloads admitted through `OWN0` | Admitted structurally only when the ownership transport slice is present and well formed | Header and capability consistency required | Covers tuple-only (`SEMCOD11`), direct record-field (`SEMCOD12`), `SequenceIndexStatic` `Borrow`/`Write` (`SEMCOD21`, `CAP_OWNERSHIP_SEQUENCE_PATHS`), and `AdtPayload` `Borrow`-only (`SEMCOD21`, `CAP_OWNERSHIP_ADT_BORROW_PATHS`) ownership transport. `Write(AdtPayload)` is rejected unconditionally under every header, including `SEMCOD21` - not a capability gap. |
 | Descriptor-dependent ADT families: `MAKE_ADT`, `ADT_TAG`, `ADT_GET` | Admitted only under a header revision `>= 23` (`SEMCOD22`), checked against the artifact's own decoded `ADT0` table; rejected with `AdtRequiresDescriptorHeader` under any older header | Descriptor authority (`ADT0`), not a capability bit | See `## ADT Descriptor Admission`. The static `ADT_GET` index check is bounded by the largest variant arity of the type. |
 | Unknown, unsupported, or malformed opcode encodings | Rejected | N/A | Rejection must happen before a successful VM execution path. |

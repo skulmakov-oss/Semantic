@@ -60,10 +60,9 @@ fn no_path_adapter_back_to_root_src() {
     let mut files = Vec::new();
     collect_rs_files(Path::new("crates"), &mut files);
     for f in files {
-        let txt = match fs::read_to_string(&f) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+        let bytes = fs::read(&f)
+            .unwrap_or_else(|error| panic!("failed to read '{}': {error}", f.display()));
+        let txt = String::from_utf8_lossy(&bytes);
         assert!(
             !txt.contains("#[path = \"../../../src/"),
             "forbidden legacy path adapter in {}",
@@ -136,10 +135,9 @@ fn root_src_bans_legacy_patterns() {
     let mut files = Vec::new();
     collect_rs_files(Path::new("src"), &mut files);
     for f in files {
-        let txt = match fs::read_to_string(&f) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+        let bytes = fs::read(&f)
+            .unwrap_or_else(|error| panic!("failed to read '{}': {error}", f.display()));
+        let txt = String::from_utf8_lossy(&bytes);
         let rel = f.to_string_lossy().replace('\\', "/");
         assert!(
             !txt.contains("legacy_"),
@@ -290,10 +288,9 @@ fn ton618_content_inventory_is_explicit() {
     let mut matches = BTreeSet::new();
     for file in files {
         let rel = file.to_string_lossy().replace('\\', "/");
-        let txt = match fs::read_to_string(&file) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+        let bytes = fs::read(&file)
+            .unwrap_or_else(|error| panic!("failed to read '{}': {error}", file.display()));
+        let txt = String::from_utf8_lossy(&bytes);
         if txt.contains("ton618_core") || txt.contains("ton618-core") {
             matches.insert(rel);
         }

@@ -44,7 +44,8 @@ The VM does not silently execute unverified SemCode through the canonical verifi
 
 ```text
 Raw SemCode Bytes
-  -> admit: VerifiedEntrySemCode
+  -> admit: VerifiedSemCode
+  -> require_entry: VerifiedEntrySemCode
   -> reject: RejectReport
 ```
 

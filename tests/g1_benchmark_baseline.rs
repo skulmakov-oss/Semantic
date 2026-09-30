@@ -86,9 +86,9 @@ fn measure_once(src: &str, profile: &ParserProfile) -> (PipelineSnapshot, StageD
     let semcode = compile_program_to_semcode(src).expect("compile semcode");
     let t5 = Instant::now();
     verify_semcode(&semcode).expect("verify");
-    let t6 = Instant::now();
     let token = verify_semcode_token(&semcode).expect("token admission");
     let entry_token = token.require_entry("main").expect("entry resolution");
+    let t6 = Instant::now();
     run_verified_entry_semcode(&entry_token).expect("verified run");
     let t7 = Instant::now();
 

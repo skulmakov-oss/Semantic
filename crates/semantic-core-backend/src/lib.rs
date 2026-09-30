@@ -72,37 +72,37 @@ pub const fn select_backend(kind: BackendKind, _caps: BackendCaps) -> BackendKin
 }
 
 pub fn join_reg32(kind: BackendKind, dst: &mut [QuadroReg32], src: &[QuadroReg32]) {
-    match select_backend(kind, detect_backend_caps()) {
+    match select_backend(kind, BackendCaps::scalar()) {
         BackendKind::Scalar | BackendKind::Auto => scalar::ScalarBackend::join_reg32(dst, src),
     }
 }
 
 pub fn meet_reg32(kind: BackendKind, dst: &mut [QuadroReg32], src: &[QuadroReg32]) {
-    match select_backend(kind, detect_backend_caps()) {
+    match select_backend(kind, BackendCaps::scalar()) {
         BackendKind::Scalar | BackendKind::Auto => scalar::ScalarBackend::meet_reg32(dst, src),
     }
 }
 
 pub fn inverse_reg32(kind: BackendKind, dst: &mut [QuadroReg32]) {
-    match select_backend(kind, detect_backend_caps()) {
+    match select_backend(kind, BackendCaps::scalar()) {
         BackendKind::Scalar | BackendKind::Auto => scalar::ScalarBackend::inverse_reg32(dst),
     }
 }
 
 pub fn join_tile128(kind: BackendKind, dst: &mut [QuadTile128], src: &[QuadTile128]) {
-    match select_backend(kind, detect_backend_caps()) {
+    match select_backend(kind, BackendCaps::scalar()) {
         BackendKind::Scalar | BackendKind::Auto => scalar::ScalarBackend::join_tile128(dst, src),
     }
 }
 
 pub fn meet_tile128(kind: BackendKind, dst: &mut [QuadTile128], src: &[QuadTile128]) {
-    match select_backend(kind, detect_backend_caps()) {
+    match select_backend(kind, BackendCaps::scalar()) {
         BackendKind::Scalar | BackendKind::Auto => scalar::ScalarBackend::meet_tile128(dst, src),
     }
 }
 
 pub fn inverse_tile128(kind: BackendKind, dst: &mut [QuadTile128]) {
-    match select_backend(kind, detect_backend_caps()) {
+    match select_backend(kind, BackendCaps::scalar()) {
         BackendKind::Scalar | BackendKind::Auto => scalar::ScalarBackend::inverse_tile128(dst),
     }
 }

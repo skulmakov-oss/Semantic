@@ -26,7 +26,8 @@ standard-form baseline across the practical stack:
   and explicit match payload binding for the standard forms.
 - Lowering already emits the canonical ADT-style carrier path for both
   standard forms.
-- SemCode, verifier, and VM already execute the emitted standard-form paths.
+- SemCode represents the emitted standard-form paths, the verifier validates
+  them for admission, and the VM executes the admitted artifacts.
 - Diagnostics already exist for contextual constructor typing and match policy
   boundaries.
 - Canonical examples and qualification fixtures already exercise the

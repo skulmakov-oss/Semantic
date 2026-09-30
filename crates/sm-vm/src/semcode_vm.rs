@@ -994,8 +994,9 @@ pub fn run_verified_function_semcode_with_args_and_config(
 /// Local opcode profiling path for verified token execution.
 ///
 /// This is a feature-gated, local measurement harness that collects opcode
-/// execution counts for verified VM execution. It does not change VM semantics
-/// and it is not production telemetry.
+/// execution counts for verified VM execution. Effectful opcodes are denied by
+/// the capability-aware host used by this local harness. It does not change VM
+/// semantics and it is not production telemetry.
 #[cfg(feature = "vm-profile")]
 pub fn run_verified_entry_semcode_with_profile(
     token: &VerifiedEntrySemCode<'_, '_>,
@@ -1013,7 +1014,14 @@ pub fn run_verified_entry_semcode_with_profile(
         prng_state: 0,
     };
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
-    let mut bridge = LegacyVmHost;
+    let mut host = prom_abi::RecordingHostAbi::default();
+    let capabilities = prom_cap::CapabilityManifest::for_application_profile(
+        prom_cap::ApplicationCapabilityProfile::Pure,
+    );
+    let mut bridge = PrometheusVmHost {
+        host: &mut host,
+        capabilities: &capabilities,
+    };
     let mut observation = HelloObservationRuntime::discard();
     let mut profile = VmOpcodeProfile::default();
     exec_loop_with_profile(&mut vm, &mut bridge, &mut observation, &mut profile)?;
@@ -4332,9 +4340,19 @@ mod tests {
 
             let mut selected = Vec::new();
             for wanted in semantic_locals {
-                if let Some((_, value)) = locals.iter().find(|(name, _)| name == wanted) {
-                    selected.push(format!("{wanted}={value}"));
-                }
+                let (_, value) = locals
+                    .iter()
+                    .find(|(name, _)| {
+                        name.strip_prefix("__sm_local_")
+                            .and_then(|rest| rest.split_once('_'))
+                            .map(|(_, semantic_name)| semantic_name)
+                            .unwrap_or(name)
+                            == *wanted
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("missing expected semantic local '{wanted}' in {observable}")
+                    });
+                selected.push(format!("{wanted}={value}"));
             }
 
             format!("{ret_part}; locals=[{}]", selected.join(", "))

@@ -1365,7 +1365,7 @@ fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenH
     let (line, column) = extract_error_location(first_line);
 
     let (stage, kind, category) = match code.as_str() {
-        "E0201" => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
+        c if c.starts_with("E02") => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
         c if c.starts_with('E') => (
             "syntax",
             SevenHellDiagnosticKind::SyntaxDiagnostic,
@@ -1646,6 +1646,16 @@ mod tests {
 
     fn syntax_diagnostic() -> SevenHellDiagnostic {
         diagnostic_from_check_error("[E0005]: syntax failed at line 1:1", "program.sm")
+    }
+
+    #[test]
+    fn semantic_check_codes_are_type_hell_diagnostics() {
+        let diagnostic =
+            diagnostic_from_check_error("Error [E0243]: invalid match at line 2:3", "program.sm");
+
+        assert_eq!(diagnostic.stage, "type");
+        assert_eq!(diagnostic.kind, SevenHellDiagnosticKind::CheckDiagnostic);
+        assert_eq!(diagnostic.category, "type");
     }
 
     #[test]

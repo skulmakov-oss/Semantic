@@ -2,8 +2,8 @@
 mod cli_artifact_support;
 
 use cli_artifact_support::{
-    check_source, compile_source_to_artifact, run_source, source_fixture, temp_semcode_artifact,
-    verify_artifact,
+    check_source, compile_source_to_artifact, run_smc_artifact, run_source, source_fixture,
+    temp_semcode_artifact, verify_artifact,
 };
 
 fn check_run_compile_verify(rel: &str) {
@@ -14,6 +14,7 @@ fn check_run_compile_verify(rel: &str) {
     let artifact = temp_semcode_artifact("pcc7-sequence", "smc_pcc7_sequence_acceptance");
     compile_source_to_artifact(&source, &artifact);
     verify_artifact(&artifact);
+    run_smc_artifact(&artifact);
 }
 
 #[test]

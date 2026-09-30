@@ -48,7 +48,12 @@ pub fn evaluate_hello_observation_capability(
                 HelloObservationCapabilityDenial::GenericIoNotAllowed,
             );
         }
-        _ => {}
+        Some(_) => {
+            return HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::GenericIoNotAllowed,
+            );
+        }
+        None => {}
     }
 
     if !context.observation_sink_present {
@@ -81,7 +86,12 @@ pub fn require_hello_observation_sink_capability<C: CapabilityChecker>(
                 HelloObservationCapabilityDenial::GenericIoNotAllowed,
             );
         }
-        _ => {}
+        Some(_) => {
+            return HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::GenericIoNotAllowed,
+            );
+        }
+        None => {}
     }
 
     if !context.observation_sink_present {
@@ -101,5 +111,26 @@ pub fn require_hello_observation_sink_capability<C: CapabilityChecker>(
         Err(_) => HelloObservationCapabilityDecision::Deny(
             HelloObservationCapabilityDenial::MissingObservationCapability,
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_host_channel_is_denied() {
+        let context = HelloObservationCapabilityContext {
+            observation_sink_present: true,
+            sink_available: true,
+            requested_host_channel: Some("socket"),
+        };
+
+        assert_eq!(
+            evaluate_hello_observation_capability(&context),
+            HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::GenericIoNotAllowed
+            )
+        );
     }
 }

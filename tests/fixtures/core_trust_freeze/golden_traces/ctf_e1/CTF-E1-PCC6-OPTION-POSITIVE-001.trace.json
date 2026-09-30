@@ -8,11 +8,11 @@
   "stage": "selected",
   "expected_status": "accept",
   "source_hash": "86a1c92a6678acca",
-  "ir_hash": "60b5c1f62a44e9be",
+  "ir_hash": "216009f12652d671",
   "semcode_hash": "bba53391a67be993",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "965df4e984379b05",
+  "expected_output_hash": "cbf29ce484222325",
   "notes": "Selected standard-form Option trace only; Result remains covered by later evidence if needed."
 }

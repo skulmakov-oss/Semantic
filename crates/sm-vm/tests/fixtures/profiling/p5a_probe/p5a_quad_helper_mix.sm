@@ -57,6 +57,9 @@ fn main() {
         }
     }
 
+    assert(hot_path_hits == 0);
+    assert(batch_hits == 96);
+    assert(control_hits == 64);
     assert(checksum == 8128);
     return;
 }

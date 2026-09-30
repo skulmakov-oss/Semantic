@@ -101,10 +101,12 @@ fn main() {
             } else {
                 if code == 2 {
                     entered_false += 1;
-                } else {
-                    left_false += 1;
                 }
             }
+        }
+
+        if old_state == F && new_state != F {
+            left_false += 1;
         }
 
         code_sum += code;

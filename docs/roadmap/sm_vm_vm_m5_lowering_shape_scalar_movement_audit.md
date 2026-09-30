@@ -124,7 +124,7 @@ VM-M4 documents the dominant scalar movement pressure in [docs/roadmap/sm_vm_vm_
 - `LoadVar`: 30
 - `StoreVar`: 22
 - `LoadVar + StoreVar`: 52
-- `LoadVar` is top opcode #1 and `StoreVar` is top opcode #2.
+- `LoadQ` is top opcode #1 (`32`), followed by `LoadVar` (`30`); `StoreVar` contributes another `22` scalar-movement operations.
 - Scalar movement is `29.38%`.
 
 #### Suspected lowering pattern
@@ -151,7 +151,7 @@ VM-M4 documents the dominant scalar movement pressure in [docs/roadmap/sm_vm_vm_
 - `LoadVar`: 49
 - `StoreVar`: 22
 - `LoadVar + StoreVar`: 71
-- `LoadVar` is top opcode #1 and `StoreVar` is top opcode #2.
+- `Jmp` is top opcode #1 (`63`), followed by `LoadQ` (`54`) and `LoadVar` (`49`); `StoreVar` contributes another `22` scalar-movement operations.
 - Scalar movement is `23.36%`.
 
 #### Suspected lowering pattern
