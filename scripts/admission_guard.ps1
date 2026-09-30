@@ -8,6 +8,13 @@
 # Invoke-WorkspaceFmtCheck) so it doesn't exceed the Windows CreateProcess
 # command-line length limit on this workspace.
 #
+# Every native command in a multi-command step is checked individually
+# (Invoke-CheckedNative), the merge-preflight base ref is fetched as requested
+# (Update-MergePreflightBaseRef), and the default/merge/full modes finish by
+# failing on any tracked change (Assert-TrackedWorktreeUnchanged). Mode
+# composition lives in Get-AdmissionGuardPlan so FullPreflight stays a
+# superset of the default guard. Helpers: scripts/admission_guard_lib.ps1.
+#
 # This script includes formatting because the baseline has been normalized.
 # Do not use formatting as a substitute for behavior checks. After any manual
 # formatting attempt, inspect `git diff --name-only` and revert unrelated churn.
@@ -30,41 +37,7 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
 
 . (Join-Path $PSScriptRoot "workspace_fmt_check.ps1")
-
-function Invoke-LocalCiStep {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string] $Name,
-
-        [Parameter(Mandatory = $true)]
-        [scriptblock] $Command
-    )
-
-    Write-Host ""
-    Write-Host "== $Name =="
-    & $Command
-    if ($LASTEXITCODE -ne 0) {
-        throw "local_ci step failed: $Name"
-    }
-}
-
-function Assert-CleanWorkingTreeForMergePreflight {
-    $statusLines = git status --porcelain --untracked-files=all
-    if ($LASTEXITCODE -ne 0) {
-        throw "failed to inspect working tree status before merge preflight"
-    }
-
-    $relevantLines = @(
-        $statusLines | Where-Object {
-            $_ -and ($_ -notmatch '\.claude([\\/]|$)')
-        }
-    )
-
-    if ($relevantLines.Count -gt 0) {
-        $details = $relevantLines -join [Environment]::NewLine
-        throw "merge preflight requires a clean working tree; commit/stash changes first`n$details"
-    }
-}
+. (Join-Path $PSScriptRoot "admission_guard_lib.ps1")
 
 function Invoke-LocalCiMergePreflight {
     param(
@@ -75,10 +48,7 @@ function Invoke-LocalCiMergePreflight {
     Assert-CleanWorkingTreeForMergePreflight
 
     Invoke-LocalCiStep "merge preflight against $BaseRef" {
-        git fetch origin main
-        if ($LASTEXITCODE -ne 0) {
-            throw "failed to fetch origin main for merge preflight"
-        }
+        $BaseSha = Update-MergePreflightBaseRef -BaseRef $BaseRef
 
         $HeadSha = git rev-parse HEAD
         if ($LASTEXITCODE -ne 0) {
@@ -92,7 +62,7 @@ function Invoke-LocalCiMergePreflight {
         $WorktreeCreated = $false
 
         try {
-            git worktree add --detach $MergePreflightWorktree $BaseRef
+            git worktree add --detach $MergePreflightWorktree $BaseSha
             if ($LASTEXITCODE -ne 0) {
                 throw "failed to create merge preflight worktree at '$MergePreflightWorktree'"
             }
@@ -102,7 +72,7 @@ function Invoke-LocalCiMergePreflight {
             try {
                 git merge --no-commit --no-ff $HeadSha
                 if ($LASTEXITCODE -ne 0) {
-                    throw "merge preflight failed: merging current HEAD into '$BaseRef' produced conflicts"
+                    throw "merge preflight failed: merging current HEAD into '$BaseRef' ($BaseSha) produced conflicts"
                 }
 
                 cargo test --all-targets --quiet
@@ -240,40 +210,12 @@ function Invoke-ReadinessGate {
         pwsh -File scripts/verify_release_bundle.ps1 -ManifestPath $ManifestPath
     }
     Invoke-LocalCiStep "canonical project-root fixture smoke" {
-        if (Test-Path $ProjectRootSmokeTempDir) {
-            Remove-Item -Recurse -Force $ProjectRootSmokeTempDir
-        }
-        New-Item -ItemType Directory -Force -Path $ProjectRootSmokeTempDir | Out-Null
-
-        $ProjectRootSmokeOut = Join-Path $ProjectRootSmokeTempDir "out.smc"
-
-        & $SmcBinary check $ProjectRootSmokeFixture
-        & $SmcBinary run $ProjectRootSmokeFixture
-        & $SmcBinary compile $ProjectRootSmokeFixture -o $ProjectRootSmokeOut
-        & $SmcBinary verify $ProjectRootSmokeOut
-        & $SmcBinary run-smc $ProjectRootSmokeOut
-
-        if (Test-Path $ProjectRootSmokeTempDir) {
-            Remove-Item -Recurse -Force $ProjectRootSmokeTempDir
-        }
+        Invoke-SmcProjectRootSmoke -SmcBinary $SmcBinary -FixtureRoot $ProjectRootSmokeFixture `
+            -TempDirectory $ProjectRootSmokeTempDir -ArtifactName "out.smc"
     }
     Invoke-LocalCiStep "package-baseline project-root fixture smoke" {
-        if (Test-Path $PackageBaselineSmokeTempDir) {
-            Remove-Item -Recurse -Force $PackageBaselineSmokeTempDir
-        }
-        New-Item -ItemType Directory -Force -Path $PackageBaselineSmokeTempDir | Out-Null
-
-        $PackageBaselineSmokeOut = Join-Path $PackageBaselineSmokeTempDir "out-package-baseline.smc"
-
-        & $SmcBinary check $PackageBaselineSmokeFixture
-        & $SmcBinary run $PackageBaselineSmokeFixture
-        & $SmcBinary compile $PackageBaselineSmokeFixture -o $PackageBaselineSmokeOut
-        & $SmcBinary verify $PackageBaselineSmokeOut
-        & $SmcBinary run-smc $PackageBaselineSmokeOut
-
-        if (Test-Path $PackageBaselineSmokeTempDir) {
-            Remove-Item -Recurse -Force $PackageBaselineSmokeTempDir
-        }
+        Invoke-SmcProjectRootSmoke -SmcBinary $SmcBinary -FixtureRoot $PackageBaselineSmokeFixture `
+            -TempDirectory $PackageBaselineSmokeTempDir -ArtifactName "out-package-baseline.smc"
     }
     Invoke-LocalCiStep "smc 7hell human smoke" {
         & $SmcBinary 7hell tests/fixtures/7hell_e1/valid_minimal.sm
@@ -301,65 +243,50 @@ function Invoke-LegacyAdditionalChecks {
     }
 }
 
-if ($Quick) {
-    Write-Host "`n=== GATE MODE: Quick ==="
-    Invoke-QuickGate
-    Write-Host "`nADMISSION GUARD QUICK PASS"
-    exit 0
-}
+function Invoke-AdmissionGuardGate {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Gate
+    )
 
-if ($PRReady) {
-    Write-Host "`n=== GATE MODE: PRReady ==="
-    Invoke-PRReadyGate
-    Write-Host "`nADMISSION GUARD PR-READY PASS"
-    exit 0
-}
-
-if ($Readiness) {
-    Write-Host "`n=== GATE MODE: Readiness ==="
-    Invoke-ReadinessGate
-    Write-Host "`nADMISSION GUARD READINESS PASS"
-    exit 0
-}
-
-if ($CIParity) {
-    Write-Host "`n=== GATE MODE: CIParity ==="
-    Invoke-CIParityGate
-    Write-Host "`nADMISSION GUARD CI PARITY PASS"
-    exit 0
-}
-
-if ($MergePreflight) {
-    Write-Host "`n=== GATE MODE: MergePreflight ==="
-    Invoke-PRReadyGate
-    Invoke-ReadinessGate
-    Invoke-LegacyAdditionalChecks
-    Invoke-LocalCiMergePreflight -BaseRef $BaseRef
-    Invoke-LocalCiStep "git diff --check" {
-        git diff --check
+    switch ($Gate) {
+        "Quick" { Invoke-QuickGate }
+        "PRReady" { Invoke-PRReadyGate }
+        "Readiness" { Invoke-ReadinessGate }
+        "CIParity" { Invoke-CIParityGate }
+        "LegacyAdditional" { Invoke-LegacyAdditionalChecks }
+        "MergePreflight" { Invoke-LocalCiMergePreflight -BaseRef $BaseRef }
+        "DiffCheck" {
+            Invoke-LocalCiStep "git diff --check" {
+                git diff --check
+            }
+        }
+        "TrackedClean" {
+            Invoke-LocalCiStep "tracked worktree unchanged (git diff --exit-code)" {
+                Assert-TrackedWorktreeUnchanged
+            }
+        }
+        default { throw "unknown admission guard gate '$Gate'" }
     }
-    Write-Host "`nADMISSION GUARD MERGE PREFLIGHT PASS"
-    exit 0
 }
 
-if ($FullPreflight) {
-    Write-Host "`n=== GATE MODE: FullPreflight ==="
-    Invoke-PRReadyGate
-    Invoke-ReadinessGate
-    Invoke-LegacyAdditionalChecks
-    Invoke-LocalCiMergePreflight -BaseRef $BaseRef
-    Invoke-LocalCiStep "git diff --check" {
-        git diff --check
-    }
-    Write-Host "`nADMISSION GUARD FULL PREFLIGHT PASS"
-    exit 0
+$Modes = @(
+    @{ Enabled = $Quick.IsPresent; Mode = "Quick"; Banner = "Quick"; Pass = "ADMISSION GUARD QUICK PASS" },
+    @{ Enabled = $PRReady.IsPresent; Mode = "PRReady"; Banner = "PRReady"; Pass = "ADMISSION GUARD PR-READY PASS" },
+    @{ Enabled = $Readiness.IsPresent; Mode = "Readiness"; Banner = "Readiness"; Pass = "ADMISSION GUARD READINESS PASS" },
+    @{ Enabled = $CIParity.IsPresent; Mode = "CIParity"; Banner = "CIParity"; Pass = "ADMISSION GUARD CI PARITY PASS" },
+    @{ Enabled = $MergePreflight.IsPresent; Mode = "MergePreflight"; Banner = "MergePreflight"; Pass = "ADMISSION GUARD MERGE PREFLIGHT PASS" },
+    @{ Enabled = $FullPreflight.IsPresent; Mode = "FullPreflight"; Banner = "FullPreflight"; Pass = "ADMISSION GUARD FULL PREFLIGHT PASS" }
+)
+
+$Selected = $Modes | Where-Object { $_.Enabled } | Select-Object -First 1
+if (-not $Selected) {
+    $Selected = @{ Mode = "Default"; Banner = "Legacy Default"; Pass = "local_ci passed" }
 }
 
-Write-Host "`n=== GATE MODE: Legacy Default ==="
-Invoke-PRReadyGate
-Invoke-ReadinessGate
-Invoke-LegacyAdditionalChecks
-Invoke-LocalCiStep "git diff --check" {
-    git diff --check
+Write-Host "`n=== GATE MODE: $($Selected.Banner) ==="
+foreach ($Gate in (Get-AdmissionGuardPlan -Mode $Selected.Mode)) {
+    Invoke-AdmissionGuardGate -Gate $Gate
 }
-Write-Host "`nlocal_ci passed"
+Write-Host "`n$($Selected.Pass)"
+exit 0
