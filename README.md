@@ -618,6 +618,10 @@ Current work is focused on closing inconsistencies before later compatibility, m
 
 The roadmap is intentionally sequential: foundation first, widening later.
 
+The active strategic direction beyond the Foundation is **self-hosting**: a Semantic compiler written in Semantic, emitting SemCode through the existing verifier-first path and reaching a reproducible `C0 → C1 → C2` bootstrap fixed point ([#1910](https://github.com/skulmakov-oss/Semantic/issues/1910)). This is architecture work, not a release promise.
+
+Native Semantic UI, Workbench, and Semantic Studio are **retired** from the active roadmap. Their historical code and evidence remain in the repository, but they are not remediated, qualified, or promoted. See [`docs/roadmap/ui_workbench_studio_retirement.md`](docs/roadmap/ui_workbench_studio_retirement.md).
+
 ---
 
 ## Examples

@@ -1,3 +1,11 @@
+# RETIRED CONTOUR - historical manual script, not a qualification gate.
+# Native Semantic UI / Workbench / Semantic Studio were retired from the
+# active roadmap (#1968 and #1862 closed as not planned; see
+# docs/roadmap/ui_workbench_studio_retirement.md). This script is kept as
+# historical evidence only. It is not invoked by CI or by
+# scripts/admission_guard.ps1, is known to fail against the current root
+# workspace (#1862), and is intentionally not repaired.
+#
 # Live smoke test for the canonical native Workbench binary
 # (examples/workbench_semantic). Builds the real workbench_semantic.exe,
 # launches it as a real OS process against a throwaway project directory,

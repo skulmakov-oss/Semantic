@@ -24,8 +24,8 @@ split across layers:
 
 Observed practical anchors:
 
-- [examples/canonical/text_collections_toolbox/](C:\Users\said3\Desktop\EXOcode\EXOcode\examples\canonical\text_collections_toolbox\README.md)
-- [examples/canonical/text_core/](C:\Users\said3\Desktop\EXOcode\EXOcode\examples\canonical\text_core\README.md)
+- [examples/canonical/text_collections_toolbox/](../../../examples/canonical/text_collections_toolbox/README.md)
+- [examples/canonical/text_core/](../../../examples/canonical/text_core/README.md)
 - `tests/fixtures/snake_benchmark/positive_text_to_text.sm`
 - `tests/fixtures/snake_benchmark/positive_text_concat.sm`
 - `tests/fixtures/snake_benchmark/positive_text_equality.sm`

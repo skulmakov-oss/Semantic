@@ -9,6 +9,8 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot "release_asset_output.ps1")
+
 function New-Directory([string]$Path) {
     New-Item -ItemType Directory -Force -Path $Path | Out-Null
 }
@@ -111,9 +113,14 @@ $extractDirectory = Join-Path $tagOutputDirectory "zip-extract"
 $jsonReportPath = Join-Path $tagOutputDirectory "release_asset_smoke_report.json"
 $markdownReportPath = Join-Path $tagOutputDirectory "release_asset_smoke_report.md"
 
+$zipAssetName = "semantic-language-windows-x64-$Tag.zip"
+$requiredAssets = @("smc.exe", "svm.exe", $zipAssetName)
+
 New-Directory $outputDirectory
-Remove-IfExists $tagOutputDirectory
-New-Directory $tagOutputDirectory
+# Resolves (and, if needed, preserves) caller-provided assets before the
+# per-tag output directory is reset.
+$assetRoot = Initialize-ReleaseAssetOutput -TagOutputDirectory $tagOutputDirectory `
+    -AssetsDirectory $AssetsDirectory -RequiredAssets $requiredAssets
 New-Directory $logsDirectory
 New-Directory $workspaceDirectory
 
@@ -122,11 +129,8 @@ if ($release.isDraft) {
     throw "release '$Tag' is still draft"
 }
 
-$zipAssetName = "semantic-language-windows-x64-$Tag.zip"
-$requiredAssets = @("smc.exe", "svm.exe", $zipAssetName)
-
-if ($AssetsDirectory) {
-    $assetRoot = (Resolve-Path $AssetsDirectory).Path
+if ($assetRoot) {
+    Write-Host "using caller-provided release assets from '$assetRoot'"
 } else {
     New-Directory $downloadDirectory
     $assetRoot = $downloadDirectory

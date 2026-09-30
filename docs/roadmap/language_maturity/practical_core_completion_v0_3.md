@@ -403,11 +403,26 @@ Further aggregate work moves to PCC-5 ADT + Basic Match, then PCC-6 Option / Res
 DoD:
 
 ```text
-[ ] record examples pass check → compile → verify → run-smc
-[ ] invalid field access is diagnosed
-[ ] record value semantics are tested
-[ ] CTF registry is updated where runtime values change
+[x] record examples pass check → compile → verify → run-smc
+[x] invalid field access is diagnosed
+[x] record value semantics are tested
+[x] CTF registry is updated where runtime values change
 ```
+
+DoD evidence (reconciled for Issue #1969, FND-133; the closeout note above
+predates this checklist being ticked):
+
+- check → run → compile → verify → run-smc: `tests/pcc4_records_acceptance.rs`
+  (the emitted-artifact `run-smc` step was added by the #1969 reconciliation;
+  before it, the suite stopped at `verify`, so this box could not be ticked);
+- invalid field access and the other negative record forms:
+  `tests/pcc4_records_diagnostics.rs`;
+- record value semantics: `tests/pcc4_records_acceptance.rs` (construction,
+  field read, function-boundary value passing),
+  `tests/record_copy_with_surface_qualification.rs`, and
+  `tests/record_field_ownership_golden.rs`;
+- CTF registry: the `record` row (PCC-4, freeze-candidate) in
+  `docs/roadmap/language_maturity/core_trust_freeze/runtime_value_registry.md`.
 
 ## 13. PCC-5 — ADT + Basic Match
 

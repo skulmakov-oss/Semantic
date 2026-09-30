@@ -34,7 +34,7 @@ This closeout does not widen trust, release, no_std, symbolic ownership, or runt
 
 Future work must start from the synced `main` worktree:
 
-`C:\Users\said3\Desktop\EXOcode\Semantic_phase1_prom_ui`
+`<local checkout>/Semantic_phase1_prom_ui` (machine-local absolute path redacted by Issue #1969; a separate local clone, not a repository path)
 
 The old `pcc/sequence-ownership-contract` branch must not be used as the base for new work.
 

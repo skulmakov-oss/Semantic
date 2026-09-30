@@ -20,13 +20,13 @@ It does not:
 
 Fresh rehearsal worktree:
 
-- `C:\Users\said3\Desktop\EXOcode\EXOcode-d3`
+- `<local clone>/EXOcode-d3` (machine-local absolute path redacted by Issue #1969)
 
 Cold build setup:
 
 - fresh worktree from current `origin/main`
 - dedicated cold target dir:
-  - `C:\Users\said3\Desktop\EXOcode\EXOcode-d3\.cold_start_target`
+  - `<local clone>/EXOcode-d3/.cold_start_target`
 
 Repository docs exercised:
 

@@ -46,8 +46,8 @@ Observed from `cargo run --bin smc -- --help`:
 
 Current canonical examples pack:
 
-- [examples/canonical/README.md](C:\Users\said3\Desktop\EXOcode\Semantic\examples\canonical\README.md)
-- [docs/examples_index.md](C:\Users\said3\Desktop\EXOcode\Semantic\docs\examples_index.md)
+- [examples/canonical/README.md](../../../examples/canonical/README.md)
+- [docs/examples_index.md](../../../docs/examples_index.md)
 
 Inventory:
 

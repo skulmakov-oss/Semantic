@@ -110,6 +110,24 @@ The project may describe components only as one of the following:
 | `experimental` | Useful research/donor/substrate exists, but it is not canonical readiness. |
 | `out-of-scope` | Explicitly excluded from the current phase. |
 
+These five labels are an internal PCC evidence vocabulary for component-level
+audits. They are **not** release or readiness status families and must not
+replace the canonical vocabulary in `docs/roadmap/public_status_model.md`
+(Published Stable, Qualified Limited Release, Landed On `main` Not Yet
+Promised, Out Of Scope). When a PCC finding feeds a release-facing or
+readiness-facing document, map it explicitly (Issue #1969, FND-109):
+
+| PCC evidence label | Canonical status reading |
+|---|---|
+| `working` | `landed on main, not yet promised`, unless the surface is explicitly named in the qualified contour (`qualified limited release`) or the published stable line |
+| `partial` | `landed on main, not yet promised`, with the known missing edges stated |
+| `documented-only` | not landed; no release-facing status claim |
+| `experimental` | not landed as canonical behavior; no release-facing status claim |
+| `out-of-scope` | `out of scope` |
+
+The PCC labels never promote a surface: `working` is not `qualified` and not
+`published stable`.
+
 Avoid mixed optimistic status labels such as:
 
 ```text

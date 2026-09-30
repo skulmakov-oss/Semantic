@@ -93,7 +93,7 @@ Commands already run for this audit:
 
 Observed results:
 
-- repo root confirmed at `C:\Users\said3\Desktop\EXOcode\Semantic`
+- repo root confirmed at the local repository checkout root (machine-local absolute path redacted by Issue #1969)
 - workspace had pre-existing dirty/untracked files outside this change
 - `cargo metadata` resolved the expected Semantic workspace
 - 7hell passed end-to-end on the current tree

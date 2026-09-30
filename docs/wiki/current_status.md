@@ -2,7 +2,7 @@
 
 **Status:** current-main orientation page  
 **Audience:** first-time readers, users, evaluators, and contributors  
-**Last synchronized:** July 13, 2026, after the user-first README refresh
+**Last synchronized:** July 13, 2026, after the user-first README refresh; project-root commands and UI retirement updated September 30, 2026 (#1969)
 
 This page is the compact Wiki overview of Semantic Language. It explains what the platform is, why its execution model is different, what can be used today, and which parts remain deliberately limited.
 
@@ -268,10 +268,11 @@ Current `main` also contains wider work that must remain visibly unpromoted unti
 - first-wave closures;
 - first-wave generics;
 - narrow runtime ownership for tuple and direct record-field paths;
-- first-wave UI/application boundaries;
 - additional module and import work beyond the currently qualified contour.
 
 These areas may be implemented and tested without being part of the present release promise.
+
+The first-wave UI/application boundary is also landed, but it belongs to the retired native UI / Workbench / Semantic Studio contour and is not awaiting promotion (see [UI, Workbench, and Studio retirement](../roadmap/ui_workbench_studio_retirement.md)).
 
 ---
 
@@ -382,9 +383,9 @@ Responsibilities:
 
 ### UI and applications
 
-The repository contains UI, native rendering, and Workbench-related development. These surfaces are operator/application layers.
+The repository contains historical native UI, native rendering, and Workbench development. That contour — native Semantic UI, Workbench, and Semantic Studio — is **retired** from the active roadmap: its code and evidence are preserved, but it is not remediated, qualified, or promoted (see [UI, Workbench, and Studio retirement](../roadmap/ui_workbench_studio_retirement.md)). The active strategic direction is self-hosting ([#1910](https://github.com/skulmakov-oss/Semantic/issues/1910)).
 
-They may request operations and display results, but they must not become the owner of:
+Any UI or application layer, historical or external, may request operations and display results, but it must not become the owner of:
 
 - source semantics;
 - SemCode;
@@ -442,13 +443,15 @@ smc run .
 smc compile . -o app.smc
 ```
 
-When running from the Semantic repository without installing the binaries:
+When running from the Semantic repository root without installing the binaries, name a project root explicitly (the repository root itself has no `semantic.toml` or `Semantic.package`):
 
 ```bash
-cargo run --bin smc -- check .
-cargo run --bin smc -- run .
-cargo run --bin smc -- compile . -o app.smc
+cargo run --bin smc -- check examples/qualification/pcc9_project_root_minimal
+cargo run --bin smc -- run examples/qualification/pcc9_project_root_minimal
+cargo run --bin smc -- compile examples/qualification/pcc9_project_root_minimal -o app.smc
 ```
+
+`examples/qualification/pcc9_project_root_package_baseline` exercises the `Semantic.package` layout the same way.
 
 This is not yet a complete package ecosystem. It does not claim:
 

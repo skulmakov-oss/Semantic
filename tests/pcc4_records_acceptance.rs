@@ -2,11 +2,11 @@
 mod cli_artifact_support;
 
 use cli_artifact_support::{
-    check_source, compile_source_to_artifact, run_source, temp_semcode_artifact, temp_source_file,
-    verify_artifact,
+    check_source, compile_source_to_artifact, run_smc_artifact, run_source, temp_semcode_artifact,
+    temp_source_file, verify_artifact,
 };
 
-fn check_run_compile_verify_source(name: &str, source: &str) {
+fn check_run_compile_verify_run_smc_source(name: &str, source: &str) {
     let source = temp_source_file("pcc4-records", name, source);
     check_source(&source);
     run_source(&source);
@@ -14,11 +14,12 @@ fn check_run_compile_verify_source(name: &str, source: &str) {
     let artifact = temp_semcode_artifact("pcc4-records", "smc_pcc4_records_acceptance");
     compile_source_to_artifact(&source, &artifact);
     verify_artifact(&artifact);
+    run_smc_artifact(&artifact);
 }
 
 #[test]
 fn pcc4_record_declaration_fixture_passes_full_cli_path() {
-    check_run_compile_verify_source(
+    check_run_compile_verify_run_smc_source(
         "pcc4_record_declaration.sm",
         r#"
 record SensorReading {
@@ -35,7 +36,7 @@ fn main() {
 
 #[test]
 fn pcc4_record_construction_and_field_read_fixture_passes_full_cli_path() {
-    check_run_compile_verify_source(
+    check_run_compile_verify_run_smc_source(
         "pcc4_record_construction_and_field_read.sm",
         r#"
 record Pair {
@@ -55,7 +56,7 @@ fn main() {
 
 #[test]
 fn pcc4_record_function_boundary_fixture_passes_full_cli_path() {
-    check_run_compile_verify_source(
+    check_run_compile_verify_run_smc_source(
         "pcc4_record_function_boundary.sm",
         r#"
 record Sample {

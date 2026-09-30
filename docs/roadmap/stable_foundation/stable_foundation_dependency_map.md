@@ -72,7 +72,8 @@ until the preceding exit gate is accepted.
 | #1376 | Reusable evidence for SSF-06 package work | Does not bypass SSF-05 or pre-authorize package expansion. |
 | #1375 | Reusable evidence for SSF-09 language-server work | Legacy/Workbench bridges are not canonical language authority. |
 | #1374 | Reusable evidence for SSF-10 compatibility work | Does not establish stable publication by itself. |
-| Workbench, Hub, Pulsar, Atlas, ALM, Studio, Andromeda tracks | Separate/deferred | No code or product scope may be mixed into an SSF phase. |
+| Workbench, Studio, and native UI | Retired (2026-09-30, #1968/#1862 not planned; `docs/roadmap/ui_workbench_studio_retirement.md`) | No SSF phase or gate depends on them; no code or product scope may be mixed into an SSF phase. |
+| Hub, Pulsar, Atlas, ALM, Andromeda tracks | Separate/deferred | No code or product scope may be mixed into an SSF phase. |
 
 If a later phase discovers a defect owned by an earlier phase, it must reopen
 that owner or create a narrow blocking child. It must not silently widen its own

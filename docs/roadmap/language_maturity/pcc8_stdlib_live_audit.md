@@ -10,7 +10,10 @@ Non-goal: code changes
 This document audits current Stdlib v0 readiness on `main` after PCC-7
 closeout.
 
-It is docs-only. It does not add helper behavior.
+PCC-8A (this audit's initial pass), PCC-8B, and PCC-8E were docs-only.
+PCC-8C and PCC-8D added test fixtures (positive helper acceptance and
+negative diagnostics/trap coverage) — see §5–§6. No PCC-8 step added helper
+behavior.
 
 ## 2. Current Known Status
 
@@ -45,6 +48,16 @@ That still does not mean PCC-8 is a broad stdlib completion:
 - Helper behavior is deterministic within the current admitted surface.
 
 ## 3. Readiness Matrix
+
+Reading this matrix against the closed status (Issue #1969, FND-146): PCC-8 is
+closed **only for the current admitted helper surface** — `assert`,
+`print(text)`, `to_text` for admitted basic types, the admitted text helpers,
+their diagnostics/traps, and their positive/negative fixtures (the `yes`
+rows). Rows marked `Ready? no` are outside that closure: they are the
+bounded-open items listed in the PCC-8E note below (broad stdlib, `std.math`,
+collection helper packaging, Option/Result helper semantics, and the generic
+lowering/SemCode/verifier/VM layers for helpers beyond the admitted surface).
+They are not claimed complete and are not blockers of the bounded closure.
 
 | Layer            | Required for PCC-8                               | Current state | Ready? | Next action |
 | ---------------- | ------------------------------------------------ | ------------- | ------ | ----------- |
@@ -254,11 +267,14 @@ Explicitly list:
 
 ## 12. CTF Note
 
-Because this is docs-only:
+The PCC-8 contour was not docs-only overall: PCC-8C and PCC-8D added test
+fixtures and test code (Issue #1969, FND-145). None of PCC-8A–8E changed
+runtime values, trap taxonomy, determinism, the verifier, `SymbolId`,
+capabilities, or trace formats.
 
 `CTF touched: none`
 
 Reason:
 
-`docs-only bounded closeout; no runtime value, trap, determinism, verifier,
+`docs and test-only additions; no runtime value, trap, determinism, verifier,
 SymbolId, capability, or trace change`

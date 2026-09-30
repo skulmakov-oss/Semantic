@@ -18,9 +18,9 @@ has enough evidence to support canonical examples.
 
 Observed practical anchors:
 
-- [examples/canonical/text_collections_toolbox/](C:\Users\said3\Desktop\EXOcode\EXOcode\examples\canonical\text_collections_toolbox\README.md)
-- [examples/canonical/match_control_flow/](C:\Users\said3\Desktop\EXOcode\EXOcode\examples\canonical\match_control_flow\README.md)
-- [examples/canonical/option_result_control_flow/](C:\Users\said3\Desktop\EXOcode\EXOcode\examples\canonical\option_result_control_flow\README.md)
+- [examples/canonical/text_collections_toolbox/](../../../examples/canonical/text_collections_toolbox/README.md)
+- [examples/canonical/match_control_flow/](../../../examples/canonical/match_control_flow/README.md)
+- [examples/canonical/option_result_control_flow/](../../../examples/canonical/option_result_control_flow/README.md)
 
 Current verdict:
 

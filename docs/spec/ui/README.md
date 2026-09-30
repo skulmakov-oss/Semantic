@@ -1,5 +1,13 @@
 # UI Spec Subbundle
 
+> [!IMPORTANT]
+> **Retired contour — historical record.** Native Semantic UI, Workbench, and
+> Semantic Studio are retired from the active roadmap (#1968 and #1862 closed
+> as not planned). This document is preserved as written for its era; any
+> readiness, planning, or "proposed" status below is not an active commitment,
+> and its open items are not being remediated. See
+> [UI, Workbench, and Studio retirement](../../roadmap/ui_workbench_studio_retirement.md).
+
 Status: Draft
 Track: POST-UI
 Scope: UI runtime effect path boundary and envelope specs only

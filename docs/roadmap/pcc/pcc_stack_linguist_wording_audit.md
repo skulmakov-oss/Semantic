@@ -21,7 +21,7 @@ Explain that the first safe slice proposal from external PR #1301 is limited to 
 
 ## Source-of-truth local repo
 
-- path: `C:\Users\said3\Desktop\EXOcode\Semantic_phase1_prom_ui`
+- path: `<local checkout>/Semantic_phase1_prom_ui` (machine-local absolute path redacted by Issue #1969; a separate local clone, not a repository path)
 - branch: `main`
 - HEAD: `cbb54af2518943950d3be5d0ed66520a762d1a34`
 - main == origin/main: `yes`

@@ -75,23 +75,15 @@ ALLOWLIST_PATHS = {
     "reports/security/dashboard/app.js",
     "reports/security/dashboard/README.md",
     "reports/security/REPOSITORY_HYGIENE_AUDIT.md",
-    # Historical admission logs & roadmap audits documenting past local CI runs
-    "docs/roadmap/pcc/cli_public_sample_qualification_audit.md",
-    "docs/roadmap/pcc/collections_core_audit.md",
-    "docs/roadmap/pcc/control_flow_core_audit.md",
-    "docs/roadmap/pcc/pcc_stack_bridge_audit.md",
-    "docs/roadmap/pcc/pcc_stack_external_diff_sampling_captured.md",
-    "docs/roadmap/pcc/pcc_stack_external_inventory.md",
-    "docs/roadmap/pcc/pcc_stack_linguist_wording_audit.md",
-    "docs/roadmap/pcc/post_merge_sequence_ownership_closeout.md",
-    "docs/roadmap/pcc/record_field_ownership_audit.md",
-    "docs/roadmap/pcc/text_core_audit.md",
+    # Retired post-UI / UI-DNA historical records (docs/roadmap/post_ui/README.md)
+    # that quote past local command evidence. Current-facing roadmap and PCC
+    # audit documents are NOT exempt: their machine-local paths were replaced
+    # with repo-relative links or redactions by Issue #1969 (FND-060, FND-339),
+    # so the guard now enforces them.
     "docs/roadmap/post_ui/r12_ui_project_board_reconciliation.md",
     "docs/roadmap/post_ui/r12_ui_project_board_status_metadata_reconciliation_followup.md",
     "docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md",
     "docs/roadmap/post_ui/ui_dna2_prom_ui_reconciliation.md",
-    "docs/roadmap/repository_truth_audit_2026-04-22.md",
-    "reports/cold_start_rehearsal_2026-04-24.md",
     # Historical workbench package manifests and capture logs
     "artifacts/workbench/beta-smoke/workbench_beta_package_manifest.json",
     "artifacts/workbench/beta-smoke/workbench_beta_smoke_latest.json",

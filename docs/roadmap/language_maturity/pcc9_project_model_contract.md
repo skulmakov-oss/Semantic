@@ -69,7 +69,12 @@ Contract rules:
 
 - package name is required if the admitted parser requires it; current baseline
   does
-- project entry is required for project-root check/run
+- a resolved project entry is required for project-root check/run: the
+  explicit manifest entry when present, otherwise the default `src/main.sm`
+  (see Deterministic Module Root Policy below); a missing resolved entry file
+  is a stable project-layout diagnostic (Issue #1969, FND-147; current
+  behavior: `crates/smc-cli/src/package_manifest.rs`, test
+  `parse_semantic_toml_manifest_defaults_entry_and_rejects_escape`)
 - entry path must be relative to project root
 - entry path must not escape project root
 - path normalization must be deterministic

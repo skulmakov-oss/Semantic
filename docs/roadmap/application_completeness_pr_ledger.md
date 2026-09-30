@@ -42,6 +42,15 @@ The required benchmark family is:
 - `examples/benchmarks/snake_learning.sm`
 - `examples/benchmarks/snake_trace.sm`
 
+Reconciliation note (Issue #1969, FND-066): no PR in the sequence below
+delivers a separate `snake_trace.sm` program, and none exists on `main`. The
+trace requirement was closed instead by `PR-F3` — the trace adapter contract
+(`docs/roadmap/snake_trace_adapter_contract.md`) plus the deterministic sample
+trace (`examples/benchmarks/snake_trace_sample.txt`) — and `PR-F4` closed the
+pack on that basis (`reports/application_completeness_benchmark_verdict.md`).
+The `snake_trace.sm` line above is kept as the original plan; it is not an
+outstanding deliverable.
+
 The base path does **not** require:
 
 - browser DOM ownership
@@ -498,7 +507,10 @@ Current `main` still fails this benchmark family at the following points:
   Title:
   - `cli/runtime: add narrow file export for experiment traces`
 
-- `PR-CONT-2` [contingency]
+- `PR-CONT-2` [contingency — retired]
+  Retired: native UI / Workbench / Semantic Studio are no longer on the
+  roadmap (`docs/roadmap/ui_workbench_studio_retirement.md`); this slot will
+  not open.
   Trigger:
   - open only if a visual native demo is required after the headless benchmark
     pack is already green

@@ -109,8 +109,10 @@ compiler truth rather than reimplement it.
 ### Proof and onboarding
 
 The final contour must be exercised by the canonical application families in
-SSF-11 and the exact qualification gates in SSF-12. Native UI may demonstrate a
-consumer path but is not language, verifier, runtime, or Foundation authority.
+SSF-11 and the exact qualification gates in SSF-12. Native UI, Workbench, and
+Semantic Studio are retired (`docs/roadmap/ui_workbench_studio_retirement.md`)
+and are not part of this proof; UI is not language, verifier, runtime, or
+Foundation authority.
 
 ## Exclusions
 
