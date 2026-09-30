@@ -33,7 +33,7 @@ Historical audit CSV/JSON remain immutable; this is derived current-state eviden
 | FND-371 | REM-010 | FIXED_LATER_CONFIRMED | test discovery sorts losslessly or rejects invalid names |
 | FND-157 | REM-011 | FIXED_LATER_CONFIRMED | 7hell is wired through shared CLI dispatch |
 | FND-159 | REM-011 | FIXED_LATER_CONFIRMED | type-check failures map to Type Hell |
-| FND-160 | REM-011 | FIXED_BY_THIS_PR | E0201 type mismatches map to Type Hell without misclassifying E02 parser diagnostics |
+| FND-160 | REM-011 | FIXED_BY_THIS_PR | structured producer origin separates parser and semantic diagnostics even when both use E0221 |
 | FND-161 | REM-011 | FIXED_LATER_CONFIRMED | VM blocker graph contains no self-cycle |
 | FND-162 | REM-011 | FIXED_LATER_CONFIRMED | verifier failure report matches blocked VM behavior |
 | FND-163 | REM-011 | FIXED_LATER_CONFIRMED | successful 7hell execution does not rerun SemCode |

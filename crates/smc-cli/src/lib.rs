@@ -49,7 +49,9 @@ use sm_emit::compile_program_to_semcode_with_options_debug;
 #[cfg(feature = "std")]
 use sm_ir::{compile_program_to_ir_with_options, CompileProfile, OptLevel};
 #[cfg(feature = "std")]
-use sm_sema::{check_file_with_provider, check_source, ModuleProvider, SemanticReport};
+use sm_sema::{
+    check_file_with_provider, check_source, ModuleProvider, SemanticError, SemanticReport,
+};
 #[cfg(feature = "std")]
 use std::path::Path;
 #[cfg(feature = "std")]
@@ -160,7 +162,11 @@ impl CliPipeline {
     }
 
     pub fn semantic_check_source(src: &str) -> Result<SemanticReport, String> {
-        check_source(src).map_err(|e| e.to_string())
+        Self::semantic_check_source_diagnostic(src).map_err(|error| error.to_string())
+    }
+
+    pub fn semantic_check_source_diagnostic(src: &str) -> Result<SemanticReport, SemanticError> {
+        check_source(src)
     }
 
     pub fn semantic_check_file(path: &Path) -> Result<SemanticReport, String> {

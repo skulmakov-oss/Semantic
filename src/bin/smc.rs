@@ -2,8 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use sm_diagnostic::DiagnosticFamily;
 use sm_emit::{compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
+use sm_front::diagnostic_authority::FRONTEND_TYPE_CHECK_CODE;
 use sm_ir::CompilePipelineError;
+use sm_sema::SemanticError;
 use sm_verify::{RejectReport, VerifiedProgram};
 use sm_vm::RuntimeError as VmRuntimeError;
 use smc_cli::{CliPipeline, ControlledObservationQualificationEnvelope};
@@ -228,7 +231,7 @@ fn execute_7hell_single_file(
     let target_display = display_path_for_report(target);
     let report = match fs::read_to_string(Path::new(target)) {
         Ok(source) => {
-            match smc_cli::CliPipeline::semantic_check_source(&source) {
+            match smc_cli::CliPipeline::semantic_check_source_diagnostic(&source) {
                 Ok(_) => {
                     match compile_program_to_semcode_with_options_debug(
                         &source,
@@ -282,8 +285,8 @@ fn execute_7hell_single_file(
                         ),
                     }
                 }
-                Err(error_text) => {
-                    let diagnostic = diagnostic_from_check_error(&error_text, &target_display);
+                Err(error) => {
+                    let diagnostic = diagnostic_from_check_error(&error, &target_display);
                     build_check_failed_7hell_report(target_display, diagnostic)
                 }
             }
@@ -1357,35 +1360,39 @@ fn render_json_diagnostics(diagnostics: &[SevenHellDiagnostic]) -> String {
     out
 }
 
-fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenHellDiagnostic {
-    let first_line = error_text.lines().next().unwrap_or(error_text);
-    let code = extract_error_code(first_line).unwrap_or_else(|| "unknown".to_string());
-    let message_needle =
-        extract_error_message(first_line).unwrap_or_else(|| "check failed".to_string());
-    let (line, column) = extract_error_location(first_line);
-
-    let (stage, kind, category) = match code.as_str() {
-        "E0201" => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
-        c if c.starts_with('E') => (
+fn diagnostic_from_check_error(error: &SemanticError, target_display: &str) -> SevenHellDiagnostic {
+    let diagnostic = &error.diag;
+    let (stage, kind, category) = match diagnostic.canonical.family {
+        DiagnosticFamily::Semantic => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
+        DiagnosticFamily::Frontend if diagnostic.code == FRONTEND_TYPE_CHECK_CODE => {
+            ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type")
+        }
+        DiagnosticFamily::Frontend => (
             "syntax",
             SevenHellDiagnosticKind::SyntaxDiagnostic,
             "syntax",
         ),
-        _ => ("syntax", SevenHellDiagnosticKind::CheckDiagnostic, "check"),
+        DiagnosticFamily::Verification | DiagnosticFamily::Runtime => {
+            unreachable!("semantic check returned a non-compiler diagnostic family")
+        }
     };
 
     SevenHellDiagnostic {
         id: "D001".to_string(),
         stage,
         kind,
-        code: Some(code),
+        code: Some(diagnostic.code.to_string()),
         category,
-        message_needle,
+        message_needle: diagnostic
+            .canonical
+            .canonical_message
+            .clone()
+            .unwrap_or_else(|| diagnostic.message.clone()),
         severity: Some("error"),
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
-            line,
-            column,
+            line: (diagnostic.mark.line > 0).then_some(diagnostic.mark.line),
+            column: (diagnostic.mark.col > 0).then_some(diagnostic.mark.col),
         },
     }
 }
@@ -1561,12 +1568,6 @@ fn boundary_denial_diagnostic(target_display: &str) -> SevenHellDiagnostic {
     }
 }
 
-fn extract_error_code(line: &str) -> Option<String> {
-    let start = line.find('[')? + 1;
-    let end = line[start..].find(']')? + start;
-    Some(line[start..end].to_string())
-}
-
 fn extract_error_message(line: &str) -> Option<String> {
     let after_colon = line.find("]: ")? + 3;
     let tail = &line[after_colon..];
@@ -1575,17 +1576,6 @@ fn extract_error_message(line: &str) -> Option<String> {
     } else {
         Some(tail.trim().to_string())
     }
-}
-
-fn extract_error_location(line: &str) -> (Option<u32>, Option<u32>) {
-    let Some(pos) = line.rfind(" at line ") else {
-        return (None, None);
-    };
-    let loc = &line[(pos + " at line ".len())..];
-    let mut split = loc.split(':');
-    let line = split.next().and_then(|v| v.parse::<u32>().ok());
-    let column = split.next().and_then(|v| v.parse::<u32>().ok());
-    (line, column)
 }
 
 fn json_escape(value: &str) -> String {
@@ -1645,31 +1635,55 @@ mod tests {
     }
 
     fn syntax_diagnostic() -> SevenHellDiagnostic {
-        diagnostic_from_check_error("[E0005]: syntax failed at line 1:1", "program.sm")
+        let error = sm_sema::check_source("fn main(").expect_err("must reject");
+        diagnostic_from_check_error(&error, "program.sm")
     }
 
     #[test]
-    fn type_mismatch_is_a_type_hell_diagnostic() {
-        let diagnostic = diagnostic_from_check_error(
-            "Error [E0201]: mismatched types at line 2:3",
-            "program.sm",
-        );
+    fn same_e0221_code_preserves_parser_and_semantic_origins() {
+        let cases = [
+            (
+                "parser",
+                "Entity A:\n    state x: quad\nLaw:\n",
+                "syntax",
+                "syntax-diagnostic",
+            ),
+            (
+                "semantic",
+                "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When true ->\n        System.recovery()\nLaw \"L\" [priority 1]:\n    When true ->\n        System.recovery()\n",
+                "type",
+                "check-diagnostic",
+            ),
+        ];
 
-        assert_eq!(diagnostic.stage, "type");
-        assert_eq!(diagnostic.kind, SevenHellDiagnosticKind::CheckDiagnostic);
-        assert_eq!(diagnostic.category, "type");
-    }
+        for (label, source, stage, kind) in cases {
+            let dir = mk_temp_dir(&format!("smc_7hell_e0221_{label}"));
+            let entry = dir.join("program.sm");
+            std::fs::write(&entry, source).expect("write source");
 
-    #[test]
-    fn parser_e02_codes_stay_syntax_hell_diagnostics() {
-        let diagnostic = diagnostic_from_check_error(
-            "Error [E0200]: expected declaration at line 2:3",
-            "program.sm",
-        );
+            let outcome =
+                execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Json);
+            assert!(!outcome.success, "{label}: {}", outcome.rendered);
+            assert!(
+                outcome.rendered.contains("\"code\": \"E0221\""),
+                "{label}: {}",
+                outcome.rendered
+            );
+            assert!(
+                outcome
+                    .rendered
+                    .contains(&format!("\"stage\": \"{stage}\"")),
+                "{label}: {}",
+                outcome.rendered
+            );
+            assert!(
+                outcome.rendered.contains(&format!("\"kind\": \"{kind}\"")),
+                "{label}: {}",
+                outcome.rendered
+            );
 
-        assert_eq!(diagnostic.stage, "syntax");
-        assert_eq!(diagnostic.kind, SevenHellDiagnosticKind::SyntaxDiagnostic);
-        assert_eq!(diagnostic.category, "syntax");
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[test]

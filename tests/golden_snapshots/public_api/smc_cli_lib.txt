@@ -26,6 +26,7 @@ pub use wire_contract::{ build_generated_wire_contract, format_generated_wire_co
 pub fn compile_source( src: &str, profile: CompileProfile, opt: OptLevel, debug_symbols: bool, ) -> Result<Vec<u8>, String> {
 pub fn build_ir( src: &str, profile: CompileProfile, opt: OptLevel, ) -> Result<Vec<sm_ir::IrFunction>, String> {
 pub fn semantic_check_source(src: &str) -> Result<SemanticReport, String> {
+pub fn semantic_check_source_diagnostic(src: &str) -> Result<SemanticReport, SemanticError> {
 pub fn semantic_check_file(path: &Path) -> Result<SemanticReport, String> {
 pub fn qualify_controlled_observation_bytes( bytes: &[u8], ) -> Result<ControlledObservationQualificationEnvelope, String> {
 pub fn explain(code: &str) -> Option<&'static str> {
