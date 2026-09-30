@@ -37,6 +37,15 @@ fn smc_commands_reject_leading_unknown_flags() {
     assert_unknown_flag_error(&["run", "--bogus"]);
     assert_unknown_flag_error(&["verify", "--bogus"]);
     assert_unknown_flag_error(&["run-smc", "--bogus"]);
+    assert_unknown_flag_error(&["lint", "--bogus"]);
+    assert_unknown_flag_error(&["watch", "--bogus"]);
+    assert_unknown_flag_error(&["dump-ast", "--bogus"]);
+    assert_unknown_flag_error(&["dump-ir", "--bogus"]);
+    assert_unknown_flag_error(&["dump-bytecode", "--bogus"]);
+    assert_unknown_flag_error(&["hash-ast", "--bogus"]);
+    assert_unknown_flag_error(&["hash-ir", "--bogus"]);
+    assert_unknown_flag_error(&["hash-smc", "--bogus"]);
+    assert_unknown_flag_error(&["disasm", "--bogus"]);
 }
 
 #[test]

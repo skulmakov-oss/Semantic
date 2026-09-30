@@ -2,8 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use sm_diagnostic::DiagnosticFamily;
 use sm_emit::{compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
+use sm_front::diagnostic_authority::FRONTEND_TYPE_CHECK_CODE;
 use sm_ir::CompilePipelineError;
+use sm_sema::SemanticError;
 use sm_verify::{RejectReport, VerifiedProgram};
 use sm_vm::RuntimeError as VmRuntimeError;
 use smc_cli::{CliPipeline, ControlledObservationQualificationEnvelope};
@@ -227,67 +230,67 @@ fn execute_7hell_single_file(
 ) -> SevenHellRenderOutput {
     let target_display = display_path_for_report(target);
     let report = match fs::read_to_string(Path::new(target)) {
-        Ok(source) => {
-            match smc_cli::CliPipeline::semantic_check_source(&source) {
-                Ok(_) => {
-                    match compile_program_to_semcode_with_options_debug(
-                        &source,
-                        CompileProfile::Auto,
-                        OptLevel::O0,
-                        false,
-                    ) {
-                        Ok(bytes) => {
-                            match sm_verify::verify_semcode_token(&bytes) {
-                                Ok(token) => {
-                                    let verified = token.program().clone();
-                                    let entry_result =
-                                        token.require_entry("main").map_err(|e| match e {
-                                            sm_verify::EntryResolutionError::MissingEntry {
-                                                entry,
-                                            } => VmRuntimeError::UnknownFunction(entry),
-                                        });
-                                    match entry_result {
-                            Ok(entry_token) => match sm_vm::run_verified_entry_semcode(&entry_token) {
-                                Ok(()) => match CliPipeline::qualify_controlled_observation_bytes(&bytes) {
-                                    Ok(practical) => build_practical_passed_7hell_report(
+        Ok(source) => match sm_sema::check_source(&source) {
+            Ok(_) => {
+                match compile_program_to_semcode_with_options_debug(
+                    &source,
+                    CompileProfile::Auto,
+                    OptLevel::O0,
+                    false,
+                ) {
+                    Ok(bytes) => match sm_verify::verify_semcode_token(&bytes) {
+                        Ok(token) => {
+                            let verified = token.program().clone();
+                            let entry_result = token.require_entry("main").map_err(|e| match e {
+                                sm_verify::EntryResolutionError::MissingEntry { entry } => {
+                                    VmRuntimeError::UnknownFunction(entry)
+                                }
+                            });
+                            match entry_result {
+                                Ok(entry_token) => match execute_once_and_qualify(
+                                    || {
+                                        sm_vm::run_verified_entry_semcode_collecting_hello_observations(
+                                        &entry_token,
+                                    )
+                                    },
+                                    CliPipeline::qualify_controlled_observations,
+                                ) {
+                                    Ok(Ok(practical)) => build_practical_passed_7hell_report(
                                         target_display,
                                         verified,
                                         practical,
                                     ),
-                                    Err(error) => build_practical_failed_7hell_report(
+                                    Ok(Err(error)) => build_practical_failed_7hell_report(
                                         target_display.clone(),
                                         diagnostic_from_practical_error(&error, &target_display),
+                                    ),
+                                    Err(error) => build_vm_failed_7hell_report(
+                                        target_display.clone(),
+                                        diagnostic_from_vm_error(&error, &target_display),
                                     ),
                                 },
                                 Err(error) => build_vm_failed_7hell_report(
                                     target_display.clone(),
                                     diagnostic_from_vm_error(&error, &target_display),
                                 ),
-                            },
-                            Err(error) => build_vm_failed_7hell_report(
-                                target_display.clone(),
-                                diagnostic_from_vm_error(&error, &target_display),
-                            ),
-                        }
-                                }
-                                Err(report) => build_verifier_failed_7hell_report(
-                                    target_display.clone(),
-                                    diagnostic_from_verifier_error(&report, &target_display),
-                                ),
                             }
                         }
-                        Err(error) => build_lowering_failed_7hell_report(
+                        Err(report) => build_verifier_failed_7hell_report(
                             target_display.clone(),
-                            diagnostic_from_compile_error(&error, &target_display),
+                            diagnostic_from_verifier_error(&report, &target_display),
                         ),
-                    }
-                }
-                Err(error_text) => {
-                    let diagnostic = diagnostic_from_check_error(&error_text, &target_display);
-                    build_check_failed_7hell_report(target_display, diagnostic)
+                    },
+                    Err(error) => build_lowering_failed_7hell_report(
+                        target_display.clone(),
+                        diagnostic_from_compile_error(&error, &target_display),
+                    ),
                 }
             }
-        }
+            Err(error) => {
+                let diagnostic = diagnostic_from_check_error(&error, &target_display);
+                build_check_failed_7hell_report(target_display, diagnostic)
+            }
+        },
         Err(_) => build_check_failed_7hell_report(
             target_display.clone(),
             boundary_denial_diagnostic(&target_display),
@@ -299,6 +302,18 @@ fn execute_7hell_single_file(
         rendered: render_7hell_report(&report, output_mode),
         success,
     }
+}
+
+fn execute_once_and_qualify<T, E>(
+    execute: impl FnOnce() -> Result<
+        Vec<sm_runtime_core::hello_observation_sink::HelloObservationEvent>,
+        E,
+    >,
+    qualify: impl FnOnce(
+        Vec<sm_runtime_core::hello_observation_sink::HelloObservationEvent>,
+    ) -> Result<T, String>,
+) -> Result<Result<T, String>, E> {
+    execute().map(qualify)
 }
 
 fn display_path_for_report(path: &str) -> String {
@@ -1357,30 +1372,43 @@ fn render_json_diagnostics(diagnostics: &[SevenHellDiagnostic]) -> String {
     out
 }
 
-fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenHellDiagnostic {
-    let first_line = error_text.lines().next().unwrap_or(error_text);
-    let code = extract_error_code(first_line).unwrap_or_else(|| "unknown".to_string());
-    let message_needle =
-        extract_error_message(first_line).unwrap_or_else(|| "check failed".to_string());
-    let (line, column) = extract_error_location(first_line);
-
-    let (stage, kind, category) = match code.as_str() {
-        "E0201" => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
-        c if c.starts_with('E') => (
+fn diagnostic_from_check_error(error: &SemanticError, target_display: &str) -> SevenHellDiagnostic {
+    let diagnostic = &error.diag;
+    let (stage, kind, category) = match diagnostic.canonical.family {
+        DiagnosticFamily::Semantic => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
+        DiagnosticFamily::Frontend if diagnostic.code == FRONTEND_TYPE_CHECK_CODE => {
+            ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type")
+        }
+        DiagnosticFamily::Frontend => (
             "syntax",
             SevenHellDiagnosticKind::SyntaxDiagnostic,
             "syntax",
         ),
-        _ => ("syntax", SevenHellDiagnosticKind::CheckDiagnostic, "check"),
+        DiagnosticFamily::Verification | DiagnosticFamily::Runtime => {
+            unreachable!("semantic check returned a non-compiler diagnostic family")
+        }
+    };
+
+    let (line, column) = if diagnostic.canonical.range.is_some() {
+        (
+            Some(diagnostic.mark.line.max(1)),
+            Some(diagnostic.mark.col.max(1)),
+        )
+    } else {
+        (None, None)
     };
 
     SevenHellDiagnostic {
         id: "D001".to_string(),
         stage,
         kind,
-        code: Some(code),
+        code: Some(diagnostic.code.to_string()),
         category,
-        message_needle,
+        message_needle: diagnostic
+            .canonical
+            .canonical_message
+            .clone()
+            .unwrap_or_else(|| diagnostic.message.clone()),
         severity: Some("error"),
         source: SevenHellDiagnosticSource {
             file: target_display.to_string(),
@@ -1561,12 +1589,6 @@ fn boundary_denial_diagnostic(target_display: &str) -> SevenHellDiagnostic {
     }
 }
 
-fn extract_error_code(line: &str) -> Option<String> {
-    let start = line.find('[')? + 1;
-    let end = line[start..].find(']')? + start;
-    Some(line[start..end].to_string())
-}
-
 fn extract_error_message(line: &str) -> Option<String> {
     let after_colon = line.find("]: ")? + 3;
     let tail = &line[after_colon..];
@@ -1575,17 +1597,6 @@ fn extract_error_message(line: &str) -> Option<String> {
     } else {
         Some(tail.trim().to_string())
     }
-}
-
-fn extract_error_location(line: &str) -> (Option<u32>, Option<u32>) {
-    let Some(pos) = line.rfind(" at line ") else {
-        return (None, None);
-    };
-    let loc = &line[(pos + " at line ".len())..];
-    let mut split = loc.split(':');
-    let line = split.next().and_then(|v| v.parse::<u32>().ok());
-    let column = split.next().and_then(|v| v.parse::<u32>().ok());
-    (line, column)
 }
 
 fn json_escape(value: &str) -> String {
@@ -1645,7 +1656,74 @@ mod tests {
     }
 
     fn syntax_diagnostic() -> SevenHellDiagnostic {
-        diagnostic_from_check_error("[E0005]: syntax failed at line 1:1", "program.sm")
+        let error = sm_sema::check_source("fn main(").expect_err("must reject");
+        diagnostic_from_check_error(&error, "program.sm")
+    }
+
+    #[test]
+    fn law_name_syntax_and_duplicate_law_semantics_have_distinct_codes() {
+        let cases = [
+            (
+                "parser",
+                "Entity A:\n    state x: quad\nLaw:\n",
+                "E0217",
+                "syntax",
+                "syntax-diagnostic",
+            ),
+            (
+                "semantic",
+                "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When true ->\n        System.recovery()\nLaw \"L\" [priority 1]:\n    When true ->\n        System.recovery()\n",
+                "E0221",
+                "type",
+                "check-diagnostic",
+            ),
+        ];
+
+        for (label, source, code, stage, kind) in cases {
+            let dir = mk_temp_dir(&format!("smc_7hell_e0221_{label}"));
+            let entry = dir.join("program.sm");
+            std::fs::write(&entry, source).expect("write source");
+
+            let outcome =
+                execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Json);
+            assert!(!outcome.success, "{label}: {}", outcome.rendered);
+            assert!(
+                outcome.rendered.contains(&format!("\"code\": \"{code}\"")),
+                "{label}: {}",
+                outcome.rendered
+            );
+            assert!(
+                outcome
+                    .rendered
+                    .contains(&format!("\"stage\": \"{stage}\"")),
+                "{label}: {}",
+                outcome.rendered
+            );
+            assert!(
+                outcome.rendered.contains(&format!("\"kind\": \"{kind}\"")),
+                "{label}: {}",
+                outcome.rendered
+            );
+
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn successful_7hell_orchestration_executes_once() {
+        let mut executions = 0;
+        let result = execute_once_and_qualify(
+            || {
+                executions += 1;
+                Ok::<_, ()>(Vec::new())
+            },
+            |events| Ok::<_, String>(events.len()),
+        )
+        .expect("execution succeeds")
+        .expect("qualification succeeds");
+
+        assert_eq!(executions, 1);
+        assert_eq!(result, 0);
     }
 
     #[test]

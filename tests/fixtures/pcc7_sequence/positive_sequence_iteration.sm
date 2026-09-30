@@ -1,11 +1,11 @@
 fn classify(values: Sequence(i32)) -> bool {
-    let saw_retry: bool = false;
+    let mut traversal: i32 = 0;
+    let mut count: i32 = 0;
     for value in values {
-        if value == 2 {
-            saw_retry ||= true;
-        }
+        traversal = traversal * 10 + value;
+        count += 1;
     }
-    return saw_retry;
+    return traversal == 24 && count == 3;
 }
 
 fn main() {

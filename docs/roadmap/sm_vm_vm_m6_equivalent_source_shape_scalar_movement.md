@@ -193,5 +193,5 @@ Results:
 
 - `cargo test -p sm-vm --features vm-profile --test vm_opcode_profile_workloads -- --nocapture` passed.
 - `cargo test -p sm-vm --features vm-profile --test vm_opcode_profile_workloads -- --ignored --nocapture` passed.
-- `git diff --check` passed, with only LF/CRLF warnings on the new roadmap docs.
-- `cargo fmt --check` failed due to pre-existing unrelated formatting drift in `crates/prom-ui-backend-native/src/lib.rs`.
+- `git diff --check` passed without content or line-ending errors.
+- `cargo fmt --check` passed.

@@ -34,6 +34,7 @@ CLI source: `smc explain <code>` and `smc explain --list`.
 - `E0214`: Expected Entity field declaration.
 - `E0215`: Entity field must start with `state` or `prop`.
 - `E0216`: Expected `:` in Entity field declaration.
+- `E0217`: Expected a quoted Law name.
 - `E0220`: Duplicate Entity declaration.
 - `E0221`: Duplicate Law inside the same Entity scope.
 - `E0222`: Law body is empty.

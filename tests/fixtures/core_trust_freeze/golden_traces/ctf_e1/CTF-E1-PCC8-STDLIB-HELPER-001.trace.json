@@ -8,11 +8,11 @@
   "stage": "selected",
   "expected_status": "accept",
   "source_hash": "7dd16913eee5d7ee",
-  "ir_hash": "aa750173e9bbe47f",
+  "ir_hash": "f414b94b2348f9a5",
   "semcode_hash": "0cc0d17017403415",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "1216c78527ef1dc8",
+  "expected_output_hash": "cbf29ce484222325",
   "notes": "Selected assert helper boundary only; no universal to_text or debug_render widening."
 }

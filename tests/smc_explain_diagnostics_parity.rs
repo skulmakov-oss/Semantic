@@ -50,6 +50,8 @@ fn smc_explain_known_code_returns_help() {
 fn smc_explain_known_catalog_entries_return_help() {
     let cases = [
         ("E0101", "Bad indentation level (INDENT/DEDENT mismatch)."),
+        ("E0217", "Expected a quoted Law name."),
+        ("E0221", "Duplicate Law inside the same Entity scope."),
         ("E0238", "Cyclic import detected."),
         ("E0239", "Import resolution/read/parse failure."),
         (

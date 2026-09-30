@@ -28,4 +28,5 @@ pub fn build_ir( src: &str, profile: CompileProfile, opt: OptLevel, ) -> Result<
 pub fn semantic_check_source(src: &str) -> Result<SemanticReport, String> {
 pub fn semantic_check_file(path: &Path) -> Result<SemanticReport, String> {
 pub fn qualify_controlled_observation_bytes( bytes: &[u8], ) -> Result<ControlledObservationQualificationEnvelope, String> {
+pub fn qualify_controlled_observations( events: Vec<sm_runtime_core::hello_observation_sink::HelloObservationEvent>, ) -> Result<ControlledObservationQualificationEnvelope, String> {
 pub fn explain(code: &str) -> Option<&'static str> {

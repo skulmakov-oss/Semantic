@@ -118,6 +118,8 @@ fn main() {
     let max_steps: i32 = 200;
 
     let mut qtable: Map(i32, i32) = map_empty();
+    let mut q_writes: i32 = 0;
+    let mut last_q_key: i32 = 0;
     let mut total_score: i32 = 0;
     let mut total_steps: i32 = 0;
 
@@ -152,23 +154,31 @@ fn main() {
 
             if !in_bounds(nx, ny) {
                 alive = false;
+                last_q_key = q_key(state, action);
                 qtable = q_add(qtable, state, action, -100);
+                q_writes = q_writes + 1;
             } else {
                 let new_head: i32 = pack(nx, ny);
                 let tail_gone: Sequence(i32) = pop(snake);
                 if contains(tail_gone, new_head) {
                     alive = false;
+                    last_q_key = q_key(state, action);
                     qtable = q_add(qtable, state, action, -100);
+                    q_writes = q_writes + 1;
                 } else {
                     if new_head == food {
                         snake = prepend(snake, new_head);
                         score = score + 1;
                         food = random_next_i32(0, 100);
+                        last_q_key = q_key(state, action);
                         qtable = q_add(qtable, state, action, 50);
+                        q_writes = q_writes + 1;
                     } else {
                         let grown: Sequence(i32) = prepend(snake, new_head);
                         snake = pop(grown);
+                        last_q_key = q_key(state, action);
                         qtable = q_add(qtable, state, action, 1);
+                        q_writes = q_writes + 1;
                     }
                     steps = steps + 1;
                 }
@@ -188,8 +198,9 @@ fn main() {
     assert(total_score >= 0);
     assert(total_steps >= 0);
     assert(episode == n_episodes);
-    // Q-table must be non-empty after training (episodes left entries)
-    assert(map_contains(qtable, 0) || map_contains(qtable, 1) || map_contains(qtable, 2));
+    // Q-table must contain the key written by the final training update.
+    assert(q_writes > 0);
+    assert(map_contains(qtable, last_q_key));
 
     // Deterministic golden values: 10 episodes, seeds episode*137+42
     // Episode 0 always goes straight (bootstrap).  Episodes 1-9 use

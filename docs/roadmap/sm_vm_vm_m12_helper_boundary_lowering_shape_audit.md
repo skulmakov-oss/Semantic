@@ -54,7 +54,7 @@ VM-M12 does not introduce result-inspection APIs.
 |---|---:|---:|---|---|---|---|
 | VM-M9 helper boundary | 2 | 1 | `quad` | `score`, `merged_count`, `checksum`, `state`, `next` | `score > 0`, `merged_count > 0`, `checksum == 120` | Two helper calls per loop iteration; inline variant keeps the same semantics without helper calls. |
 | G2 single-call helper boundary | 1 | 1 | `quad` | `score`, `hit_count`, `checksum`, `state` | `score == 20`, `hit_count == 2`, `checksum == 28` | Cleaner one-call pair; helper pressure remains visible even with smaller call density. |
-| G2 call-chain helper boundary | 2 | 2 | `i32` then `quad` | `score`, `chain_hits`, `checksum`, `class`, `state`, `next_class`, `next_state` | `score == 40`, `chain_hits > 0`, `checksum == 120` | Small helper chain amplifies the helper-boundary effect. |
+| G2 call-chain helper boundary | 4 (2 chains) | 2 | `i32` then `quad` | `score`, `chain_hits`, `checksum`, `class`, `state`, `next_class`, `next_state` | `score == 40`, `chain_hits > 0`, `checksum == 120` | Two helper chains, each containing two calls, amplify the helper-boundary effect. |
 
 ## Lowering / VM Path Inventory
 

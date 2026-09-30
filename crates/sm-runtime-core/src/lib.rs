@@ -323,6 +323,7 @@ impl DebugNameMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn access_path_root_starts_with_empty_component_list() {

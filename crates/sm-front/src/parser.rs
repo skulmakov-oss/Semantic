@@ -3740,7 +3740,7 @@ impl<'a> Parser<'a> {
 
     fn parse_logos_law(&mut self) -> Result<LogosLaw, FrontendError> {
         let kw = self.expect_raw(TokenKind::KwLaw, "expected 'Law'", "E0220")?;
-        let name_tok = self.expect_raw(TokenKind::String, "expected law name", "E0221")?;
+        let name_tok = self.expect_raw(TokenKind::String, "expected law name", "E0217")?;
         let name = name_tok.text.trim_matches('"').to_string();
         let mut priority = 0u32;
         if self.eat_raw(TokenKind::LBracket) {

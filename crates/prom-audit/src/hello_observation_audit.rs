@@ -33,6 +33,7 @@ pub struct HelloObservationAuditLinkage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HelloObservationAuditEvent {
     pub event_kind: HelloObservationAuditEventKind,
     pub operation_kind: &'static str,

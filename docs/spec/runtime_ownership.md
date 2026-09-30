@@ -171,7 +171,8 @@ Current transport scope:
   the identical component in a `Write` event is rejected unconditionally,
   under every header
 - deterministic event order
-- `CAP_OWNERSHIP_PATHS` remains the tuple ownership capability family
+- every artifact that carries an `OWN0` section must declare
+  `CAP_OWNERSHIP_PATHS`; admission rejects ownership metadata without it
 - `CAP_OWNERSHIP_FIELD_PATHS` marks direct record-field ownership path transport
 - `CAP_OWNERSHIP_SEQUENCE_PATHS` marks `Sequence` static-index ownership path
   transport (#1718)

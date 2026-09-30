@@ -7,7 +7,7 @@ use semantic_language::{
     semcode_verify::verify_semcode,
 };
 use sm_verify::verify_semcode_token;
-use sm_vm::run_verified_entry_semcode;
+use sm_vm::run_verified_entry_semcode_collecting_hello_observations;
 
 const UPDATE_ENV: &str = "SM_UPDATE_CTF_E1_TRACES";
 
@@ -204,38 +204,18 @@ fn render_trace_artifact(case: &TraceCase) -> String {
     verify_semcode(&semcode).expect("verify semcode");
     let token = verify_semcode_token(&semcode).expect("token admission");
     let entry_token = token.require_entry("main").expect("entry resolution");
-    run_verified_entry_semcode(&entry_token).expect("run verified semcode");
+    let observations = run_verified_entry_semcode_collecting_hello_observations(&entry_token)
+        .expect("run verified semcode and collect observations");
 
     let source_hash = hash_hex(&src);
-    let mut ir_signatures = Vec::with_capacity(ir.len());
-    for func in &ir {
-        ir_signatures.push(format!("{}:{}", func.name, func.instrs.len()));
-    }
-    ir_signatures.sort();
-    let ir_hash = hash_hex(&ir_signatures.join("|"));
+    let ir_hash = hash_hex(&format!("{ir:#?}"));
     let semcode_hash = hash_hex_bytes(&semcode);
-    let trace_body = format!(
-        "{{\n  \"trace_id\": \"{}\",\n  \"pcc\": \"{}\",\n  \"pcc_owner\": \"{}\",\n  \"surface\": \"{}\",\n  \"source_fixture\": \"{}\",\n  \"trace_class\": [{}],\n  \"stage\": \"{}\",\n  \"expected_status\": \"{}\",\n  \"source_hash\": \"{}\",\n  \"ir_hash\": \"{}\",\n  \"semcode_hash\": \"{}\",\n  \"verifier_status\": \"accept\",\n  \"vm_status\": \"ok\",\n  \"runtime_config\": \"{}\",\n  \"notes\": \"{}\"\n}}\n",
-        case.trace_id,
-        case.pcc,
-        case.pcc_owner,
-        case.surface,
-        case.source_fixture,
-        case
-            .trace_class
-            .iter()
-            .map(|entry| format!("\"{entry}\""))
-            .collect::<Vec<_>>()
-            .join(", "),
-        case.stage,
-        case.expected_status,
-        source_hash,
-        ir_hash,
-        semcode_hash,
-        case.runtime_config,
-        case.notes,
-    );
-    let expected_output_hash = hash_hex(&trace_body);
+    let observed_output = observations
+        .iter()
+        .map(|event| event.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let expected_output_hash = hash_hex(&observed_output);
     format!(
         "{{\n  \"trace_id\": \"{}\",\n  \"pcc\": \"{}\",\n  \"pcc_owner\": \"{}\",\n  \"surface\": \"{}\",\n  \"source_fixture\": \"{}\",\n  \"trace_class\": [{}],\n  \"stage\": \"{}\",\n  \"expected_status\": \"{}\",\n  \"source_hash\": \"{}\",\n  \"ir_hash\": \"{}\",\n  \"semcode_hash\": \"{}\",\n  \"verifier_status\": \"accept\",\n  \"vm_status\": \"ok\",\n  \"runtime_config\": \"{}\",\n  \"expected_output_hash\": \"{}\",\n  \"notes\": \"{}\"\n}}\n",
         case.trace_id,

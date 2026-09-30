@@ -102,6 +102,24 @@ fn type_invalid_json_snapshot() {
 }
 
 #[test]
+fn pcc9_execution_stages_remain_not_implemented() {
+    let mapping = read_text(&repo_path(
+        "docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md",
+    ));
+    let expected = "| PCC-9 Project Model | not_implemented | not_implemented | not_implemented | not_implemented | not_implemented | not_implemented | pass | not_implemented |";
+
+    assert!(
+        mapping.lines().any(|line| line == expected),
+        "PCC-9 cross-stage matrix must not claim project-root execution"
+    );
+    assert!(!mapping.lines().any(|line| {
+        line.starts_with("| PCC-9 Project Model |")
+            && line != expected
+            && line.contains("| pass | pass |")
+    }));
+}
+
+#[test]
 fn vm_trap_assert_false_json_snapshot() {
     let input = fixture("tests/fixtures/7hell_e1/vm_trap_assert_false.sm");
     let output = smc_output(&["seven-hell", &input, "--json"]);

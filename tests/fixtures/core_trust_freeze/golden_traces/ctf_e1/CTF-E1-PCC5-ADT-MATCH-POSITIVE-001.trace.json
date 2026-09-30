@@ -8,11 +8,11 @@
   "stage": "selected",
   "expected_status": "accept",
   "source_hash": "b674e2eb54322422",
-  "ir_hash": "f40e40b30590a1ac",
+  "ir_hash": "e0cb0064fad9b2c0",
   "semcode_hash": "123a590c4525032c",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "7f4f6ce988ae96a5",
+  "expected_output_hash": "cbf29ce484222325",
   "notes": "Selected basic ADT/match trace only; no broader pattern-matching freeze."
 }

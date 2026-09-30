@@ -160,7 +160,7 @@ impl CliPipeline {
     }
 
     pub fn semantic_check_source(src: &str) -> Result<SemanticReport, String> {
-        check_source(src).map_err(|e| e.to_string())
+        check_source(src).map_err(|error| error.to_string())
     }
 
     pub fn semantic_check_file(path: &Path) -> Result<SemanticReport, String> {
@@ -175,6 +175,12 @@ impl CliPipeline {
         bytes: &[u8],
     ) -> Result<ControlledObservationQualificationEnvelope, String> {
         app::qualify_controlled_observation_envelope(bytes)
+    }
+
+    pub fn qualify_controlled_observations(
+        events: Vec<sm_runtime_core::hello_observation_sink::HelloObservationEvent>,
+    ) -> Result<ControlledObservationQualificationEnvelope, String> {
+        app::qualify_controlled_observation_events(events)
     }
 
     pub fn explain(code: &str) -> Option<&'static str> {

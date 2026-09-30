@@ -100,6 +100,14 @@ task:
     ordinary Cargo resolution produces for the `sm-diagnostic` dependency
     edges authorized above (no other dependency or version change), together
     with the R3 review repairs inside the paths already listed.
+    Repository owner explicit governance authorization (2026-09-30, Issue #1967)
+    to execute the Ledger 2/4 Execution, CLI, and Trust Boundary closure as one
+    macro PR. This controlled transition authorizes only the implementation,
+    regression, specification-reconciliation, and derived Ledger/dashboard paths
+    required by REM-007, REM-008, REM-009, REM-010, REM-011, REM-012, REM-013,
+    REM-018, REM-019, REM-020, REM-021, REM-024, and REM-026. It does not
+    authorize UI remediation packages, workflow changes, stable-promotion claims,
+    or historical audit evidence rewrites.
 
 intent:
   summary: >-
@@ -166,9 +174,25 @@ scope:
     - crates/sm-emit/**
     - crates/sm-verify/**
     - crates/sm-vm/**
+    - crates/sm-runtime-core/**
     - crates/smc-cli/**
+    - crates/semantic-core-exec/**
+    - crates/semantic-core-backend/**
+    - crates/ton618-core/**
+    - crates/prom-cap/**
+    - crates/prom-audit/**
     - src/bin/smc.rs
     - src/lib.rs
+    - docs/architecture/blueprint.md
+    - docs/architecture/svm_verified_execution_core.md
+    - docs/roadmap/language_maturity/7hell_qualification_contract.md
+    - docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md
+    - docs/roadmap/roadmap_pulsar.md
+    - docs/roadmap/**
+    - examples/**
+    - reports/security/**
+    - tools/generate_health_dashboard.py
+    - tools/generate_macro_issues.py
 
   forbidden_paths:
     - .github/**
@@ -196,6 +220,7 @@ constraints:
   one_active_ssf_phase: true
   active_phase: SSF-09
   issue: 1580
+  ledger_macro_issue: 1967
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true

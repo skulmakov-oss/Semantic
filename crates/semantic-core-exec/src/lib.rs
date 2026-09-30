@@ -1491,9 +1491,14 @@ impl CoreExecutor {
                     return Err(CoreTrap::InvalidFunction);
                 };
                 let mut regs = vec![CoreValue::Unit; callee.regs as usize];
-                for offset in 0..*arg_count as usize {
-                    let value = read(frames, frame_index, RegId(arg_base.0 + offset as u16))?;
-                    let Some(slot) = regs.get_mut(offset) else {
+                for offset in 0..*arg_count {
+                    let arg = arg_base
+                        .0
+                        .checked_add(offset)
+                        .map(RegId)
+                        .ok_or(CoreTrap::InvalidRegister)?;
+                    let value = read(frames, frame_index, arg)?;
+                    let Some(slot) = regs.get_mut(offset as usize) else {
                         return Err(CoreTrap::InvalidRegister);
                     };
                     *slot = value;

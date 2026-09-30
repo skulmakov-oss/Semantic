@@ -81,6 +81,7 @@ Valid S7 path:
 Failure paths:
 
 - syntax/type failure -> result FAIL
+- lowering failure -> result FAIL
 - verifier rejection -> result FAIL
 - VM trap -> result FAIL
 - Practical failure -> result FAIL

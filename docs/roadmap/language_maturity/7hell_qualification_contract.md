@@ -381,11 +381,13 @@ Overall result:
 
 | Stage states | Overall result |
 |---|---|
-| all pass | `pass` |
 | any fail | `fail` |
-| any blocked and no fail | `blocked` |
+| no fail and any not_implemented | `incomplete` |
+| no fail/not_implemented and any blocked | `blocked` |
 | only pass/skip | `pass-with-skips` |
-| any not_implemented | `incomplete` |
+| all pass | `pass` |
+
+Rows are evaluated top to bottom, so mixed states have one deterministic result.
 
 ## 15. Report Contract Split
 

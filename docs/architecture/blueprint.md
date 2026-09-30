@@ -9,7 +9,7 @@ Semantic is split into two architectural products:
 
 The core execution rule is:
 
-`frontend -> semantics -> lowering -> IR passes -> emit -> VM`
+`frontend -> semantics -> lowering -> IR passes -> emit -> verifier -> VM`
 
 Current repository state:
 

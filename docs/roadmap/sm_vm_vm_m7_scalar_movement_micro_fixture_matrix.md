@@ -277,10 +277,9 @@ Commands run:
 - `sed -n '1,220p' docs/roadmap/sm_vm_vm_m4_scalar_movement_audit.md`
 - `sed -n '1,180p' docs/roadmap/sm_vm_measured_improvement_path_after_p4h.md`
 - `git diff --check`
-- `cargo fmt --check`
 
 Results:
 
 - `git status --short` shows unrelated pre-existing dirty files only.
-- `cargo fmt --check` was not run separately in this doc pass because the repository already has the known unrelated formatting drift in `crates/prom-ui-backend-native/src/lib.rs`.
+- `cargo fmt --check` was not run in this doc pass.
 - `git diff --check` has no new content issues for this doc task.

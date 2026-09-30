@@ -350,8 +350,22 @@ fn cli_compile_project_root_err_no_overwrite(
     let artifact = temp_semcode_artifact("pcc9-project-root", out_name);
     let input = normalize_path(dir);
     let out_arg = artifact.cli_arg();
-    std::fs::write(artifact.path(), "sentinel").expect("write sentinel");
     let err = cli_err(
+        vec![
+            "compile".to_string(),
+            input.clone(),
+            "-o".to_string(),
+            out_arg.clone(),
+        ],
+        context,
+    );
+    assert!(
+        !artifact.path().exists(),
+        "{context} created an output artifact on compilation failure"
+    );
+
+    std::fs::write(artifact.path(), "sentinel").expect("write sentinel");
+    let overwrite_err = cli_err(
         vec!["compile".to_string(), input, "-o".to_string(), out_arg],
         context,
     );
@@ -359,6 +373,10 @@ fn cli_compile_project_root_err_no_overwrite(
     assert_eq!(
         content, "sentinel",
         "{context} overwrote existing file on compilation failure"
+    );
+    assert_eq!(
+        err, overwrite_err,
+        "{context} failure changed by output state"
     );
     err
 }

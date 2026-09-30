@@ -8,7 +8,7 @@ Status:
 This document does **not** claim full language completion.
 This document does **not** claim exhaustiveness redesign.
 This document does **not** claim loop-expression expansion, `for`, labeled
-loops, or expression-valued `match`.
+loops, or exhaustive pattern analysis.
 
 ## 1. Closed Scope
 
@@ -116,7 +116,6 @@ Still out of scope for the current control-flow contour:
 - iterators
 - labeled loops
 - `break expr`
-- expression-valued `match`
 - exhaustiveness checker
 - advanced ADT matching
 - async / concurrency

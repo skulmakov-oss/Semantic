@@ -347,6 +347,9 @@ fn runs_all_equal(runs: &[RunSummary]) -> bool {
     runs.iter().all(|run| {
         run.failure_layer == runs[0].failure_layer
             && run.observed_status == runs[0].observed_status
+            && run.source_hash == runs[0].source_hash
+            && run.ir_shape_hash == runs[0].ir_shape_hash
+            && run.semcode_hash == runs[0].semcode_hash
             && run.stable_error_code == runs[0].stable_error_code
             && run.stable_message_needle == runs[0].stable_message_needle
             && run.trap_class == runs[0].trap_class

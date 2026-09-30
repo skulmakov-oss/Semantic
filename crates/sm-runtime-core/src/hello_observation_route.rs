@@ -38,12 +38,18 @@ pub fn route_hello_observation_to_sink<S: HelloObservationSink>(
         return HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NotAdmitted);
     }
 
-    match input.text.as_str() {
+    let controlled_text = input
+        .text
+        .strip_prefix('"')
+        .and_then(|text| text.strip_suffix('"'))
+        .unwrap_or(&input.text);
+
+    match controlled_text {
         "Hello, World!" => {
             let event = HelloObservationEvent {
                 operation_kind: "controlled_observation_text",
                 observation_class: HelloObservationClass::ControlledText,
-                text: input.text,
+                text: controlled_text.into(),
                 sequence_index: input.sequence_index,
             };
 
@@ -58,5 +64,41 @@ pub fn route_hello_observation_to_sink<S: HelloObservationSink>(
             HelloObservationRouteResult::NotRouted(HelloObservationRouteError::ForbiddenHostOutput)
         }
         _ => HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NonControlledText),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hello_observation_sink::HelloObservationSinkError;
+    use alloc::vec::Vec;
+
+    #[derive(Default)]
+    struct TestSink(Vec<HelloObservationEvent>);
+
+    impl HelloObservationSink for TestSink {
+        fn observe(
+            &mut self,
+            event: HelloObservationEvent,
+        ) -> Result<(), HelloObservationSinkError> {
+            self.0.push(event);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn routes_verifier_admitted_quoted_text() {
+        let mut sink = TestSink::default();
+        let result = route_hello_observation_to_sink(
+            HelloObservationRouteInput {
+                admitted: true,
+                text: String::from("\"Hello, World!\""),
+                sequence_index: HelloObservationSequenceIndex(0),
+            },
+            &mut sink,
+        );
+
+        assert_eq!(result, HelloObservationRouteResult::Routed);
+        assert_eq!(sink.0[0].text, "Hello, World!");
     }
 }
