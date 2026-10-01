@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "artifact_size_bytes": 64,
+  "producer": {
+    "compiler_name": "smc",
+    "compiler_version": "99.0.0",
+    "build_target": "incompatible-arch",
+    "commit_hash": "future-commit",
+    "profile": "release",
+    "enabled_features": [
+      "experimental"
+    ]
+  },
+  "source": {
+    "package_name": "toolchain_mismatch_demo",
+    "package_version": "0.1.0",
+    "entry_file": "main.sm",
+    "source_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "manifest_hash": null
+  },
+  "contract": {
+    "semcode_format": "SEMCOD99",
+    "semcode_epoch": 9,
+    "semcode_revision": 99,
+    "verifier_profile": "FutureVerifier",
+    "runtime_profile": "FutureRuntime",
+    "stdlib_version": "99.0.0",
+    "diagnostic_contract": "semantic.diagnostics/v99"
+  }
+}

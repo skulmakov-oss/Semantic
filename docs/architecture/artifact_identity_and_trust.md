@@ -1,4 +1,4 @@
-# Artifact Identity, Compatibility, and Trust Specification (SSF-10)
+# Artifact Identity, Provenance, Compatibility, and Trust Specification (SSF-10)
 
 Status: canonical SSF-10 architecture authority  
 Issue: #1581 (SSF-10)  
@@ -8,46 +8,65 @@ Owner layer: `sm-format`, `sm-verify`, `smc-cli`
 
 ## 1. Overview and Objectives
 
-This document establishes the explicit, deterministic, and testable compatibility and artifact-trust contract for the Semantic language platform per milestone SSF-10 (#1581).
+This document establishes the explicit, deterministic, and testable compatibility, provenance, and artifact-trust contract for the Semantic language platform per milestone SSF-10 (#1581).
 
 Prior to SSF-10, the repository contained header-revision checks and non-cryptographic hash utilities (`fnv1a64`), but lacked:
 - A canonical, cryptographic compiled-artifact identity.
 - Explicit verifier binding guaranteeing that a verification token corresponds to the exact artifact bytes verified.
-- Deterministic stale and mismatched artifact detection.
+- Producer provenance tracking separating the producing compiler from the inspecting toolchain.
+- Digest-based stale and mismatched artifact detection independent of filesystem timestamps (`mtime`).
+- Explicit, formal compatibility policies across language, manifest, diagnostics, stdlib, runtime, and verifier dimensions.
 - A non-destructive migration dry-run path.
-- Clear public CLI commands for artifact inspection and hashing.
+- Public CLI commands for artifact inspection and hashing.
 - Explicit, truthful release asset signing posture (`"unsigned"`).
 
 SSF-10 resolves each of these requirements without creating speculative infrastructure or breaking existing platform boundaries.
 
 ---
 
-## 2. Compatibility Contract Dimensions
+## 2. Canonical Compatibility Policies (Section 5 Authority)
 
-Semantic defines seven canonical compatibility dimensions:
+Semantic defines six explicit compatibility policies across its subsystems:
 
-| Dimension | Canonical Contract Identifier | Baseline / Active Scope | Rejection / Migration Rule |
-|---|---|---|---|
-| **Source Language** | `semantic-source-v1` | Rust-like executable profile (`fn main`, `let`, control flow, ADTs, tuples, records) | Syntax or type errors report deterministic `sm-diagnostic` codes; no silent grammar mutation. |
-| **Manifest / Schema** | `semantic-manifest-v1` | `Semantic.toml` / `Semantic.package` | Structural validator rejects unrecognized fields or root-escape path violations. |
-| **Diagnostics Contract** | `semantic-diag-v1` | External JSON schema (`docs/spec/diagnostics_machine_schema_v1.md`) | Byte-deterministic JSON output with stable severity and code strings (`E*`, `W*`, `V*`, `R*`). |
-| **Standard Library** | `semantic-stdlib-v0` | `std.core`, `std.quad`, `std.math` (`sqrt`, `abs`), `std.text`, `std.seq`, `std.map`, `std.option`, `std.result` | Language-owned builtins; unrecognized builtins reject at typecheck. |
-| **SemCode Format** | `SEMCOD22` | Revision `23`, Epoch `0` with mandatory `ADT0` descriptor table | Header revisions `< 23` are classified `Deprecated`; revisions `> 23` are `Unsupported`; non-SemCode magic is `Incompatible`. |
-| **Verifier Gate** | `VerifiedLocal` | Verifier-first mandatory admission token (`VerifiedSemCode`, `VerifiedEntrySemCode`) | Standard execution fails closed on any unadmitted bytecode. No VM execution without prior admission. |
-| **Runtime Model** | `DeterministicVM` | Pure compute or capability-gated PROMETHEUS host effects | Effect opcodes require explicit capability bits and manifest grants; unauthorized effects fault. |
+### A. Source Language Compatibility Policy
+- **States**: Every language construct is classified as `Compatible`, `Deprecated`, or `Removed`.
+- **Minimum Deprecation Window**: Any construct marked deprecated (via `// @deprecated` or `#[deprecated]`) must remain supported with compiler diagnostic warnings for a minimum of 1 minor/epoch cycle before removal.
+- **Removed Constructs**: Transition to `Removed` results in a deterministic compile-time error (`E0005`/`E0201`), never silent behavior alteration.
 
-Every dimension evaluates to one of four states:
-- `Compatible`: matches current toolchain and runtime contract exactly.
-- `Deprecated`: older supported contract (e.g. legacy headers without ADT opcodes); migration recommended.
-- `Incompatible`: violates contracts, fails verifier admission, or carries corrupt payload; hard rejection.
-- `Unsupported`: future or unrecognized version beyond toolchain capabilities; hard rejection.
+### B. Manifest and Project Compatibility Policy
+- **Independent Versioning**: Manifest schemas (`Semantic.toml`) are versioned independently from the source language compiler version.
+- **Supported Schemas**: Currently schema version `1`. Schema version `0` is admitted with deprecation warnings.
+- **Fail-Closed Rejection**: Unknown or future schema versions (e.g. `schema_version = 99`) are rejected fail-closed.
+- **Zero Silent Migration**: The compiler and CLI never modify manifests or project files automatically.
+
+### C. Diagnostics Contract Compatibility Policy
+- **Contract Identifier**: `semantic.diagnostics`, current schema version `1`.
+- **Breaking Changes**: Any change to diagnostic output that:
+  1. Renames, renumbers, or removes an established diagnostic error code (`E*`, `W*`, `V*`, `R*`),
+  2. Modifies diagnostic severity from warning to error (or vice-versa),
+  3. Modifies structural JSON keys or types,
+  is classified as a breaking contract change and requires bumping the machine schema version (`semantic.diagnostics/v2`).
+
+### D. Standard Library Compatibility Policy
+- **Contract Baseline**: Version `0.1.0` covering `std.core`, `std.quad`, `std.math` (`sqrt`, `abs`), `std.text`, `std.seq`, `std.map`, `std.option`, `std.result`.
+- **Behavior-Preserving Additions**: Introducing new pure, non-conflicting builtins or library modules is non-breaking.
+- **Breaking Changes**: Changing argument counts, parameter types, return types, or widening capability requirements is breaking.
+
+### E. Runtime and Total Determinism Compatibility Policy
+- **Canonical Profile**: `deterministic-v1` executed by `sm-vm`.
+- **Total Determinism PRNG Rule**: Any supported runtime PRNG contract must produce bit-for-bit identical pseudo-random sequences across repeated executions with the identical seed. PRNG algorithm alterations constitute a breaking runtime contract change.
+
+### F. SemCode and Verifier Gate Policy
+- **Wire Format**: SemCode format `SEMCOD22` (Revision 23, Epoch 0) with mandatory `ADT0` descriptor table.
+- **Verifier Profile**: `canonical-v1` enforcing loop CFG acyclicity, operand stack limits, register bounds, and capability gating.
+- **Verifier Admission Gate**: Canonical execution consumes verifier-admitted SemCode. Revisions `< 23` are classified `Deprecated`; revisions `> 23` are `Unsupported`.
 
 ---
 
-## 3. Canonical Artifact Identity
+## 3. Canonical Artifact Identity & Digest Authority
 
 ### A. Cryptographic Hash Construction
-Every compiled SemCode artifact (`.smc`) has an exact, deterministic canonical identity computed via zero-dependency, FIPS 180-4 compliant SHA-256:
+Every compiled SemCode artifact (`.smc`) has an exact, deterministic canonical identity computed via a zero-dependency SHA-256 implementation following the algorithm defined by FIPS PUB 180-4:
 
 $$\text{ArtifactHash} = \text{SHA-256}(\text{RawArtifactBytes})$$
 
@@ -70,9 +89,66 @@ The hash excludes non-deterministic metadata: no wall-clock timestamps, build pa
 
 ---
 
-## 4. Verifier Binding Invariant
+## 4. Companion Artifact Provenance & Producer Binding
 
-A successful verification result (`VerifiedSemCode` / `VerifiedEntrySemCode`) is immutably bound to the exact artifact hash verified.
+To identify the toolchain that originally produced an arbitrary `.smc` without format churn on the wire bytecode, Semantic defines a canonical companion provenance record (`<artifact>.provenance.json`):
+
+```json
+{
+  "schema_version": 1,
+  "artifact_hash": "sha256:73a23b307f08154c9f3ef35fda96bad341466bbf15df43e79253d012e7ff4024",
+  "artifact_size_bytes": 1024,
+  "producer": {
+    "compiler_name": "smc",
+    "compiler_version": "0.1.0",
+    "build_target": "x86_64-pc-windows-msvc",
+    "commit_hash": "443569c32db5fc8a",
+    "profile": "release",
+    "enabled_features": ["std", "profile-rust", "debug-symbols"]
+  },
+  "source": {
+    "package_name": "demo",
+    "package_version": "0.1.0",
+    "entry_file": "main.sm",
+    "source_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "manifest_hash": "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+  },
+  "contract": {
+    "semcode_format": "SEMCOD22",
+    "semcode_epoch": 0,
+    "semcode_revision": 23,
+    "verifier_profile": "VerifiedLocal",
+    "runtime_profile": "SVM-Deterministic-v1",
+    "stdlib_version": "0.1.0",
+    "diagnostic_contract": "semantic.diagnostics/v1"
+  }
+}
+```
+
+### Cryptographic Binding Invariant
+The companion provenance is cryptographically bound to the artifact through `artifact_hash`. If the artifact bytes change or do not match `artifact_hash`, inspection reports `CorruptedMismatch`.
+
+---
+
+## 5. Digest-Based Stale and Mismatch Detection Authority
+
+Filesystem timestamps (`mtime`) are strictly treated as non-authoritative hints. The canonical authority for artifact freshness and compatibility is content digest comparison:
+
+1. **Immunity to mtime Spoofing**: If source code is replaced with new content, but its `mtime` is backdated or preserved, `detect_artifact_staleness` computes the actual source SHA-256 and compares it against provenance `source_hash`. The mismatch is detected immediately as `StaleSourceChanged`.
+2. **Explicit Detection Statuses**:
+   - `Fresh`: Source, manifest, and artifact hashes match provenance exactly.
+   - `StaleSourceChanged`: Source content hash has changed.
+   - `ProjectMismatch`: Artifact provenance belongs to a different package/project name.
+   - `ManifestMismatch`: Manifest content hash has changed.
+   - `ToolchainMismatch`: Producing compiler major version differs from the current compiler.
+   - `MissingProvenance`: Companion provenance is absent (fail-closed; cannot prove correlation).
+   - `UnsupportedProvenance`: Provenance record is corrupt or invalid JSON.
+
+---
+
+## 6. Verifier Binding Invariant
+
+A successful verification result (`VerifiedSemCode` / `VerifiedEntrySemCode`) is immutably bound to the exact artifact hash verified:
 
 ```rust
 pub struct VerifiedSemCode {
@@ -91,27 +167,7 @@ impl VerifiedSemCode {
 ### Non-Bypass Law
 $$\forall A, B : A \neq B \implies \neg \text{matches\_artifact}(\text{Verify}(A), B)$$
 
-It is architecturally impossible for a verification token issued for artifact $A$ to be used to admit or execute artifact $B$. Any modification (even 1 bit) to the artifact invalidates `matches_artifact()`.
-
----
-
-## 5. Stale and Mismatched Artifact Detection
-
-`smc-cli` provides deterministic detection for out-of-date or mismatched artifacts:
-- **Source Modified Detection**: Compares filesystem modification timestamps (`mtime`) between the `.sm` source and the `.smc` artifact. If source `mtime > artifact mtime`, the artifact is flagged `StaleSourceModified`.
-- **Content Mismatch Detection**: Re-verifies source-to-binary hash correlation. If the artifact was generated from different source text, verification or staleness checks detect the mismatch fail-closed.
-- **Header Mismatch**: Corrupted or unrecognized headers reject immediately at the decoder and verifier boundaries.
-
----
-
-## 6. Migration Dry-Run (Non-Destructive Guarantee)
-
-Migration preview is provided by the `smc migrate <check|preview>` CLI surface.
-
-### Invariants:
-1. **Zero Filesystem Mutation**: Dry-run operations perform strictly zero disk writes or deletions. All input files retain their exact contents, sizes, and hashes before and after execution.
-2. **Deterministic Output**: Evaluates the package or source against current compatibility dimensions and emits reproducible human-readable or JSON reports.
-3. **Explicit Deprecation Reporting**: Reports legacy constructs (such as pre-revision 23 headers requiring recompilation) without silently rewriting code.
+It is architecturally impossible for a verification token issued for artifact $A$ to be used to admit or execute artifact $B$.
 
 ---
 
@@ -124,10 +180,7 @@ Semantic binaries (`smc.exe`, `svm.exe`) are currently **unsigned**.
   ```json
   "signing": "unsigned"
   ```
-- Any future introduction of code signing will require explicit repository-owner authorization and actual hardware/CI key infrastructure.
-
-### Cryptographic Checksums
-All release distribution assets are validated against SHA-256 checksums published alongside the release assets, verified by `scripts/verify_release_assets.ps1`.
+- Release verification (`scripts/verify_release_assets.ps1`) executes the extracted release binary `smc version --json` to capture and record the actual release toolchain evidence (compiler version, source commit, features, format revision) alongside the exact SHA-256 asset checksums.
 
 ---
 
@@ -136,21 +189,8 @@ All release distribution assets are validated against SHA-256 checksums publishe
 ### `smc version [--json]`
 Displays toolchain version, source commit, enabled cargo features, active SemCode format revision, verifier profile, and release signing state.
 
-```text
-Semantic Language Toolchain v0.1.0
-Source Commit:      4e6449a323044357
-Enabled Features:   DEBUG_SYMBOLS,DEFAULT,PROFILE_LOGOS,PROFILE_RUST,STD
-SemCode Format:     SEMCOD22 (epoch=0, rev=23)
-Verifier Profile:   VerifiedLocal
-Release Signing:    unsigned
-```
-
 ### `smc artifact hash <path.smc> [--json]`
 Computes and outputs the canonical SHA-256 hash of the compiled artifact.
-
-```text
-sha256:9d4982fb448e30d60bab66129c855d599b77f5f2386efb344b0dc225c6da1d2a
-```
 
 ### `smc artifact inspect <path.smc> [--json]`
 Decodes and formats comprehensive artifact metadata:
@@ -159,10 +199,12 @@ Decodes and formats comprehensive artifact metadata:
 - Function count, names, code sizes, string counts, and signature status.
 - ADT descriptor inventory.
 - Verifier admission verdict.
-- Toolchain identity and signing state.
+- **Producer Toolchain Identity** (from provenance, or explicit `UNRECORDED - NO PROVENANCE ATTACHED`).
+- **Inspecting Toolchain Identity** (current process).
+- Signing state.
 
 ### `smc migrate <check|preview> <path> [--json] [--dry-run]`
-Performs non-destructive dry-run migration analysis on a source file or project directory.
+Performs non-destructive dry-run migration analysis on a source file or project directory with guaranteed zero filesystem mutation.
 
 ---
 
@@ -171,5 +213,6 @@ Performs non-destructive dry-run migration analysis on a source file or project 
 With SSF-10 complete, the following invariants are established for SSF-11 (*Documentation, canonical examples, clean-clone onboarding*):
 1. Toolchain versions and format revisions are frozen at `SEMCOD22` (rev 23).
 2. All compiled examples can be canonically hashed with `smc artifact hash` and verified with `smc verify`.
-3. Release smoke scripts assert `signing: "unsigned"` and verify exact SHA-256 checksums.
-4. Clean-clone onboarding documentation can rely on stable `smc version`, `smc artifact`, and `smc migrate` commands.
+3. Companion provenance records can be created alongside `.smc` binaries.
+4. Release smoke scripts assert `signing: "unsigned"` and verify exact SHA-256 checksums bound to real release toolchain evidence.
+5. Clean-clone onboarding documentation can rely on stable `smc version`, `smc artifact`, and `smc migrate` commands.

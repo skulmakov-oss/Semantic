@@ -236,6 +236,9 @@ Assert-FileContains -Path $traceDisasmPath -Patterns @(
     "policy_trace"
 )
 
+$steps.Add((Invoke-CapturedStep -Name "release toolchain version" -FilePath $extractedSmc -ArgumentList @("version", "--json") -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
+$releaseToolchainJson = Get-Content -LiteralPath $steps[$steps.Count - 1].stdoutPath -Raw | ConvertFrom-Json
+
 $report = [ordered]@{
     generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
     repository = $Repository
@@ -277,12 +280,29 @@ $report = [ordered]@{
             result = "pass"
         }
     )
+    toolchainEvidence = [ordered]@{
+        compilerVersion = $releaseToolchainJson.toolchain_version
+        sourceHash = $releaseToolchainJson.source_hash
+        enabledFeatures = $releaseToolchainJson.enabled_features
+        semcodeFormat = $releaseToolchainJson.semcode_format
+        verifierProfile = $releaseToolchainJson.verifier_profile
+        signing = $releaseToolchainJson.signing
+    }
     signingState = "unsigned"
     trustPolicy = [ordered]@{
         signingState = "unsigned"
         digestAlgorithm = "SHA-256"
+        digestStandard = "FIPS PUB 180-4"
         signatureVerification = "explicitly-unsupported"
         verifierBinding = "exact-artifact-hash"
+        producingToolchain = [ordered]@{
+            compilerVersion = $releaseToolchainJson.toolchain_version
+            sourceHash = $releaseToolchainJson.source_hash
+            enabledFeatures = $releaseToolchainJson.enabled_features
+            semcodeFormat = $releaseToolchainJson.semcode_format
+            verifierProfile = $releaseToolchainJson.verifier_profile
+            signing = $releaseToolchainJson.signing
+        }
     }
     steps = $steps
 }
@@ -299,7 +319,9 @@ $markdown = @(
     "- Release URL: $($report.releaseUrl)"
     "- Output root: $($report.outputRoot)"
     "- Release Signing: unsigned (explicitly unsigned per SSF-10)"
-    "- Digest Algorithm: SHA-256 (FIPS 180-4)"
+    "- Digest Algorithm: SHA-256 (algorithm defined by FIPS PUB 180-4)"
+    "- Release Toolchain Version: $($report.toolchainEvidence.compilerVersion)"
+    "- Release Compiler Source Commit: $($report.toolchainEvidence.sourceHash)"
     ""
     "## Asset Hashes"
     ""

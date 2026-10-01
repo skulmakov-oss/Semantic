@@ -1,0 +1,4 @@
+[package]
+name = "stdlib_boundary_demo"
+version = "0.1.0"
+format = 1
