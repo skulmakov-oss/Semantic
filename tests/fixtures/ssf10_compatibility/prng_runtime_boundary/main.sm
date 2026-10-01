@@ -1,0 +1,4 @@
+fn main() {
+    let seed: i32 = 1337;
+    return;
+}

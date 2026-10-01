@@ -1,0 +1,18 @@
+{
+  "schema": "semantic.diagnostics",
+  "schema_version": 99,
+  "status": "failed",
+  "sources": [],
+  "diagnostics": [
+    {
+      "code": "E0999",
+      "severity": "error",
+      "family": "future",
+      "message": "future breaking diagnostic format"
+    }
+  ],
+  "summary": {
+    "errors": 1,
+    "warnings": 0
+  }
+}

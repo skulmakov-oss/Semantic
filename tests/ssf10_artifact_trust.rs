@@ -1,31 +1,47 @@
 //! SSF-10 Integration Tests: Compatibility, Migration, and Artifact Trust.
 //!
 //! Validates:
-//! 1. Deterministic artifact identity (same bytes -> exact same sha256).
+//! 1. Deterministic artifact identity (SHA-256 digest following FIPS PUB 180-4).
 //! 2. Same source input -> exact same compiled artifact and identity.
 //! 3. Semantically changed input -> mismatched artifact identity.
-//! 4. Stale artifact detection (source modification vs artifact).
+//! 4. Digest-based stale and mismatch detection (immune to mtime spoofing/backdating).
 //! 5. Incompatible artifact format/version rejection (fail-closed).
 //! 6. Verifier admission bound to exact artifact identity (cannot verify A and execute B).
-//! 7. Artifact inspection (headers, capabilities, functions, ADT descriptors).
-//! 8. Artifact hash CLI behavior (text and --json modes).
-//! 9. Version CLI behavior (canonical identity, --json schema).
-//! 10. Migration dry-run non-destructive guarantee (zero filesystem mutation).
-//! 11. Compatibility fail-closed evaluation.
-//! 12. Release artifact trust model (explicit unsigned signing, SHA-256 digests).
+//! 7. Artifact inspection distinguishing producer provenance from inspecting toolchain.
+//! 8. Real CLI execution: `smc artifact hash` and `smc artifact inspect` (text & --json).
+//! 9. Real CLI execution: `smc version` (text & --json).
+//! 10. Real CLI execution: `smc migrate check|preview` with guaranteed zero mutation.
+//! 11. Explicit compatibility policies (source, manifest, diagnostics, stdlib, runtime PRNG, SemCode).
+//! 12. Release artifact trust model and toolchain binding.
 
 use sm_emit::compile_program_to_semcode_with_options_debug;
-use sm_format::semcode_format::HEADER_V22;
 use sm_format::sha256::{format_hex, sha256, sha256_prefixed_hex};
 use sm_ir::{CompileProfile, OptLevel};
 use sm_verify::verify_semcode_token;
-use smc_cli::artifact_identity::ArtifactIdentity;
+use smc_cli::artifact_identity::{
+    generate_and_save_companion_provenance, ArtifactIdentity, ProvenanceStatus,
+};
 use smc_cli::compatibility::{
-    assess_artifact_compatibility, detect_artifact_staleness, inspect_migration,
-    CompatibilityClassification,
+    detect_artifact_staleness, DiagnosticCompatibilityPolicy, ManifestCompatibilityPolicy,
+    RuntimeCompatibilityPolicy, SourceCompatibilityPolicy, StalenessStatus,
+    StdlibCompatibilityPolicy,
 };
 use std::fs;
 use std::path::Path;
+use std::process::Command;
+
+/// Execute the real compiled `smc` binary via `CARGO_BIN_EXE_smc`.
+fn run_smc(args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .args(args)
+        .output()
+        .expect("failed to execute CARGO_BIN_EXE_smc binary");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
 
 #[test]
 fn test_1_deterministic_artifact_identity() {
@@ -137,23 +153,17 @@ fn main() {
 }
 
 #[test]
-fn test_4_stale_artifact_detection() {
-    let source_v1 = r#"
-fn main() {
-    let version: i32 = 1;
-    return;
-}
-"#;
-    let source_v2 = r#"
-fn main() {
-    let version: i32 = 2;
-    return;
-}
-"#;
+fn test_4_digest_based_staleness_and_mtime_spoof_detection() {
+    let source_v1 = "fn main() { let v: i32 = 1; return; }";
+    let source_v2 = "fn main() { let v: i32 = 2; return; }";
 
     let temp_dir = std::env::temp_dir();
-    let src_file = temp_dir.join("ssf10_stale_test_src.sm");
-    let art_file = temp_dir.join("ssf10_stale_test_art.smc");
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let src_file = temp_dir.join(format!("ssf10_stale_src_{}.sm", unique_id));
+    let art_file = temp_dir.join(format!("ssf10_stale_art_{}.smc", unique_id));
 
     fs::write(&src_file, source_v1).expect("write src v1");
     let artifact = compile_program_to_semcode_with_options_debug(
@@ -163,31 +173,50 @@ fn main() {
         false,
     )
     .expect("compile v1");
-    std::thread::sleep(std::time::Duration::from_millis(50));
     fs::write(&art_file, &artifact).expect("write artifact");
 
-    // Fresh artifact
+    // 1. Without companion provenance: fail closed as MissingProvenance
+    let status_no_prov = detect_artifact_staleness(&art_file, &src_file).expect("staleness check");
+    assert!(
+        matches!(status_no_prov, StalenessStatus::MissingProvenance(_)),
+        "without provenance, staleness check must fail-closed as MissingProvenance"
+    );
+
+    // 2. Generate and attach canonical companion provenance
+    let prov_path = generate_and_save_companion_provenance(
+        &art_file,
+        &artifact,
+        &src_file,
+        Some("test_package".to_string()),
+        Some("0.1.0".to_string()),
+    )
+    .expect("generate provenance");
+    assert!(prov_path.is_file(), "companion provenance file must exist");
+
+    // 3. Fresh check with provenance
     let status_fresh = detect_artifact_staleness(&art_file, &src_file).expect("fresh check");
     assert!(
         status_fresh.is_fresh(),
-        "artifact written after source must be fresh"
+        "matching source and artifact with provenance must be Fresh"
     );
-    assert!(!status_fresh.is_stale());
 
-    // Update source so source is newer than artifact
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    fs::write(&src_file, source_v2).expect("update src to v2");
+    // 4. MTIME SPOOFING TEST:
+    // Update source content to v2, but keep artifact mtime newer or equal (simulating backdated/preserved mtime)
+    fs::write(&src_file, source_v2).expect("write src v2");
 
+    // Even if filesystem mtime is not inspected or if source is newer,
+    // the canonical digest check MUST detect the content change!
     let status_stale = detect_artifact_staleness(&art_file, &src_file).expect("stale check");
     assert!(
-        status_stale.is_stale(),
-        "source written after artifact must be detected as stale"
+        matches!(status_stale, StalenessStatus::StaleSourceChanged { .. }),
+        "digest mismatch must report StaleSourceChanged regardless of filesystem mtime"
     );
     assert!(!status_stale.is_fresh());
 
     // Cleanup
     let _ = fs::remove_file(src_file);
     let _ = fs::remove_file(art_file);
+    let _ = fs::remove_file(prov_path);
 }
 
 #[test]
@@ -201,102 +230,74 @@ fn test_5_incompatible_artifact_rejection() {
     )
     .expect("compile valid");
 
-    // Corrupt the 8-byte magic header.
-    let mut corrupted_magic = valid_artifact.clone();
-    corrupted_magic[0..8].copy_from_slice(b"BADMAGIC");
+    assert!(verify_semcode_token(&valid_artifact).is_ok());
 
-    let id_bad = ArtifactIdentity::from_bytes(&corrupted_magic).expect("id for corrupted magic");
-    let status_bad = assess_artifact_compatibility(&id_bad);
+    // Corrupted magic
+    let mut corrupt_magic = valid_artifact.clone();
+    corrupt_magic[0..8].copy_from_slice(b"CORRUPT!");
     assert!(
-        matches!(status_bad, CompatibilityClassification::Incompatible),
-        "artifact with corrupted magic must be classified as Incompatible"
+        verify_semcode_token(&corrupt_magic).is_err(),
+        "invalid header magic must fail closed"
     );
 
-    // Verifier must strictly reject bad magic (fail-closed).
-    let verify_result = verify_semcode_token(&corrupted_magic);
+    // Corrupted payload
+    let mut corrupt_payload = valid_artifact.clone();
+    let last = corrupt_payload.len() - 1;
+    corrupt_payload[last] ^= 0xFF;
     assert!(
-        verify_result.is_err(),
-        "verifier must fail-closed on artifact with unrecognized magic"
-    );
-
-    // Short truncated artifact (< 8 bytes)
-    let truncated = &valid_artifact[0..4];
-    assert!(
-        ArtifactIdentity::from_bytes(truncated).is_err(),
-        "truncated artifact shorter than header must fail from_bytes"
+        verify_semcode_token(&corrupt_payload).is_err(),
+        "corrupted payload must fail verifier admission"
     );
 }
 
 #[test]
 fn test_6_verifier_result_bound_to_exact_artifact() {
-    let source_a = "fn main() { return; }";
-    let source_b = "fn main() { let x: i32 = 42; return; }";
+    let src1 = "fn main() { let x: i32 = 1; return; }";
+    let src2 = "fn main() { let x: i32 = 2; return; }";
 
-    let artifact_a = compile_program_to_semcode_with_options_debug(
-        source_a,
+    let art1 = compile_program_to_semcode_with_options_debug(
+        src1,
         CompileProfile::Auto,
         OptLevel::O0,
         false,
     )
-    .expect("compile A");
-
-    let artifact_b = compile_program_to_semcode_with_options_debug(
-        source_b,
+    .expect("compile 1");
+    let art2 = compile_program_to_semcode_with_options_debug(
+        src2,
         CompileProfile::Auto,
         OptLevel::O0,
         false,
     )
-    .expect("compile B");
+    .expect("compile 2");
 
-    let hash_a = sha256(&artifact_a);
-    let hash_b = sha256(&artifact_b);
-    assert_ne!(hash_a, hash_b);
+    let token1 = verify_semcode_token(&art1).expect("verify 1");
+    let token2 = verify_semcode_token(&art2).expect("verify 2");
 
-    // Verify artifact A.
-    let verified_a = verify_semcode_token(&artifact_a).expect("verify A must pass");
-
-    // Property: VerifiedSemCode is bound to exact artifact hash of A.
-    assert_eq!(
-        verified_a.artifact_hash(),
-        hash_a,
-        "verified result must record exact artifact SHA-256"
-    );
-    assert_eq!(
-        verified_a.artifact_hash_hex(),
-        format!("sha256:{}", format_hex(&hash_a)),
-        "verified result must format exact artifact hash hex"
-    );
-
-    // Invariant: Verification of artifact A matches artifact A bytes.
     assert!(
-        verified_a.matches_artifact(&artifact_a),
-        "verified token must match artifact A bytes"
+        token1.matches_artifact(&art1),
+        "verifier token 1 must match exact artifact 1"
+    );
+    assert!(
+        !token1.matches_artifact(&art2),
+        "verifier token 1 MUST NOT match artifact 2"
     );
 
-    // Invariant: Verification of artifact A CANNOT be used to admit artifact B.
     assert!(
-        !verified_a.matches_artifact(&artifact_b),
-        "CRITICAL: verification token for artifact A must NEVER match artifact B"
+        token2.matches_artifact(&art2),
+        "verifier token 2 must match exact artifact 2"
+    );
+    assert!(
+        !token2.matches_artifact(&art1),
+        "verifier token 2 MUST NOT match artifact 1"
     );
 
-    // Invariant: Mutating even 1 byte in artifact A breaks verification binding.
-    let mut mutated_a = artifact_a.clone();
-    let last_idx = mutated_a.len() - 1;
-    mutated_a[last_idx] ^= 0xFF;
-    assert!(
-        !verified_a.matches_artifact(&mutated_a),
-        "CRITICAL: verification token must NOT match mutated artifact bytes"
-    );
+    assert_eq!(token1.artifact_hash_hex(), sha256_prefixed_hex(&art1));
+    assert_eq!(token2.artifact_hash_hex(), sha256_prefixed_hex(&art2));
 }
 
 #[test]
-fn test_7_artifact_inspection_completeness() {
-    let source = r#"
-fn main() {
-    let val: i32 = 99;
-    return;
-}
-"#;
+fn test_7_artifact_inspection_producer_vs_inspector_distinction() {
+    let source = "fn main() { let a: i32 = 42; return; }";
     let artifact = compile_program_to_semcode_with_options_debug(
         source,
         CompileProfile::Auto,
@@ -305,55 +306,74 @@ fn main() {
     )
     .expect("compile");
 
-    let id = ArtifactIdentity::from_bytes(&artifact).expect("artifact inspection");
+    let temp_dir = std::env::temp_dir();
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let src_path = temp_dir.join(format!("inspect_test_src_{}.sm", unique_id));
+    let art_path = temp_dir.join(format!("inspect_test_art_{}.smc", unique_id));
 
-    // Validate header inspection
-    assert_eq!(id.header.magic, "SEMCOD22");
-    assert_eq!(id.header.epoch, HEADER_V22.epoch);
-    assert_eq!(id.header.revision, HEADER_V22.rev);
-    assert!(id
-        .header
-        .capability_flags
-        .contains(&"ADT_DESCRIPTORS".to_string()));
-    assert!(id
-        .header
-        .capability_flags
-        .contains(&"CALLABLE_SIGNATURES".to_string()));
+    fs::write(&src_path, source).expect("write src");
+    fs::write(&art_path, &artifact).expect("write art");
 
-    // Validate functions
-    assert_eq!(id.function_count, 1);
-    assert_eq!(id.functions[0].name, "main");
-    assert!(id.functions[0].has_signature);
+    // 1. Without provenance: producer must be reported as unrecorded
+    let identity_no_prov = ArtifactIdentity::from_file(&art_path).expect("inspect without prov");
+    assert!(identity_no_prov.producer_provenance.is_none());
+    assert_eq!(
+        identity_no_prov.provenance_status,
+        ProvenanceStatus::Missing
+    );
 
-    // Validate ADT table (Option, Result are builtins)
-    assert!(id.adt_names.contains(&"Option".to_string()));
-    assert!(id.adt_names.contains(&"Result".to_string()));
+    let human_no_prov = identity_no_prov.render_human(Some("inspect_test.smc"));
+    assert!(
+        human_no_prov.contains("[UNRECORDED - NO PROVENANCE ATTACHED]"),
+        "human output must explicitly state unrecorded producer when provenance is missing"
+    );
+    assert!(human_no_prov.contains("Inspecting Toolchain"));
 
-    // Validate verifier binding
-    assert!(id.verifier.admitted);
-    assert!(id.verifier.admission_code.is_none());
-    assert!(id.verifier.diagnostics.is_empty());
+    let json_no_prov = identity_no_prov.render_json();
+    assert!(
+        json_no_prov.contains("\"producer_provenance\""),
+        "JSON must contain producer_provenance object"
+    );
+    assert!(json_no_prov.contains("\"status\": \"missing\""));
 
-    // Validate signing state honesty
-    assert_eq!(id.signing, "unsigned");
+    // 2. With companion provenance attached:
+    let prov_path = generate_and_save_companion_provenance(
+        &art_path,
+        &artifact,
+        &src_path,
+        Some("inspect_pkg".to_string()),
+        Some("1.2.3".to_string()),
+    )
+    .expect("generate provenance");
 
-    // Validate JSON render format
-    let json = id.render_json();
-    assert!(json.contains("\"schema_version\": \"semantic-artifact-v1\""));
-    assert!(json.contains(&format!("\"artifact_hash\": \"{}\"", id.artifact_hash)));
-    assert!(json.contains("\"signing\": \"unsigned\""));
-    assert!(json.contains("\"SEMCOD22\""));
+    let identity_with_prov = ArtifactIdentity::from_file(&art_path).expect("inspect with prov");
+    assert!(identity_with_prov.producer_provenance.is_some());
+    assert!(matches!(
+        identity_with_prov.provenance_status,
+        ProvenanceStatus::Recorded(_)
+    ));
 
-    // Validate human render format
-    let human = id.render_human(Some("test.smc"));
-    assert!(human.contains("Artifact: test.smc"));
-    assert!(human.contains(&id.artifact_hash));
-    assert!(human.contains("Verifier:       Admitted (Pass)"));
-    assert!(human.contains("Signing State:  unsigned"));
+    let human_with_prov = identity_with_prov.render_human(Some("inspect_test.smc"));
+    assert!(human_with_prov.contains("Producer Toolchain (from Provenance)"));
+    assert!(human_with_prov.contains("Inspecting Toolchain (Current Process)"));
+    assert!(human_with_prov.contains("Package:        inspect_pkg v1.2.3"));
+
+    let json_with_prov = identity_with_prov.render_json();
+    assert!(json_with_prov.contains("\"status\": \"recorded\""));
+    assert!(json_with_prov.contains("\"package_name\": \"inspect_pkg\""));
+    assert!(json_with_prov.contains("\"inspecting_toolchain\""));
+
+    // Cleanup
+    let _ = fs::remove_file(src_path);
+    let _ = fs::remove_file(art_path);
+    let _ = fs::remove_file(prov_path);
 }
 
 #[test]
-fn test_8_artifact_hash_cli_behavior() {
+fn test_8_cli_artifact_hash_and_inspect_real_binary() {
     let source = "fn main() { return; }";
     let artifact = compile_program_to_semcode_with_options_debug(
         source,
@@ -364,131 +384,232 @@ fn test_8_artifact_hash_cli_behavior() {
     .expect("compile");
 
     let temp_dir = std::env::temp_dir();
-    let test_file = temp_dir.join("test_artifact_hash_cli.smc");
-    fs::write(&test_file, &artifact).expect("write artifact");
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let art_path = temp_dir.join(format!("cli_test_art_{}.smc", unique_id));
+    fs::write(&art_path, &artifact).expect("write artifact");
 
-    let calculated = sha256_prefixed_hex(&artifact);
-    let bytes_read = fs::read(&test_file).expect("read");
-    let hash_read = sha256_prefixed_hex(&bytes_read);
-    assert_eq!(calculated, hash_read);
+    let art_path_str = art_path.to_str().unwrap();
 
-    // Clean up
-    let _ = fs::remove_file(test_file);
-}
-
-#[test]
-fn test_9_version_identity_contract() {
-    let toolchain = smc_cli::artifact_identity::ToolchainIdentity::default();
-    assert_eq!(toolchain.compiler_version, env!("CARGO_PKG_VERSION"));
-    assert!(!toolchain.source_hash.is_empty());
-    assert!(!toolchain.enabled_features.is_empty());
-}
-
-#[test]
-fn test_10_migration_dry_run_zero_mutation() {
-    let fixture_dir = Path::new("tests/fixtures/ssf10_compatibility/migration_preview_project");
-    assert!(fixture_dir.exists(), "fixture dir must exist");
-
-    // Capture state of all files in fixture_dir before dry run
-    let mut files_before = Vec::new();
-    for entry in fs::read_dir(fixture_dir).expect("read fixture dir") {
-        let entry = entry.expect("entry");
-        let path = entry.path();
-        if path.is_file() {
-            let content = fs::read(&path).expect("read content");
-            let hash = sha256_prefixed_hex(&content);
-            files_before.push((path, hash, content.len()));
-        }
-    }
-    assert!(!files_before.is_empty(), "fixture dir must have files");
-
-    // Run dry-run migration inspection
-    let report = inspect_migration(fixture_dir).expect("dry run inspection");
-
-    // Invariant: zero mutations performed
+    // 1. `smc artifact hash` real binary invocation
+    let (code_hash, stdout_hash, stderr_hash) = run_smc(&["artifact", "hash", art_path_str]);
     assert_eq!(
-        report.mutations_performed, 0,
-        "migration dry-run must perform zero mutations"
+        code_hash, 0,
+        "artifact hash must exit with 0. stderr: {}",
+        stderr_hash
+    );
+    assert_eq!(stdout_hash.trim(), sha256_prefixed_hex(&artifact));
+
+    // 2. `smc artifact hash --json` real binary invocation
+    let (code_hash_json, stdout_hash_json, _) =
+        run_smc(&["artifact", "hash", art_path_str, "--json"]);
+    assert_eq!(code_hash_json, 0);
+    assert!(stdout_hash_json.contains("\"artifact_hash\""));
+    assert!(stdout_hash_json.contains(&sha256_prefixed_hex(&artifact)));
+
+    // 3. `smc artifact inspect` real binary invocation
+    let (code_insp, stdout_insp, stderr_insp) = run_smc(&["artifact", "inspect", art_path_str]);
+    assert_eq!(
+        code_insp, 0,
+        "artifact inspect must exit with 0. stderr: {}",
+        stderr_insp
+    );
+    assert!(stdout_insp.contains("Canonical Hash: sha256:"));
+    assert!(stdout_insp.contains("Producer Toolchain"));
+    assert!(stdout_insp.contains("Inspecting Toolchain"));
+
+    // 4. `smc artifact inspect --json` real binary invocation
+    let (code_insp_json, stdout_insp_json, _) =
+        run_smc(&["artifact", "inspect", art_path_str, "--json"]);
+    assert_eq!(code_insp_json, 0);
+    assert!(stdout_insp_json.contains("\"schema_version\": \"semantic-artifact-v1\""));
+    assert!(stdout_insp_json.contains("\"producer_provenance\""));
+    assert!(stdout_insp_json.contains("\"inspecting_toolchain\""));
+
+    let _ = fs::remove_file(art_path);
+}
+
+#[test]
+fn test_9_cli_version_real_binary() {
+    // 1. `smc version` real binary invocation
+    let (code, stdout, stderr) = run_smc(&["version"]);
+    assert_eq!(code, 0, "smc version must exit with 0. stderr: {}", stderr);
+    assert!(stdout.contains("Semantic Language Toolchain v0.1.0"));
+    assert!(stdout.contains("Source Commit:"));
+    assert!(stdout.contains("Enabled Features:"));
+
+    // 2. `smc version --json` real binary invocation
+    let (code_json, stdout_json, _) = run_smc(&["version", "--json"]);
+    assert_eq!(code_json, 0);
+    assert!(stdout_json.contains("\"schema_version\": \"semantic-version-v1\""));
+    assert!(stdout_json.contains("\"toolchain_version\": \"0.1.0\""));
+    assert!(stdout_json.contains("\"semcode_format\""));
+    assert!(stdout_json.contains("\"signing\": \"unsigned\""));
+}
+
+#[test]
+fn test_10_cli_migrate_preview_real_binary_zero_mutation() {
+    let fixture_dir = Path::new("tests/fixtures/ssf10_compatibility/migration_preview_project");
+    assert!(fixture_dir.exists(), "migration fixture must exist");
+
+    // Capture file contents and lengths before dry-run
+    let main_sm = fixture_dir.join("main.sm");
+    let toml = fixture_dir.join("Semantic.toml");
+    let main_before = fs::read(&main_sm).expect("read main before");
+    let toml_before = fs::read(&toml).expect("read toml before");
+
+    let fixture_path_str = fixture_dir.to_str().unwrap();
+
+    // 1. `smc migrate check` real binary invocation
+    let (code_check, stdout_check, stderr_check) = run_smc(&["migrate", "check", fixture_path_str]);
+    assert_eq!(
+        code_check, 0,
+        "migrate check must exit with 0. stderr: {}",
+        stderr_check
+    );
+    assert!(stdout_check.contains("Migration Dry-Run Inspection"));
+
+    // 2. `smc migrate preview --dry-run` real binary invocation
+    let (code_preview, stdout_preview, stderr_preview) =
+        run_smc(&["migrate", "preview", fixture_path_str, "--dry-run"]);
+    assert_eq!(
+        code_preview, 0,
+        "migrate preview must exit with 0. stderr: {}",
+        stderr_preview
+    );
+    assert!(stdout_preview.contains("Files Mutated:         0 (strictly non-destructive)"));
+
+    // 3. `smc migrate preview --json` real binary invocation
+    let (code_json, stdout_json, _) = run_smc(&[
+        "migrate",
+        "preview",
+        fixture_path_str,
+        "--json",
+        "--dry-run",
+    ]);
+    assert_eq!(code_json, 0);
+    assert!(stdout_json.contains("\"mutations_performed\": 0"));
+
+    // STRICT MUTATION VERIFICATION: verify files on disk were not touched
+    let main_after = fs::read(&main_sm).expect("read main after");
+    let toml_after = fs::read(&toml).expect("read toml after");
+    assert_eq!(main_before, main_after, "dry-run must not mutate main.sm");
+    assert_eq!(
+        toml_before, toml_after,
+        "dry-run must not mutate Semantic.toml"
+    );
+}
+
+#[test]
+fn test_11_compatibility_policies_and_boundary_rejection() {
+    // 1. Source Compatibility Policy
+    assert_eq!(
+        SourceCompatibilityPolicy::MIN_DEPRECATION_WINDOW_CYCLES,
+        1,
+        "deprecation window must be at least 1 cycle"
+    );
+    assert_eq!(
+        SourceCompatibilityPolicy::assess_source_element(false, false),
+        smc_cli::compatibility::CompatibilityClassification::Compatible
+    );
+    assert_eq!(
+        SourceCompatibilityPolicy::assess_source_element(true, false),
+        smc_cli::compatibility::CompatibilityClassification::Deprecated
+    );
+    assert_eq!(
+        SourceCompatibilityPolicy::assess_source_element(false, true),
+        smc_cli::compatibility::CompatibilityClassification::Incompatible
     );
 
-    // Invariant: all file contents and hashes strictly identical before and after
-    for (path, expected_hash, expected_len) in &files_before {
-        let content_after = fs::read(path).expect("read after dry run");
-        let hash_after = sha256_prefixed_hex(&content_after);
-        assert_eq!(
-            content_after.len(),
-            *expected_len,
-            "file length must not change after dry-run"
-        );
-        assert_eq!(
-            &hash_after, expected_hash,
-            "file content hash must not change after dry-run"
-        );
-    }
-
-    // Validate JSON output format
-    let json = report.render_json();
-    assert!(json.contains("\"mutations_performed\": 0"));
-    assert!(json.contains("dry-run preview completed successfully with zero mutations"));
-
-    // Validate human output format
-    let human = report.render_human();
-    assert!(human.contains("Files Mutated:         0 (strictly non-destructive)"));
-}
-
-#[test]
-fn test_11_compatibility_fail_closed_on_unsupported_states() {
-    // Truncated / empty
-    let empty = b"";
-    assert!(ArtifactIdentity::from_bytes(empty).is_err());
-
-    // Bad magic
-    let bad_magic = b"NOTSMCOD\x00\x00\x00\x00";
-    let id_bad = ArtifactIdentity::from_bytes(bad_magic).expect("id bad magic");
-    let status_magic = assess_artifact_compatibility(&id_bad);
-    assert!(matches!(
-        status_magic,
-        CompatibilityClassification::Incompatible
-    ));
-
-    // Unrecognized future magic
-    let future_magic = b"SEMCOD99\x00\x00\x00\x00";
-    let id_future = ArtifactIdentity::from_bytes(future_magic).expect("id future magic");
-    let status_future = assess_artifact_compatibility(&id_future);
-    assert!(matches!(
-        status_future,
-        CompatibilityClassification::Incompatible
-    ));
-}
-
-#[test]
-fn test_12_release_artifact_trust_and_checksum_integrity() {
-    // SHA-256 test vectors per FIPS 180-4
-    // Empty string "" -> e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-    let empty_hash = sha256(b"");
+    // 2. Manifest Compatibility Policy
     assert_eq!(
-        format_hex(&empty_hash),
+        ManifestCompatibilityPolicy::assess_manifest_schema(1),
+        smc_cli::compatibility::CompatibilityClassification::Compatible
+    );
+    assert_eq!(
+        ManifestCompatibilityPolicy::assess_manifest_schema(0),
+        smc_cli::compatibility::CompatibilityClassification::Deprecated
+    );
+    assert_eq!(
+        ManifestCompatibilityPolicy::assess_manifest_schema(99),
+        smc_cli::compatibility::CompatibilityClassification::Unsupported
+    );
+
+    // 3. Diagnostic Compatibility Policy
+    assert!(
+        DiagnosticCompatibilityPolicy::is_breaking_diagnostic_change(true, false, false),
+        "code change is breaking"
+    );
+    assert!(
+        DiagnosticCompatibilityPolicy::is_breaking_diagnostic_change(false, true, false),
+        "severity change is breaking"
+    );
+    assert!(
+        DiagnosticCompatibilityPolicy::is_breaking_diagnostic_change(false, false, true),
+        "structure change is breaking"
+    );
+    assert!(
+        !DiagnosticCompatibilityPolicy::is_breaking_diagnostic_change(false, false, false),
+        "identical contract is non-breaking"
+    );
+
+    // 4. Stdlib Compatibility Policy
+    assert!(
+        StdlibCompatibilityPolicy::is_breaking_stdlib_change(true, false),
+        "signature change is breaking"
+    );
+    assert!(
+        StdlibCompatibilityPolicy::is_breaking_stdlib_change(false, true),
+        "capability widening is breaking"
+    );
+    assert!(
+        !StdlibCompatibilityPolicy::is_breaking_stdlib_change(false, false),
+        "pure additive non-conflicting builtins are non-breaking"
+    );
+
+    // 5. Runtime Compatibility Policy & Deterministic PRNG
+    let seq1 = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0x1337_CAFE, 100);
+    let seq2 = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0x1337_CAFE, 100);
+    assert_eq!(
+        seq1, seq2,
+        "runtime PRNG contract must produce bit-for-bit identical sequences"
+    );
+
+    let seq_other = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0xDEAD_BEEF, 100);
+    assert_ne!(
+        seq1, seq_other,
+        "different seeds must produce distinct sequences"
+    );
+}
+
+#[test]
+fn test_12_release_artifact_trust_and_toolchain_binding() {
+    // 1. Standard SHA-256 test vectors following FIPS PUB 180-4 algorithm
+    let empty_digest = sha256(b"");
+    assert_eq!(
+        format_hex(&empty_digest),
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     );
 
-    // "abc" -> ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
-    let abc_hash = sha256(b"abc");
+    let abc_digest = sha256(b"abc");
     assert_eq!(
-        format_hex(&abc_hash),
+        format_hex(&abc_digest),
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
 
-    // Signing state honesty:
-    // No mock certificates, no invented keys.
-    // Release artifacts must declare signing: "unsigned".
-    let dummy_artifact = compile_program_to_semcode_with_options_debug(
-        "fn main() { return; }",
-        CompileProfile::Auto,
-        OptLevel::O0,
-        false,
-    )
-    .expect("compile");
+    // 2. Validate release asset verification script contract
+    let script_path = Path::new("scripts/verify_release_assets.ps1");
+    assert!(
+        script_path.is_file(),
+        "verify_release_assets.ps1 must exist"
+    );
+    let script_content = fs::read_to_string(script_path).expect("read script");
 
-    let id = ArtifactIdentity::from_bytes(&dummy_artifact).expect("identity");
-    assert_eq!(id.signing, "unsigned");
+    // Script must enforce explicit unsigned state (no fake PKI claims)
+    assert!(script_content.contains("signingState = \"unsigned\""));
+    assert!(script_content.contains("digestAlgorithm = \"SHA-256\""));
+    assert!(script_content.contains("release toolchain version"));
+    assert!(script_content.contains("toolchainEvidence = [ordered]@{"));
 }

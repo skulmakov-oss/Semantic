@@ -697,6 +697,13 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     let t_compile = Instant::now();
     std::fs::write(out, &bytes).map_err(|e| format!("failed to write '{}': {}", out, e))?;
+    let _ = crate::artifact_identity::generate_and_save_companion_provenance(
+        Path::new(out),
+        &bytes,
+        &root,
+        None,
+        None,
+    );
     let t_write = Instant::now();
     println!("compiled '{}' -> '{}' ({} bytes)", input, out, bytes.len());
     if debug_symbols {
