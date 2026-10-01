@@ -12,9 +12,13 @@ mod app;
 #[cfg(feature = "std")]
 mod application_host;
 #[cfg(feature = "std")]
+pub mod artifact_identity;
+#[cfg(feature = "std")]
 pub mod canonical_check;
 #[cfg(feature = "std")]
 mod canonical_json;
+#[cfg(feature = "std")]
+pub mod compatibility;
 #[cfg(feature = "std")]
 mod config;
 #[cfg(feature = "std")]

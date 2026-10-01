@@ -1,6 +1,10 @@
 source: crates/smc-cli/src/lib.rs
 #[cfg(feature = "std")]
+pub mod artifact_identity;
+#[cfg(feature = "std")]
 pub mod canonical_check;
+#[cfg(feature = "std")]
+pub mod compatibility;
 #[cfg(feature = "std")]
 pub mod diagnostic_schema;
 #[cfg(feature = "std")]

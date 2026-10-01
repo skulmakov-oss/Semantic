@@ -83,8 +83,14 @@ pub fn artifact(&self) -> &'token VerifiedSemCode<'bytes> {
 pub fn entry(&self) -> &str {
 pub fn bytes(&self) -> &'bytes [u8] {
 pub fn program(&self) -> &VerifiedProgram {
+pub fn artifact_hash(&self) -> [u8; 32] {
+pub fn artifact_hash_hex(&self) -> String {
+pub fn matches_artifact(&self, bytes: &[u8]) -> bool {
 pub fn bytes(&self) -> &'a [u8] {
 pub fn program(&self) -> &VerifiedProgram {
+pub fn artifact_hash(&self) -> [u8; 32] {
+pub fn artifact_hash_hex(&self) -> String {
+pub fn matches_artifact(&self, bytes: &[u8]) -> bool {
 pub fn function_names(&self) -> impl Iterator<Item = &str> {
 pub fn has_entry(&self, entry: &str) -> bool {
 pub fn require_entry<'token>( &'token self, entry: &str, ) -> Result<VerifiedEntrySemCode<'token, 'a>, EntryResolutionError> {

@@ -110,6 +110,14 @@ Current release-governance artifacts include:
 These artifacts exist to validate the checkpoint assets, not to widen any
 stable promise.
 
+## Release Artifact Trust & Signing State (SSF-10)
+
+Release artifacts (`smc.exe`, `svm.exe`, and release zip archives) follow an explicit trust contract established in SSF-10 (#1581):
+
+- **Explicit Signing State**: `unsigned`. The repository deliberately does not sign binaries with code-signing certificates and does not simulate public-key infrastructure. All release smoke validation (`scripts/verify_release_assets.ps1`) and CLI tooling (`smc version`, `smc artifact inspect`) explicitly report `"signing": "unsigned"`.
+- **Exact Cryptographic Checksums**: Every release asset publishes an exact SHA-256 digest (computed per FIPS 180-4). Smoke verification downloads and verifies assets strictly against these digests.
+- **Deterministic Toolchain Identity**: Artifact inspection exposes the exact compiler commit, package version, enabled features, and SemCode format revision (`SEMCOD22`).
+
 ## What Is Not Yet Promised
 
 The following must not be inferred from the current `v1.1.1` checkpoint

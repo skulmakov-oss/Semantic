@@ -36,6 +36,7 @@ function Get-FileSummary([string]$Path) {
         fileName = $item.Name
         sizeBytes = [int64]$item.Length
         sha256 = $hash.Hash.ToLowerInvariant()
+        signingState = "unsigned"
     }
 }
 
@@ -276,6 +277,13 @@ $report = [ordered]@{
             result = "pass"
         }
     )
+    signingState = "unsigned"
+    trustPolicy = [ordered]@{
+        signingState = "unsigned"
+        digestAlgorithm = "SHA-256"
+        signatureVerification = "explicitly-unsupported"
+        verifierBinding = "exact-artifact-hash"
+    }
     steps = $steps
 }
 
@@ -290,24 +298,26 @@ $markdown = @(
     "- Published: $($report.publishedAt)"
     "- Release URL: $($report.releaseUrl)"
     "- Output root: $($report.outputRoot)"
+    "- Release Signing: unsigned (explicitly unsigned per SSF-10)"
+    "- Digest Algorithm: SHA-256 (FIPS 180-4)"
     ""
     "## Asset Hashes"
     ""
-    "| Asset | Size (bytes) | SHA256 |"
-    "| --- | ---: | --- |"
+    "| Asset | Size (bytes) | SHA256 | Signing State |"
+    "| --- | ---: | --- | --- |"
 )
 
 foreach ($asset in $report.standaloneAssets) {
-    $markdown += "| $($asset.fileName) | $($asset.sizeBytes) | $($asset.sha256) |"
+    $markdown += "| $($asset.fileName) | $($asset.sizeBytes) | $($asset.sha256) | $($asset.signingState) |"
 }
 
 $markdown += ""
 $markdown += "## Zip Contents"
 $markdown += ""
-$markdown += "| File | Size (bytes) | SHA256 |"
-$markdown += "| --- | ---: | --- |"
+$markdown += "| File | Size (bytes) | SHA256 | Signing State |"
+$markdown += "| --- | ---: | --- | --- |"
 foreach ($asset in $report.zipContents) {
-    $markdown += "| $($asset.fileName) | $($asset.sizeBytes) | $($asset.sha256) |"
+    $markdown += "| $($asset.fileName) | $($asset.sizeBytes) | $($asset.sha256) | $($asset.signingState) |"
 }
 
 $markdown += ""

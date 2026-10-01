@@ -18,4 +18,4 @@ sm-diagnostic = { path = "../sm-diagnostic" }
 
 [dev-dependencies]
 
-sm-ir = { path = "../sm-ir", default-features = false, features = ["std"] }
+sm-ir = { path = "../sm-ir", default-features = false, features = ["std", "profile-rust"] }

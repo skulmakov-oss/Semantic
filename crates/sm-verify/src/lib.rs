@@ -529,6 +529,7 @@ pub struct VerifiedSemCode<'a> {
     bytes: &'a [u8],
     program: VerifiedProgram,
     decoded: Vec<sm_format::semcode_decode::DecodedFunctionEnvelope<'a>>,
+    artifact_hash: [u8; 32],
 }
 
 /// Error type for canonical entry resolution.
@@ -586,6 +587,18 @@ impl<'token, 'bytes> VerifiedEntrySemCode<'token, 'bytes> {
     pub fn program(&self) -> &VerifiedProgram {
         self.artifact.program()
     }
+
+    pub fn artifact_hash(&self) -> [u8; 32] {
+        self.artifact.artifact_hash()
+    }
+
+    pub fn artifact_hash_hex(&self) -> String {
+        self.artifact.artifact_hash_hex()
+    }
+
+    pub fn matches_artifact(&self, bytes: &[u8]) -> bool {
+        self.artifact.matches_artifact(bytes)
+    }
 }
 
 #[cfg(feature = "std")]
@@ -596,6 +609,21 @@ impl<'a> VerifiedSemCode<'a> {
 
     pub fn program(&self) -> &VerifiedProgram {
         &self.program
+    }
+
+    pub fn artifact_hash(&self) -> [u8; 32] {
+        self.artifact_hash
+    }
+
+    pub fn artifact_hash_hex(&self) -> String {
+        format!(
+            "sha256:{}",
+            sm_format::sha256::format_hex(&self.artifact_hash)
+        )
+    }
+
+    pub fn matches_artifact(&self, bytes: &[u8]) -> bool {
+        self.bytes == bytes && self.artifact_hash == sm_format::sha256::sha256(bytes)
     }
 
     pub fn function_names(&self) -> impl Iterator<Item = &str> {
@@ -974,10 +1002,12 @@ pub fn verify_semcode_token_with_quotas_and_limits(
     }
 
     if diagnostics.is_empty() {
+        let artifact_hash = sm_format::sha256::sha256(bytes);
         Ok(VerifiedSemCode {
             bytes,
             program: VerifiedProgram { header, functions },
             decoded: decoded_functions,
+            artifact_hash,
         })
     } else {
         Err(RejectReport { diagnostics })
