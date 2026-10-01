@@ -1,0 +1,4 @@
+fn main() {
+    let message: string = "version 1 of code";
+    return;
+}

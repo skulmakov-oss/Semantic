@@ -18,6 +18,7 @@ std = [
     "sm-ir/std",
     "sm-emit/std",
     "sm-sema/std",
+    "sm-format/std",
     "sm-verify/std",
     "sm-vm/std",
     "sm-runtime-core/std",
@@ -42,6 +43,7 @@ sm-emit = { path = "../sm-emit", default-features = false, features = ["std"] }
 sm-sema = { path = "../sm-sema", default-features = false, features = ["std"] }
 sm-diagnostic = { path = "../sm-diagnostic" }
 sm-verify = { path = "../sm-verify", default-features = false, features = ["std"] }
+sm-format = { path = "../sm-format", default-features = false, features = ["std"] }
 sm-vm = { path = "../sm-vm", default-features = false, features = ["std", "disasm"] }
 sm-runtime-core = { path = "../sm-runtime-core", default-features = false, features = ["std"] }
 prom-cap = { path = "../prom-cap", default-features = false, features = ["std"] }

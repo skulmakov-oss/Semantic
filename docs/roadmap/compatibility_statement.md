@@ -83,6 +83,17 @@ Recorded under `docs/spec/semcode.md` `## Backward Compatibility Rule`:
 This statement does not claim that every `SEMCODE0` to `SEMCOD21` binary keeps
 its previous verifier outcome.
 
+### SSF-10 Compatibility, Migration, and Artifact Trust Contract (#1581)
+
+Established by milestone SSF-10 and documented in `docs/architecture/artifact_identity_and_trust.md`:
+
+- **Compatibility Dimensions**: Explicitly distinguishes between `Compatible`, `Deprecated`, `Incompatible`, and `Unsupported` states across seven dimensions: source (`semantic-source-v1`), manifest (`semantic-manifest-v1`), diagnostics (`semantic-diag-v1`), stdlib (`semantic-stdlib-v0`), SemCode format (`SEMCOD22`), verifier gate (`VerifiedLocal`), and runtime model (`DeterministicVM`).
+- **Canonical Artifact Identity**: Deterministic, zero-dependency SHA-256 (`sha256:<64-hex>`) computed over the raw `.smc` byte payload, transitively binding header, capabilities, signatures, instruction stream, ADT descriptors, and debug symbols.
+- **Immutable Verifier Binding**: `VerifiedSemCode` and `VerifiedEntrySemCode` record the exact artifact SHA-256 digest. A verification result for artifact A cannot validate or admit artifact B.
+- **Deterministic Staleness Detection**: Detects source modification and content mismatches without silent regeneration or silent acceptance.
+- **Non-Destructive Migration Dry-Run**: `smc migrate <check|preview> <path> [--json] [--dry-run]` guarantees zero filesystem mutations while reporting intended changes and deprecations.
+- **Explicit Release Trust**: Binaries and distribution archives are explicitly declared as `"unsigned"` (no simulated certificates or fake PKI). Asset integrity is grounded in FIPS 180-4 SHA-256 digests.
+
 ## Explicit Non-Commitments
 
 The repository does not currently claim final compatibility guarantees for:

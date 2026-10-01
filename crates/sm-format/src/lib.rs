@@ -11,6 +11,9 @@ pub mod semcode_format {
     pub use crate::local_format::*;
 }
 
+#[cfg(feature = "std")]
+pub mod sha256;
+
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;

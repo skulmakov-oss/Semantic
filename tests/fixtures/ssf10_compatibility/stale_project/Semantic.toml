@@ -1,0 +1,4 @@
+[package]
+name = "ssf10_stale"
+version = "0.1.0"
+entry = "main.sm"

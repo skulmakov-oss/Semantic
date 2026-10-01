@@ -370,6 +370,9 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         }
     }
     match args[0].as_str() {
+        "version" => cmd_version(&args[1..]),
+        "artifact" => cmd_artifact(&args[1..]),
+        "migrate" => cmd_migrate(&args[1..]),
         "compile" => cmd_compile(&args[1..]),
         "check" => cmd_check(&args[1..]),
         "lint" => cmd_lint(&args[1..]),
@@ -4982,9 +4985,180 @@ fn cmd_disasm(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_version(args: &[String]) -> Result<(), String> {
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--help" | "-h" => {
+                println!("usage: smc version [--json]");
+                return Ok(());
+            }
+            other => {
+                return Err(format!(
+                    "unknown flag '{}'\nusage: smc version [--json]",
+                    other
+                ))
+            }
+        }
+    }
+
+    let version = env!("CARGO_PKG_VERSION");
+    let source_hash = env!("SM_COMPILER_SOURCE_HASH");
+    let raw_features = env!("SM_ENABLED_FEATURES");
+    let features: Vec<&str> = raw_features
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if json {
+        let features_json = features
+            .iter()
+            .map(|f| format!("\"{}\"", f))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "{{\n  \"schema_version\": \"semantic-version-v1\",\n  \"toolchain_version\": \"{}\",\n  \"source_hash\": \"{}\",\n  \"enabled_features\": [{}],\n  \"semcode_format\": {{\n    \"magic\": \"SEMCOD22\",\n    \"epoch\": 0,\n    \"revision\": 23\n  }},\n  \"verifier_profile\": \"VerifiedLocal\",\n  \"signing\": \"unsigned\"\n}}",
+            version, source_hash, features_json
+        );
+    } else {
+        println!("Semantic Language Toolchain v{}", version);
+        println!("Source Commit:      {}", source_hash);
+        println!(
+            "Enabled Features:   {}",
+            if features.is_empty() {
+                "none"
+            } else {
+                raw_features
+            }
+        );
+        println!("SemCode Format:     SEMCOD22 (epoch=0, rev=23)");
+        println!("Verifier Profile:   VerifiedLocal");
+        println!("Release Signing:    unsigned");
+    }
+    Ok(())
+}
+
+fn cmd_artifact(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("usage: smc artifact <hash|inspect> <path.smc> [--json]".to_string());
+    }
+    match args[0].as_str() {
+        "hash" => {
+            if args.len() < 2 {
+                return Err("usage: smc artifact hash <path.smc> [--json]".to_string());
+            }
+            reject_leading_unknown_flag(&args[1])?;
+            let path = Path::new(&args[1]);
+            let mut json = false;
+            for flag in &args[2..] {
+                match flag.as_str() {
+                    "--json" => json = true,
+                    other => return Err(format!("unknown flag '{}'\nusage: smc artifact hash <path.smc> [--json]", other)),
+                }
+            }
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read artifact '{}': {}", path.display(), e))?;
+            let hash = sm_format::sha256::sha256_prefixed_hex(&bytes);
+            if json {
+                println!("{{\n  \"path\": \"{}\",\n  \"artifact_hash\": \"{}\"\n}}", path.display(), hash);
+            } else {
+                println!("{hash}");
+            }
+            Ok(())
+        }
+        "inspect" => {
+            if args.len() < 2 {
+                return Err("usage: smc artifact inspect <path.smc> [--json]".to_string());
+            }
+            reject_leading_unknown_flag(&args[1])?;
+            let path = Path::new(&args[1]);
+            let mut json = false;
+            for flag in &args[2..] {
+                match flag.as_str() {
+                    "--json" => json = true,
+                    other => return Err(format!("unknown flag '{}'\nusage: smc artifact inspect <path.smc> [--json]", other)),
+                }
+            }
+            let identity = crate::artifact_identity::ArtifactIdentity::from_file(path)?;
+            if json {
+                println!("{}", identity.render_json());
+            } else {
+                print!("{}", identity.render_human(Some(args[1].as_str())));
+            }
+            Ok(())
+        }
+        "--help" | "-h" | "help" => {
+            println!("usage: smc artifact <hash|inspect> <path.smc> [--json]");
+            Ok(())
+        }
+        other => Err(format!(
+            "unknown artifact subcommand '{}'\nusage: smc artifact <hash|inspect> <path.smc> [--json]",
+            other
+        )),
+    }
+}
+
+fn cmd_migrate(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("usage: smc migrate <check|preview> <path> [--json] [--dry-run]".to_string());
+    }
+    let mut subcmd = None;
+    let mut target_path = None;
+    let mut json = false;
+    let mut _dry_run = false;
+
+    for arg in args {
+        match arg.as_str() {
+            "check" | "preview" | "dry-run" => {
+                if subcmd.is_none() {
+                    subcmd = Some(arg.as_str());
+                } else if target_path.is_none() {
+                    target_path = Some(arg.as_str());
+                }
+            }
+            "--dry-run" | "-n" => _dry_run = true,
+            "--json" => json = true,
+            "--help" | "-h" | "help" => {
+                println!("usage: smc migrate <check|preview> <path> [--json] [--dry-run]");
+                return Ok(());
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!(
+                    "unknown flag '{}'\nusage: smc migrate <check|preview> <path> [--json] [--dry-run]",
+                    flag
+                ));
+            }
+            path => {
+                if target_path.is_none() {
+                    target_path = Some(path);
+                } else {
+                    return Err(format!("unexpected argument '{}'", path));
+                }
+            }
+        }
+    }
+    let path_str = target_path.ok_or_else(|| {
+        "usage: smc migrate <check|preview> <path> [--json] [--dry-run]".to_string()
+    })?;
+    let path = Path::new(path_str);
+    let report = crate::compatibility::inspect_migration(path)?;
+    if json {
+        println!("{}", report.render_json());
+    } else {
+        print!("{}", report.render_human());
+    }
+    Ok(())
+}
+
 fn usage() -> String {
     [
         "Semantic Language toolchain v0",
+        "  smc version [--json]",
+        "  smc artifact hash <path.smc> [--json]",
+        "  smc artifact inspect <path.smc> [--json]",
+        "  smc migrate <check|preview> <path> [--json] [--dry-run]",
         "  smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust] [--opt-level O0|O1] [--debug-symbols] [--metrics]",
         "  smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]",
         "  smc check <input.sm|project-root> --format human|json",

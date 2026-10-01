@@ -3853,6 +3853,7 @@ dependencies = [
  "serde_json",
  "sm-diagnostic",
  "sm-emit",
+ "sm-format",
  "sm-front",
  "sm-ir",
  "sm-runtime-core",

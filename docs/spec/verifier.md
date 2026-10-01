@@ -625,6 +625,17 @@ semantics are actually invalid, and canonical admission still fails closed
 either way - there is no fallback to a weaker analysis, no "assume
 defined," and no partial-proof acceptance.
 
+## Artifact Identity & Verifier Binding (SSF-10)
+
+Per SSF-10 (#1581), a successful verification admission token (`VerifiedSemCode` and `VerifiedEntrySemCode`) is cryptographically and immutably bound to the exact artifact byte sequence verified:
+
+- `artifact_hash(&self) -> [u8; 32]`: Returns the exact SHA-256 digest of the admitted `.smc` payload.
+- `artifact_hash_hex(&self) -> String`: Returns the digest formatted as `sha256:<64-hex>`.
+- `matches_artifact(&self, bytes: &[u8]) -> bool`: Confirms bit-for-bit identity binding between the verified token and a candidate artifact byte slice.
+
+### Binding Invariant
+An admission token issued for artifact $A$ cannot validate or admit execution of artifact $B$ ($A \neq B$). Any mutation of the artifact payload after verification fails `matches_artifact()`.
+
 ## Verified Execution Rule
 
 The standard `.smc` execution route must require `sm-verify` admission.

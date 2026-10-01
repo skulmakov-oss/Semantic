@@ -1,9 +1,9 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-09
-  title: "diagnostics: freeze diagnostic/source-span authority and an editor baseline contract"
-  type: diagnostics_and_editor_baseline_contract_qualification_and_bounded_implementation
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-10
+  title: "compatibility, migration and artifact trust"
+  type: compatibility_migration_and_artifact_trust_qualification_and_implementation
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-08
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-09
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
@@ -200,6 +200,8 @@ scope:
     - src/lib.rs
     - docs/architecture/blueprint.md
     - docs/architecture/svm_verified_execution_core.md
+    - docs/architecture/artifact_identity_and_trust.md
+    - docs/release_artifact_model.md
     - docs/roadmap/language_maturity/7hell_qualification_contract.md
     - docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md
     - docs/roadmap/roadmap_pulsar.md
@@ -251,8 +253,8 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-09
-  issue: 1580
+  active_phase: SSF-10
+  issue: 1581
   ledger_macro_issue: 1969
   owner_authorized: true
   reason: >
