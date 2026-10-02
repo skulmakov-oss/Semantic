@@ -15,9 +15,10 @@ This guide is the shortest honest route from a fresh clone to:
 - running a capability-controlled file transform;
 - understanding failures, compatibility and release status.
 
-You do not need any knowledge that lives outside this repository. Every
-command below was executed during the SSF-11 cold-start rehearsal
-(`reports/ssf11_cold_start_rehearsal.md`).
+You do not need any knowledge that lives outside this repository. The POSIX
+commands below were executed on Linux during the SSF-11 cold-start rehearsal
+(`reports/ssf11_cold_start_rehearsal.md`). The PowerShell form in section 6
+was added afterwards and has not yet been executed in a rehearsal.
 
 > **Release status.** Current `main` is **not** a published stable release.
 > Landed work is not release-promised. The final Stable Foundation verdict
