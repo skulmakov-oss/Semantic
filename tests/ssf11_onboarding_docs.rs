@@ -227,17 +227,19 @@ fn ssf12_is_not_described_as_completed_or_promoted() {
         .lines()
         .find(|line| line.starts_with("| SSF-12 / #1583 |"))
         .expect("SSF-12 row");
+    // SSF-12 may be blocked or active, but never completed: completion is a
+    // verdict that only a human release decision can record.
     assert!(
-        ssf12.contains("Blocked by SSF-11"),
-        "SSF-12 must stay blocked: {ssf12}"
+        ssf12.contains("Blocked by SSF-11") || ssf12.contains("**Active**"),
+        "SSF-12 must be blocked or active, never completed: {ssf12}"
     );
     let ssf11 = dependencies
         .lines()
         .find(|line| line.starts_with("| SSF-11 / #1582 |"))
         .expect("SSF-11 row");
     assert!(
-        ssf11.contains("**Active**"),
-        "SSF-11 must be the active phase"
+        ssf11.contains("**Active**") || ssf11.contains("| Completed |"),
+        "SSF-11 must be active or completed: {ssf11}"
     );
 
     for document_path in CURRENT_FACING {
