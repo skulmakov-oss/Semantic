@@ -781,15 +781,20 @@ pub fn save_companion_provenance(
     Ok(prov_path)
 }
 
-/// Atomically save compiled artifact and its companion provenance sidecar together.
+/// Save compiled artifact and its companion provenance sidecar together with handled-failure rollback.
 ///
 /// Both the artifact and sidecar are staged into sibling temporary files.
 /// The sidecar is staged and committed first: if the sidecar cannot be written or replaced
 /// (for example, if the destination is a directory or permission denied), all temporary files
 /// are cleaned up and the original artifact file remains completely untouched.
-/// Furthermore, if replacing the artifact subsequently fails, any pre-existing sidecar
-/// is restored from backup (or cleaned up if none existed previously), ensuring the artifact
-/// and provenance sidecar never become inconsistent.
+/// Furthermore, if replacing the artifact subsequently fails during handled execution,
+/// any pre-existing sidecar is restored from backup (or cleaned up if none existed previously),
+/// and the backup is preserved if restoration fails, ensuring handled operation errors do not
+/// leave an inconsistent artifact/provenance pair.
+///
+/// Note on crash consistency: Across separate filesystem paths without OS multi-file atomic transactions,
+/// if an abrupt process or system interruption occurs between the two renames, the resulting pair
+/// is detected fail-closed upon subsequent inspection via SHA-256 binding (`ProvenanceStatus::CorruptedMismatch`).
 pub fn save_artifact_and_companion_provenance_atomic(
     artifact_path: &Path,
     artifact_bytes: &[u8],
