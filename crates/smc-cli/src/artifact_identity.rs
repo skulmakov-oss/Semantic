@@ -887,9 +887,20 @@ pub fn save_artifact_and_companion_provenance_atomic(
         if had_existing_prov {
             // Restore pre-existing sidecar
             let _ = fs::remove_file(&prov_path);
-            if fs::rename(&tmp_backup_prov, &prov_path).is_err() {
-                let _ = fs::copy(&tmp_backup_prov, &prov_path);
-                let _ = fs::remove_file(&tmp_backup_prov);
+            let restore_res = fs::rename(&tmp_backup_prov, &prov_path)
+                .or_else(|_| fs::copy(&tmp_backup_prov, &prov_path).map(|_| ()));
+            match restore_res {
+                Ok(()) => {
+                    let _ = fs::remove_file(&tmp_backup_prov);
+                }
+                Err(restore_err) => {
+                    return Err(format!(
+                        "failed to atomically replace artifact '{}': {e}; additionally failed to restore original provenance sidecar '{}' from backup '{}': {restore_err}",
+                        artifact_path.display(),
+                        prov_path.display(),
+                        tmp_backup_prov.display()
+                    ));
+                }
             }
         } else {
             // If there was no pre-existing sidecar, do not leave newly staged sidecar behind as an orphan

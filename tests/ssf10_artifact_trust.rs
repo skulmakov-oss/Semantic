@@ -1862,6 +1862,15 @@ fn test_38_manifest_lowercase_precedence_and_atomic_compile_safety() {
         preserved_sidecar, b"ORIGINAL_SIDECAR_PAYLOAD",
         "pre-existing sidecar must be restored to original contents after artifact replacement failure"
     );
+    let prov_dir = unit_art_prov.parent().unwrap();
+    let has_dangling_backup = fs::read_dir(prov_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().contains(".bak."));
+    assert!(
+        !has_dangling_backup,
+        "backup file must be cleaned up when restoration succeeds"
+    );
     let _ = fs::remove_file(&unit_art_prov);
     let _ = fs::remove_dir_all(&unit_art_dir);
 
