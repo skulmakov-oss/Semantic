@@ -87,7 +87,7 @@ its previous verifier outcome.
 
 Established by milestone SSF-10 and documented in `docs/architecture/artifact_identity_and_trust.md`:
 
-- **Compatibility Dimensions**: Explicitly distinguishes between `Compatible`, `Deprecated`, `Incompatible`, and `Unsupported` states across seven dimensions: source (`semantic-source-v1`), manifest (`semantic-manifest-v1`), diagnostics (`semantic-diag-v1`), stdlib (`semantic-stdlib-v0`), SemCode format (`SEMCOD22`), verifier gate (`VerifiedLocal`), and runtime model (`DeterministicVM`).
+- **Compatibility Dimensions**: Explicitly distinguishes between `Compatible`, `Deprecated`, `Incompatible`, and `Unsupported` states across canonical dimensions: source (`0.1.0`), manifest (`1`), diagnostics (`semantic.diagnostics`), stdlib (`semantic-stdlib-v1`), SemCode format (`SEMCOD22`), verifier gate (`verifier-canonical-v1`), and runtime model (`deterministic-v1`).
 - **Canonical Artifact Identity**: Deterministic, zero-dependency SHA-256 (`sha256:<64-hex>`) computed over the raw `.smc` byte payload, transitively binding header, capabilities, signatures, instruction stream, ADT descriptors, and debug symbols.
 - **Immutable Verifier Binding**: `VerifiedSemCode` and `VerifiedEntrySemCode` record the exact artifact SHA-256 digest. A verification result for artifact A cannot validate or admit artifact B.
 - **Deterministic Digest-Based Staleness Detection**: Detects source modification, mtime spoofing, and content mismatches via cryptographic digest comparison against companion provenance, without relying on filesystem timestamps alone and without silent regeneration or silent acceptance.

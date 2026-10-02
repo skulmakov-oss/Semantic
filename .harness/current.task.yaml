@@ -14,7 +14,7 @@ task:
     #1762, #1763, #1900, #1902 — fully closed beforehand). Full evidence:
     docs/roadmap/stable_foundation/ssf08_closure_audit.md. This file's own
     prior activation (chore(ssf07): ..., commit 5ddb703b) established the
-    precedent this transition follows. Only SSF-09 is now active.
+    precedent this transition follows. SSF-09 is closed; only SSF-10 is now active.
     Repository owner explicit governance authorization (2026-09-21) to allow
     the root .gitattributes change required by #1698 for deterministic LF
     materialization of byte-sensitive 7HELL fixtures.
@@ -243,12 +243,12 @@ constraints:
   one_active_ssf_phase: true
   active_phase: SSF-10
   issue: 1581
-  ledger_macro_issue: 1969
   owner_authorized: true
   reason: >
-    Final CI/governance/repository-state closure requires REM-022 script
-    changes, REM-027 current-facing governance reconciliation, and explicit
-    retirement documentation for Native UI / Workbench / Semantic Studio.
+    Execution of SSF-10 (#1581) under Stable Foundation umbrella #1569:
+    establishing canonical compatibility dimensions, deterministic migration preview,
+    cryptographic artifact identity, unsigned companion provenance, digest-based
+    staleness authority, immutable verifier/artifact binding, and release trust qualification.
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
