@@ -580,18 +580,20 @@ fn test_11_compatibility_policies_and_boundary_rejection() {
         "pure additive non-conflicting builtins are non-breaking"
     );
 
-    // 5. Runtime Compatibility Policy & Deterministic PRNG
-    let seq1 = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0x1337_CAFE, 100);
-    let seq2 = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0x1337_CAFE, 100);
+    // 5. Runtime Compatibility Policy
     assert_eq!(
-        seq1, seq2,
-        "runtime PRNG contract must produce bit-for-bit identical sequences"
+        RuntimeCompatibilityPolicy::assess_runtime_profile(
+            RuntimeCompatibilityPolicy::CANONICAL_RUNTIME_PROFILE
+        ),
+        smc_cli::compatibility::CompatibilityClassification::Compatible
     );
-
-    let seq_other = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0xDEAD_BEEF, 100);
-    assert_ne!(
-        seq1, seq_other,
-        "different seeds must produce distinct sequences"
+    assert_eq!(
+        RuntimeCompatibilityPolicy::assess_runtime_profile("experimental-v2"),
+        smc_cli::compatibility::CompatibilityClassification::Incompatible
+    );
+    assert_eq!(
+        RuntimeCompatibilityPolicy::assess_runtime_profile("deterministic-v0"),
+        smc_cli::compatibility::CompatibilityClassification::Incompatible
     );
 }
 
@@ -1469,35 +1471,162 @@ fn test_34_provenance_schema_version_validation() {
 
 #[test]
 fn test_35_deterministic_prng_alignment_with_vm() {
-    use smc_cli::compatibility::RuntimeCompatibilityPolicy;
+    // 1. Architectural Guard: ensure smc-cli does NOT implement runtime PRNG algorithm.
+    // Sole semantic authority belongs to sm-vm.
+    let compat_path = Path::new("crates/smc-cli/src/compatibility.rs");
+    let compat_src = fs::read_to_string(compat_path).expect("read compatibility.rs");
+    assert!(
+        !compat_src.contains("verify_deterministic_prng_seed"),
+        "smc-cli must not expose duplicate verify_deterministic_prng_seed authority"
+    );
+    assert!(
+        !compat_src.contains("state ^= state << 13"),
+        "smc-cli must not contain duplicate xorshift64 bitshift algorithm"
+    );
 
-    // Zero seed avoids zero fixed point: maps to 1
-    let seq_zero = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0, 5);
-    let seq_one = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(1, 5);
+    // 2. Canonical Runtime Transition in sm-vm
+    // Zero-seed normalization: maps to 1 to avoid zero fixed-point
     assert_eq!(
-        seq_zero, seq_one,
+        sm_vm::deterministic_prng_next(0),
+        sm_vm::deterministic_prng_next(1),
         "seed 0 must be normalized to seed 1 to avoid fixed point"
     );
 
-    // Validate bit-for-bit xorshift64 (shifts 13, 7, 17)
-    let mut state: u64 = 0x1234_5678_9ABC_DEF0;
-    let expected: Vec<u64> = (0..10)
-        .map(|_| {
-            let mut x = state;
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            state = x;
-            x
-        })
-        .collect();
-
-    let actual =
-        RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0x1234_5678_9ABC_DEF0, 10);
+    // Exact frozen sequence from canonical contract (docs/spec/foundation_stdlib_v0.md:181-192)
+    // Seed 1 transitions:
     assert_eq!(
-        actual, expected,
-        "PRNG sequence must match canonical xorshift64 (13, 7, 17)"
+        sm_vm::deterministic_prng_next(1),
+        1082269761u64,
+        "first transition from seed 1"
     );
+    assert_eq!(
+        sm_vm::deterministic_prng_next(1082269761u64),
+        1152992998833853505u64,
+        "second transition from seed 1"
+    );
+    assert_eq!(
+        sm_vm::deterministic_prng_next(1152992998833853505u64),
+        11177516664432764457u64,
+        "third transition from seed 1"
+    );
+
+    // Seed 42 transitions:
+    assert_eq!(
+        sm_vm::deterministic_prng_next(42),
+        45454805674u64,
+        "first transition from seed 42"
+    );
+    assert_eq!(
+        sm_vm::deterministic_prng_next(45454805674u64),
+        11532217803599905471u64,
+        "second transition from seed 42"
+    );
+
+    // deterministic_prng_step advances mutable state
+    let mut state = 42u64;
+    let s1 = sm_vm::deterministic_prng_step(&mut state);
+    assert_eq!(s1, 45454805674u64);
+    assert_eq!(state, 45454805674u64);
+    let s2 = sm_vm::deterministic_prng_step(&mut state);
+    assert_eq!(s2, 11532217803599905471u64);
+    assert_eq!(state, 11532217803599905471u64);
+
+    // 3. Authoritative VM Execution via SemCode
+    let program = r#"
+fn run_prng(seed: i32, lo: i32, hi: i32) -> i32 {
+    random_seed(seed);
+    let v: i32 = random_next_i32(lo, hi);
+    return v;
+}
+fn main() { return; }
+"#;
+    let semcode_bytes =
+        sm_emit::compile_program_to_semcode(program).expect("compile PRNG program to SemCode");
+    let token = verify_semcode_token(&semcode_bytes).expect("verify SemCode token");
+    let entry = token
+        .require_entry("run_prng")
+        .expect("require run_prng entry");
+
+    // Frozen contract output for seed 42 in range [0, 1000):
+    // raw = 45454805674, offset = raw % 1000 = 674, result = 0 + 674 = 674.
+    let res42 = sm_vm::run_verified_function_semcode_with_args(
+        &entry,
+        vec![
+            sm_vm::Value::I32(42),
+            sm_vm::Value::I32(0),
+            sm_vm::Value::I32(1000),
+        ],
+    )
+    .expect("execute VM run_prng(42, 0, 1000)");
+    assert_eq!(
+        res42,
+        sm_vm::Value::I32(674),
+        "VM execution for seed 42 in [0, 1000) must yield exact frozen contract value 674"
+    );
+
+    // Repeatability: executing again with same seed yields identical result
+    let res42_repeat = sm_vm::run_verified_function_semcode_with_args(
+        &entry,
+        vec![
+            sm_vm::Value::I32(42),
+            sm_vm::Value::I32(0),
+            sm_vm::Value::I32(1000),
+        ],
+    )
+    .expect("execute VM run_prng(42, 0, 1000) repeat");
+    assert_eq!(
+        res42, res42_repeat,
+        "deterministic VM execution must yield identical outputs for identical seed"
+    );
+
+    // Seed 0 normalization to 1:
+    // raw = 1082269761, offset = raw % 1000 = 761, result = 0 + 761 = 761.
+    let res0 = sm_vm::run_verified_function_semcode_with_args(
+        &entry,
+        vec![
+            sm_vm::Value::I32(0),
+            sm_vm::Value::I32(0),
+            sm_vm::Value::I32(1000),
+        ],
+    )
+    .expect("execute VM run_prng(0, 0, 1000)");
+    let res1 = sm_vm::run_verified_function_semcode_with_args(
+        &entry,
+        vec![
+            sm_vm::Value::I32(1),
+            sm_vm::Value::I32(0),
+            sm_vm::Value::I32(1000),
+        ],
+    )
+    .expect("execute VM run_prng(1, 0, 1000)");
+    assert_eq!(
+        res0,
+        sm_vm::Value::I32(761),
+        "VM execution for seed 0 must yield exact frozen contract value 761"
+    );
+    assert_eq!(
+        res0, res1,
+        "VM execution for seed 0 and seed 1 must yield identical output"
+    );
+
+    // Cross-zero range: [-2000000000, 2000000000)
+    let res_span = sm_vm::run_verified_function_semcode_with_args(
+        &entry,
+        vec![
+            sm_vm::Value::I32(1),
+            sm_vm::Value::I32(-2000000000),
+            sm_vm::Value::I32(2000000000),
+        ],
+    )
+    .expect("execute VM run_prng(1, -2000000000, 2000000000)");
+    if let sm_vm::Value::I32(val) = res_span {
+        assert!(
+            (-2000000000..2000000000).contains(&val),
+            "output must lie strictly within [lo, hi): got {val}"
+        );
+    } else {
+        panic!("expected i32 return value");
+    }
 }
 
 #[test]

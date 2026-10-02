@@ -115,3 +115,5 @@ pub fn run_verified_entry_semcode_with_profile( token: &VerifiedEntrySemCode<'_,
 pub fn run_semcode_with_entry_and_config( bytes: &[u8], entry: &str, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 #[cfg(feature = "disasm")]
 pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {
+pub fn deterministic_prng_next(state: u64) -> u64 {
+pub fn deterministic_prng_step(state: &mut u64) -> u64 {
