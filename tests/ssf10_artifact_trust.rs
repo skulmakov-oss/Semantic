@@ -1791,6 +1791,80 @@ fn test_38_manifest_lowercase_precedence_and_atomic_compile_safety() {
     );
     let _ = fs::remove_dir_all(&fail_sidecar_dir);
 
+    // 2b. Verify sidecar restoration and rollback when artifact destination fails (e.g. artifact destination is a directory)
+    let fail_art_dir = project_dir.join("art_dest_fail.smc");
+    let fail_art_prov = project_dir.join("art_dest_fail.smc.provenance.json");
+    fs::create_dir_all(&fail_art_dir).expect("create blocking directory at artifact path");
+    let initial_prov_bytes = b"{\"preexisting_sidecar\": true}";
+    fs::write(&fail_art_prov, initial_prov_bytes).expect("write pre-existing sidecar");
+
+    let (c_code_art, _, _) = run_smc(&[
+        "compile",
+        valid_sm.to_str().unwrap(),
+        "-o",
+        fail_art_dir.to_str().unwrap(),
+    ]);
+    assert_ne!(
+        c_code_art, 0,
+        "compile must fail when artifact destination cannot be replaced (e.g. is a directory)"
+    );
+    let restored_prov_bytes = fs::read(&fail_art_prov).expect("read restored sidecar");
+    assert_eq!(
+        restored_prov_bytes, initial_prov_bytes,
+        "pre-existing provenance sidecar must be preserved/restored when artifact replacement fails"
+    );
+    let _ = fs::remove_file(&fail_art_prov);
+    let _ = fs::remove_dir_all(&fail_art_dir);
+
+    // 2c. Direct unit test of save_artifact_and_companion_provenance_atomic rollback:
+    // When artifact replacement fails, an existing sidecar is restored intact,
+    // and when no sidecar previously existed, no orphaned sidecar is left behind.
+    let unit_art_dir = project_dir.join("unit_fail_art.smc");
+    let unit_art_prov = smc_cli::artifact_identity::companion_provenance_path(&unit_art_dir);
+    fs::create_dir_all(&unit_art_dir).expect("create blocking directory at artifact path");
+
+    let dummy_prov = smc_cli::artifact_identity::generate_companion_provenance(
+        b"payload",
+        &project_dir,
+        None,
+        None,
+    )
+    .expect("generate dummy provenance");
+
+    // Case 2c-1: No pre-existing sidecar -> must not leave orphaned sidecar on failure
+    let res_none = smc_cli::artifact_identity::save_artifact_and_companion_provenance_atomic(
+        &unit_art_dir,
+        b"payload",
+        &dummy_prov,
+    );
+    assert!(
+        res_none.is_err(),
+        "must return error when artifact cannot be replaced"
+    );
+    assert!(
+        !unit_art_prov.exists(),
+        "must not leave orphaned sidecar behind when no sidecar existed prior to failure"
+    );
+
+    // Case 2c-2: Pre-existing sidecar -> must restore original sidecar on failure
+    fs::write(&unit_art_prov, b"ORIGINAL_SIDECAR_PAYLOAD").expect("write pre-existing sidecar");
+    let res_existing = smc_cli::artifact_identity::save_artifact_and_companion_provenance_atomic(
+        &unit_art_dir,
+        b"payload",
+        &dummy_prov,
+    );
+    assert!(
+        res_existing.is_err(),
+        "must return error when artifact cannot be replaced"
+    );
+    let preserved_sidecar = fs::read(&unit_art_prov).expect("read preserved sidecar");
+    assert_eq!(
+        preserved_sidecar, b"ORIGINAL_SIDECAR_PAYLOAD",
+        "pre-existing sidecar must be restored to original contents after artifact replacement failure"
+    );
+    let _ = fs::remove_file(&unit_art_prov);
+    let _ = fs::remove_dir_all(&unit_art_dir);
+
     // 3. Direct atomic write verification
     let atomic_target = project_dir.join("atomic_target.bin");
     fs::write(&atomic_target, b"initial").expect("write initial");
