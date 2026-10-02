@@ -162,26 +162,23 @@ impl StdlibCompatibilityPolicy {
     }
 }
 
-/// Explicit policy governing Runtime execution and Total Determinism.
+/// Explicit policy governing Runtime execution and Total Determinism metadata.
+///
+/// Note: Semantic authority for runtime PRNG execution resides exclusively in `sm-vm`
+/// (`sm_vm::deterministic_prng_next`, `sm_vm::deterministic_prng_step`, and VM opcode execution).
+/// `RuntimeCompatibilityPolicy` identifies and assesses runtime contract metadata only.
 pub struct RuntimeCompatibilityPolicy;
 
 impl RuntimeCompatibilityPolicy {
     pub const CANONICAL_RUNTIME_PROFILE: &'static str = CANONICAL_RUNTIME_ENGINE;
 
-    /// Total Determinism PRNG Rule:
-    /// Any supported runtime PRNG contract must produce bit-for-bit identical
-    /// pseudo-random sequences across repeated executions with the identical seed.
-    /// Canonical algorithm matches sm-vm's deterministic xorshift64 (shifts 13, 7, 17).
-    pub fn verify_deterministic_prng_seed(seed: u64, iterations: usize) -> Vec<u64> {
-        let mut state = if seed == 0 { 1 } else { seed };
-        let mut out = Vec::with_capacity(iterations);
-        for _ in 0..iterations {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            out.push(state);
+    /// Evaluates whether a runtime profile is compatible.
+    pub fn assess_runtime_profile(profile: &str) -> CompatibilityClassification {
+        if profile == Self::CANONICAL_RUNTIME_PROFILE {
+            CompatibilityClassification::Compatible
+        } else {
+            CompatibilityClassification::Incompatible
         }
-        out
     }
 }
 

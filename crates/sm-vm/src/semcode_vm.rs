@@ -3386,18 +3386,29 @@ fn map_key_from_value(v: Value) -> Result<MapKey, RuntimeError> {
     }
 }
 
-/// Advance the xorshift64 PRNG state by one step and return the new raw value.
-/// If state is 0 (unseeded), treat it as seed 1 to avoid the zero fixed point.
-fn xorshift64_step(state: &mut u64) -> u64 {
-    if *state == 0 {
-        *state = 1;
-    }
-    let mut x = *state;
+/// Canonical deterministic xorshift64 transition for the Semantic runtime.
+///
+/// Total Determinism PRNG contract (`docs/spec/foundation_stdlib_v0.md:181-192`):
+/// State 0 is mapped to 1 to avoid the zero fixed point.
+/// Transitions via xorshift64 (shifts 13, 7, 17) with wrapping u64 operations and no multiplier.
+pub fn deterministic_prng_next(state: u64) -> u64 {
+    let mut x = if state == 0 { 1 } else { state };
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;
-    *state = x;
     x
+}
+
+/// Advance the xorshift64 PRNG state by one step and return the new raw value.
+/// If state is 0 (unseeded), treat it as seed 1 to avoid the zero fixed point.
+pub fn deterministic_prng_step(state: &mut u64) -> u64 {
+    let next = deterministic_prng_next(*state);
+    *state = next;
+    next
+}
+
+fn xorshift64_step(state: &mut u64) -> u64 {
+    deterministic_prng_step(state)
 }
 
 fn fx_add_raw(lhs: i32, rhs: i32) -> Result<i32, RuntimeError> {
