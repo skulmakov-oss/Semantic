@@ -731,9 +731,9 @@
         }
       ],
       "expected_observable": "frontend admits the generic declaration (check exit 0), but IR lowering rejects it deterministically before any SemCode exists; nothing executes",
-      "bootstrap_comparable": true,
+      "bootstrap_comparable": false,
       "qualification_role": "boundary",
-      "note": "The wording check is the frozen #1717 IR-boundary diagnostic; there is no stable code for it yet."
+      "note": "Not Bootstrap-comparable yet: the only failure discriminator is the #1717 IR-boundary wording, and no stable diagnostic code exists for it. Exit statuses and the absent artifact remain Foundation evidence. Becomes comparable once a canonical code is assigned (RETURN-TO-OWNER SSF-07/SSF-09)."
     },
     {
       "case_id": "ssf11.f06.project_model",
@@ -1352,7 +1352,9 @@
             "run-smc",
             "{artifact}"
           ],
-          "expected_exit": 0
+          "expected_exit": 0,
+          "stdout_exact": "snake_core: score=0 steps=200\n",
+          "replay_identical": true
         },
         {
           "args": [

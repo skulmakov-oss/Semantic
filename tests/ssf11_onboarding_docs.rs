@@ -206,7 +206,10 @@ fn excluded_and_historical_rows_are_never_presented_as_stable_positives() {
                     || line.contains("Boundary"),
                 "boundary/historical row lacks honest maturity: {line}"
             );
-            assert!(!line.contains("Published stable"), "{line}");
+            assert!(
+                !line.to_ascii_lowercase().contains("published stable"),
+                "{line}"
+            );
         }
     }
     let corpus = corpus();

@@ -32,8 +32,9 @@ was added afterwards and has not yet been executed in a rehearsal.
 |---|---|---|
 | Git | clone | `git --version` |
 | `rustup` | the repository pins its toolchain in `rust-toolchain.toml` (Rust `1.97.1`, with `rustfmt` and `clippy`); `rustup` installs it automatically on first `cargo` use | `rustup --version` |
-| C toolchain/linker | ordinary Rust linking (`cc` on Linux, MSVC Build Tools on Windows) | `cc --version` |
-| **Linux only:** OpenBLAS development library | the workspace links `-lopenblas` through a Hub dependency; without it the `smc` link step fails with `unable to find library -lopenblas` | Debian/Ubuntu: `sudo apt-get install -y libopenblas-dev` |
+| C toolchain/linker | ordinary Rust linking | Linux/macOS: `cc --version`; Windows (MSVC Build Tools): `cl` from a Developer prompt |
+| **Linux:** OpenBLAS development library | the workspace links `-lopenblas` through a Hub dependency (BLAS is enabled on Linux and macOS, not Windows); without it the `smc` link step fails with `unable to find library -lopenblas` | Debian/Ubuntu: `sudo apt-get install -y libopenblas-dev` (rehearsed) |
+| **macOS:** OpenBLAS | same link requirement as Linux | `brew install openblas`; if the linker still cannot find it, `export LIBRARY_PATH="$(brew --prefix openblas)/lib:$LIBRARY_PATH"`. Not yet rehearsed on macOS. |
 
 Run all commands from the repository root.
 
@@ -223,7 +224,7 @@ not by message wording.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `rust-lld: error: unable to find library -lopenblas` | Linux without OpenBLAS | `sudo apt-get install -y libopenblas-dev` (or your distribution's OpenBLAS dev package) |
+| `unable to find library -lopenblas` | Linux or macOS without OpenBLAS (see Prerequisites) | Linux: `sudo apt-get install -y libopenblas-dev`; macOS: `brew install openblas` (see Prerequisites) |
 | `cargo` downloads a toolchain on first use | `rust-toolchain.toml` pins `1.97.1` | expected; let it finish |
 | `capability ... denied ... MissingCapability` | the profile does not grant that effect (`pure` grants none) | pick the profile the program needs; see `controlled_application_boundary_v0.md` |
 | `path must be relative and must not contain parent traversal` | an application path escaped `--root` | keep file arguments inside the root |
