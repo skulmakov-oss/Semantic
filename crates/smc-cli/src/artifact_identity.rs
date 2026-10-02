@@ -781,6 +781,94 @@ pub fn save_companion_provenance(
     Ok(prov_path)
 }
 
+/// Atomically save compiled artifact and its companion provenance sidecar together.
+///
+/// Both the artifact and sidecar are staged into sibling temporary files.
+/// The sidecar is staged and committed first: if the sidecar cannot be written or replaced
+/// (for example, if the destination is a directory or permission denied), all temporary files
+/// are cleaned up and the original artifact file remains completely untouched.
+pub fn save_artifact_and_companion_provenance_atomic(
+    artifact_path: &Path,
+    artifact_bytes: &[u8],
+    provenance: &ArtifactProvenance,
+) -> Result<(PathBuf, PathBuf), String> {
+    let prov_path = companion_provenance_path(artifact_path);
+    let prov_json = serde_json::to_string_pretty(provenance)
+        .map_err(|e| format!("failed to serialize provenance: {}", e))?;
+
+    let art_dir = artifact_path.parent().unwrap_or_else(|| Path::new("."));
+    let prov_dir = prov_path.parent().unwrap_or_else(|| Path::new("."));
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+
+    let art_name = artifact_path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("output");
+    let prov_name = prov_path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("output.provenance.json");
+
+    let tmp_art = art_dir.join(format!(".{art_name}.tmp.{pid}.{suffix}"));
+    let tmp_prov = prov_dir.join(format!(".{prov_name}.tmp.{pid}.{suffix}"));
+
+    // 1. Stage sidecar
+    let stage_prov_res = (|| {
+        use std::io::Write;
+        let mut f = fs::File::create(&tmp_prov)?;
+        f.write_all(prov_json.as_bytes())?;
+        f.sync_all()
+    })();
+    if let Err(e) = stage_prov_res {
+        let _ = fs::remove_file(&tmp_prov);
+        return Err(format!(
+            "failed to stage provenance sidecar '{}': {e}",
+            tmp_prov.display()
+        ));
+    }
+
+    // 2. Stage artifact
+    let stage_art_res = (|| {
+        use std::io::Write;
+        let mut f = fs::File::create(&tmp_art)?;
+        f.write_all(artifact_bytes)?;
+        f.sync_all()
+    })();
+    if let Err(e) = stage_art_res {
+        let _ = fs::remove_file(&tmp_art);
+        let _ = fs::remove_file(&tmp_prov);
+        return Err(format!(
+            "failed to stage artifact '{}': {e}",
+            tmp_art.display()
+        ));
+    }
+
+    // 3. Atomically replace sidecar first
+    if let Err(e) = fs::rename(&tmp_prov, &prov_path) {
+        let _ = fs::remove_file(&tmp_prov);
+        let _ = fs::remove_file(&tmp_art);
+        return Err(format!(
+            "failed to atomically replace provenance sidecar '{}': {e}",
+            prov_path.display()
+        ));
+    }
+
+    // 4. Atomically replace artifact
+    if let Err(e) = fs::rename(&tmp_art, artifact_path) {
+        let _ = fs::remove_file(&tmp_art);
+        return Err(format!(
+            "failed to atomically replace artifact '{}': {e}",
+            artifact_path.display()
+        ));
+    }
+
+    Ok((artifact_path.to_path_buf(), prov_path))
+}
+
 /// Find project root directory by searching ancestors for `semantic.toml` or `Semantic.toml`.
 pub(crate) fn find_project_root_ancestor(start: &Path) -> Option<PathBuf> {
     let mut current = if start.is_file() {
