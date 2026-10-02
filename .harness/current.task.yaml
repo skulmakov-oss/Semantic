@@ -1,19 +1,31 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-11
-  title: "canonical applications and onboarding"
-  type: canonical_applications_conformance_corpus_and_external_onboarding
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-12
+  title: "full qualification and stable promotion"
+  type: governance_activation_only
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-10
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-11
   authorized_by: >-
+    Repository owner direct instruction (2026-10-02) to record the SSF-11 ->
+    SSF-12 phase transition after #1582 closed as completed through merged
+    PR #1976 (squash commit bd4e34ebe219037bcb5330c1c3666d03dd0ec11d), so
+    that `.harness/current.task.yaml` and the dependency map stop presenting
+    a closed phase as active. This envelope is ACTIVATION-ONLY: it records
+    SSF-12 as the active phase and authorizes nothing beyond that record.
+    No qualification run, no PROMOTE / DO NOT PROMOTE verdict, no release,
+    no tag, no workflow change, no closing of #1583 or #1569. Any SSF-12
+    implementation work requires a separate explicit owner authorization
+    that widens this envelope.
+  prior_phase_authorization_history: >-
+    RETIRED (historical record of SSF-11 and earlier envelopes; grants no
+    authority to SSF-12).
+    SSF-11 (retired):
     Repository owner direct instruction (2026-10-02) to execute #1582
     (SSF-11) under umbrella #1569 in one bounded PR from main
     ea0d6dcacc70cada5b1fc80e23a5560ecddccb94, after SSF-10 (#1581) closed
     through merged PR #1975. SSF-11 is evidence and onboarding work only:
     no new language/runtime features, no core crate changes, no SSF-12
     work, no stable promotion, no merge without owner MERGE GO.
-  prior_phase_authorization_history: >-
-    RETIRED (historical record of SSF-10 and earlier envelopes; grants no
-    authority to SSF-11).
+    SSF-10 and earlier (retired):
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
     order. SSF-08 closed 2026-09-11 through a final acceptance-reconciliation
@@ -135,29 +147,19 @@ task:
 
 intent:
   summary: >-
-    Execute SSF-11 (#1582): map the twelve #1582 application families to
-    existing or new canonical evidence, publish a machine-readable
-    conformance corpus of observable (not Rust-internal) outcomes usable
-    as a future Rust Foundation <-> Bootstrap differential corpus, guard
-    it with automated tests through the public `smc` CLI, and make the
-    external onboarding path accurate, discoverable, and status-honest.
+    Record SSF-12 (#1583) as the single active Stable Foundation phase after
+    SSF-11 (#1582) completion, keeping the two independent active-phase
+    authorities (this file and the dependency map) consistent. No SSF-12
+    work, verdict, or promotion is performed or implied.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - README.md
-    - docs/LANGUAGE.md
-    - docs/examples_index.md
-    - docs/getting_started.md
-    - docs/spec/**
-    - docs/status/**
-    - docs/roadmap/public_*.md
     - docs/roadmap/stable_foundation/**
-    - examples/canonical/**
-    - examples/qualification/**
-    - examples/benchmarks/**
-    - tests/**
-    - reports/ssf11_*
+    - docs/getting_started.md
+    - docs/examples_index.md
+    - tests/ssf_status_drift.rs
+    - tests/ssf11_onboarding_docs.rs
 
   forbidden_paths:
     - .github/**
@@ -166,11 +168,6 @@ scope:
     - src/**
     - Cargo.toml
     - Cargo.lock
-    - crates/prom-ui/**
-    - crates/prom-ui-runtime/**
-    - crates/prom-ui-backend-native/**
-    - crates/prom-ui-iced-adapter/**
-    - crates/prom-ui-demo/**
     - examples/workbench_semantic/**
     - experiments/**
     - third_party/**
@@ -179,9 +176,9 @@ scope:
 authorization:
   rust_implementation: false
   language_implementation: false
-  documentation_addition: true
+  documentation_addition: false
   documentation_correction: true
-  test_addition: true
+  test_addition: false
   workflow_changes: false
   dependency_changes: false
   github_issue_lifecycle: false
@@ -191,28 +188,21 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-11
-  issue: 1582
+  active_phase: SSF-12
+  issue: 1583
   owner_authorized: true
   reason: >
-    Execution of SSF-11 (#1582) under Stable Foundation umbrella #1569:
-    canonical applications, Bootstrap-comparable conformance corpus, and
-    external onboarding consuming SSF-00..SSF-10 authorities unchanged.
+    Governance-state honesty after SSF-11 (#1582) completion. SSF-12 is
+    recorded as active; no SSF-12 qualification, verdict, or promotion is
+    authorized by this envelope.
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
   stable_promotion: false
-  no_new_language_features_for_examples: true
-  verifier_authority_preserved: true
-  capability_authority_preserved: true
-  project_package_authority_preserved: true
-  deterministic_examples_required: true
-  bootstrap_conformance_corpus_role: true
-  earlier_phase_defects_return_to_owner: true
-  ssf12_untouched: true
-  native_ui_workbench_studio_retired: true
+  activation_only_no_verdict: true
+  no_release_or_tag: true
   ownership_position: A
   ownership_position_decision_record: >-
     docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md

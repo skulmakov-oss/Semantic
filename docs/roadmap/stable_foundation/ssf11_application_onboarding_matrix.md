@@ -1,6 +1,7 @@
 # SSF-11 Application and Onboarding Matrix
 
-Status: SSF-11 (#1582) canonical mapping, active phase evidence
+Status: SSF-11 (#1582) canonical mapping, completed phase evidence (merged
+through PR #1976, commit `bd4e34ebe219037bcb5330c1c3666d03dd0ec11d`)
 Umbrella: #1569 — Semantic Stable Foundation
 Base: `main` at `ea0d6dcacc70cada5b1fc80e23a5560ecddccb94` (SSF-10 / #1581
 closed through merged PR #1975)
@@ -15,7 +16,7 @@ companion of the machine-readable corpus:
 - onboarding/drift guard: `tests/ssf11_onboarding_docs.rs`
 
 This matrix is evidence for SSF-12 (#1583). It is **not** a stable-release
-claim, and it does not promote anything. SSF-12 has not started.
+claim, and it does not promote anything. SSF-12 has issued no verdict.
 
 ## Disposition vocabulary
 

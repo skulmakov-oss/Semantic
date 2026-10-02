@@ -76,8 +76,8 @@ Foundation qualification, boundary evidence, or historical evidence.
 
 Every command above runs as `cargo run --bin smc -- <command> <path>` from
 the repository root. Boundary and historical rows are not stable positives.
-Nothing in this index is a published-stable claim. SSF-12 (#1583) has not
-started.
+Nothing in this index is a published-stable claim. SSF-12 (#1583) has
+issued no qualification verdict.
 
 ## Validation
 
