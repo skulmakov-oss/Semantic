@@ -1198,3 +1198,409 @@ fn test_25_compatibility_dimensions_canonical_drift_guard() {
         "smc version JSON semcode revision drift"
     );
 }
+
+#[test]
+fn test_26_read_dir_error_handling_fails_closed() {
+    use smc_cli::artifact_identity::collect_project_files_secure;
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test26_{}", std::process::id()));
+    let non_existent = temp_dir.join("non_existent_subdir");
+    let mut visited = std::collections::HashSet::new();
+    let mut out_sm = Vec::new();
+    let res = collect_project_files_secure(
+        &temp_dir,
+        &temp_dir,
+        &non_existent,
+        &mut visited,
+        &mut out_sm,
+    );
+    assert!(
+        res.is_err(),
+        "collect_project_files_secure must fail closed on missing or unreadable dir"
+    );
+}
+
+#[test]
+fn test_27_reparse_check_fails_closed() {
+    use smc_cli::artifact_identity::collect_project_files_secure;
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test27_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).expect("create temp dir");
+    let canonical = fs::canonicalize(&temp_dir).expect("canonicalize");
+    let outside_dir = std::env::temp_dir().join(format!("ssf10_test27_out_{}", std::process::id()));
+    fs::create_dir_all(&outside_dir).expect("create outside dir");
+    let canonical_out = fs::canonicalize(&outside_dir).expect("canonicalize outside");
+
+    let mut visited = std::collections::HashSet::new();
+    let mut out_sm = Vec::new();
+    let res = collect_project_files_secure(
+        &temp_dir,
+        &canonical,
+        &canonical_out,
+        &mut visited,
+        &mut out_sm,
+    );
+    assert!(
+        res.is_err(),
+        "collect_project_files_secure must fail closed when directory escapes canonical root"
+    );
+    let _ = fs::remove_dir_all(&temp_dir);
+    let _ = fs::remove_dir_all(&outside_dir);
+}
+
+#[test]
+fn test_28_prefix_free_source_framing() {
+    use smc_cli::artifact_identity::collect_project_source_bytes;
+    let temp_dir_a = std::env::temp_dir().join(format!("ssf10_test28a_{}", std::process::id()));
+    let temp_dir_b = std::env::temp_dir().join(format!("ssf10_test28b_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir_a).expect("create a");
+    fs::create_dir_all(&temp_dir_b).expect("create b");
+
+    // Project A: file "a.sm" content "bc", file "d.sm" content "e"
+    fs::write(temp_dir_a.join("a.sm"), "bc").expect("write a/a.sm");
+    fs::write(temp_dir_a.join("d.sm"), "e").expect("write a/d.sm");
+
+    // Project B: file "a.sm" content "b", file "cd.sm" content "e"
+    // Under un-prefixed concatenation these could collide, but prefix-free framing distinguishes them
+    fs::write(temp_dir_b.join("a.sm"), "b").expect("write b/a.sm");
+    fs::write(temp_dir_b.join("cd.sm"), "e").expect("write b/cd.sm");
+
+    let mut out_a = Vec::new();
+    let mut out_b = Vec::new();
+    collect_project_source_bytes(&temp_dir_a, &mut out_a).expect("collect a");
+    collect_project_source_bytes(&temp_dir_b, &mut out_b).expect("collect b");
+
+    assert_ne!(
+        out_a, out_b,
+        "prefix-free framing must prevent boundary shift collisions"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir_a);
+    let _ = fs::remove_dir_all(&temp_dir_b);
+}
+
+#[test]
+fn test_29_manifest_reparse_error_propagation() {
+    use smc_cli::compatibility::inspect_migration;
+    let missing_path = Path::new("non_existent_directory_for_migration_check_99999");
+    let res = inspect_migration(missing_path);
+    assert!(
+        res.is_err(),
+        "inspect_migration must fail closed if target does not exist"
+    );
+}
+
+#[test]
+fn test_30_verify_release_assets_powershell_syntax() {
+    let script_path = Path::new("scripts/verify_release_assets.ps1");
+    assert!(
+        script_path.is_file(),
+        "verify_release_assets.ps1 must exist"
+    );
+    let content = fs::read_to_string(script_path).expect("read script");
+    assert!(
+        !content.contains("    $sourceFingerprint = if"),
+        "hashtable must not contain inline variable assignment"
+    );
+}
+
+#[test]
+fn test_31_compile_package_version_from_manifest() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test31_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    let src_dir = project_dir.join("src");
+    fs::create_dir_all(&src_dir).expect("create src dir");
+
+    // Case 1: manifest has version = "1.2.3"
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"ver_test\"\nversion = \"1.2.3\"\n",
+    )
+    .expect("write manifest");
+    let main_sm = src_dir.join("main.sm");
+    let art_path = project_dir.join("main.smc");
+    fs::write(&main_sm, "fn main() { return; }\n").expect("write main.sm");
+
+    let (c_code, _, c_err) = run_smc(&[
+        "compile",
+        main_sm.to_str().unwrap(),
+        "-o",
+        art_path.to_str().unwrap(),
+    ]);
+    assert_eq!(c_code, 0, "compile failed: {c_err}");
+
+    let (i_code, i_out, i_err) = run_smc(&["artifact", "inspect", art_path.to_str().unwrap()]);
+    assert_eq!(i_code, 0, "inspect failed: {i_err}");
+    assert!(
+        i_out.contains("Package:        ver_test v1.2.3"),
+        "inspected output must show manifest package version: {i_out}"
+    );
+
+    // Case 2: manifest has NO version
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"ver_test_none\"\n",
+    )
+    .expect("write manifest without version");
+    let (c_code2, _, c_err2) = run_smc(&[
+        "compile",
+        main_sm.to_str().unwrap(),
+        "-o",
+        art_path.to_str().unwrap(),
+    ]);
+    assert_eq!(c_code2, 0, "compile without version failed: {c_err2}");
+
+    let (i_code2, i_out2, i_err2) = run_smc(&["artifact", "inspect", art_path.to_str().unwrap()]);
+    assert_eq!(i_code2, 0, "inspect failed: {i_err2}");
+    assert!(
+        i_out2.contains("Package:        ver_test_none\n"),
+        "inspected output must NOT fabricate v0.1.0 when version is omitted: {i_out2}"
+    );
+    assert!(
+        !i_out2.contains("ver_test_none v0.1.0"),
+        "must not fabricate fallback 0.1.0"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_32_migrate_requires_subcommand() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test32_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).expect("create temp dir");
+    let test_file = temp_dir.join("test.sm");
+    fs::write(&test_file, "fn main() { return; }\n").expect("write test.sm");
+
+    // 1. Invoking without subcommand must fail
+    let (code_no_sub, _, err_no_sub) = run_smc(&["migrate", test_file.to_str().unwrap()]);
+    assert_ne!(
+        code_no_sub, 0,
+        "invoking migrate without subcommand must fail"
+    );
+    assert!(
+        err_no_sub.contains("missing required subcommand 'check' or 'preview'"),
+        "error must explain missing subcommand: {err_no_sub}"
+    );
+
+    // 2. Invoking with check on valid file must succeed (Compatible -> exit 0)
+    let (code_ok, out_ok, _) = run_smc(&["migrate", "check", test_file.to_str().unwrap()]);
+    assert_eq!(code_ok, 0, "migrate check on valid file must succeed");
+    assert!(out_ok.contains("Compatible"));
+
+    // 3. Invoking with check on syntax error file must fail with non-zero exit code (Incompatible -> exit 1)
+    let err_file = temp_dir.join("error.sm");
+    fs::write(&err_file, "fn main() { invalid syntax !! }\n").expect("write error.sm");
+    let (code_err, _, err_out) = run_smc(&["migrate", "check", err_file.to_str().unwrap()]);
+    assert_ne!(
+        code_err, 0,
+        "migrate check on incompatible syntax must exit non-zero"
+    );
+    assert!(
+        err_out.contains("migration check failed with classification: Incompatible"),
+        "must report classification failure: {err_out}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_33_producer_toolchain_target_forwarding() {
+    use smc_cli::artifact_identity::ProducerToolchainIdentity;
+    let id = ProducerToolchainIdentity::default();
+    assert!(
+        !id.build_target.is_empty(),
+        "build_target must not be empty"
+    );
+    if let Ok(expected) = std::env::var("TARGET") {
+        assert_eq!(id.build_target, expected);
+    }
+}
+
+#[test]
+fn test_34_provenance_schema_version_validation() {
+    use smc_cli::artifact_identity::{ArtifactIdentity, ArtifactProvenance, ProvenanceStatus};
+    use smc_cli::compatibility::{detect_artifact_staleness, StalenessStatus};
+
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test34_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).expect("create dir");
+    let src_file = temp_dir.join("main.sm");
+    let art_file = temp_dir.join("main.smc");
+    let prov_file = temp_dir.join("main.smc.provenance.json");
+    fs::write(&src_file, "fn main() { return; }\n").expect("write src");
+
+    let (c_code, _, _) = run_smc(&[
+        "compile",
+        src_file.to_str().unwrap(),
+        "-o",
+        art_file.to_str().unwrap(),
+    ]);
+    assert_eq!(c_code, 0);
+
+    // Read generated valid provenance and tamper schema_version to 99
+    let mut prov: ArtifactProvenance =
+        serde_json::from_str(&fs::read_to_string(&prov_file).expect("read prov")).expect("parse");
+    prov.schema_version = 99;
+    fs::write(&prov_file, serde_json::to_string_pretty(&prov).unwrap())
+        .expect("write tampered prov");
+
+    // 1. ArtifactIdentity::from_file must report Unsupported
+    let ident = ArtifactIdentity::from_file(&art_file).expect("from_file");
+    assert!(
+        matches!(ident.provenance_status, ProvenanceStatus::Unsupported(_)),
+        "unsupported schema version must yield ProvenanceStatus::Unsupported: {:?}",
+        ident.provenance_status
+    );
+
+    // 2. ArtifactIdentity::with_provenance must return Err
+    let from_bytes = ArtifactIdentity::from_bytes(&fs::read(&art_file).unwrap()).unwrap();
+    assert!(
+        from_bytes.with_provenance(prov.clone()).is_err(),
+        "with_provenance must reject schema_version != 1"
+    );
+
+    // 3. detect_artifact_staleness must report UnsupportedProvenance
+    let staleness = detect_artifact_staleness(&art_file, &src_file).expect("staleness");
+    assert!(
+        matches!(staleness, StalenessStatus::UnsupportedProvenance(_)),
+        "unsupported schema version must yield StalenessStatus::UnsupportedProvenance: {:?}",
+        staleness
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_35_deterministic_prng_alignment_with_vm() {
+    use smc_cli::compatibility::RuntimeCompatibilityPolicy;
+
+    // Zero seed avoids zero fixed point: maps to 1
+    let seq_zero = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0, 5);
+    let seq_one = RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(1, 5);
+    assert_eq!(
+        seq_zero, seq_one,
+        "seed 0 must be normalized to seed 1 to avoid fixed point"
+    );
+
+    // Validate bit-for-bit xorshift64 (shifts 13, 7, 17)
+    let mut state: u64 = 0x1234_5678_9ABC_DEF0;
+    let expected: Vec<u64> = (0..10)
+        .map(|_| {
+            let mut x = state;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            state = x;
+            x
+        })
+        .collect();
+
+    let actual =
+        RuntimeCompatibilityPolicy::verify_deterministic_prng_seed(0x1234_5678_9ABC_DEF0, 10);
+    assert_eq!(
+        actual, expected,
+        "PRNG sequence must match canonical xorshift64 (13, 7, 17)"
+    );
+}
+
+#[test]
+fn test_36_assess_artifact_compatibility_branches() {
+    use smc_cli::artifact_identity::ArtifactIdentity;
+    use smc_cli::compatibility::{assess_artifact_compatibility, CompatibilityClassification};
+
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test36_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).expect("create dir");
+    let src_file = temp_dir.join("main.sm");
+    let art_file = temp_dir.join("main.smc");
+    fs::write(&src_file, "fn main() { return; }\n").expect("write src");
+
+    let (c_code, _, _) = run_smc(&[
+        "compile",
+        src_file.to_str().unwrap(),
+        "-o",
+        art_file.to_str().unwrap(),
+    ]);
+    assert_eq!(c_code, 0);
+
+    let valid_bytes = fs::read(&art_file).expect("read artifact");
+
+    // 1. Current canonical rev 23 -> Compatible
+    let ident_current = ArtifactIdentity::from_bytes(&valid_bytes).expect("ident current");
+    assert_eq!(
+        assess_artifact_compatibility(&ident_current),
+        CompatibilityClassification::Compatible
+    );
+
+    // 2. Legacy rev < 23 -> Deprecated
+    let mut legacy_bytes = valid_bytes.clone();
+    // Offset 10 is revision in 8-byte magic + 2-byte epoch + 2-byte rev
+    legacy_bytes[10] = 22;
+    legacy_bytes[11] = 0;
+    let mut ident_legacy = ArtifactIdentity::from_bytes(&legacy_bytes).expect("ident legacy");
+    ident_legacy.verifier.admitted = true; // Test compatibility classification logic
+    assert_eq!(
+        assess_artifact_compatibility(&ident_legacy),
+        CompatibilityClassification::Deprecated
+    );
+
+    // 3. Future rev > 23 -> Unsupported
+    let mut future_bytes = valid_bytes.clone();
+    future_bytes[10] = 24;
+    future_bytes[11] = 0;
+    let mut ident_future = ArtifactIdentity::from_bytes(&future_bytes).expect("ident future");
+    ident_future.verifier.admitted = true;
+    assert_eq!(
+        assess_artifact_compatibility(&ident_future),
+        CompatibilityClassification::Unsupported
+    );
+
+    // 4. Verifier rejected or corrupted -> Incompatible
+    let mut rejected = ident_current.clone();
+    rejected.verifier.admitted = false;
+    assert_eq!(
+        assess_artifact_compatibility(&rejected),
+        CompatibilityClassification::Incompatible
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_37_uppercase_manifest_deprecation_and_format_recommendation() {
+    use smc_cli::compatibility::inspect_migration;
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test37_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    fs::create_dir_all(&project_dir).expect("create dir");
+
+    // Create uppercase Semantic.toml with legacy format = 0
+    fs::write(
+        project_dir.join("Semantic.toml"),
+        "[package]\nname = \"legacy_manifest\"\nformat = 0\n",
+    )
+    .expect("write uppercase manifest");
+    fs::write(project_dir.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
+
+    let report = inspect_migration(&project_dir).expect("inspect_migration");
+
+    // Verify finding for uppercase Semantic.toml
+    let has_deprecated_manifest = report
+        .findings
+        .iter()
+        .any(|f| f.category == "manifest_deprecated" && f.message.contains("Semantic.toml"));
+    assert!(
+        has_deprecated_manifest,
+        "inspect_migration must emit manifest_deprecated for uppercase Semantic.toml: {:?}",
+        report.findings
+    );
+
+    // Verify finding for format = 0 does NOT recommend format = 1
+    let format_finding = report
+        .findings
+        .iter()
+        .find(|f| f.category == "manifest_version")
+        .expect("must find manifest_version finding");
+    assert!(
+        !format_finding.recommendation.contains("format = 1"),
+        "recommendation must not propose format = 1 in semantic.toml: {}",
+        format_finding.recommendation
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}

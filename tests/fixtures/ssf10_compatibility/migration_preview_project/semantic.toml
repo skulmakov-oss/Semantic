@@ -1,4 +1,6 @@
 [package]
 name = "ssf10_migration_preview"
 version = "0.1.0"
+
+[project]
 entry = "main.sm"

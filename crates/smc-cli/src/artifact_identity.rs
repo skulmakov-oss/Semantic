@@ -44,8 +44,10 @@ impl Default for ProducerToolchainIdentity {
         Self {
             compiler_name: "smc".to_string(),
             compiler_version: env!("CARGO_PKG_VERSION").to_string(),
-            build_target: option_env!("TARGET")
-                .unwrap_or("x86_64-pc-windows-msvc")
+            build_target: option_env!("SM_COMPILER_TARGET")
+                .or(option_env!("TARGET"))
+                .filter(|s| !s.is_empty())
+                .unwrap_or("unknown")
                 .to_string(),
             source_fingerprint: option_env!("SM_COMPILER_SOURCE_HASH")
                 .unwrap_or("release-build")
@@ -104,6 +106,9 @@ impl Default for ProvenanceContractIdentity {
         }
     }
 }
+
+/// Canonical schema version for companion artifact provenance records.
+pub const ARTIFACT_PROVENANCE_SCHEMA_VERSION: u32 = 1;
 
 /// Canonical provenance record produced by the compiler and bound to the artifact SHA-256.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -367,20 +372,31 @@ impl ArtifactIdentity {
                         sig_found,
                     )
                 }
-                Err(_) => (
-                    ArtifactHeaderSummary {
-                        magic: magic_str,
-                        epoch: 0,
-                        revision: 0,
-                        capabilities: 0,
-                        capability_flags: Vec::new(),
-                    },
-                    Vec::new(),
-                    Vec::new(),
-                    false,
-                    false,
-                    false,
-                ),
+                Err(_) => {
+                    let (epoch, rev, caps) = if bytes.len() >= 16 {
+                        (
+                            u16::from_le_bytes([bytes[8], bytes[9]]),
+                            u16::from_le_bytes([bytes[10], bytes[11]]),
+                            u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
+                        )
+                    } else {
+                        (0, 0, 0)
+                    };
+                    (
+                        ArtifactHeaderSummary {
+                            magic: magic_str,
+                            epoch,
+                            revision: rev,
+                            capabilities: caps,
+                            capability_flags: Vec::new(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        false,
+                        false,
+                        false,
+                    )
+                }
             };
 
         // Verifier admission check
@@ -440,7 +456,12 @@ impl ArtifactIdentity {
             match fs::read_to_string(&prov_path) {
                 Ok(content) => match serde_json::from_str::<ArtifactProvenance>(&content) {
                     Ok(prov) => {
-                        if prov.artifact_hash == identity.artifact_hash {
+                        if prov.schema_version != ARTIFACT_PROVENANCE_SCHEMA_VERSION {
+                            identity.provenance_status = ProvenanceStatus::Unsupported(format!(
+                                "unsupported provenance schema version {}; expected {}",
+                                prov.schema_version, ARTIFACT_PROVENANCE_SCHEMA_VERSION
+                            ));
+                        } else if prov.artifact_hash == identity.artifact_hash {
                             identity.provenance_status =
                                 ProvenanceStatus::Recorded(Box::new(prov.clone()));
                             identity.producer_provenance = Some(prov);
@@ -476,6 +497,12 @@ impl ArtifactIdentity {
 
     /// Explicitly bind provenance to an identity, checking cryptographic hash match.
     pub fn with_provenance(mut self, provenance: ArtifactProvenance) -> Result<Self, String> {
+        if provenance.schema_version != ARTIFACT_PROVENANCE_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported provenance schema version {}; expected {}",
+                provenance.schema_version, ARTIFACT_PROVENANCE_SCHEMA_VERSION
+            ));
+        }
         if provenance.artifact_hash != self.artifact_hash {
             return Err(format!(
                 "provenance artifact hash '{}' does not match artifact identity '{}'",
@@ -554,11 +581,11 @@ impl ArtifactIdentity {
                     prov.source.entry_file, prov.source.source_hash
                 ));
                 if let Some(pkg) = &prov.source.package_name {
-                    out.push_str(&format!(
-                        "Package:        {} v{}\n",
-                        pkg,
-                        prov.source.package_version.as_deref().unwrap_or("0.1.0")
-                    ));
+                    if let Some(ver) = &prov.source.package_version {
+                        out.push_str(&format!("Package:        {} v{}\n", pkg, ver));
+                    } else {
+                        out.push_str(&format!("Package:        {}\n", pkg));
+                    }
                 }
                 if let Some(mh) = &prov.source.manifest_hash {
                     out.push_str(&format!("Manifest Hash:  {}\n", mh));
@@ -757,71 +784,78 @@ pub fn generate_and_save_companion_provenance(
         find_project_root_ancestor(source_path)
     };
 
-    let (source_bytes, manifest_hash, resolved_package_name) = match project_root {
-        Some(ref root) => {
-            let mut combined = Vec::new();
-            collect_project_source_bytes(root, &mut combined)?;
-            let manifest_path = if root.join("semantic.toml").is_file() {
-                root.join("semantic.toml")
-            } else if root.join("Semantic.toml").is_file() {
-                root.join("Semantic.toml")
-            } else {
-                PathBuf::new()
-            };
-            let (m_hash, pkg_name) = if manifest_path.is_file() {
-                let m_bytes = fs::read(&manifest_path).map_err(|e| {
-                    format!(
-                        "failed to read manifest '{}': {}",
-                        manifest_path.display(),
-                        e
-                    )
-                })?;
-                let mut found_pkg = None;
-                if let Ok(m_str) = std::str::from_utf8(&m_bytes) {
-                    for line in m_str.lines() {
-                        let trimmed = line.trim();
-                        if trimmed.starts_with("name =") {
-                            let name = trimmed
-                                .strip_prefix("name =")
-                                .unwrap_or("")
-                                .trim()
-                                .trim_matches('"');
-                            if !name.is_empty() {
-                                found_pkg = Some(name.to_string());
-                            }
-                        }
-                    }
-                }
-                (Some(sha256_prefixed_hex(&m_bytes)), found_pkg)
-            } else {
-                (None, None)
-            };
-            (combined, m_hash, package_name.or(pkg_name))
-        }
-        None => {
-            let s_bytes = if source_path.is_file() {
-                fs::read(source_path).map_err(|e| {
-                    format!("failed to read source '{}': {}", source_path.display(), e)
-                })?
-            } else {
+    let (source_bytes, manifest_hash, resolved_package_name, resolved_package_version) =
+        match project_root {
+            Some(ref root) => {
                 let mut combined = Vec::new();
-                collect_project_source_bytes(source_path, &mut combined)?;
-                combined
-            };
-            (s_bytes, None, package_name)
-        }
-    };
+                collect_project_source_bytes(root, &mut combined)?;
+                let manifest_path = if root.join("semantic.toml").is_file() {
+                    root.join("semantic.toml")
+                } else if root.join("Semantic.toml").is_file() {
+                    root.join("Semantic.toml")
+                } else {
+                    PathBuf::new()
+                };
+                let (m_hash, pkg_name, pkg_ver) = if manifest_path.is_file() {
+                    let m_bytes = fs::read(&manifest_path).map_err(|e| {
+                        format!(
+                            "failed to read manifest '{}': {}",
+                            manifest_path.display(),
+                            e
+                        )
+                    })?;
+                    let m_str = std::str::from_utf8(&m_bytes).map_err(|e| {
+                        format!(
+                            "manifest '{}' is not valid UTF-8: {}",
+                            manifest_path.display(),
+                            e
+                        )
+                    })?;
+                    let (found_pkg, found_ver) =
+                        match crate::package_manifest::parse_semantic_toml_manifest(
+                            &manifest_path,
+                            m_str,
+                        ) {
+                            Ok(parsed) => {
+                                (Some(parsed.manifest.package.name), parsed.package_version)
+                            }
+                            Err(_) => (None, None),
+                        };
+                    (Some(sha256_prefixed_hex(&m_bytes)), found_pkg, found_ver)
+                } else {
+                    (None, None, None)
+                };
+                (
+                    combined,
+                    m_hash,
+                    package_name.or(pkg_name),
+                    package_version.or(pkg_ver),
+                )
+            }
+            None => {
+                let s_bytes = if source_path.is_file() {
+                    fs::read(source_path).map_err(|e| {
+                        format!("failed to read source '{}': {}", source_path.display(), e)
+                    })?
+                } else {
+                    let mut combined = Vec::new();
+                    collect_project_source_bytes(source_path, &mut combined)?;
+                    combined
+                };
+                (s_bytes, None, package_name, package_version)
+            }
+        };
 
     let source_hash = sha256_prefixed_hex(&source_bytes);
 
     let provenance = ArtifactProvenance {
-        schema_version: 1,
+        schema_version: ARTIFACT_PROVENANCE_SCHEMA_VERSION,
         artifact_hash,
         artifact_size_bytes: artifact_bytes.len(),
         producer: ProducerToolchainIdentity::default(),
         source: ProvenanceSourceIdentity {
             package_name: resolved_package_name,
-            package_version,
+            package_version: resolved_package_version,
             entry_file: source_path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -838,7 +872,7 @@ pub fn generate_and_save_companion_provenance(
 
 /// Securely collect all `.sm` files under a project root, enforcing containment,
 /// reparse-point rejection, and cycle prevention.
-pub(crate) fn collect_project_files_secure(
+pub fn collect_project_files_secure(
     _root: &Path,
     canonical_root: &Path,
     current_dir: &Path,
@@ -876,7 +910,17 @@ pub(crate) fn collect_project_files_secure(
         )
     })?;
 
-    let mut entries: Vec<_> = read_dir.filter_map(Result::ok).collect();
+    let mut entries = Vec::new();
+    for entry_res in read_dir {
+        let entry = entry_res.map_err(|e| {
+            format!(
+                "failed to read directory entry in '{}': {}",
+                current_dir.display(),
+                e
+            )
+        })?;
+        entries.push(entry);
+    }
     entries.sort_by_key(|e| e.path());
 
     for entry in entries {
@@ -888,7 +932,13 @@ pub(crate) fn collect_project_files_secure(
             continue;
         }
 
-        let is_reparse = crate::package_manifest::path_is_reparse(&path).unwrap_or(false);
+        let is_reparse = crate::package_manifest::path_is_reparse(&path).map_err(|e| {
+            format!(
+                "security violation: failed to inspect reparse status of '{}': {}",
+                path.display(),
+                e
+            )
+        })?;
         if is_reparse {
             match fs::canonicalize(&path) {
                 Ok(canon) => {
@@ -933,7 +983,7 @@ pub(crate) fn collect_project_files_secure(
 }
 
 /// Collect sorted project source bytes across all `.sm` files, normalized with relative paths.
-pub(crate) fn collect_project_source_bytes(dir: &Path, out: &mut Vec<u8>) -> Result<(), String> {
+pub fn collect_project_source_bytes(dir: &Path, out: &mut Vec<u8>) -> Result<(), String> {
     let canonical_root = fs::canonicalize(dir).map_err(|e| {
         format!(
             "failed to canonicalize directory '{}': {}",
@@ -946,15 +996,21 @@ pub(crate) fn collect_project_source_bytes(dir: &Path, out: &mut Vec<u8>) -> Res
     collect_project_files_secure(dir, &canonical_root, dir, &mut visited_dirs, &mut entries)?;
     entries.sort();
 
+    // Prefix-free framing:
+    // 1. Total entry count as u64_le
+    // 2. Per entry: relative path length as u64_le, relative path UTF-8 bytes,
+    //    content length as u64_le, content bytes
+    out.extend_from_slice(&(entries.len() as u64).to_le_bytes());
     for path in entries {
         let b =
             fs::read(&path).map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
         let rel = path.strip_prefix(dir).unwrap_or(&path);
         let rel_str = rel.to_string_lossy().replace('\\', "/");
-        out.extend_from_slice(rel_str.as_bytes());
-        out.push(0);
+        let rel_bytes = rel_str.as_bytes();
+        out.extend_from_slice(&(rel_bytes.len() as u64).to_le_bytes());
+        out.extend_from_slice(rel_bytes);
+        out.extend_from_slice(&(b.len() as u64).to_le_bytes());
         out.extend_from_slice(&b);
-        out.push(0);
     }
     Ok(())
 }
