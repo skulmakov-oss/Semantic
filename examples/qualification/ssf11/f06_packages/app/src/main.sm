@@ -1,0 +1,6 @@
+Import "m::main.sm"
+
+fn main() {
+    assert(triple(14) == 42);
+    return;
+}

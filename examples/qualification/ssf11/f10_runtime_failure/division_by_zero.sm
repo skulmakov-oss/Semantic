@@ -1,0 +1,6 @@
+fn main() {
+    let divisor: i32 = 0;
+    let quotient: i32 = 10 / divisor;
+    assert(quotient == 0);
+    return;
+}

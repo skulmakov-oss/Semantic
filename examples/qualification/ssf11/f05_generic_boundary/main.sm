@@ -1,0 +1,8 @@
+fn identity<T>(value: T) -> T {
+    return value;
+}
+
+fn main() {
+    assert(identity(7) == 7);
+    return;
+}

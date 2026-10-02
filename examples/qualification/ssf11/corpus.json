@@ -1,0 +1,1438 @@
+{
+  "schema": "semantic.foundation.ssf11.corpus",
+  "schema_version": 1,
+  "purpose": "SSF-11 (#1582) canonical application conformance corpus: observable outcomes of the Rust Foundation toolchain, replayable later against a Bootstrap implementation. Not a stable-release claim.",
+  "placeholders": {
+    "{entry}": "entry_path resolved against the repository root",
+    "{artifact}": "a fresh per-case temporary .smc path"
+  },
+  "observation_rules": [
+    "exit status, diagnostic codes, verifier categories, runtime trap/quota identifiers, stdout bytes and written file bytes are comparable observations",
+    "absolute paths, temp directories, timestamps and timing are never compared",
+    "stderr expectations are substring checks of stable identifiers, not full-message snapshots",
+    "Rust type names, struct layouts and private APIs are never part of an expectation"
+  ],
+  "families": [
+    {
+      "family_id": "F01",
+      "title": "Minimal program",
+      "disposition": "PASS-NEW",
+      "contract_owner": "SSF-01 / SSF-10",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F02",
+      "title": "Quad decision engine",
+      "disposition": "PASS-NEW",
+      "contract_owner": "SSF-01",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F03",
+      "title": "Records / enums / Option / Result",
+      "disposition": "PASS-NEW",
+      "contract_owner": "SSF-01 / SSF-07",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F04",
+      "title": "Sequence / Map processing",
+      "disposition": "PASS-REUSED",
+      "contract_owner": "SSF-03 / SSF-07",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F05",
+      "title": "Generic + trait-based reusable helper",
+      "disposition": "EXCLUDED-JUSTIFIED",
+      "contract_owner": "SSF-07",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F06",
+      "title": "Module and local package composition",
+      "disposition": "PASS-NEW",
+      "contract_owner": "SSF-05 / SSF-06",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F07",
+      "title": "Deterministic structured serialization",
+      "disposition": "EXCLUDED-JUSTIFIED",
+      "contract_owner": "SSF-03",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F08",
+      "title": "Controlled CLI file transform",
+      "disposition": "PASS-NEW",
+      "contract_owner": "SSF-04",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F09",
+      "title": "Contract / verifier rejection",
+      "disposition": "PASS-NEW",
+      "contract_owner": "SSF-10 / verifier",
+      "evidence_kind": "rejection"
+    },
+    {
+      "family_id": "F10",
+      "title": "Deterministic runtime trap / quota",
+      "disposition": "PASS-NEW",
+      "contract_owner": "SSF-08",
+      "evidence_kind": "rejection"
+    },
+    {
+      "family_id": "F11",
+      "title": "Benchmark-class non-trivial application",
+      "disposition": "PASS-REUSED",
+      "contract_owner": "SSF-08",
+      "evidence_kind": "execution"
+    },
+    {
+      "family_id": "F12",
+      "title": "Native Semantic application evidence",
+      "disposition": "HISTORICAL-NON-QUALIFYING",
+      "contract_owner": "retired (#1968, #1862)",
+      "evidence_kind": "historical"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "ssf11.f01.minimal.pipeline",
+      "family_id": "F01",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f01_minimal/main.sm",
+      "contract_refs": [
+        "docs/spec/source_semantics.md",
+        "docs/spec/cli.md",
+        "docs/spec/verifier.md",
+        "docs/roadmap/stable_foundation/stable_public_language_contract.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "artifact",
+            "hash",
+            "{artifact}"
+          ],
+          "expected_exit": 0,
+          "stdout_regex": "^sha256:[0-9a-f]{64}\n$"
+        }
+      ],
+      "expected_observable": "check/compile/verify/run-smc/run all exit 0; the in-program assert proves 1 + 1 == 2",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding",
+      "note": "The artifact-hash step checks the `sha256:<64 hex>` shape only. Byte-identical SemCode output is Foundation artifact-trust evidence (SSF-10), not a Bootstrap equivalence criterion."
+    },
+    {
+      "case_id": "ssf11.f02.quad.decision",
+      "family_id": "F02",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f02_quad_decision/main.sm",
+      "contract_refs": [
+        "docs/spec/types.md",
+        "docs/spec/quad_logic_frame_v1.md",
+        "docs/spec/branch_condition_quad_rule.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        }
+      ],
+      "expected_observable": "exit 0; asserts fix N/F/T/S match dispatch codes 0/1/2/3 and evidence-plane algebra: T&&T=T, T&&F=N, T||F=S, S&&S=S, S||T=S, !T=F, !F=T",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f02.quad.bare_condition_rejected",
+      "family_id": "F02",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f02_quad_bare_condition/main.sm",
+      "contract_refs": [
+        "docs/spec/branch_condition_quad_rule.md",
+        "docs/spec/diagnostics_machine_schema_v1.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}",
+            "--format",
+            "json"
+          ],
+          "expected_exit": 1,
+          "diagnostic_codes": [
+            "E0201"
+          ],
+          "stdout_contains": [
+            "\"status\": \"failed\""
+          ]
+        }
+      ],
+      "expected_observable": "check rejects a bare quad `if` condition with diagnostic E0201",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f02.quad.match_control_flow",
+      "family_id": "F02",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/canonical/match_control_flow/src/main.sm",
+      "contract_refs": [
+        "examples/canonical/README.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        }
+      ],
+      "expected_observable": "exit 0 (canonical pack, reused)",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding"
+    },
+    {
+      "case_id": "ssf11.f02.quad.rule_state_decision",
+      "family_id": "F02",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/canonical/rule_state_decision/src/main.sm",
+      "contract_refs": [
+        "examples/canonical/README.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        }
+      ],
+      "expected_observable": "exit 0 (canonical pack, reused)",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding"
+    },
+    {
+      "case_id": "ssf11.f03.records_enums_option_result",
+      "family_id": "F03",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f03_records_enums_option_result/main.sm",
+      "contract_refs": [
+        "docs/spec/source_semantics.md",
+        "docs/spec/types.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        }
+      ],
+      "expected_observable": "exit 0; asserts fix enum classification, record field access, Option Some/None and Result Ok/Err handling",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f03.option_result_control_flow",
+      "family_id": "F03",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/canonical/option_result_control_flow/src/main.sm",
+      "contract_refs": [
+        "examples/canonical/README.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        }
+      ],
+      "expected_observable": "exit 0 (canonical pack, reused)",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding"
+    },
+    {
+      "case_id": "ssf11.f03.match_missing_variant_rejected",
+      "family_id": "F03",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "tests/fixtures/pcc5_adt_diagnostics/negative_match_missing_variant.sm",
+      "contract_refs": [
+        "docs/spec/source_semantics.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}",
+            "--format",
+            "json"
+          ],
+          "expected_exit": 1,
+          "diagnostic_codes": [
+            "E0201"
+          ],
+          "stdout_contains": [
+            "non-exhaustive match"
+          ]
+        }
+      ],
+      "expected_observable": "check rejects a non-exhaustive enum match with E0201",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f04.collections_core",
+      "family_id": "F04",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/canonical/collections_core/src/main.sm",
+      "contract_refs": [
+        "docs/spec/foundation_stdlib_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        }
+      ],
+      "expected_observable": "exit 0 (canonical pack, reused): Sequence(i32) and Map(i32, bool) operations under asserts",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding"
+    },
+    {
+      "case_id": "ssf11.f04.text_collections_toolbox",
+      "family_id": "F04",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/canonical/text_collections_toolbox/src/main.sm",
+      "contract_refs": [
+        "docs/spec/foundation_stdlib_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        }
+      ],
+      "expected_observable": "exit 0 (canonical pack, reused)",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding"
+    },
+    {
+      "case_id": "ssf11.f04.map_key_type_rejected",
+      "family_id": "F04",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "tests/fixtures/pcc7_collections_diagnostics/negative_map_key_type_mismatch.sm",
+      "contract_refs": [
+        "docs/spec/foundation_stdlib_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}",
+            "--format",
+            "json"
+          ],
+          "expected_exit": 1,
+          "diagnostic_codes": [
+            "E0201"
+          ],
+          "stdout_contains": [
+            "key type"
+          ]
+        }
+      ],
+      "expected_observable": "check rejects a Map key type mismatch with E0201",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f05.direct_record_iterable",
+      "family_id": "F05",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Qualified limited release",
+      "entry_path": "examples/canonical/data_audit_record_iterable/src/main.sm",
+      "contract_refs": [
+        "docs/roadmap/stable_foundation/semantic_stable_foundation_matrix.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        }
+      ],
+      "expected_observable": "exit 0 (canonical pack, reused): the only admitted executable trait slice, direct-record Iterable dispatch",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding"
+    },
+    {
+      "case_id": "ssf11.f05.generic_helper_not_executable",
+      "family_id": "F05",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Roadmap",
+      "entry_path": "examples/qualification/ssf11/f05_generic_boundary/main.sm",
+      "contract_refs": [
+        "docs/roadmap/stable_foundation/semantic_stable_foundation_matrix.md",
+        "docs/roadmap/stable_foundation/ssf07_exit_reconciliation_record.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "generic function 'identity'",
+            "concrete IR monomorphisation is not implemented"
+          ],
+          "artifact_absent": true
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "concrete IR monomorphisation is not implemented"
+          ]
+        }
+      ],
+      "expected_observable": "frontend admits the generic declaration (check exit 0), but IR lowering rejects it deterministically before any SemCode exists; nothing executes",
+      "bootstrap_comparable": true,
+      "qualification_role": "boundary",
+      "note": "The wording check is the frozen #1717 IR-boundary diagnostic; there is no stable code for it yet."
+    },
+    {
+      "case_id": "ssf11.f06.project_model",
+      "family_id": "F06",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f06_project",
+      "contract_refs": [
+        "docs/spec/project_model_v0.md",
+        "docs/spec/modules.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "test",
+            "{entry}"
+          ],
+          "expected_exit": 0,
+          "stdout_exact": "ok tests/double.sm\ntest result: ok. 1 passed\n"
+        }
+      ],
+      "expected_observable": "semantic.toml project with a local lib.sm module: check/compile/verify/run exit 0; `smc test` discovers exactly tests/double.sm",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding"
+    },
+    {
+      "case_id": "ssf11.f06.local_package_graph",
+      "family_id": "F06",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f06_packages/app",
+      "contract_refs": [
+        "docs/spec/package_baseline_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "package",
+            "inspect",
+            "{entry}"
+          ],
+          "expected_exit": 0,
+          "stdout_contains": [
+            "\"schema\": \"semantic.foundation.package.provenance/0.1\"",
+            "\"root_package\": \"app\"",
+            "\"alias\": \"m\"",
+            "\"local_path\": \"../mathlib\"",
+            "\"package\": \"mathlib\""
+          ],
+          "replay_identical": true
+        }
+      ],
+      "expected_observable": "local Semantic.package dependency `m -> ../mathlib` resolves; app runs; provenance record is deterministic across runs and names the graph",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding",
+      "note": "Fingerprint values are deliberately not frozen here: they hash checkout bytes, and this directory has no eol pin."
+    },
+    {
+      "case_id": "ssf11.f06.missing_dependency_rejected",
+      "family_id": "F06",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f06_package_missing_dep",
+      "contract_refs": [
+        "docs/spec/package_baseline_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "dependency alias 'missing' expected Semantic.package"
+          ]
+        }
+      ],
+      "expected_observable": "a declared dependency without a manifest is rejected before compilation",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f06.project_entry_escape_rejected",
+      "family_id": "F06",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f06_project_entry_escape",
+      "contract_refs": [
+        "docs/spec/project_model_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "must not escape the project root"
+          ]
+        }
+      ],
+      "expected_observable": "semantic.toml entry `../main.sm` is rejected as a project-root escape",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f07.serialization_not_admitted",
+      "family_id": "F07",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Roadmap",
+      "entry_path": "examples/qualification/ssf11/f07_serialization_boundary/main.sm",
+      "contract_refs": [
+        "docs/roadmap/stable_foundation/standard_library_v0_evidence.md",
+        "docs/roadmap/stable_foundation/semantic_stable_foundation_matrix.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}",
+            "--format",
+            "json"
+          ],
+          "expected_exit": 1,
+          "diagnostic_codes": [
+            "E0201"
+          ],
+          "stdout_contains": [
+            "unknown function 'to_json'"
+          ]
+        }
+      ],
+      "expected_observable": "no serialization API exists in the Foundation contour: a serializer call is an unknown function",
+      "bootstrap_comparable": true,
+      "qualification_role": "boundary"
+    },
+    {
+      "case_id": "ssf11.f08.file_transform",
+      "family_id": "F08",
+      "kind": "positive",
+      "profile": "cli-file-transform",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f08_file_transform/main.sm",
+      "contract_refs": [
+        "docs/spec/controlled_application_boundary_v0.md",
+        "docs/roadmap/stable_foundation/controlled_application_boundary_evidence.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "run",
+            "{entry}",
+            "--profile",
+            "cli-file-transform",
+            "--root",
+            ".",
+            "--",
+            "input.txt",
+            "output.txt"
+          ],
+          "expected_exit": 0,
+          "cwd": "sandbox",
+          "stdout_exact": "transform complete",
+          "stderr_contains": [
+            "capability=args.read decision=allow",
+            "capability=fs.read decision=allow",
+            "capability=fs.write decision=allow",
+            "capability=stdout.write decision=allow"
+          ],
+          "files_exact": {
+            "input.txt": "hello\n",
+            "output.txt": "transformed:hello\n"
+          },
+          "files_only": [
+            "input.txt",
+            "output.txt"
+          ],
+          "replay_identical": true
+        }
+      ],
+      "expected_observable": "root-contained read, explicit grants, write of exactly `transformed:hello\\n`; nothing else is created; audit lines are deterministic",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation+onboarding",
+      "sandbox_files": {
+        "input.txt": "hello\n"
+      }
+    },
+    {
+      "case_id": "ssf11.f08.read_only_denies_write",
+      "family_id": "F08",
+      "kind": "negative",
+      "profile": "cli-read-only",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f08_file_transform/main.sm",
+      "contract_refs": [
+        "docs/spec/controlled_application_boundary_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "run",
+            "{entry}",
+            "--profile",
+            "cli-read-only",
+            "--root",
+            ".",
+            "--",
+            "input.txt",
+            "output.txt"
+          ],
+          "expected_exit": 1,
+          "cwd": "sandbox",
+          "stderr_contains": [
+            "capability=fs.write decision=deny",
+            "MissingCapability"
+          ],
+          "files_only": [
+            "input.txt"
+          ]
+        }
+      ],
+      "expected_observable": "cli-read-only denies fs.write before host dispatch; no file is written",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation",
+      "sandbox_files": {
+        "input.txt": "hello\n"
+      }
+    },
+    {
+      "case_id": "ssf11.f08.parent_traversal_denied",
+      "family_id": "F08",
+      "kind": "negative",
+      "profile": "cli-file-transform",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f08_file_transform/main.sm",
+      "contract_refs": [
+        "docs/spec/controlled_application_boundary_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "run",
+            "{entry}",
+            "--profile",
+            "cli-file-transform",
+            "--root",
+            ".",
+            "--",
+            "input.txt",
+            "../escaped.txt"
+          ],
+          "expected_exit": 1,
+          "cwd": "sandbox",
+          "stderr_contains": [
+            "capability=fs.write decision=deny",
+            "parent traversal"
+          ],
+          "files_only": [
+            "input.txt"
+          ],
+          "outside_absent": [
+            "escaped.txt"
+          ]
+        }
+      ],
+      "expected_observable": "a write outside the declared root is denied; nothing is created inside or outside the root",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation",
+      "sandbox_files": {
+        "input.txt": "hello\n"
+      }
+    },
+    {
+      "case_id": "ssf11.f08.pure_denies_args",
+      "family_id": "F08",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f08_file_transform/main.sm",
+      "contract_refs": [
+        "docs/spec/controlled_application_boundary_v0.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "run",
+            "{entry}",
+            "--profile",
+            "pure",
+            "--root",
+            ".",
+            "--",
+            "input.txt",
+            "output.txt"
+          ],
+          "expected_exit": 1,
+          "cwd": "sandbox",
+          "stderr_contains": [
+            "capability=args.read decision=deny",
+            "MissingCapability"
+          ],
+          "files_only": [
+            "input.txt"
+          ]
+        }
+      ],
+      "expected_observable": "the pure profile denies the first host capability (args.read)",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation",
+      "sandbox_files": {
+        "input.txt": "hello\n"
+      }
+    },
+    {
+      "case_id": "ssf11.f09.unsupported_header_rejected",
+      "family_id": "F09",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f09_verifier_rejection/unsupported_header.smc",
+      "contract_refs": [
+        "docs/spec/verifier.md",
+        "docs/spec/semcode.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "verify",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "[UnsupportedVersion]"
+          ]
+        },
+        {
+          "args": [
+            "run-smc",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "[UnsupportedVersion]"
+          ],
+          "stdout_exact": ""
+        }
+      ],
+      "expected_observable": "verifier rejects an unknown SemCode header with category UnsupportedVersion; run-smc refuses to execute",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f09.corrupt_artifact_rejected",
+      "family_id": "F09",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "tests/fixtures/ssf10_compatibility/unsupported_semcode/corrupt.smc",
+      "contract_refs": [
+        "docs/spec/verifier.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "verify",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "[InvalidFunctionName]"
+          ]
+        },
+        {
+          "args": [
+            "run-smc",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "[InvalidFunctionName]"
+          ],
+          "stdout_exact": ""
+        }
+      ],
+      "expected_observable": "verifier rejects a corrupted function table (InvalidFunctionName); run-smc refuses to execute",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation",
+      "note": "Reused SSF-10 fixture."
+    },
+    {
+      "case_id": "ssf11.f10.division_by_zero_trap",
+      "family_id": "F10",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f10_runtime_failure/division_by_zero.sm",
+      "contract_refs": [
+        "docs/roadmap/stable_foundation/ssf08_1763_runtime_failure_taxonomy_decision.md",
+        "docs/spec/runtime.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "runtime trap: DivisionByZero"
+          ],
+          "replay_identical": true
+        }
+      ],
+      "expected_observable": "a verified artifact traps deterministically with DivisionByZero",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f10.step_quota_exceeded",
+      "family_id": "F10",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f10_runtime_failure/step_quota.sm",
+      "contract_refs": [
+        "docs/spec/quotas.md",
+        "docs/roadmap/stable_foundation/ssf08_1763_runtime_failure_taxonomy_decision.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "quota exceeded: Steps limit=100000 used=100001"
+          ],
+          "replay_identical": true
+        }
+      ],
+      "expected_observable": "an unbounded loop stops at the default VerifiedLocal Steps quota with exact limit/used values, never by wall-clock",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f10.assertion_failure",
+      "family_id": "F10",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/qualification/ssf11/f10_runtime_failure/assertion_failure.sm",
+      "contract_refs": [
+        "docs/spec/source_semantics.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "assertion failed"
+          ]
+        }
+      ],
+      "expected_observable": "a failing assert stops execution with a non-zero exit",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f11.snake_core",
+      "family_id": "F11",
+      "kind": "positive",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/benchmarks/snake_core.sm",
+      "contract_refs": [
+        "examples/benchmarks/README.md",
+        "docs/roadmap/snake_trace_adapter_contract.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run-smc",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 0,
+          "stdout_exact": "snake_core: score=0 steps=200\n",
+          "replay_identical": true
+        }
+      ],
+      "expected_observable": "deterministic 200-step headless snake engine prints exactly `snake_core: score=0 steps=200`",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation",
+      "note": "Timing is never a pass/fail input."
+    },
+    {
+      "case_id": "ssf11.f11.snake_learning_default_envelope",
+      "family_id": "F11",
+      "kind": "negative",
+      "profile": "pure",
+      "maturity": "Landed and qualified on `main`",
+      "entry_path": "examples/benchmarks/snake_learning.sm",
+      "contract_refs": [
+        "docs/roadmap/stable_foundation/ssf08_1902_snake_learning_envelope_decision.md"
+      ],
+      "steps": [
+        {
+          "args": [
+            "check",
+            "{entry}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "compile",
+            "{entry}",
+            "-o",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "verify",
+            "{artifact}"
+          ],
+          "expected_exit": 0
+        },
+        {
+          "args": [
+            "run",
+            "{entry}"
+          ],
+          "expected_exit": 1,
+          "stderr_contains": [
+            "quota exceeded: Steps limit=100000 used=100001"
+          ],
+          "stdout_exact": ""
+        }
+      ],
+      "expected_observable": "the Q-learning benchmark verifies, but `smc run` is fail-closed under the default envelope; the full run is proven only under an explicit test envelope (tests/snake_learning_benchmark.rs)",
+      "bootstrap_comparable": true,
+      "qualification_role": "foundation"
+    },
+    {
+      "case_id": "ssf11.f12.native_ui_historical",
+      "family_id": "F12",
+      "kind": "historical",
+      "profile": "pure",
+      "maturity": "Out of scope",
+      "entry_path": null,
+      "contract_refs": [
+        "docs/architecture/ui_boundary_index.md",
+        "docs/wiki/current_status.md"
+      ],
+      "steps": [],
+      "expected_observable": "no current native Semantic application; retired Workbench/Studio/native UI evidence is historical only",
+      "bootstrap_comparable": false,
+      "qualification_role": "historical-non-qualifying"
+    }
+  ]
+}
