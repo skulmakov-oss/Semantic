@@ -156,7 +156,13 @@ fn diagnostic_codes(stdout: &str) -> Vec<String> {
 fn sandbox_listing(root: &Path) -> BTreeSet<String> {
     std::fs::read_dir(root)
         .expect("list sandbox")
-        .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect()
 }
 
@@ -173,13 +179,22 @@ fn check_step(case_id: &str, index: usize, step: &Value, seen: &Observed, scratc
         assert_eq!(seen.stdout, exact, "stdout mismatch: {ctx}");
     }
     if let Some(pattern) = step["stdout_regex"].as_str() {
-        assert!(simple_sha_shape(pattern, &seen.stdout), "stdout shape: {ctx}");
+        assert!(
+            simple_sha_shape(pattern, &seen.stdout),
+            "stdout shape: {ctx}"
+        );
     }
     for needle in str_list(&step["stdout_contains"]) {
-        assert!(seen.stdout.contains(&needle), "stdout lacks {needle:?}: {ctx}");
+        assert!(
+            seen.stdout.contains(&needle),
+            "stdout lacks {needle:?}: {ctx}"
+        );
     }
     for needle in str_list(&step["stderr_contains"]) {
-        assert!(seen.stderr.contains(&needle), "stderr lacks {needle:?}: {ctx}");
+        assert!(
+            seen.stderr.contains(&needle),
+            "stderr lacks {needle:?}: {ctx}"
+        );
     }
     let codes = str_list(&step["diagnostic_codes"]);
     if !codes.is_empty() {
@@ -205,18 +220,30 @@ fn check_step(case_id: &str, index: usize, step: &Value, seen: &Observed, scratc
         assert_eq!(sandbox_listing(&scratch.root), expected, "sandbox: {ctx}");
     }
     for name in str_list(&step["outside_absent"]) {
-        assert!(!scratch.outer.join(&name).exists(), "{name} escaped root: {ctx}");
+        assert!(
+            !scratch.outer.join(&name).exists(),
+            "{name} escaped root: {ctx}"
+        );
     }
 }
 
 /// The only regex the corpus uses is the SSF-10 digest shape; keep the check
 /// local instead of adding a regex dependency.
 fn simple_sha_shape(pattern: &str, text: &str) -> bool {
-    assert_eq!(pattern, "^sha256:[0-9a-f]{64}\n$", "unsupported stdout_regex");
-    let Some(hex) = text.strip_prefix("sha256:").and_then(|t| t.strip_suffix('\n')) else {
+    assert_eq!(
+        pattern, "^sha256:[0-9a-f]{64}\n$",
+        "unsupported stdout_regex"
+    );
+    let Some(hex) = text
+        .strip_prefix("sha256:")
+        .and_then(|t| t.strip_suffix('\n'))
+    else {
         return false;
     };
-    hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 #[test]
@@ -301,7 +328,10 @@ fn corpus_cases_are_unique_and_reference_existing_paths() {
     let mut seen = BTreeSet::new();
     for case in cases(&corpus) {
         let case_id = case["case_id"].as_str().expect("case_id");
-        assert!(seen.insert(case_id.to_string()), "duplicate case_id {case_id}");
+        assert!(
+            seen.insert(case_id.to_string()),
+            "duplicate case_id {case_id}"
+        );
         assert!(case_id.starts_with("ssf11.f"), "{case_id}: id prefix");
         for field in ["kind", "profile", "maturity", "qualification_role"] {
             assert!(case[field].is_string(), "{case_id}: missing {field}");
@@ -314,7 +344,10 @@ fn corpus_cases_are_unique_and_reference_existing_paths() {
             assert!(repo().join(entry).exists(), "{case_id}: missing {entry}");
         }
         for reference in str_list(&case["contract_refs"]) {
-            assert!(repo().join(&reference).exists(), "{case_id}: missing ref {reference}");
+            assert!(
+                repo().join(&reference).exists(),
+                "{case_id}: missing ref {reference}"
+            );
         }
         if case["kind"] == "positive" {
             assert!(
@@ -338,7 +371,10 @@ fn bootstrap_comparable_cases_are_replayable() {
         let case_id = case["case_id"].as_str().unwrap();
         assert!(case["entry_path"].is_string(), "{case_id}: entry_path");
         let observable = case["expected_observable"].as_str().unwrap_or_default();
-        assert!(!observable.trim().is_empty(), "{case_id}: expected_observable");
+        assert!(
+            !observable.trim().is_empty(),
+            "{case_id}: expected_observable"
+        );
         let steps = case["steps"].as_array().expect("steps");
         assert!(!steps.is_empty(), "{case_id}: no steps");
         for step in steps {
@@ -360,7 +396,13 @@ fn bootstrap_comparable_cases_are_replayable() {
             );
         }
         let text = case.to_string();
-        for forbidden in ["sm_vm::", "sm_verify::", "RuntimeQuotas {", "/tmp/", "C:\\\\"] {
+        for forbidden in [
+            "sm_vm::",
+            "sm_verify::",
+            "RuntimeQuotas {",
+            "/tmp/",
+            "C:\\\\",
+        ] {
             assert!(!text.contains(forbidden), "{case_id}: encodes {forbidden}");
         }
     }
