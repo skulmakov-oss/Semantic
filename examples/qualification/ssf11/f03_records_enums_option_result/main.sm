@@ -1,0 +1,58 @@
+enum Level {
+    Low,
+    High,
+}
+
+record Reading {
+    sensor: i32,
+    value: i32,
+}
+
+fn classify(reading: Reading) -> Level {
+    if reading.value > 50 { return Level::High; }
+    return Level::Low;
+}
+
+fn level_code(level: Level) -> i32 {
+    return match level {
+        Level::Low => { 1 }
+        Level::High => { 2 }
+    };
+}
+
+fn find_value(reading: Reading, sensor: i32) -> Option(i32) {
+    if reading.sensor == sensor { return Option::Some(reading.value); }
+    return Option::None;
+}
+
+fn checked_value(reading: Reading) -> Result(i32, i32) {
+    if reading.value < 0 { return Result::Err(reading.sensor); }
+    return Result::Ok(reading.value);
+}
+
+fn option_or_zero(value: Option(i32)) -> i32 {
+    return match value {
+        Option::Some(found) => { found }
+        Option::None => { 0 }
+    };
+}
+
+fn result_or_negative(value: Result(i32, i32)) -> i32 {
+    return match value {
+        Result::Ok(found) => { found }
+        Result::Err(sensor) => { 0 - sensor }
+    };
+}
+
+fn main() {
+    let warm: Reading = Reading { sensor: 7, value: 72 };
+    let broken: Reading = Reading { sensor: 9, value: -1 };
+
+    assert(level_code(classify(warm)) == 2);
+    assert(level_code(classify(broken)) == 1);
+    assert(option_or_zero(find_value(warm, 7)) == 72);
+    assert(option_or_zero(find_value(warm, 8)) == 0);
+    assert(result_or_negative(checked_value(warm)) == 72);
+    assert(result_or_negative(checked_value(broken)) == -9);
+    return;
+}

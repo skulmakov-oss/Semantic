@@ -1,0 +1,5 @@
+[package]
+name = "f06_project_entry_escape"
+
+[project]
+entry = "../main.sm"

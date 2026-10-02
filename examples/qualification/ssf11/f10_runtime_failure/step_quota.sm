@@ -1,0 +1,6 @@
+fn main() {
+    let mut counter: i32 = 0;
+    loop {
+        counter = counter + 1;
+    }
+}

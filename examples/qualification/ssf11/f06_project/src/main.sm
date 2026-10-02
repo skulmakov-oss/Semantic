@@ -1,0 +1,6 @@
+Import "lib.sm" { double }
+
+fn main() {
+    assert(double(21) == 42);
+    return;
+}

@@ -1,0 +1,28 @@
+fn decide(state: quad) -> i32 {
+    return match state {
+        N => { 0 }
+        F => { 1 }
+        T => { 2 }
+        _ => { 3 }
+    };
+}
+
+fn main() {
+    assert(decide(N) == 0);
+    assert(decide(F) == 1);
+    assert(decide(T) == 2);
+    assert(decide(S) == 3);
+
+    assert((T && T) == T);
+    assert((T && F) == N);
+    assert((T || F) == S);
+    assert((S && S) == S);
+    assert((S || T) == S);
+    assert(!T == F);
+    assert(!F == T);
+
+    let observed: quad = S;
+    assert(observed is S);
+    if observed == T { assert(false); }
+    return;
+}

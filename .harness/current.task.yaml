@@ -1,10 +1,19 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-10
-  title: "compatibility, migration and artifact trust"
-  type: compatibility_migration_and_artifact_trust_qualification_and_implementation
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-11
+  title: "canonical applications and onboarding"
+  type: canonical_applications_conformance_corpus_and_external_onboarding
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-09
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-10
   authorized_by: >-
+    Repository owner direct instruction (2026-10-02) to execute #1582
+    (SSF-11) under umbrella #1569 in one bounded PR from main
+    ea0d6dcacc70cada5b1fc80e23a5560ecddccb94, after SSF-10 (#1581) closed
+    through merged PR #1975. SSF-11 is evidence and onboarding work only:
+    no new language/runtime features, no core crate changes, no SSF-12
+    work, no stable promotion, no merge without owner MERGE GO.
+  prior_phase_authorization_history: >-
+    RETIRED (historical record of SSF-10 and earlier envelopes; grants no
+    authority to SSF-11).
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
     order. SSF-08 closed 2026-09-11 through a final acceptance-reconciliation
@@ -126,94 +135,37 @@ task:
 
 intent:
   summary: >-
-    Execute SSF-10 (#1581) in a single bounded implementation pass: establish
-    explicit, deterministic, and testable compatibility/trust contracts across
-    source language, package manifest (semantic.toml), diagnostic schemas,
-    standard library, SemCode wire format, verifier admission, and deterministic
-    runtime execution. Bind canonical compiled-artifact identity to SHA-256
-    digests following FIPS PUB 180-4, separate producer provenance from
-    inspecting toolchain identity via companion provenance sidecars, enforce
-    digest-based staleness and mismatch authority immune to mtime backdating,
-    provide strictly non-destructive fail-closed migration inspection, and
-    maintain complete signing honesty (explicitly unsigned).
+    Execute SSF-11 (#1582): map the twelve #1582 application families to
+    existing or new canonical evidence, publish a machine-readable
+    conformance corpus of observable (not Rust-internal) outcomes usable
+    as a future Rust Foundation <-> Bootstrap differential corpus, guard
+    it with automated tests through the public `smc` CLI, and make the
+    external onboarding path accurate, discoverable, and status-honest.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .gitattributes
-    - Cargo.toml
-    - Cargo.lock
-    - tests/legacy_guards.rs
-    - crates/sm-diagnostic/**
-    - crates/ton618-core/src/diagnostics.rs
-    - docs/ERROR_CODES.md
-    - docs/architecture/dependency_boundary_rules.md
-    - docs/architecture/module_ownership_map.md
     - README.md
-    - CHANGELOG.md
     - docs/LANGUAGE.md
     - docs/examples_index.md
     - docs/getting_started.md
     - docs/spec/**
-    - docs/status/feature_maturity_matrix.md
-    - docs/roadmap/public_maturity_snapshot.md
-    - docs/roadmap/public_status_model.md
-    - docs/roadmap/v1_readiness.md
-    - docs/roadmap/compatibility_statement.md
+    - docs/status/**
+    - docs/roadmap/public_*.md
     - docs/roadmap/stable_foundation/**
-    - docs/language/semantic_command_lexicon.md
-    - docs/language/semantic_hello_verifier_admission.md
-    - docs/research/quad_logic_engineering_decisions_v0_1.md
-    - docs/roadmap/core_quad/quad_tile128_layout_boundary.md
-    - docs/roadmap/core_quad/v1_compatibility_rollout.md
-    - docs/roadmap/first_wave_map_surface.md
     - examples/canonical/**
     - examples/qualification/**
+    - examples/benchmarks/**
     - tests/**
-    - crates/sm-format/**
-    - crates/sm-front/**
-    - crates/sm-sema/**
-    - crates/sm-ir/**
-    - crates/sm-emit/**
-    - crates/sm-verify/**
-    - crates/sm-vm/**
-    - crates/sm-runtime-core/**
-    - crates/smc-cli/**
-    - crates/semantic-core-exec/**
-    - crates/semantic-core-backend/**
-    - crates/ton618-core/**
-    - crates/prom-cap/**
-    - crates/prom-audit/**
-    - src/bin/smc.rs
-    - src/lib.rs
-    - docs/architecture/blueprint.md
-    - docs/architecture/svm_verified_execution_core.md
-    - docs/architecture/artifact_identity_and_trust.md
-    - docs/release_artifact_model.md
-    - docs/roadmap/language_maturity/7hell_qualification_contract.md
-    - docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md
-    - docs/roadmap/roadmap_pulsar.md
-    - docs/roadmap/**
-    - examples/**
-    - reports/security/**
-    - tools/generate_health_dashboard.py
-    - tools/generate_macro_issues.py
-    - scripts/admission_guard.ps1
-    - scripts/admission_guard_lib.ps1
-    - scripts/release_asset_output.ps1
-    - scripts/verify_release_assets.ps1
-    - scripts/check_repository_hygiene.py
-    - scripts/workbench_native_launch_smoke.ps1
-    - ARCHITECTURE.md
-    - CONTRIBUTING.md
-    - docs/wiki/current_status.md
-    - docs/workbench/*.md
-    - docs/architecture/ui_boundary_index.md
-    - reports/cold_start_rehearsal_2026-04-24.md
+    - reports/ssf11_*
 
   forbidden_paths:
     - .github/**
     - apps/**
+    - crates/**
+    - src/**
+    - Cargo.toml
+    - Cargo.lock
     - crates/prom-ui/**
     - crates/prom-ui-runtime/**
     - crates/prom-ui-backend-native/**
@@ -221,53 +173,51 @@ scope:
     - crates/prom-ui-demo/**
     - examples/workbench_semantic/**
     - experiments/**
-    - src/bin/svm.rs
-    - src/bin/ton618_core.rs
     - third_party/**
     - ton618_legacy/**
 
 authorization:
-  rust_implementation: true
-  language_implementation: true
+  rust_implementation: false
+  language_implementation: false
   documentation_addition: true
   documentation_correction: true
   test_addition: true
   workflow_changes: false
-  dependency_changes: true
-  github_issue_lifecycle: true
+  dependency_changes: false
+  github_issue_lifecycle: false
   git_commit_push_pr: true
-  merge_after_review_and_checks: true
+  merge_after_review_and_checks: false
   stable_promotion: false
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-10
-  issue: 1581
+  active_phase: SSF-11
+  issue: 1582
   owner_authorized: true
   reason: >
-    Execution of SSF-10 (#1581) under Stable Foundation umbrella #1569:
-    establishing canonical compatibility dimensions, deterministic migration preview,
-    cryptographic artifact identity, unsigned companion provenance, digest-based
-    staleness authority, immutable verifier/artifact binding, and release trust qualification.
+    Execution of SSF-11 (#1582) under Stable Foundation umbrella #1569:
+    canonical applications, Bootstrap-comparable conformance corpus, and
+    external onboarding consuming SSF-00..SSF-10 authorities unchanged.
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
-  contract_gaps_separated_from_implementation_bugs: true
+  stable_promotion: false
+  no_new_language_features_for_examples: true
+  verifier_authority_preserved: true
+  capability_authority_preserved: true
+  project_package_authority_preserved: true
+  deterministic_examples_required: true
+  bootstrap_conformance_corpus_role: true
+  earlier_phase_defects_return_to_owner: true
+  ssf12_untouched: true
+  native_ui_workbench_studio_retired: true
   ownership_position: A
   ownership_position_decision_record: >-
     docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md
-  compatibility_dimensions_explicit_and_enforced: true
-  canonical_artifact_identity_sha256_bound: true
-  producer_provenance_distinguished_from_inspecting_toolchain: true
-  digest_based_staleness_immune_to_mtime_spoofing: true
-  verifier_token_strictly_bound_to_verified_bytes: true
-  migration_inspection_strictly_zero_mutation: true
-  migration_inspection_fails_closed_on_errors: true
-  migration_traversal_project_root_contained: true
-  release_signing_posture_explicitly_unsigned: true
   no_rust_equivalent_lifetime_region_claim: true
+  no_hidden_host_authority: true
   no_global_refactor_unless_invariant_cannot_be_preserved_otherwise: true
   no_stable_abstraction_depends_on_unstable_internal_crate_apis: true
   no_async_await: true

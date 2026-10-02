@@ -1,0 +1,5 @@
+fn main() {
+    let encoded: text = to_json(42);
+    assert(encoded == "42");
+    return;
+}

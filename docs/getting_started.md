@@ -1,173 +1,253 @@
 # Getting Started
 
-Status: current-main onboarding guide for the current public toolchain surface
+Status: current-main onboarding guide for the public toolchain surface
+(SSF-11 / #1582 external onboarding path)
 
 ## Purpose
 
-This guide gives an external engineer the shortest honest path from clone to:
+This guide is the shortest honest route from a fresh clone to:
 
-- building the public CLI entrypoints
-- checking and running a minimal program
-- compiling and verifying a `.smc` artifact
-- running the verified artifact and inspecting it when needed
-- optionally reviewing the current diagnostic/readiness path
+- building the public `smc` CLI;
+- checking, compiling, verifying and running a minimal program;
+- inspecting and hashing the verified `.smc` artifact;
+- running the canonical examples and the SSF-11 application corpus;
+- using a project root and a local package;
+- running a capability-controlled file transform;
+- understanding failures, compatibility and release status.
 
-This is an onboarding guide, not a release-promotion document. Current `main`
-includes landed work beyond the published stable line, so release reading still
-follows the status model in `docs/roadmap/public_status_model.md`.
+You do not need any knowledge that lives outside this repository. The POSIX
+commands below were executed on Linux during the SSF-11 cold-start rehearsal
+(`reports/ssf11_cold_start_rehearsal.md`). The PowerShell form in section 6
+was added afterwards and has not yet been executed in a rehearsal.
 
-## External Onboarding Map
-
-Use this path if you are reading the repository for the first time and want a
-single honest route from clone to the current documented surface:
-
-1. Understand status and non-claims
-   - `README.md`
-   - `docs/roadmap/public_status_model.md`
-   - `docs/roadmap/v1_readiness.md`
-   - `docs/status/feature_maturity_matrix.md`
-
-2. Follow the shortest practical path
-   - this guide
-
-3. Move to the curated proof surface
-   - `docs/examples_index.md`
-   - `examples/canonical/README.md`
-
-4. Read the public command and diagnostic contracts
-   - `docs/spec/cli.md`
-   - `docs/spec/diagnostics.md`
-
-5. Review release posture and non-claims
-   - `docs/roadmap/stable_release_policy.md`
-   - `docs/roadmap/public_maturity_snapshot.md`
-
-The canonical examples pack is the practical proof surface for the current
-readiness contour. It is the right place to see the admitted `check`, `run`,
-`compile`, and `verify` path in action before reading release-facing status.
+> **Release status.** Current `main` is **not** a published stable release.
+> Landed work is not release-promised. The final Stable Foundation verdict
+> belongs to SSF-12 (#1583) and an explicit human release decision, and
+> neither has happened. Read `docs/roadmap/public_status_model.md` before
+> treating any surface as stable.
 
 ## Prerequisites
 
-- Rust toolchain installed
-- repository cloned locally
-- commands run from repository root
+| Requirement | Why | Check |
+|---|---|---|
+| Git | clone | `git --version` |
+| `rustup` | the repository pins its toolchain in `rust-toolchain.toml` (Rust `1.97.1`, with `rustfmt` and `clippy`); `rustup` installs it automatically on first `cargo` use | `rustup --version` |
+| C toolchain/linker | ordinary Rust linking | Linux/macOS: `cc --version`; Windows (MSVC Build Tools): `cl` from a Developer prompt |
+| **Linux:** OpenBLAS development library | the workspace links `-lopenblas` through a Hub dependency (BLAS is enabled on Linux and macOS, not Windows); without it the `smc` link step fails with `unable to find library -lopenblas` | Debian/Ubuntu: `sudo apt-get install -y libopenblas-dev` (rehearsed) |
+| **macOS:** OpenBLAS | same link requirement as Linux | `brew install openblas`; if the linker still cannot find it, `export LIBRARY_PATH="$(brew --prefix openblas)/lib:$LIBRARY_PATH"`. Not yet rehearsed on macOS. |
 
-## Build The Public Entry Points
+Run all commands from the repository root.
 
-```powershell
-cargo build --bin smc --bin svm
+## 1. Clone and build
+
+```bash
+git clone https://github.com/skulmakov-oss/Semantic.git
+cd Semantic
+cargo --version            # triggers the pinned 1.97.1 toolchain install
+rustc -Vv
+cargo build --bin smc
 ```
 
-## Minimal Source Loop
+The binary is `target/debug/smc` (`target\debug\smc.exe` on Windows).
+`cargo run --bin smc -- <args>` is equivalent. The examples below use
+`cargo run --bin smc --`, which behaves the same in every shell; the one
+step that creates files (section 6) gives both POSIX and PowerShell forms.
 
-Create a minimal source file:
+```bash
+cargo run --bin smc -- --help
+cargo run --bin smc -- version
+```
 
-```powershell
-@'
+## 2. Minimal program: check, compile, verify, run
+
+The minimal program already exists at
+`examples/qualification/ssf11/f01_minimal/main.sm`:
+
+```semantic
 fn main() {
+    assert(1 + 1 == 2);
     return;
 }
-'@ | Set-Content program.sm
 ```
 
-Check the source:
-
-```powershell
-cargo run --bin smc -- check program.sm
+```bash
+cargo run --bin smc -- check examples/qualification/ssf11/f01_minimal/main.sm
+cargo run --bin smc -- compile examples/qualification/ssf11/f01_minimal/main.sm -o minimal.smc
+cargo run --bin smc -- verify minimal.smc
+cargo run --bin smc -- run-smc minimal.smc
 ```
 
-Compile to SemCode:
+Expected:
 
-```powershell
-cargo run --bin smc -- compile program.sm -o program.smc
+- `check` prints `smc check passed: 0 warning(s), 0 scheduled law(s)`;
+- `compile` writes `minimal.smc` and reports its size;
+- `verify` prints `verified ... header=SEMCOD22, epoch=0.23`;
+- `run-smc` re-verifies the artifact, executes it and exits `0` silently.
+  A failing `assert` exits non-zero with `assertion failed`.
+
+Compiling is **not** verification. `run-smc` always passes the artifact
+through the verifier before execution; an inadmissible artifact never runs.
+`smc run <file.sm>` is the source workflow command. It compiles, verifies and
+executes in one step.
+
+To write your own file, create `program.sm` with the content above in any
+editor and use the same commands.
+
+## 3. Inspect and hash the artifact
+
+```bash
+cargo run --bin smc -- artifact inspect minimal.smc
+cargo run --bin smc -- artifact hash minimal.smc
+cargo run --bin smc -- disasm minimal.smc
 ```
 
-Verify the compiled artifact:
+`artifact inspect` reports the SemCode header, capabilities, functions, ADT
+descriptors, verifier admission and `Signing State: unsigned`. `artifact
+hash` prints `sha256:<64 hex>`. Artifacts are unsigned by design (SSF-10).
+The digest is an identity, not a trust signature.
 
-```powershell
-cargo run --bin smc -- verify program.smc
-```
+## 4. Canonical examples
 
-Run the verified `.smc` artifact:
-
-```powershell
-cargo run --bin smc -- run-smc program.smc
-```
-
-Disassemble the compiled artifact:
-
-```powershell
-cargo run --bin svm -- disasm program.smc
-```
-
-If you want to run from source instead of the verified artifact route, `smc run program.sm` remains the source-execution workflow command. The practical onboarding order is still:
-
-1. write or use a small `.sm` example
-2. check source
-3. compile to SemCode
-4. verify the compiled artifact
-5. run the verified artifact
-6. disassemble if needed
-
-The admitted Practical Core path uses explicit source/project-root entry resolution through the current bounded admission model.
-
-The current baseline also exposes `smc 7hell program.sm [--json]` as a diagnostic/readiness path. Use it for report-quality checks and qualification review, not as the normal first-run route.
-
-## Canonical Example Loop
-
-The current curated examples pack lives in:
-
-- `examples/canonical/`
-
-Start with:
-
-- `examples/canonical/cli_batch_core/src/main.sm`
-
-Check it:
-
-```powershell
-cargo run --bin smc -- check examples/canonical/cli_batch_core/src/main.sm
-```
-
-Run it:
-
-```powershell
+```bash
 cargo run --bin smc -- run examples/canonical/cli_batch_core/src/main.sm
+cargo run --bin smc -- run examples/canonical/match_control_flow/src/main.sm
 ```
 
-Compile and verify it:
+What each example proves, its profile, maturity and command:
+`docs/examples_index.md`.
+
+## 5. Project root and local package
+
+A project root is a directory with `semantic.toml`
+(`docs/spec/project_model_v0.md`):
+
+```bash
+cargo run --bin smc -- check examples/qualification/ssf11/f06_project
+cargo run --bin smc -- run examples/qualification/ssf11/f06_project
+cargo run --bin smc -- test examples/qualification/ssf11/f06_project
+```
+
+`smc test` prints `ok tests/double.sm` and `test result: ok. 1 passed`.
+
+A local package graph uses `Semantic.package` with an explicit relative
+dependency (`docs/spec/package_baseline_v0.md`):
+
+```bash
+cargo run --bin smc -- run examples/qualification/ssf11/f06_packages/app
+cargo run --bin smc -- package inspect examples/qualification/ssf11/f06_packages/app
+```
+
+`package inspect` prints the deterministic
+`semantic.foundation.package.provenance/0.1` record. It is read-only. There
+is no registry, network fetch or implicit dependency search.
+
+## 6. Controlled file transform (capabilities)
+
+Host effects exist only through an explicit profile and root
+(`docs/spec/controlled_application_boundary_v0.md`). The paths are resolved
+inside `--root`. Use a scratch directory:
+
+POSIX shells (bash, zsh):
+
+```bash
+mkdir -p sandbox && printf 'hello\n' > sandbox/input.txt
+cd sandbox
+cargo run --bin smc -- run ../examples/qualification/ssf11/f08_file_transform/main.sm \
+  --profile cli-file-transform --root . -- input.txt output.txt
+cat output.txt            # transformed:hello
+cd ..
+```
+
+PowerShell (Windows):
 
 ```powershell
-cargo run --bin smc -- compile examples/canonical/cli_batch_core/src/main.sm -o cli_batch_core.smc
-cargo run --bin smc -- verify cli_batch_core.smc
+New-Item -ItemType Directory -Force sandbox | Out-Null
+[System.IO.File]::WriteAllText("$PWD/sandbox/input.txt", "hello`n")
+Set-Location sandbox
+cargo run --bin smc -- run ../examples/qualification/ssf11/f08_file_transform/main.sm `
+  --profile cli-file-transform --root . -- input.txt output.txt
+Get-Content output.txt    # transformed:hello
+Set-Location ..
 ```
 
-If you want a broader tour of the curated pack, see `docs/examples_index.md`.
+stdout carries the program's own output (`transform complete`). stderr carries
+one `semantic.foundation.application.audit/0.1` line per capability decision.
+Try `--profile cli-read-only` (write denied, `MissingCapability`) or the output
+path `../escaped.txt` (denied: parent traversal). Nothing is written in either
+case.
 
-## Current Public CLI References
+## 7. The SSF-11 application corpus
 
-For the current admitted CLI surface, see:
+`examples/qualification/ssf11/corpus.json` indexes 30 cases across the twelve
+#1582 families. Positive programs, verifier rejections, runtime traps and
+quotas, and justified exclusions are all listed, each with its exact
+expected observable result. The family-by-family explanation is
+`docs/roadmap/stable_foundation/ssf11_application_onboarding_matrix.md`.
 
-- `docs/spec/cli.md`
-
-For the canonical spec bundle, start at:
-
-- `docs/spec/index.md`
-
-## Validation
-
-Useful repository-level checks during onboarding:
-
-```powershell
-cargo test -q
-cargo test -q --test public_api_contracts
-cargo test -q --test canonical_examples
+```bash
+cargo test --test ssf11_canonical_applications
+cargo test --test ssf11_onboarding_docs
+cargo test --test canonical_examples
 ```
 
-## Boundary Reminder
+Deterministic failures you can reproduce by hand:
 
-The canonical examples pack includes one honest boundary example:
+```bash
+cargo run --bin smc -- verify examples/qualification/ssf11/f09_verifier_rejection/unsupported_header.smc
+#   verify error [UnsupportedVersion] ...   (exit 1; the artifact never runs)
+cargo run --bin smc -- run examples/qualification/ssf11/f10_runtime_failure/division_by_zero.sm
+#   runtime trap: DivisionByZero
+cargo run --bin smc -- run examples/qualification/ssf11/f10_runtime_failure/step_quota.sm
+#   quota exceeded: Steps limit=100000 used=100001
+```
 
-- `examples/canonical/boundary_alias_import/`
+## 8. Diagnostics
 
-It exists to show a real current limit, not a supported workflow, and future support for that alias-import form would require an explicit language/source-admission change.
+```bash
+cargo run --bin smc -- check examples/qualification/ssf11/f02_quad_bare_condition/main.sm --format json
+cargo run --bin smc -- explain E0201
+```
+
+`--format json` emits the versioned `semantic.diagnostics` v1 schema
+(`docs/spec/diagnostics_machine_schema_v1.md`). Compare diagnostics by `code`,
+not by message wording.
+
+## 9. Compatibility and migration
+
+- Policy: `docs/roadmap/compatibility_statement.md`
+  (active SemCode baseline `SEMCOD22`; older revisions are `Deprecated`,
+  unknown ones are `Incompatible`/`Unsupported`).
+- Non-destructive inspection:
+  `cargo run --bin smc -- migrate check <path> --json`. It never writes.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `unable to find library -lopenblas` | Linux or macOS without OpenBLAS (see Prerequisites) | Linux: `sudo apt-get install -y libopenblas-dev`; macOS: `brew install openblas` (see Prerequisites) |
+| `cargo` downloads a toolchain on first use | `rust-toolchain.toml` pins `1.97.1` | expected; let it finish |
+| `capability ... denied ... MissingCapability` | the profile does not grant that effect (`pure` grants none) | pick the profile the program needs; see `controlled_application_boundary_v0.md` |
+| `path must be relative and must not contain parent traversal` | an application path escaped `--root` | keep file arguments inside the root |
+| `generic function '...' is admitted by the frontend but is not executable` | generic execution (IR monomorphisation) is Roadmap | use a concrete function; see the matrix row F05 |
+| `quota exceeded: Steps ...` | the default execution envelope bounds work deterministically | expected for unbounded loops; `examples/benchmarks/snake_learning.sm` fails closed under `smc run` by design |
+| `verify error [...]` | the artifact is malformed or from an incompatible SemCode revision | recompile with the current `smc`; see the compatibility statement |
+| `"\n"` in a string literal prints a backslash and `n` | string literals have no escape processing in the current contract | write literal text; tracked as an SSF-01 return in the SSF-11 matrix |
+
+## Where to go next
+
+| Topic | Owner |
+|---|---|
+| Language tour | `docs/LANGUAGE.md`, `docs/spec/source_semantics.md` |
+| Semantic by example | `docs/examples_index.md` |
+| Standard library | `docs/spec/foundation_stdlib_v0.md` |
+| CLI | `docs/spec/cli.md` |
+| Diagnostics | `docs/spec/diagnostics.md` |
+| Verifier / runtime | `docs/spec/verifier.md`, `docs/spec/runtime.md`, `docs/spec/quotas.md` |
+| Release status | `docs/roadmap/public_status_model.md`, `docs/status/feature_maturity_matrix.md` |
+
+## Boundary reminder
+
+`examples/canonical/boundary_alias_import/` shows a real current limit
+(top-level alias import on the executable path), not a supported workflow.
+The F05 and F07 corpus cases mark two more boundaries: generic execution and
+serialization.

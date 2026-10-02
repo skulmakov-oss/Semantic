@@ -1,0 +1,5 @@
+[package]
+name = "ssf11_project"
+
+[project]
+entry = "src/main.sm"
