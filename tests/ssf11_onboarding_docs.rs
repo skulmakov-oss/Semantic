@@ -38,16 +38,24 @@ fn corpus() -> Value {
 /// whitespace (so quoted command output such as `ok tests/x.sm` is not read
 /// as a path) and Markdown link targets.
 fn referenced_paths(document: &str) -> Vec<String> {
-    let mut candidates: Vec<&str> = document
+    let candidates: Vec<&str> = document
         .split('`')
         .skip(1)
         .step_by(2)
         .filter(|span| !span.chars().any(char::is_whitespace))
         .collect();
-    for link in document.split("](").skip(1) {
-        candidates.push(link.split(')').next().unwrap_or_default());
-    }
     let mut found = Vec::new();
+    for link in document.split("](").skip(1) {
+        let target = link.split(')').next().unwrap_or_default();
+        let target = target.split('#').next().unwrap_or_default();
+        let external = target.is_empty() || target.contains("://") || target.starts_with("mailto:");
+        if external {
+            continue;
+        }
+        // Document-relative link targets are always checked; `resolve` tries
+        // the repository root first and then the document's own directory.
+        found.push(target.to_string());
+    }
     for candidate in candidates {
         let token = candidate.trim_start_matches("../");
         let token = token.split('#').next().unwrap_or_default();

@@ -48,7 +48,8 @@ cargo build --bin smc
 
 The binary is `target/debug/smc` (`target\debug\smc.exe` on Windows).
 `cargo run --bin smc -- <args>` is equivalent. The examples below use
-`cargo run --bin smc --` so that they work the same way on every shell.
+`cargo run --bin smc --`, which behaves the same in every shell; the one
+step that creates files (section 6) gives both POSIX and PowerShell forms.
 
 ```bash
 cargo run --bin smc -- --help
@@ -144,6 +145,8 @@ Host effects exist only through an explicit profile and root
 (`docs/spec/controlled_application_boundary_v0.md`). The paths are resolved
 inside `--root`. Use a scratch directory:
 
+POSIX shells (bash, zsh):
+
 ```bash
 mkdir -p sandbox && printf 'hello\n' > sandbox/input.txt
 cd sandbox
@@ -151,6 +154,18 @@ cargo run --bin smc -- run ../examples/qualification/ssf11/f08_file_transform/ma
   --profile cli-file-transform --root . -- input.txt output.txt
 cat output.txt            # transformed:hello
 cd ..
+```
+
+PowerShell (Windows):
+
+```powershell
+New-Item -ItemType Directory -Force sandbox | Out-Null
+[System.IO.File]::WriteAllText("$PWD/sandbox/input.txt", "hello`n")
+Set-Location sandbox
+cargo run --bin smc -- run ../examples/qualification/ssf11/f08_file_transform/main.sm `
+  --profile cli-file-transform --root . -- input.txt output.txt
+Get-Content output.txt    # transformed:hello
+Set-Location ..
 ```
 
 stdout carries the program's own output (`transform complete`). stderr carries

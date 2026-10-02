@@ -48,7 +48,7 @@ Status: SSF-11 (#1582) onboarding evidence. Not a release or promotion record.
 | Defect | Class | Disposition |
 |---|---|---|
 | A first build on Linux failed with `rust-lld: error: unable to find library -lopenblas`. The previous Getting Started listed no system prerequisite. CI installs `libopenblas-dev`, but the onboarding docs never mentioned it. | Documentation defect | **Fixed in SSF-11**: the Prerequisites and Troubleshooting sections of `docs/getting_started.md` now name it, guarded by `tests/ssf11_onboarding_docs.rs`. The package was installed during the development session before the clean clone, so step 2 above ran with it present. |
-| The previous Getting Started used only PowerShell here-strings and `Set-Content`, which are unusable from a POSIX shell. | Documentation defect | **Fixed in SSF-11**: the commands now use checked-in files and `cargo run --bin smc --`, which work on every shell. |
+| The previous Getting Started used only PowerShell here-strings and `Set-Content`, which are unusable from a POSIX shell. | Documentation defect | **Fixed in SSF-11**: the commands now use checked-in files and `cargo run --bin smc --`, which behave the same in every shell; the one file-creating step (section 6) has POSIX and PowerShell forms (the PowerShell form was added after this rehearsal and was not executed here). |
 | `"\n"` in a string literal is written as a backslash and `n` (no escape processing, undocumented). | Earlier-phase contract gap | **RETURN-TO-OWNER SSF-01 / SSF-04**; documented in Troubleshooting. Not blocking. |
 | `known(x)`, `unknown(x)` and `conflict(x)` are documented quad predicates but are rejected as unknown functions. | Earlier-phase doc/admission drift | **RETURN-TO-OWNER SSF-01**. Not blocking. |
 

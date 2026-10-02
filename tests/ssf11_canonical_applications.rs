@@ -9,9 +9,11 @@
 
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 const CORPUS: &str = "examples/qualification/ssf11/corpus.json";
 const FAMILIES: [&str; 12] = [
@@ -100,6 +102,9 @@ impl Drop for Scratch {
 
 struct Observed {
     exit: i32,
+    /// Raw stdout bytes: compared exactly by `stdout_exact` and replay checks.
+    stdout_raw: Vec<u8>,
+    /// Normalized stdout text: only for substring, regex-shape and JSON checks.
     stdout: String,
     stderr: String,
 }
@@ -131,15 +136,54 @@ fn run_step(case: &Value, step: &Value, scratch: &Scratch) -> Observed {
     } else {
         repo()
     };
-    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .args(&args)
-        .current_dir(&cwd)
-        .output()
-        .expect("spawn smc");
+    let output = run_bounded(&args, &cwd);
     Observed {
         exit: output.status.code().unwrap_or(-1),
+        stdout_raw: output.stdout.clone(),
         stdout: normalize(&String::from_utf8_lossy(&output.stdout), scratch),
         stderr: normalize(&String::from_utf8_lossy(&output.stderr), scratch),
+    }
+}
+
+/// Every corpus failure must be enforced by Semantic's own quotas, never by a
+/// harness clock. This deadline only turns a quota regression (for example an
+/// unbounded `step_quota.sm`) into a reported failure instead of a hung job.
+const STEP_DEADLINE: Duration = Duration::from_secs(300);
+
+fn run_bounded(args: &[String], cwd: &Path) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .args(args)
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn smc");
+    let mut stdout = child.stdout.take().expect("stdout pipe");
+    let mut stderr = child.stderr.take().expect("stderr pipe");
+    let out_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll smc") {
+            break status;
+        }
+        if started.elapsed() > STEP_DEADLINE {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("smc {args:?} exceeded {STEP_DEADLINE:?}; runtime quota enforcement regressed");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    Output {
+        status,
+        stdout: out_reader.join().expect("join").expect("read stdout"),
+        stderr: err_reader.join().expect("join").expect("read stderr"),
     }
 }
 
@@ -176,7 +220,11 @@ fn check_step(case_id: &str, index: usize, step: &Value, seen: &Observed, scratc
     let expected_exit = step["expected_exit"].as_i64().expect("expected_exit") as i32;
     assert_eq!(seen.exit, expected_exit, "exit status mismatch: {ctx}");
     if let Some(exact) = step["stdout_exact"].as_str() {
-        assert_eq!(seen.stdout, exact, "stdout mismatch: {ctx}");
+        assert_eq!(
+            seen.stdout_raw,
+            exact.as_bytes(),
+            "stdout bytes mismatch: {ctx}"
+        );
     }
     if let Some(pattern) = step["stdout_regex"].as_str() {
         assert!(
@@ -261,8 +309,8 @@ fn every_corpus_case_replays_through_the_public_cli() {
                 scratch.reset_root(&case["sandbox_files"]);
                 let replay = run_step(case, step, &scratch);
                 assert_eq!(
-                    (seen.exit, &seen.stdout, &seen.stderr),
-                    (replay.exit, &replay.stdout, &replay.stderr),
+                    (seen.exit, &seen.stdout_raw, &seen.stderr),
+                    (replay.exit, &replay.stdout_raw, &replay.stderr),
                     "{case_id} step {index} is not replay-deterministic"
                 );
                 check_step(case_id, index, step, &replay, &scratch);
