@@ -696,15 +696,14 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
         compile_program_to_semcode_with_options_debug(&src, actual_profile, opt, debug_symbols)
             .map_err(|e| e.to_string())?;
     let t_compile = Instant::now();
-    std::fs::write(out, &bytes).map_err(|e| format!("failed to write '{}': {}", out, e))?;
-    if let Err(e) = crate::artifact_identity::generate_and_save_companion_provenance(
-        Path::new(out),
-        &bytes,
-        &root,
-        None,
-        None,
-    ) {
-        let _ = std::fs::remove_file(out);
+    let provenance =
+        crate::artifact_identity::generate_companion_provenance(&bytes, &root, None, None)
+            .map_err(|e| format!("failed to record artifact provenance: {}", e))?;
+
+    let out_path = Path::new(out);
+    crate::artifact_identity::write_file_atomic(out_path, &bytes)
+        .map_err(|e| format!("failed to write '{}': {}", out, e))?;
+    if let Err(e) = crate::artifact_identity::save_companion_provenance(out_path, &provenance) {
         return Err(format!("failed to record artifact provenance: {}", e));
     }
     let t_write = Instant::now();

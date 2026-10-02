@@ -22,9 +22,9 @@ use smc_cli::artifact_identity::{
     generate_and_save_companion_provenance, ArtifactIdentity, ProvenanceStatus,
 };
 use smc_cli::compatibility::{
-    detect_artifact_staleness, CompatibilityClassification, DiagnosticCompatibilityPolicy,
-    ManifestCompatibilityPolicy, RuntimeCompatibilityPolicy, SourceCompatibilityPolicy,
-    StalenessStatus, StdlibCompatibilityPolicy,
+    detect_artifact_staleness, inspect_migration, CompatibilityClassification,
+    DiagnosticCompatibilityPolicy, ManifestCompatibilityPolicy, RuntimeCompatibilityPolicy,
+    SourceCompatibilityPolicy, StalenessStatus, StdlibCompatibilityPolicy,
 };
 use std::fs;
 use std::path::Path;
@@ -1693,7 +1693,6 @@ fn test_36_assess_artifact_compatibility_branches() {
 
 #[test]
 fn test_37_uppercase_manifest_deprecation_and_format_recommendation() {
-    use smc_cli::compatibility::inspect_migration;
     let temp_dir = std::env::temp_dir().join(format!("ssf10_test37_{}", std::process::id()));
     let project_dir = temp_dir.join("project");
     fs::create_dir_all(&project_dir).expect("create dir");
@@ -1729,6 +1728,79 @@ fn test_37_uppercase_manifest_deprecation_and_format_recommendation() {
         !format_finding.recommendation.contains("format = 1"),
         "recommendation must not propose format = 1 in semantic.toml: {}",
         format_finding.recommendation
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_38_manifest_lowercase_precedence_and_atomic_compile_safety() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test38_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    fs::create_dir_all(&project_dir).expect("create project dir");
+
+    // 1. Verify atomic compile safety: failed compilation preserves pre-existing valid artifact
+    let out_smc = project_dir.join("output.smc");
+    let original_payload = b"ORIGINAL_VALID_ARTIFACT_PRESERVED";
+    fs::write(&out_smc, original_payload).expect("write original valid artifact");
+
+    let bad_sm = project_dir.join("bad.sm");
+    fs::write(&bad_sm, "fn invalid_syntax { non_existent }\n").expect("write bad.sm");
+
+    let (c_code, _, _) = run_smc(&[
+        "compile",
+        bad_sm.to_str().unwrap(),
+        "-o",
+        out_smc.to_str().unwrap(),
+    ]);
+    assert_ne!(c_code, 0, "compilation with bad syntax must fail");
+    assert!(
+        out_smc.is_file(),
+        "pre-existing output file must not be removed on compile failure"
+    );
+    let remaining_bytes = fs::read(&out_smc).expect("read remaining bytes");
+    assert_eq!(
+        remaining_bytes, original_payload,
+        "pre-existing output file contents must remain unchanged after compile failure"
+    );
+
+    // 2. Direct atomic write verification
+    let atomic_target = project_dir.join("atomic_target.bin");
+    fs::write(&atomic_target, b"initial").expect("write initial");
+    smc_cli::artifact_identity::write_file_atomic(&atomic_target, b"replaced")
+        .expect("write_file_atomic should succeed");
+    let updated_bytes = fs::read(&atomic_target).expect("read atomic target");
+    assert_eq!(updated_bytes, b"replaced");
+
+    // 3. Manifest lowercase precedence in inspect_migration
+    let sub_project = temp_dir.join("manifest_sub");
+    fs::create_dir_all(&sub_project).expect("create manifest_sub");
+    fs::write(
+        sub_project.join("semantic.toml"),
+        "[package]\nname = \"canonical_lowercase\"\n",
+    )
+    .expect("write lowercase manifest");
+    fs::write(sub_project.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
+
+    let report = inspect_migration(&sub_project).expect("inspect_migration");
+    assert_eq!(
+        report.classification,
+        CompatibilityClassification::Compatible
+    );
+    let m_path = report.manifest_path.expect("manifest_path present");
+    assert!(
+        m_path.ends_with("semantic.toml"),
+        "must select canonical lowercase semantic.toml: {}",
+        m_path.display()
+    );
+    // Findings must NOT report deprecated uppercase name because canonical lowercase is present
+    let has_uppercase_finding = report
+        .findings
+        .iter()
+        .any(|f| f.message.contains("Semantic.toml"));
+    assert!(
+        !has_uppercase_finding,
+        "must not emit uppercase finding when canonical lowercase manifest is used"
     );
 
     let _ = fs::remove_dir_all(&temp_dir);
