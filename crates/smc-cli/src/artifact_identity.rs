@@ -787,6 +787,9 @@ pub fn save_companion_provenance(
 /// The sidecar is staged and committed first: if the sidecar cannot be written or replaced
 /// (for example, if the destination is a directory or permission denied), all temporary files
 /// are cleaned up and the original artifact file remains completely untouched.
+/// Furthermore, if replacing the artifact subsequently fails, any pre-existing sidecar
+/// is restored from backup (or cleaned up if none existed previously), ensuring the artifact
+/// and provenance sidecar never become inconsistent.
 pub fn save_artifact_and_companion_provenance_atomic(
     artifact_path: &Path,
     artifact_bytes: &[u8],
@@ -815,6 +818,18 @@ pub fn save_artifact_and_companion_provenance_atomic(
 
     let tmp_art = art_dir.join(format!(".{art_name}.tmp.{pid}.{suffix}"));
     let tmp_prov = prov_dir.join(format!(".{prov_name}.tmp.{pid}.{suffix}"));
+    let tmp_backup_prov = prov_dir.join(format!(".{prov_name}.bak.{pid}.{suffix}"));
+
+    // Check if pre-existing provenance sidecar exists and back it up
+    let had_existing_prov = prov_path.is_file();
+    if had_existing_prov {
+        if let Err(e) = fs::copy(&prov_path, &tmp_backup_prov) {
+            return Err(format!(
+                "failed to backup existing provenance sidecar '{}': {e}",
+                prov_path.display()
+            ));
+        }
+    }
 
     // 1. Stage sidecar
     let stage_prov_res = (|| {
@@ -825,6 +840,9 @@ pub fn save_artifact_and_companion_provenance_atomic(
     })();
     if let Err(e) = stage_prov_res {
         let _ = fs::remove_file(&tmp_prov);
+        if had_existing_prov {
+            let _ = fs::remove_file(&tmp_backup_prov);
+        }
         return Err(format!(
             "failed to stage provenance sidecar '{}': {e}",
             tmp_prov.display()
@@ -841,6 +859,9 @@ pub fn save_artifact_and_companion_provenance_atomic(
     if let Err(e) = stage_art_res {
         let _ = fs::remove_file(&tmp_art);
         let _ = fs::remove_file(&tmp_prov);
+        if had_existing_prov {
+            let _ = fs::remove_file(&tmp_backup_prov);
+        }
         return Err(format!(
             "failed to stage artifact '{}': {e}",
             tmp_art.display()
@@ -851,6 +872,9 @@ pub fn save_artifact_and_companion_provenance_atomic(
     if let Err(e) = fs::rename(&tmp_prov, &prov_path) {
         let _ = fs::remove_file(&tmp_prov);
         let _ = fs::remove_file(&tmp_art);
+        if had_existing_prov {
+            let _ = fs::remove_file(&tmp_backup_prov);
+        }
         return Err(format!(
             "failed to atomically replace provenance sidecar '{}': {e}",
             prov_path.display()
@@ -860,10 +884,26 @@ pub fn save_artifact_and_companion_provenance_atomic(
     // 4. Atomically replace artifact
     if let Err(e) = fs::rename(&tmp_art, artifact_path) {
         let _ = fs::remove_file(&tmp_art);
+        if had_existing_prov {
+            // Restore pre-existing sidecar
+            let _ = fs::remove_file(&prov_path);
+            if fs::rename(&tmp_backup_prov, &prov_path).is_err() {
+                let _ = fs::copy(&tmp_backup_prov, &prov_path);
+                let _ = fs::remove_file(&tmp_backup_prov);
+            }
+        } else {
+            // If there was no pre-existing sidecar, do not leave newly staged sidecar behind as an orphan
+            let _ = fs::remove_file(&prov_path);
+        }
         return Err(format!(
             "failed to atomically replace artifact '{}': {e}",
             artifact_path.display()
         ));
+    }
+
+    // 5. Cleanup backup on success
+    if had_existing_prov {
+        let _ = fs::remove_file(&tmp_backup_prov);
     }
 
     Ok((artifact_path.to_path_buf(), prov_path))
