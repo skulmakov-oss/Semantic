@@ -1764,7 +1764,34 @@ fn test_38_manifest_lowercase_precedence_and_atomic_compile_safety() {
         "pre-existing output file contents must remain unchanged after compile failure"
     );
 
-    // 2. Direct atomic write verification
+    // 2. Verify non-destructive failure when provenance sidecar destination fails (e.g. is a directory)
+    let fail_sidecar_dir = project_dir.join("sidecar_dest_fail.smc.provenance.json");
+    let sidecar_out_smc = project_dir.join("sidecar_dest_fail.smc");
+    fs::write(&sidecar_out_smc, b"PREEXISTING_VALID_OUTPUT_UNTOUCHED")
+        .expect("write pre-existing output");
+    fs::create_dir_all(&fail_sidecar_dir).expect("create blocking directory at sidecar path");
+
+    let valid_sm = project_dir.join("valid.sm");
+    fs::write(&valid_sm, "fn main() { return; }\n").expect("write valid.sm");
+
+    let (c_code_sc, _, _) = run_smc(&[
+        "compile",
+        valid_sm.to_str().unwrap(),
+        "-o",
+        sidecar_out_smc.to_str().unwrap(),
+    ]);
+    assert_ne!(
+        c_code_sc, 0,
+        "compile must fail when companion provenance sidecar destination cannot be written"
+    );
+    let preserved_sc_bytes = fs::read(&sidecar_out_smc).expect("read preserved output");
+    assert_eq!(
+        preserved_sc_bytes, b"PREEXISTING_VALID_OUTPUT_UNTOUCHED",
+        "pre-existing output must NOT be replaced when provenance sidecar saving fails"
+    );
+    let _ = fs::remove_dir_all(&fail_sidecar_dir);
+
+    // 3. Direct atomic write verification
     let atomic_target = project_dir.join("atomic_target.bin");
     fs::write(&atomic_target, b"initial").expect("write initial");
     smc_cli::artifact_identity::write_file_atomic(&atomic_target, b"replaced")
@@ -1772,7 +1799,7 @@ fn test_38_manifest_lowercase_precedence_and_atomic_compile_safety() {
     let updated_bytes = fs::read(&atomic_target).expect("read atomic target");
     assert_eq!(updated_bytes, b"replaced");
 
-    // 3. Manifest lowercase precedence in inspect_migration
+    // 4. Manifest lowercase precedence in inspect_migration with both casings exercised
     let sub_project = temp_dir.join("manifest_sub");
     fs::create_dir_all(&sub_project).expect("create manifest_sub");
     fs::write(
@@ -1781,6 +1808,24 @@ fn test_38_manifest_lowercase_precedence_and_atomic_compile_safety() {
     )
     .expect("write lowercase manifest");
     fs::write(sub_project.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
+
+    // Probe filesystem case-sensitivity
+    let probe_a = sub_project.join("case_probe_a.tmp");
+    let probe_b = sub_project.join("CASE_PROBE_A.tmp");
+    let _ = fs::write(&probe_a, b"a");
+    let is_case_sensitive =
+        fs::write(&probe_b, b"b").is_ok() && fs::read(&probe_a).map(|c| c == b"a").unwrap_or(false);
+    let _ = fs::remove_file(&probe_a);
+    let _ = fs::remove_file(&probe_b);
+
+    if is_case_sensitive {
+        // Exercise coexistence of both manifest casings in the same directory
+        fs::write(
+            sub_project.join("Semantic.toml"),
+            "[package]\nname = \"legacy_uppercase_manifest\"\n",
+        )
+        .expect("write uppercase manifest alongside lowercase");
+    }
 
     let report = inspect_migration(&sub_project).expect("inspect_migration");
     assert_eq!(
@@ -1793,14 +1838,14 @@ fn test_38_manifest_lowercase_precedence_and_atomic_compile_safety() {
         "must select canonical lowercase semantic.toml: {}",
         m_path.display()
     );
-    // Findings must NOT report deprecated uppercase name because canonical lowercase is present
+    // Findings must NOT report deprecated uppercase name because canonical lowercase is present and prioritized
     let has_uppercase_finding = report
         .findings
         .iter()
         .any(|f| f.message.contains("Semantic.toml"));
     assert!(
         !has_uppercase_finding,
-        "must not emit uppercase finding when canonical lowercase manifest is used"
+        "must not emit uppercase finding when canonical lowercase manifest is prioritized"
     );
 
     let _ = fs::remove_dir_all(&temp_dir);

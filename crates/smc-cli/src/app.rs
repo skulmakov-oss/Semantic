@@ -701,11 +701,12 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
             .map_err(|e| format!("failed to record artifact provenance: {}", e))?;
 
     let out_path = Path::new(out);
-    crate::artifact_identity::write_file_atomic(out_path, &bytes)
-        .map_err(|e| format!("failed to write '{}': {}", out, e))?;
-    if let Err(e) = crate::artifact_identity::save_companion_provenance(out_path, &provenance) {
-        return Err(format!("failed to record artifact provenance: {}", e));
-    }
+    crate::artifact_identity::save_artifact_and_companion_provenance_atomic(
+        out_path,
+        &bytes,
+        &provenance,
+    )
+    .map_err(|e| format!("failed to write artifact and provenance: {}", e))?;
     let t_write = Instant::now();
     println!("compiled '{}' -> '{}' ({} bytes)", input, out, bytes.len());
     if debug_symbols {
