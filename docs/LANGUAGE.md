@@ -7,6 +7,12 @@ The canonical public language name is `Semantic Language`. `Semantic` is the sho
 
 Its purpose is to express meaning-oriented logic with the same rigor that ordinary languages apply to computation.
 
+> **Language tour entry point.** To run code first, follow
+> `docs/getting_started.md`. For worked examples with expected results, see
+> `docs/examples_index.md` and the SSF-11 corpus
+> (`examples/qualification/ssf11/corpus.json`). Current `main` is not a
+> published stable release.
+
 Semantic is built as a minimal compiler stack that ends in a deterministic virtual machine.
 
 The canonical language-level public contract is now centered in the spec
