@@ -449,8 +449,8 @@ fn test_9_cli_version_real_binary() {
     // 2. `smc version --json` real binary invocation
     let (code_json, stdout_json, _) = run_smc(&["version", "--json"]);
     assert_eq!(code_json, 0);
-    let ver_parsed: serde_json::Value = serde_json::from_str(&stdout_json)
-        .expect("version --json must produce valid JSON");
+    let ver_parsed: serde_json::Value =
+        serde_json::from_str(&stdout_json).expect("version --json must produce valid JSON");
     assert_eq!(ver_parsed["schema_version"], "semantic-version-v1");
     assert_eq!(ver_parsed["toolchain_version"], "0.1.0");
     assert!(ver_parsed["source_fingerprint"].is_string());
@@ -499,8 +499,8 @@ fn test_10_cli_migrate_preview_real_binary_zero_mutation() {
         "--dry-run",
     ]);
     assert_eq!(code_json, 0);
-    let mig_parsed: serde_json::Value = serde_json::from_str(&stdout_json)
-        .expect("migrate preview --json must produce valid JSON");
+    let mig_parsed: serde_json::Value =
+        serde_json::from_str(&stdout_json).expect("migrate preview --json must produce valid JSON");
     assert_eq!(mig_parsed["mutations_performed"], 0);
 
     // STRICT MUTATION VERIFICATION: verify files on disk were not touched
@@ -633,7 +633,7 @@ fn create_dir_link(target: &Path, link: &Path) -> std::io::Result<()> {
             return Ok(());
         }
         let status = std::process::Command::new("cmd")
-            .args(&[
+            .args([
                 "/c",
                 "mklink",
                 "/J",
@@ -644,10 +644,9 @@ fn create_dir_link(target: &Path, link: &Path) -> std::io::Result<()> {
         if status.status.success() {
             Ok(())
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                String::from_utf8_lossy(&status.stderr),
-            ))
+            Err(std::io::Error::other(String::from_utf8_lossy(
+                &status.stderr,
+            )))
         }
     }
     #[cfg(unix)]
@@ -913,8 +912,8 @@ fn test_19_canonical_lowercase_manifest_precedence() {
     .expect("write lowercase manifest");
     fs::write(project_dir.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
 
-    let report = smc_cli::compatibility::inspect_migration(&project_dir)
-        .expect("inspection should succeed");
+    let report =
+        smc_cli::compatibility::inspect_migration(&project_dir).expect("inspection should succeed");
 
     assert_eq!(
         report.classification,
@@ -1122,30 +1121,80 @@ fn test_24_imported_module_change_invalidates_provenance() {
 
 #[test]
 fn test_25_compatibility_dimensions_canonical_drift_guard() {
-    let dims = smc_cli::compatibility::CompatibilityDimensions::default();
+    use smc_cli::artifact_identity::ProvenanceContractIdentity;
+    use smc_cli::compatibility::*;
+
+    let dims = CompatibilityDimensions::default();
+    let contract = ProvenanceContractIdentity::default();
+
+    // 1. Cross-validate CompatibilityDimensions vs ProvenanceContractIdentity
     assert_eq!(
-        dims.verifier_profile, "verifier-canonical-v1",
-        "verifier ID must match canonical specification"
+        dims.verifier_profile, contract.verifier_profile,
+        "verifier ID must match between compatibility dimensions and provenance contract"
     );
     assert_eq!(
-        dims.runtime_engine, "deterministic-v1",
-        "runtime ID must match canonical specification"
+        dims.runtime_engine, contract.runtime_profile,
+        "runtime ID must match between compatibility dimensions and provenance contract"
     );
     assert_eq!(
-        dims.stdlib_version, "semantic-stdlib-v1",
-        "stdlib ID must match canonical specification"
+        dims.stdlib_version, contract.stdlib_version,
+        "stdlib ID must match between compatibility dimensions and provenance contract"
     );
     assert_eq!(
-        dims.diagnostic_schema, "semantic.diagnostics",
-        "diagnostic schema must match canonical specification"
+        dims.diagnostic_schema, contract.diagnostic_contract,
+        "diagnostic schema must match between compatibility dimensions and provenance contract"
     );
     assert_eq!(
-        dims.semcode_format, "SEMCOD22",
-        "format epoch must match canonical specification"
+        dims.semcode_format, contract.semcode_format,
+        "format magic must match between compatibility dimensions and provenance contract"
     );
     assert_eq!(
-        dims.semcode_revision, 23,
-        "format revision must match canonical specification"
+        dims.semcode_epoch as u16, contract.semcode_epoch,
+        "format epoch must match between compatibility dimensions and provenance contract"
+    );
+    assert_eq!(
+        dims.semcode_revision as u16, contract.semcode_revision,
+        "format revision must match between compatibility dimensions and provenance contract"
+    );
+
+    // 2. Validate against CANONICAL constants
+    assert_eq!(dims.source_version, CANONICAL_SOURCE_VERSION);
+    assert_eq!(dims.manifest_version, CANONICAL_MANIFEST_VERSION);
+    assert_eq!(dims.diagnostic_schema, CANONICAL_DIAGNOSTIC_SCHEMA);
+    assert_eq!(dims.stdlib_version, CANONICAL_STDLIB_VERSION);
+    assert_eq!(dims.semcode_format, CANONICAL_SEMCODE_FORMAT);
+    assert_eq!(dims.semcode_epoch, CANONICAL_SEMCODE_EPOCH);
+    assert_eq!(dims.semcode_revision, CANONICAL_SEMCODE_REVISION);
+    assert_eq!(dims.verifier_profile, CANONICAL_VERIFIER_PROFILE);
+    assert_eq!(dims.runtime_engine, CANONICAL_RUNTIME_ENGINE);
+
+    // 3. Dynamic cross-validation against `smc version --json`
+    let (v_code, v_out, v_err) = run_smc(&["version", "--json"]);
+    assert_eq!(v_code, 0, "smc version --json failed: {v_err}");
+    let v_parsed: serde_json::Value =
+        serde_json::from_str(&v_out).expect("parse smc version --json");
+    assert_eq!(
+        v_parsed["verifier_profile"], CANONICAL_VERIFIER_PROFILE,
+        "smc version JSON verifier_profile drift"
+    );
+    assert_eq!(
+        v_parsed["runtime_profile"], CANONICAL_RUNTIME_ENGINE,
+        "smc version JSON runtime_profile drift"
+    );
+    assert_eq!(
+        v_parsed["stdlib_version"], CANONICAL_STDLIB_VERSION,
+        "smc version JSON stdlib_version drift"
+    );
+    assert_eq!(
+        v_parsed["semcode_format"]["magic"], CANONICAL_SEMCODE_FORMAT,
+        "smc version JSON semcode magic drift"
+    );
+    assert_eq!(
+        v_parsed["semcode_format"]["epoch"], CANONICAL_SEMCODE_EPOCH,
+        "smc version JSON semcode epoch drift"
+    );
+    assert_eq!(
+        v_parsed["semcode_format"]["revision"], CANONICAL_SEMCODE_REVISION,
+        "smc version JSON semcode revision drift"
     );
 }
-

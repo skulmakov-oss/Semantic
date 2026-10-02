@@ -5024,8 +5024,8 @@ fn cmd_version(args: &[String]) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct SemcodeFormatVersionJson {
             magic: &'static str,
-            epoch: u16,
-            revision: u16,
+            epoch: u8,
+            revision: u8,
         }
 
         #[derive(serde::Serialize)]
@@ -5049,13 +5049,13 @@ fn cmd_version(args: &[String]) -> Result<(), String> {
             source_hash,
             enabled_features: features,
             semcode_format: SemcodeFormatVersionJson {
-                magic: "SEMCOD22",
-                epoch: 0,
-                revision: 23,
+                magic: crate::compatibility::CANONICAL_SEMCODE_FORMAT,
+                epoch: crate::compatibility::CANONICAL_SEMCODE_EPOCH,
+                revision: crate::compatibility::CANONICAL_SEMCODE_REVISION,
             },
-            verifier_profile: "verifier-canonical-v1",
-            runtime_profile: "deterministic-v1",
-            stdlib_version: "semantic-stdlib-v1",
+            verifier_profile: crate::compatibility::CANONICAL_VERIFIER_PROFILE,
+            runtime_profile: crate::compatibility::CANONICAL_RUNTIME_ENGINE,
+            stdlib_version: crate::compatibility::CANONICAL_STDLIB_VERSION,
             signing: "unsigned",
         };
         println!(
@@ -5074,8 +5074,16 @@ fn cmd_version(args: &[String]) -> Result<(), String> {
                 raw_features
             }
         );
-        println!("SemCode Format:     SEMCOD22 (epoch=0, rev=23)");
-        println!("Verifier Profile:   verifier-canonical-v1");
+        println!(
+            "SemCode Format:     {} (epoch={}, rev={})",
+            crate::compatibility::CANONICAL_SEMCODE_FORMAT,
+            crate::compatibility::CANONICAL_SEMCODE_EPOCH,
+            crate::compatibility::CANONICAL_SEMCODE_REVISION
+        );
+        println!(
+            "Verifier Profile:   {}",
+            crate::compatibility::CANONICAL_VERIFIER_PROFILE
+        );
         println!("Release Signing:    unsigned");
     }
     Ok(())

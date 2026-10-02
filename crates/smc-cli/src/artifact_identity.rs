@@ -29,6 +29,11 @@ pub struct ProducerToolchainIdentity {
 }
 
 impl ProducerToolchainIdentity {
+    pub fn source_fingerprint(&self) -> &str {
+        &self.source_fingerprint
+    }
+
+    #[deprecated(note = "use source_fingerprint() instead")]
     pub fn commit_hash(&self) -> &str {
         &self.source_fingerprint
     }
@@ -89,13 +94,13 @@ pub struct ProvenanceContractIdentity {
 impl Default for ProvenanceContractIdentity {
     fn default() -> Self {
         Self {
-            semcode_format: "SEMCOD22".to_string(),
-            semcode_epoch: 0,
-            semcode_revision: 23,
-            verifier_profile: "verifier-canonical-v1".to_string(),
-            runtime_profile: "deterministic-v1".to_string(),
-            stdlib_version: "semantic-stdlib-v1".to_string(),
-            diagnostic_contract: "semantic.diagnostics".to_string(),
+            semcode_format: crate::compatibility::CANONICAL_SEMCODE_FORMAT.to_string(),
+            semcode_epoch: crate::compatibility::CANONICAL_SEMCODE_EPOCH as u16,
+            semcode_revision: crate::compatibility::CANONICAL_SEMCODE_REVISION as u16,
+            verifier_profile: crate::compatibility::CANONICAL_VERIFIER_PROFILE.to_string(),
+            runtime_profile: crate::compatibility::CANONICAL_RUNTIME_ENGINE.to_string(),
+            stdlib_version: crate::compatibility::CANONICAL_STDLIB_VERSION.to_string(),
+            diagnostic_contract: crate::compatibility::CANONICAL_DIAGNOSTIC_SCHEMA.to_string(),
         }
     }
 }
@@ -222,8 +227,8 @@ pub struct ProducerProvenanceReport {
     pub compiler_name: Option<String>,
     pub compiler_version: Option<String>,
     pub build_target: Option<String>,
+    #[serde(alias = "commit_hash")]
     pub source_fingerprint: Option<String>,
-    pub commit_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_commit: Option<String>,
     pub profile: Option<String>,
@@ -529,7 +534,9 @@ impl ArtifactIdentity {
         out.push_str("\n--- Producer Toolchain (from Provenance) ---\n");
         match &self.provenance_status {
             ProvenanceStatus::Recorded(prov) => {
-                out.push_str("Trust Model:    Integrity-only sidecar bound to artifact SHA-256 (unsigned)\n");
+                out.push_str(
+                    "Trust Model:    Integrity-only sidecar bound to artifact SHA-256 (unsigned)\n",
+                );
                 out.push_str(&format!(
                     "Compiler:       {} v{} (target={}, fingerprint={}, profile={})\n",
                     prov.producer.compiler_name,
@@ -605,7 +612,6 @@ impl ArtifactIdentity {
                 compiler_version: Some(prov.producer.compiler_version.clone()),
                 build_target: Some(prov.producer.build_target.clone()),
                 source_fingerprint: Some(prov.producer.source_fingerprint.clone()),
-                commit_hash: Some(prov.producer.source_fingerprint.clone()),
                 git_commit: prov.producer.git_commit.clone(),
                 profile: Some(prov.producer.profile.clone()),
                 source_hash: Some(prov.source.source_hash.clone()),
@@ -626,7 +632,6 @@ impl ArtifactIdentity {
                     compiler_version: None,
                     build_target: None,
                     source_fingerprint: None,
-                    commit_hash: None,
                     git_commit: None,
                     profile: None,
                     source_hash: None,
@@ -864,7 +869,11 @@ pub(crate) fn collect_project_files_secure(
     }
 
     let read_dir = fs::read_dir(current_dir).map_err(|e| {
-        format!("failed to read directory '{}': {}", current_dir.display(), e)
+        format!(
+            "failed to read directory '{}': {}",
+            current_dir.display(),
+            e
+        )
     })?;
 
     let mut entries: Vec<_> = read_dir.filter_map(Result::ok).collect();
@@ -925,8 +934,13 @@ pub(crate) fn collect_project_files_secure(
 
 /// Collect sorted project source bytes across all `.sm` files, normalized with relative paths.
 pub(crate) fn collect_project_source_bytes(dir: &Path, out: &mut Vec<u8>) -> Result<(), String> {
-    let canonical_root = fs::canonicalize(dir)
-        .map_err(|e| format!("failed to canonicalize directory '{}': {}", dir.display(), e))?;
+    let canonical_root = fs::canonicalize(dir).map_err(|e| {
+        format!(
+            "failed to canonicalize directory '{}': {}",
+            dir.display(),
+            e
+        )
+    })?;
     let mut visited_dirs = std::collections::HashSet::new();
     let mut entries = Vec::new();
     collect_project_files_secure(dir, &canonical_root, dir, &mut visited_dirs, &mut entries)?;

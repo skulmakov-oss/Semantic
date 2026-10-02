@@ -12,6 +12,16 @@ use sm_format::sha256::sha256_prefixed_hex;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub const CANONICAL_SOURCE_VERSION: &str = "0.1.0";
+pub const CANONICAL_MANIFEST_VERSION: u32 = 1;
+pub const CANONICAL_DIAGNOSTIC_SCHEMA: &str = "semantic.diagnostics";
+pub const CANONICAL_STDLIB_VERSION: &str = "semantic-stdlib-v1";
+pub const CANONICAL_SEMCODE_FORMAT: &str = "SEMCOD22";
+pub const CANONICAL_SEMCODE_EPOCH: u8 = 0;
+pub const CANONICAL_SEMCODE_REVISION: u8 = 23;
+pub const CANONICAL_VERIFIER_PROFILE: &str = "verifier-canonical-v1";
+pub const CANONICAL_RUNTIME_ENGINE: &str = "deterministic-v1";
+
 /// Canonical compatibility dimensions defined by Semantic Stable Foundation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompatibilityDimensions {
@@ -29,15 +39,15 @@ pub struct CompatibilityDimensions {
 impl Default for CompatibilityDimensions {
     fn default() -> Self {
         Self {
-            source_version: "0.1.0",
-            manifest_version: 1,
-            diagnostic_schema: "semantic.diagnostics",
-            stdlib_version: "semantic-stdlib-v1",
-            semcode_format: "SEMCOD22",
-            semcode_epoch: 0,
-            semcode_revision: 23,
-            verifier_profile: "verifier-canonical-v1",
-            runtime_engine: "deterministic-v1",
+            source_version: CANONICAL_SOURCE_VERSION,
+            manifest_version: CANONICAL_MANIFEST_VERSION,
+            diagnostic_schema: CANONICAL_DIAGNOSTIC_SCHEMA,
+            stdlib_version: CANONICAL_STDLIB_VERSION,
+            semcode_format: CANONICAL_SEMCODE_FORMAT,
+            semcode_epoch: CANONICAL_SEMCODE_EPOCH,
+            semcode_revision: CANONICAL_SEMCODE_REVISION,
+            verifier_profile: CANONICAL_VERIFIER_PROFILE,
+            runtime_engine: CANONICAL_RUNTIME_ENGINE,
         }
     }
 }
@@ -156,7 +166,7 @@ impl StdlibCompatibilityPolicy {
 pub struct RuntimeCompatibilityPolicy;
 
 impl RuntimeCompatibilityPolicy {
-    pub const CANONICAL_RUNTIME_PROFILE: &'static str = "deterministic-v1";
+    pub const CANONICAL_RUNTIME_PROFILE: &'static str = CANONICAL_RUNTIME_ENGINE;
 
     /// Total Determinism PRNG Rule:
     /// Any supported runtime PRNG contract must produce bit-for-bit identical
@@ -178,9 +188,9 @@ impl RuntimeCompatibilityPolicy {
 pub struct SemCodeVerifierPolicy;
 
 impl SemCodeVerifierPolicy {
-    pub const CANONICAL_VERIFIER_PROFILE: &'static str = "verifier-canonical-v1";
+    pub const CANONICAL_VERIFIER_PROFILE: &'static str = CANONICAL_VERIFIER_PROFILE;
     pub const CURRENT_SEMCODE_MAGIC: &'static [u8; 8] = b"SEMCOD22";
-    pub const CURRENT_SEMCODE_REVISION: u16 = 23;
+    pub const CURRENT_SEMCODE_REVISION: u16 = CANONICAL_SEMCODE_REVISION as u16;
 }
 
 // ============================================================================
@@ -308,8 +318,9 @@ pub fn detect_artifact_staleness(
         }
         None => {
             let s_bytes = if source_path.is_file() {
-                fs::read(source_path)
-                    .map_err(|e| format!("failed to read source '{}': {}", source_path.display(), e))?
+                fs::read(source_path).map_err(|e| {
+                    format!("failed to read source '{}': {}", source_path.display(), e)
+                })?
             } else {
                 let mut combined = Vec::new();
                 crate::artifact_identity::collect_project_source_bytes(source_path, &mut combined)?;
@@ -572,7 +583,10 @@ impl MigrationReport {
             "Files Mutated:         {} (strictly non-destructive)\n",
             self.mutations_performed
         ));
-        out.push_str(&format!("Inspected Files:       {}\n", self.inspected_files.len()));
+        out.push_str(&format!(
+            "Inspected Files:       {}\n",
+            self.inspected_files.len()
+        ));
         out.push_str(&format!("Findings Count:        {}\n", self.findings.len()));
 
         if self.findings.is_empty() {
@@ -701,7 +715,8 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
             });
         } else if file_name == "semantic.toml" || file_name == "Semantic.toml" {
             // Validate manifest structure using canonical package manifest parser
-            if let Err(err) = crate::package_manifest::parse_semantic_toml_manifest(file, &content) {
+            if let Err(err) = crate::package_manifest::parse_semantic_toml_manifest(file, &content)
+            {
                 findings.push(MigrationCheckFinding {
                     file: file.clone(),
                     line: 1,
@@ -727,51 +742,60 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
         } else if file.extension().is_some_and(|ext| ext == "sm") {
             // Canonical source admission and checking
             match crate::executable_bundle::prepare_source_text(content.clone()) {
-                Ok((_, prepared)) => match prepared {
-                    crate::executable_bundle::PreparedSource::RustLikeOwned(Err(e)) => {
-                        let line = offset_to_line(&content, e.pos);
-                        findings.push(MigrationCheckFinding {
-                            file: file.clone(),
-                            line,
-                            category: "source_error".to_string(),
-                            message: format!("source syntax error: {}", e.message),
-                            recommendation: "Fix syntax error before checking migration compatibility".to_string(),
-                        });
-                    }
-                    crate::executable_bundle::PreparedSource::LogosOwned(Err(e)) => {
-                        let line = offset_to_line(&content, e.pos);
-                        findings.push(MigrationCheckFinding {
-                            file: file.clone(),
-                            line,
-                            category: "source_error".to_string(),
-                            message: format!("source syntax error: {}", e.message),
-                            recommendation: "Fix syntax error before checking migration compatibility".to_string(),
-                        });
-                    }
-                    crate::executable_bundle::PreparedSource::Ambiguous { logos, rustlike }
-                        if logos.is_err() && rustlike.is_err() =>
-                    {
-                        findings.push(MigrationCheckFinding {
-                            file: file.clone(),
-                            line: 1,
-                            category: "source_error".to_string(),
-                            message: "source syntax error: failed to parse under both grammars".to_string(),
-                            recommendation: "Fix syntax error before checking migration compatibility".to_string(),
-                        });
-                    }
-                    crate::executable_bundle::PreparedSource::NoSurfaceClaim
-                        if !content.trim().is_empty() && !content.trim().starts_with("//") =>
-                    {
-                        findings.push(MigrationCheckFinding {
+                Ok((_, prepared)) => {
+                    match prepared {
+                        crate::executable_bundle::PreparedSource::RustLikeOwned(Err(e)) => {
+                            let line = offset_to_line(&content, e.pos);
+                            findings.push(MigrationCheckFinding {
+                                file: file.clone(),
+                                line,
+                                category: "source_error".to_string(),
+                                message: format!("source syntax error: {}", e.message),
+                                recommendation:
+                                    "Fix syntax error before checking migration compatibility"
+                                        .to_string(),
+                            });
+                        }
+                        crate::executable_bundle::PreparedSource::LogosOwned(Err(e)) => {
+                            let line = offset_to_line(&content, e.pos);
+                            findings.push(MigrationCheckFinding {
+                                file: file.clone(),
+                                line,
+                                category: "source_error".to_string(),
+                                message: format!("source syntax error: {}", e.message),
+                                recommendation:
+                                    "Fix syntax error before checking migration compatibility"
+                                        .to_string(),
+                            });
+                        }
+                        crate::executable_bundle::PreparedSource::Ambiguous { logos, rustlike }
+                            if logos.is_err() && rustlike.is_err() =>
+                        {
+                            findings.push(MigrationCheckFinding {
+                                file: file.clone(),
+                                line: 1,
+                                category: "source_error".to_string(),
+                                message: "source syntax error: failed to parse under both grammars"
+                                    .to_string(),
+                                recommendation:
+                                    "Fix syntax error before checking migration compatibility"
+                                        .to_string(),
+                            });
+                        }
+                        crate::executable_bundle::PreparedSource::NoSurfaceClaim
+                            if !content.trim().is_empty() && !content.trim().starts_with("//") =>
+                        {
+                            findings.push(MigrationCheckFinding {
                             file: file.clone(),
                             line: 1,
                             category: "source_error".to_string(),
                             message: "source does not contain recognized Semantic grammar declarations".to_string(),
                             recommendation: "Ensure file contains valid Semantic declarations".to_string(),
                         });
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 Err(crate::executable_bundle::PrepareSourceError::Lex { error, .. }) => {
                     let line = offset_to_line(&content, error.pos);
                     findings.push(MigrationCheckFinding {
