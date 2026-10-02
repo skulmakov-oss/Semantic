@@ -793,8 +793,10 @@ pub fn save_companion_provenance(
 /// leave an inconsistent artifact/provenance pair.
 ///
 /// Note on crash consistency: Across separate filesystem paths without OS multi-file atomic transactions,
-/// if an abrupt process or system interruption occurs between the two renames, the resulting pair
-/// is detected fail-closed upon subsequent inspection via SHA-256 binding (`ProvenanceStatus::CorruptedMismatch`).
+/// if an abrupt process or system interruption occurs between the two renames, the resulting state
+/// is detected fail-closed upon subsequent inspection: an existing artifact whose bytes differ from the
+/// newly staged sidecar is detected via SHA-256 binding (`ProvenanceStatus::CorruptedMismatch`), while an
+/// absent artifact fails inspection immediately at file read.
 pub fn save_artifact_and_companion_provenance_atomic(
     artifact_path: &Path,
     artifact_bytes: &[u8],
