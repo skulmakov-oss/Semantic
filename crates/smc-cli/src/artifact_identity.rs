@@ -732,7 +732,44 @@ pub fn find_companion_provenance_path(artifact_path: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Write companion provenance JSON file to disk.
+/// Write file contents to disk atomically using a sibling temporary file and atomic replace.
+pub fn write_file_atomic(dest: &Path, contents: &[u8]) -> Result<(), String> {
+    let dir = dest.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = dest
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("output");
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = dir.join(format!(".{file_name}.tmp.{}.{suffix}", std::process::id()));
+
+    let write_result = (|| {
+        use std::io::Write;
+        let mut f = fs::File::create(&tmp_path)?;
+        f.write_all(contents)?;
+        f.sync_all()
+    })();
+    if let Err(e) = write_result {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!(
+            "failed to write temporary file '{}': {e}",
+            tmp_path.display()
+        ));
+    }
+
+    if let Err(e) = fs::rename(&tmp_path, dest) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!(
+            "failed to atomically replace '{}': {e}",
+            dest.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Write companion provenance JSON file to disk atomically.
 pub fn save_companion_provenance(
     artifact_path: &Path,
     provenance: &ArtifactProvenance,
@@ -740,13 +777,7 @@ pub fn save_companion_provenance(
     let prov_path = companion_provenance_path(artifact_path);
     let json_text = serde_json::to_string_pretty(provenance)
         .map_err(|e| format!("failed to serialize provenance: {}", e))?;
-    fs::write(&prov_path, json_text).map_err(|e| {
-        format!(
-            "failed to write provenance '{}': {}",
-            prov_path.display(),
-            e
-        )
-    })?;
+    write_file_atomic(&prov_path, json_text.as_bytes())?;
     Ok(prov_path)
 }
 
@@ -768,14 +799,13 @@ pub(crate) fn find_project_root_ancestor(start: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Generate and save companion provenance for a compiled artifact.
-pub fn generate_and_save_companion_provenance(
-    artifact_path: &Path,
+/// Generate companion provenance for a compiled artifact without modifying the filesystem.
+pub fn generate_companion_provenance(
     artifact_bytes: &[u8],
     source_path: &Path,
     package_name: Option<String>,
     package_version: Option<String>,
-) -> Result<PathBuf, String> {
+) -> Result<ArtifactProvenance, String> {
     let artifact_hash = sha256_prefixed_hex(artifact_bytes);
 
     let project_root = if source_path.is_dir() {
@@ -867,6 +897,19 @@ pub fn generate_and_save_companion_provenance(
         contract: ProvenanceContractIdentity::default(),
     };
 
+    Ok(provenance)
+}
+
+/// Generate and save companion provenance for a compiled artifact.
+pub fn generate_and_save_companion_provenance(
+    artifact_path: &Path,
+    artifact_bytes: &[u8],
+    source_path: &Path,
+    package_name: Option<String>,
+    package_version: Option<String>,
+) -> Result<PathBuf, String> {
+    let provenance =
+        generate_companion_provenance(artifact_bytes, source_path, package_name, package_version)?;
     save_companion_provenance(artifact_path, &provenance)
 }
 

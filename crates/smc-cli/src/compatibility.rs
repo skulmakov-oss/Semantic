@@ -672,22 +672,28 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
             &mut files_to_check,
         )?;
 
-        // Canonical manifest search: check semantic.toml and Semantic.toml
+        // Canonical manifest search: check semantic.toml and Semantic.toml with strict lowercase precedence
         discovered_manifest =
             if target.join("semantic.toml").is_file() || target.join("Semantic.toml").is_file() {
-                let mut actual_name = "semantic.toml".to_string();
+                let mut has_lowercase = false;
+                let mut has_uppercase = false;
                 if let Ok(entries) = fs::read_dir(target) {
                     for entry in entries.flatten() {
                         let name = entry.file_name();
-                        if name == "Semantic.toml" {
-                            actual_name = "Semantic.toml".to_string();
-                            break;
-                        } else if name == "semantic.toml" {
-                            actual_name = "semantic.toml".to_string();
-                            break;
+                        if name == "semantic.toml" {
+                            has_lowercase = true;
+                        } else if name == "Semantic.toml" {
+                            has_uppercase = true;
                         }
                     }
                 }
+                let actual_name = if has_lowercase {
+                    "semantic.toml"
+                } else if has_uppercase {
+                    "Semantic.toml"
+                } else {
+                    "semantic.toml"
+                };
                 Some(target.join(actual_name))
             } else {
                 None
