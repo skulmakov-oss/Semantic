@@ -697,14 +697,16 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     let t_compile = Instant::now();
     std::fs::write(out, &bytes).map_err(|e| format!("failed to write '{}': {}", out, e))?;
-    crate::artifact_identity::generate_and_save_companion_provenance(
+    if let Err(e) = crate::artifact_identity::generate_and_save_companion_provenance(
         Path::new(out),
         &bytes,
         &root,
         None,
         None,
-    )
-    .map_err(|e| format!("failed to record artifact provenance: {}", e))?;
+    ) {
+        let _ = std::fs::remove_file(out);
+        return Err(format!("failed to record artifact provenance: {}", e));
+    }
     let t_write = Instant::now();
     println!("compiled '{}' -> '{}' ({} bytes)", input, out, bytes.len());
     if debug_symbols {
@@ -5174,11 +5176,13 @@ fn cmd_migrate(args: &[String]) -> Result<(), String> {
 
     for arg in args {
         match arg.as_str() {
-            "check" | "preview" | "dry-run" => {
+            "check" | "preview" => {
                 if subcmd.is_none() {
                     subcmd = Some(arg.as_str());
                 } else if target_path.is_none() {
                     target_path = Some(arg.as_str());
+                } else {
+                    return Err(format!("unexpected argument '{}'", arg));
                 }
             }
             "--dry-run" | "-n" => _dry_run = true,
@@ -5202,8 +5206,18 @@ fn cmd_migrate(args: &[String]) -> Result<(), String> {
             }
         }
     }
+    let subcmd = subcmd.ok_or_else(|| {
+        "missing required subcommand 'check' or 'preview'\nusage: smc migrate <check|preview> <path> [--json] [--dry-run]".to_string()
+    })?;
+    if subcmd != "check" && subcmd != "preview" {
+        return Err(format!(
+            "unknown subcommand '{}'\nusage: smc migrate <check|preview> <path> [--json] [--dry-run]",
+            subcmd
+        ));
+    }
     let path_str = target_path.ok_or_else(|| {
-        "usage: smc migrate <check|preview> <path> [--json] [--dry-run]".to_string()
+        "missing target path\nusage: smc migrate <check|preview> <path> [--json] [--dry-run]"
+            .to_string()
     })?;
     let path = Path::new(path_str);
     let report = crate::compatibility::inspect_migration(path)?;
@@ -5211,6 +5225,14 @@ fn cmd_migrate(args: &[String]) -> Result<(), String> {
         println!("{}", report.render_json());
     } else {
         print!("{}", report.render_human());
+    }
+    if report.classification == crate::compatibility::CompatibilityClassification::Incompatible
+        || report.classification == crate::compatibility::CompatibilityClassification::Unsupported
+    {
+        return Err(format!(
+            "migration check failed with classification: {}",
+            report.classification.as_str()
+        ));
     }
     Ok(())
 }

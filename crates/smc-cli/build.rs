@@ -147,6 +147,10 @@ fn run() -> Result<(), String> {
     }
     println!("cargo:rustc-env=SM_COMPILER_SOURCE_HASH={:016x}", hash);
     println!("cargo:rustc-env=SM_ENABLED_FEATURES={}", enabled_features());
+    println!(
+        "cargo:rustc-env=SM_COMPILER_TARGET={}",
+        std::env::var("TARGET").unwrap_or_default()
+    );
     Ok(())
 }
 

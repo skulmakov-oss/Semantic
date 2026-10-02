@@ -238,6 +238,7 @@ Assert-FileContains -Path $traceDisasmPath -Patterns @(
 
 $steps.Add((Invoke-CapturedStep -Name "release toolchain version" -FilePath $extractedSmc -ArgumentList @("version", "--json") -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $releaseToolchainJson = Get-Content -LiteralPath $steps[$steps.Count - 1].stdoutPath -Raw | ConvertFrom-Json
+$sourceFingerprint = if ($releaseToolchainJson.source_fingerprint) { $releaseToolchainJson.source_fingerprint } else { $releaseToolchainJson.source_hash }
 
 $report = [ordered]@{
     generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
@@ -280,7 +281,6 @@ $report = [ordered]@{
             result = "pass"
         }
     )
-    $sourceFingerprint = if ($releaseToolchainJson.source_fingerprint) { $releaseToolchainJson.source_fingerprint } else { $releaseToolchainJson.source_hash }
     toolchainEvidence = [ordered]@{
         compilerVersion = $releaseToolchainJson.toolchain_version
         sourceFingerprint = $sourceFingerprint

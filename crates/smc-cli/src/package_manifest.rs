@@ -1392,6 +1392,7 @@ fn resolve_manifest_context(
 pub(crate) struct ParsedSemanticTomlManifest {
     pub(crate) manifest: PackageManifest,
     pub(crate) entry: String,
+    pub(crate) package_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1439,6 +1440,7 @@ pub(crate) fn parse_semantic_toml_manifest(
     #[derive(Debug, Default)]
     struct ParsedSemanticTomlFields {
         package_name: Option<String>,
+        package_version: Option<String>,
         project_entry: Option<String>,
     }
 
@@ -1526,7 +1528,18 @@ pub(crate) fn parse_semantic_toml_manifest(
                 "name" => {
                     parsed.package_name = Some(parse_toml_string(value, line_no, "package.name")?);
                 }
-                "version" => {}
+                "version" => {
+                    let v_trim = value.trim();
+                    let ver_str =
+                        if v_trim.starts_with('"') && v_trim.ends_with('"') && v_trim.len() >= 2 {
+                            v_trim[1..v_trim.len() - 1].to_string()
+                        } else if let Ok(n) = v_trim.parse::<u64>() {
+                            n.to_string()
+                        } else {
+                            v_trim.to_string()
+                        };
+                    parsed.package_version = Some(ver_str);
+                }
                 other => {
                     return Err(semantic_toml_error(
                         SemanticTomlManifestErrorCode::UnsupportedPackageField,
@@ -1635,7 +1648,11 @@ pub(crate) fn parse_semantic_toml_manifest(
         },
         Vec::new(),
     );
-    Ok(ParsedSemanticTomlManifest { manifest, entry })
+    Ok(ParsedSemanticTomlManifest {
+        manifest,
+        entry,
+        package_version: parsed.package_version,
+    })
 }
 // Same check DL-010 added to `validate_contained_relative_path` et al.: a Windows
 // root-relative spec like `\outside` has a `RootDir` component but no `Prefix`, so

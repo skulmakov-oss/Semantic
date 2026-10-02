@@ -171,14 +171,15 @@ impl RuntimeCompatibilityPolicy {
     /// Total Determinism PRNG Rule:
     /// Any supported runtime PRNG contract must produce bit-for-bit identical
     /// pseudo-random sequences across repeated executions with the identical seed.
+    /// Canonical algorithm matches sm-vm's deterministic xorshift64 (shifts 13, 7, 17).
     pub fn verify_deterministic_prng_seed(seed: u64, iterations: usize) -> Vec<u64> {
-        let mut state = seed;
+        let mut state = if seed == 0 { 1 } else { seed };
         let mut out = Vec::with_capacity(iterations);
         for _ in 0..iterations {
-            state ^= state >> 12;
-            state ^= state << 25;
-            state ^= state >> 27;
-            out.push(state.wrapping_mul(0x2545_F491_4F6C_DD1D));
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            out.push(state);
         }
         out
     }
@@ -370,6 +371,14 @@ pub fn detect_artifact_staleness(
             )));
         }
     };
+
+    if provenance.schema_version != crate::artifact_identity::ARTIFACT_PROVENANCE_SCHEMA_VERSION {
+        return Ok(StalenessStatus::UnsupportedProvenance(format!(
+            "unsupported provenance schema version {}; expected {}",
+            provenance.schema_version,
+            crate::artifact_identity::ARTIFACT_PROVENANCE_SCHEMA_VERSION
+        )));
+    }
 
     // 5. Cryptographic validation of artifact hash
     if provenance.artifact_hash != actual_artifact_hash {
@@ -666,16 +675,35 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
             &mut files_to_check,
         )?;
 
-        // Canonical manifest search: check semantic.toml first, then Semantic.toml
-        discovered_manifest = if target.join("semantic.toml").is_file() {
-            Some(target.join("semantic.toml"))
-        } else if target.join("Semantic.toml").is_file() {
-            Some(target.join("Semantic.toml"))
-        } else {
-            None
-        };
+        // Canonical manifest search: check semantic.toml and Semantic.toml
+        discovered_manifest =
+            if target.join("semantic.toml").is_file() || target.join("Semantic.toml").is_file() {
+                let mut actual_name = "semantic.toml".to_string();
+                if let Ok(entries) = fs::read_dir(target) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        if name == "Semantic.toml" {
+                            actual_name = "Semantic.toml".to_string();
+                            break;
+                        } else if name == "semantic.toml" {
+                            actual_name = "semantic.toml".to_string();
+                            break;
+                        }
+                    }
+                }
+                Some(target.join(actual_name))
+            } else {
+                None
+            };
         if let Some(ref m) = discovered_manifest {
-            if crate::package_manifest::path_is_reparse(m).unwrap_or(false) {
+            let is_reparse = crate::package_manifest::path_is_reparse(m).map_err(|e| {
+                format!(
+                    "security violation: failed to check reparse point for manifest '{}': {}",
+                    m.display(),
+                    e
+                )
+            })?;
+            if is_reparse {
                 let m_canon = fs::canonicalize(m).map_err(|e| {
                     format!("failed to canonicalize manifest '{}': {}", m.display(), e)
                 })?;
@@ -714,6 +742,16 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
                 recommendation: "Migrate to canonical semantic.toml manifest format".to_string(),
             });
         } else if file_name == "semantic.toml" || file_name == "Semantic.toml" {
+            if file_name == "Semantic.toml" {
+                findings.push(MigrationCheckFinding {
+                    file: file.clone(),
+                    line: 1,
+                    category: "manifest_deprecated".to_string(),
+                    message: "manifest uses uppercase filename 'Semantic.toml'".to_string(),
+                    recommendation: "Rename manifest file to lowercase 'semantic.toml'".to_string(),
+                });
+            }
+
             // Validate manifest structure using canonical package manifest parser
             if let Err(err) = crate::package_manifest::parse_semantic_toml_manifest(file, &content)
             {
@@ -735,7 +773,9 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
                         line: line_num,
                         category: "manifest_version".to_string(),
                         message: "legacy format version 0 declared".to_string(),
-                        recommendation: "Upgrade format declaration to 'format = 1'".to_string(),
+                        recommendation:
+                            "Remove legacy format directive or migrate to valid [package] manifest"
+                                .to_string(),
                     });
                 }
             }
