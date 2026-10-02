@@ -6,7 +6,7 @@
     "compiler_name": "smc",
     "compiler_version": "99.0.0",
     "build_target": "incompatible-arch",
-    "commit_hash": "future-commit",
+    "source_fingerprint": "future-fingerprint",
     "profile": "release",
     "enabled_features": [
       "experimental"

@@ -6,7 +6,7 @@
     "compiler_name": "smc",
     "compiler_version": "0.1.0",
     "build_target": "x86_64-pc-windows-msvc",
-    "commit_hash": "release-build",
+    "source_fingerprint": "release-build",
     "profile": "release",
     "enabled_features": [
       "std"
@@ -23,9 +23,9 @@
     "semcode_format": "SEMCOD22",
     "semcode_epoch": 0,
     "semcode_revision": 23,
-    "verifier_profile": "VerifiedLocal",
-    "runtime_profile": "SVM-Deterministic-v1",
-    "stdlib_version": "0.1.0",
-    "diagnostic_contract": "semantic.diagnostics/v1"
+    "verifier_profile": "verifier-canonical-v1",
+    "runtime_profile": "deterministic-v1",
+    "stdlib_version": "semantic-stdlib-v1",
+    "diagnostic_contract": "semantic.diagnostics"
   }
 }

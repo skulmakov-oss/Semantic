@@ -280,9 +280,11 @@ $report = [ordered]@{
             result = "pass"
         }
     )
+    $sourceFingerprint = if ($releaseToolchainJson.source_fingerprint) { $releaseToolchainJson.source_fingerprint } else { $releaseToolchainJson.source_hash }
     toolchainEvidence = [ordered]@{
         compilerVersion = $releaseToolchainJson.toolchain_version
-        sourceHash = $releaseToolchainJson.source_hash
+        sourceFingerprint = $sourceFingerprint
+        sourceHash = $sourceFingerprint
         enabledFeatures = $releaseToolchainJson.enabled_features
         semcodeFormat = $releaseToolchainJson.semcode_format
         verifierProfile = $releaseToolchainJson.verifier_profile
@@ -297,7 +299,8 @@ $report = [ordered]@{
         verifierBinding = "exact-artifact-hash"
         producingToolchain = [ordered]@{
             compilerVersion = $releaseToolchainJson.toolchain_version
-            sourceHash = $releaseToolchainJson.source_hash
+            sourceFingerprint = $sourceFingerprint
+            sourceHash = $sourceFingerprint
             enabledFeatures = $releaseToolchainJson.enabled_features
             semcodeFormat = $releaseToolchainJson.semcode_format
             verifierProfile = $releaseToolchainJson.verifier_profile
@@ -321,7 +324,7 @@ $markdown = @(
     "- Release Signing: unsigned (explicitly unsigned per SSF-10)"
     "- Digest Algorithm: SHA-256 (algorithm defined by FIPS PUB 180-4)"
     "- Release Toolchain Version: $($report.toolchainEvidence.compilerVersion)"
-    "- Release Compiler Source Commit: $($report.toolchainEvidence.sourceHash)"
+    "- Release Compiler Source Fingerprint: $($report.toolchainEvidence.sourceFingerprint)"
     ""
     "## Asset Hashes"
     ""

@@ -34,7 +34,7 @@ Semantic defines six explicit compatibility policies across its subsystems:
 - **Removed Constructs**: Transition to `Removed` results in a deterministic compile-time error (`E0005`/`E0201`), never silent behavior alteration.
 
 ### B. Manifest and Project Compatibility Policy
-- **Independent Versioning**: Manifest schemas (`Semantic.toml`) are versioned independently from the source language compiler version.
+- **Independent Versioning**: Manifest schemas (`semantic.toml`) are versioned independently from the source language compiler version.
 - **Supported Schemas**: Currently schema version `1`. Schema version `0` is admitted with deprecation warnings.
 - **Fail-Closed Rejection**: Unknown or future schema versions (e.g. `schema_version = 99`) are rejected fail-closed.
 - **Zero Silent Migration**: The compiler and CLI never modify manifests or project files automatically.
@@ -48,7 +48,7 @@ Semantic defines six explicit compatibility policies across its subsystems:
   is classified as a breaking contract change and requires bumping the machine schema version (`semantic.diagnostics/v2`).
 
 ### D. Standard Library Compatibility Policy
-- **Contract Baseline**: Version `0.1.0` covering `std.core`, `std.quad`, `std.math` (`sqrt`, `abs`), `std.text`, `std.seq`, `std.map`, `std.option`, `std.result`.
+- **Contract Baseline**: Version `semantic-stdlib-v1` (`0.1.0`) covering `std.core`, `std.quad`, `std.math` (`sqrt`, `abs`), `std.text`, `std.seq`, `std.map`, `std.option`, `std.result`.
 - **Behavior-Preserving Additions**: Introducing new pure, non-conflicting builtins or library modules is non-breaking.
 - **Breaking Changes**: Changing argument counts, parameter types, return types, or widening capability requirements is breaking.
 
@@ -58,7 +58,7 @@ Semantic defines six explicit compatibility policies across its subsystems:
 
 ### F. SemCode and Verifier Gate Policy
 - **Wire Format**: SemCode format `SEMCOD22` (Revision 23, Epoch 0) with mandatory `ADT0` descriptor table.
-- **Verifier Profile**: `canonical-v1` enforcing loop CFG acyclicity, operand stack limits, register bounds, and capability gating.
+- **Verifier Profile**: `verifier-canonical-v1` enforcing loop CFG acyclicity, operand stack limits, register bounds, and capability gating.
 - **Verifier Admission Gate**: Canonical execution consumes verifier-admitted SemCode. Revisions `< 23` are classified `Deprecated`; revisions `> 23` are `Unsupported`.
 
 ---
@@ -102,7 +102,7 @@ To identify the toolchain that originally produced an arbitrary `.smc` without f
     "compiler_name": "smc",
     "compiler_version": "0.1.0",
     "build_target": "x86_64-pc-windows-msvc",
-    "commit_hash": "443569c32db5fc8a",
+    "source_fingerprint": "443569c32db5fc8a",
     "profile": "release",
     "enabled_features": ["std", "profile-rust", "debug-symbols"]
   },
@@ -117,16 +117,18 @@ To identify the toolchain that originally produced an arbitrary `.smc` without f
     "semcode_format": "SEMCOD22",
     "semcode_epoch": 0,
     "semcode_revision": 23,
-    "verifier_profile": "VerifiedLocal",
-    "runtime_profile": "SVM-Deterministic-v1",
-    "stdlib_version": "0.1.0",
-    "diagnostic_contract": "semantic.diagnostics/v1"
+    "verifier_profile": "verifier-canonical-v1",
+    "runtime_profile": "deterministic-v1",
+    "stdlib_version": "semantic-stdlib-v1",
+    "diagnostic_contract": "semantic.diagnostics"
   }
 }
 ```
 
-### Cryptographic Binding Invariant
-The companion provenance is cryptographically bound to the artifact through `artifact_hash`. If the artifact bytes change or do not match `artifact_hash`, inspection reports `CorruptedMismatch`.
+### Trust Model (Integrity-Only Companion Record)
+Companion provenance (`<artifact>.provenance.json`) is an unsigned metadata sidecar cryptographically correlated via `artifact_hash`. It proves correlation to the artifact SHA-256 digest, but sidecar contents are not independently authenticated signatures; release trust requires external manifest/hash authority.
+
+If the artifact bytes change or do not match `artifact_hash`, inspection reports `CorruptedMismatch`.
 
 ---
 
@@ -180,14 +182,14 @@ Semantic binaries (`smc.exe`, `svm.exe`) are currently **unsigned**.
   ```json
   "signing": "unsigned"
   ```
-- Release verification (`scripts/verify_release_assets.ps1`) executes the extracted release binary `smc version --json` to capture and record the actual release toolchain evidence (compiler version, source commit, features, format revision) alongside the exact SHA-256 asset checksums.
+- Release verification (`scripts/verify_release_assets.ps1`) executes the extracted release binary `smc version --json` to capture and record the actual release toolchain evidence (compiler version, source fingerprint, features, format revision) alongside the exact SHA-256 asset checksums.
 
 ---
 
 ## 8. CLI Surfaces
 
 ### `smc version [--json]`
-Displays toolchain version, source commit, enabled cargo features, active SemCode format revision, verifier profile, and release signing state.
+Displays toolchain version, source fingerprint (FNV-1a hash of compiler source closure), enabled cargo features, active SemCode format revision, verifier profile (`verifier-canonical-v1`), and release signing state (`unsigned`).
 
 ### `smc artifact hash <path.smc> [--json]`
 Computes and outputs the canonical SHA-256 hash of the compiled artifact.

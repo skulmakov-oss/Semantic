@@ -31,13 +31,13 @@ impl Default for CompatibilityDimensions {
         Self {
             source_version: "0.1.0",
             manifest_version: 1,
-            diagnostic_schema: "semantic.diagnostics/v1",
-            stdlib_version: "0.1.0",
+            diagnostic_schema: "semantic.diagnostics",
+            stdlib_version: "semantic-stdlib-v1",
             semcode_format: "SEMCOD22",
             semcode_epoch: 0,
             semcode_revision: 23,
-            verifier_profile: "VerifiedLocal",
-            runtime_engine: "SVM-Deterministic-v1",
+            verifier_profile: "verifier-canonical-v1",
+            runtime_engine: "deterministic-v1",
         }
     }
 }
@@ -178,7 +178,7 @@ impl RuntimeCompatibilityPolicy {
 pub struct SemCodeVerifierPolicy;
 
 impl SemCodeVerifierPolicy {
-    pub const CANONICAL_VERIFIER_PROFILE: &'static str = "canonical-v1";
+    pub const CANONICAL_VERIFIER_PROFILE: &'static str = "verifier-canonical-v1";
     pub const CURRENT_SEMCODE_MAGIC: &'static [u8; 8] = b"SEMCOD22";
     pub const CURRENT_SEMCODE_REVISION: u16 = 23;
 }
@@ -219,6 +219,11 @@ pub enum StalenessStatus {
         current_compiler: String,
         reason: String,
     },
+    /// The artifact bytes do not match the cryptographic hash recorded in companion provenance.
+    CorruptedMismatch {
+        expected_artifact_hash: String,
+        actual_artifact_hash: String,
+    },
     /// Companion provenance record is missing; fail-closed cannot prove provenance.
     MissingProvenance(PathBuf),
     /// Companion provenance record is malformed or invalid JSON.
@@ -241,6 +246,7 @@ impl StalenessStatus {
                 | Self::ProjectMismatch { .. }
                 | Self::ManifestMismatch { .. }
                 | Self::ToolchainMismatch { .. }
+                | Self::CorruptedMismatch { .. }
         )
     }
 
@@ -251,6 +257,7 @@ impl StalenessStatus {
             Self::ProjectMismatch { .. } => "ProjectMismatch",
             Self::ManifestMismatch { .. } => "ManifestMismatch",
             Self::ToolchainMismatch { .. } => "ToolchainMismatch",
+            Self::CorruptedMismatch { .. } => "CorruptedMismatch",
             Self::MissingProvenance(_) => "MissingProvenance",
             Self::UnsupportedProvenance(_) => "UnsupportedProvenance",
             Self::MissingSource(_) => "MissingSource",
@@ -287,14 +294,29 @@ pub fn detect_artifact_staleness(
     let actual_artifact_hash = sha256_prefixed_hex(&artifact_bytes);
 
     // 2. Calculate actual source content hash
-    let actual_source_hash = if source_path.is_file() {
-        let s_bytes = fs::read(source_path)
-            .map_err(|e| format!("failed to read source '{}': {}", source_path.display(), e))?;
-        sha256_prefixed_hex(&s_bytes)
+    let project_root = if source_path.is_dir() {
+        Some(source_path.to_path_buf())
     } else {
-        let mut combined = Vec::new();
-        collect_project_source_bytes(source_path, &mut combined)?;
-        sha256_prefixed_hex(&combined)
+        crate::artifact_identity::find_project_root_ancestor(source_path)
+    };
+
+    let actual_source_hash = match project_root {
+        Some(ref root) => {
+            let mut combined = Vec::new();
+            crate::artifact_identity::collect_project_source_bytes(root, &mut combined)?;
+            sha256_prefixed_hex(&combined)
+        }
+        None => {
+            let s_bytes = if source_path.is_file() {
+                fs::read(source_path)
+                    .map_err(|e| format!("failed to read source '{}': {}", source_path.display(), e))?
+            } else {
+                let mut combined = Vec::new();
+                crate::artifact_identity::collect_project_source_bytes(source_path, &mut combined)?;
+                combined
+            };
+            sha256_prefixed_hex(&s_bytes)
+        }
     };
 
     // 3. Inspect mtime as a secondary diagnostic hint
@@ -340,10 +362,9 @@ pub fn detect_artifact_staleness(
 
     // 5. Cryptographic validation of artifact hash
     if provenance.artifact_hash != actual_artifact_hash {
-        return Ok(StalenessStatus::StaleSourceChanged {
-            expected_source_hash: provenance.source.source_hash,
-            actual_source_hash,
-            mtime_indicated_stale: true,
+        return Ok(StalenessStatus::CorruptedMismatch {
+            expected_artifact_hash: provenance.artifact_hash,
+            actual_artifact_hash,
         });
     }
 
@@ -357,12 +378,32 @@ pub fn detect_artifact_staleness(
     }
 
     // 7. Check manifest hash if manifest was recorded in provenance
-    let current_manifest_path = if source_path.is_dir() {
-        source_path.join("Semantic.toml")
-    } else if let Some(parent) = source_path.parent() {
-        parent.join("Semantic.toml")
-    } else {
-        PathBuf::from("Semantic.toml")
+    let current_manifest_path = match project_root {
+        Some(ref root) => {
+            if root.join("semantic.toml").is_file() {
+                root.join("semantic.toml")
+            } else if root.join("Semantic.toml").is_file() {
+                root.join("Semantic.toml")
+            } else {
+                root.join("semantic.toml")
+            }
+        }
+        None => {
+            let base_dir = if source_path.is_dir() {
+                source_path
+            } else if let Some(parent) = source_path.parent() {
+                parent
+            } else {
+                Path::new(".")
+            };
+            if base_dir.join("semantic.toml").is_file() {
+                base_dir.join("semantic.toml")
+            } else if base_dir.join("Semantic.toml").is_file() {
+                base_dir.join("Semantic.toml")
+            } else {
+                base_dir.join("semantic.toml")
+            }
+        }
     };
 
     if let Some(expected_m_hash) = &provenance.source.manifest_hash {
@@ -442,40 +483,6 @@ pub fn detect_artifact_staleness(
     })
 }
 
-fn collect_project_source_bytes(dir: &Path, out: &mut Vec<u8>) -> Result<(), String> {
-    let mut entries = Vec::new();
-    collect_sm_files_sorted(dir, &mut entries)?;
-    for path in entries {
-        let b =
-            fs::read(&path).map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
-        out.extend_from_slice(path.to_string_lossy().as_bytes());
-        out.push(0);
-        out.extend_from_slice(&b);
-        out.push(0);
-    }
-    Ok(())
-}
-
-fn collect_sm_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    let read_dir = fs::read_dir(dir)
-        .map_err(|e| format!("failed to read directory '{}': {}", dir.display(), e))?;
-    let mut entries: Vec<_> = read_dir.filter_map(Result::ok).collect();
-    entries.sort_by_key(|e| e.path());
-
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.starts_with('.') && name != "target" {
-                collect_sm_files_sorted(&path, out)?;
-            }
-        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "sm") {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
 /// Assess compatibility of a compiled SemCode artifact against canonical contracts.
 pub fn assess_artifact_compatibility(identity: &ArtifactIdentity) -> CompatibilityClassification {
     // 1. Verifier admission check
@@ -516,12 +523,35 @@ pub struct MigrationCheckFinding {
     pub recommendation: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct MigrationReportJson<'a> {
+    target: String,
+    classification: &'a str,
+    mutations_performed: usize,
+    findings_count: usize,
+    inspected_files_count: usize,
+    manifest_path: Option<String>,
+    findings: Vec<MigrationCheckFindingJson>,
+    status: &'a str,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MigrationCheckFindingJson {
+    file: String,
+    line: usize,
+    category: String,
+    message: String,
+    recommendation: String,
+}
+
 /// Summary report for non-destructive migration dry-run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MigrationReport {
     pub target: PathBuf,
     pub classification: CompatibilityClassification,
     pub findings: Vec<MigrationCheckFinding>,
+    pub inspected_files: Vec<PathBuf>,
+    pub manifest_path: Option<PathBuf>,
     /// Must be guaranteed to be 0 for dry-run inspection.
     pub mutations_performed: usize,
     pub status: String,
@@ -542,6 +572,7 @@ impl MigrationReport {
             "Files Mutated:         {} (strictly non-destructive)\n",
             self.mutations_performed
         ));
+        out.push_str(&format!("Inspected Files:       {}\n", self.inspected_files.len()));
         out.push_str(&format!("Findings Count:        {}\n", self.findings.len()));
 
         if self.findings.is_empty() {
@@ -563,39 +594,40 @@ impl MigrationReport {
     }
 
     pub fn render_json(&self) -> String {
-        let mut json = String::new();
-        json.push_str("{\n");
-        json.push_str(&format!(
-            "  \"target\": \"{}\",\n",
-            self.target.display().to_string().replace('\\', "/")
-        ));
-        json.push_str(&format!(
-            "  \"classification\": \"{}\",\n",
-            self.classification.as_str()
-        ));
-        json.push_str(&format!(
-            "  \"mutations_performed\": {},\n",
-            self.mutations_performed
-        ));
-        json.push_str(&format!("  \"findings_count\": {},\n", self.findings.len()));
-        json.push_str("  \"findings\": [\n");
-        for (i, f) in self.findings.iter().enumerate() {
-            let comma = if i + 1 < self.findings.len() { "," } else { "" };
-            json.push_str(&format!(
-                "    {{\"file\": \"{}\", \"line\": {}, \"category\": \"{}\", \"message\": \"{}\", \"recommendation\": \"{}\"}}{}\n",
-                f.file.display().to_string().replace('\\', "/"),
-                f.line,
-                f.category,
-                f.message.replace('\"', "\\\""),
-                f.recommendation.replace('\"', "\\\""),
-                comma
-            ));
-        }
-        json.push_str("  ],\n");
-        json.push_str(&format!("  \"status\": \"{}\"\n", self.status));
-        json.push_str("}\n");
-        json
+        let findings_json: Vec<MigrationCheckFindingJson> = self
+            .findings
+            .iter()
+            .map(|f| MigrationCheckFindingJson {
+                file: f.file.display().to_string().replace('\\', "/"),
+                line: f.line,
+                category: f.category.clone(),
+                message: f.message.clone(),
+                recommendation: f.recommendation.clone(),
+            })
+            .collect();
+
+        let report_json = MigrationReportJson {
+            target: self.target.display().to_string().replace('\\', "/"),
+            classification: self.classification.as_str(),
+            mutations_performed: self.mutations_performed,
+            findings_count: self.findings.len(),
+            inspected_files_count: self.inspected_files.len(),
+            manifest_path: self
+                .manifest_path
+                .as_ref()
+                .map(|p| p.display().to_string().replace('\\', "/")),
+            findings: findings_json,
+            status: &self.status,
+        };
+
+        serde_json::to_string_pretty(&report_json)
+            .unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
     }
+}
+
+fn offset_to_line(content: &str, pos: usize) -> usize {
+    let safe_pos = pos.min(content.len());
+    content[..safe_pos].chars().filter(|&c| c == '\n').count() + 1
 }
 
 /// Perform non-destructive migration inspection on a target source file or project.
@@ -607,12 +639,42 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
     }
 
     let mut files_to_check = Vec::new();
+    let mut discovered_manifest = None;
     if target.is_dir() {
-        collect_sm_files(target, &mut files_to_check)?;
-        let manifest = target.join("Semantic.toml");
-        if manifest.is_file() {
-            files_to_check.push(manifest);
+        let canonical_target = fs::canonicalize(target)
+            .map_err(|e| format!("failed to canonicalize '{}': {}", target.display(), e))?;
+        let mut visited_dirs = std::collections::HashSet::new();
+        crate::artifact_identity::collect_project_files_secure(
+            target,
+            &canonical_target,
+            target,
+            &mut visited_dirs,
+            &mut files_to_check,
+        )?;
+
+        // Canonical manifest search: check semantic.toml first, then Semantic.toml
+        discovered_manifest = if target.join("semantic.toml").is_file() {
+            Some(target.join("semantic.toml"))
+        } else if target.join("Semantic.toml").is_file() {
+            Some(target.join("Semantic.toml"))
+        } else {
+            None
+        };
+        if let Some(ref m) = discovered_manifest {
+            if crate::package_manifest::path_is_reparse(m).unwrap_or(false) {
+                let m_canon = fs::canonicalize(m).map_err(|e| {
+                    format!("failed to canonicalize manifest '{}': {}", m.display(), e)
+                })?;
+                if !m_canon.starts_with(&canonical_target) {
+                    return Err(format!(
+                        "security violation: manifest '{}' escapes project root",
+                        m.display()
+                    ));
+                }
+            }
+            files_to_check.push(m.clone());
         }
+
         let legacy_manifest = target.join("package.manifest");
         if legacy_manifest.is_file() {
             files_to_check.push(legacy_manifest);
@@ -627,42 +689,131 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
         let content = fs::read_to_string(file)
             .map_err(|e| format!("failed to read '{}': {}", file.display(), e))?;
 
-        if file.file_name().is_some_and(|n| n == "package.manifest") {
+        let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        if file_name == "package.manifest" {
             findings.push(MigrationCheckFinding {
                 file: file.clone(),
                 line: 1,
                 category: "manifest_deprecation".to_string(),
                 message: "package.manifest uses legacy package manifest format".to_string(),
-                recommendation: "Migrate to canonical Semantic.toml manifest format".to_string(),
+                recommendation: "Migrate to canonical semantic.toml manifest format".to_string(),
             });
-        }
-
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_num = line_idx + 1;
-            let trimmed = line.trim();
-
-            if trimmed.starts_with("#[deprecated") || trimmed.contains("// @deprecated") {
+        } else if file_name == "semantic.toml" || file_name == "Semantic.toml" {
+            // Validate manifest structure using canonical package manifest parser
+            if let Err(err) = crate::package_manifest::parse_semantic_toml_manifest(file, &content) {
                 findings.push(MigrationCheckFinding {
                     file: file.clone(),
-                    line: line_num,
-                    category: "deprecated_attribute".to_string(),
-                    message: "explicitly deprecated item in source".to_string(),
-                    recommendation: "Review deprecation note and replace with current API"
-                        .to_string(),
+                    line: 1,
+                    category: "manifest_error".to_string(),
+                    message: format!("malformed package manifest: {}", err.message),
+                    recommendation: "Fix syntax error in semantic.toml manifest".to_string(),
                 });
             }
 
-            if trimmed.starts_with("format = 0") || trimmed.starts_with("format 0") {
-                findings.push(MigrationCheckFinding {
-                    file: file.clone(),
-                    line: line_num,
-                    category: "manifest_version".to_string(),
-                    message: "legacy format version 0 declared".to_string(),
-                    recommendation: "Upgrade format declaration to 'format = 1'".to_string(),
-                });
+            for (line_idx, line) in content.lines().enumerate() {
+                let line_num = line_idx + 1;
+                let trimmed = line.trim();
+                if trimmed.starts_with("format = 0") || trimmed.starts_with("format 0") {
+                    findings.push(MigrationCheckFinding {
+                        file: file.clone(),
+                        line: line_num,
+                        category: "manifest_version".to_string(),
+                        message: "legacy format version 0 declared".to_string(),
+                        recommendation: "Upgrade format declaration to 'format = 1'".to_string(),
+                    });
+                }
+            }
+        } else if file.extension().is_some_and(|ext| ext == "sm") {
+            // Canonical source admission and checking
+            match crate::executable_bundle::prepare_source_text(content.clone()) {
+                Ok((_, prepared)) => match prepared {
+                    crate::executable_bundle::PreparedSource::RustLikeOwned(Err(e)) => {
+                        let line = offset_to_line(&content, e.pos);
+                        findings.push(MigrationCheckFinding {
+                            file: file.clone(),
+                            line,
+                            category: "source_error".to_string(),
+                            message: format!("source syntax error: {}", e.message),
+                            recommendation: "Fix syntax error before checking migration compatibility".to_string(),
+                        });
+                    }
+                    crate::executable_bundle::PreparedSource::LogosOwned(Err(e)) => {
+                        let line = offset_to_line(&content, e.pos);
+                        findings.push(MigrationCheckFinding {
+                            file: file.clone(),
+                            line,
+                            category: "source_error".to_string(),
+                            message: format!("source syntax error: {}", e.message),
+                            recommendation: "Fix syntax error before checking migration compatibility".to_string(),
+                        });
+                    }
+                    crate::executable_bundle::PreparedSource::Ambiguous { logos, rustlike }
+                        if logos.is_err() && rustlike.is_err() =>
+                    {
+                        findings.push(MigrationCheckFinding {
+                            file: file.clone(),
+                            line: 1,
+                            category: "source_error".to_string(),
+                            message: "source syntax error: failed to parse under both grammars".to_string(),
+                            recommendation: "Fix syntax error before checking migration compatibility".to_string(),
+                        });
+                    }
+                    crate::executable_bundle::PreparedSource::NoSurfaceClaim
+                        if !content.trim().is_empty() && !content.trim().starts_with("//") =>
+                    {
+                        findings.push(MigrationCheckFinding {
+                            file: file.clone(),
+                            line: 1,
+                            category: "source_error".to_string(),
+                            message: "source does not contain recognized Semantic grammar declarations".to_string(),
+                            recommendation: "Ensure file contains valid Semantic declarations".to_string(),
+                        });
+                    }
+                    _ => {}
+                },
+                Err(crate::executable_bundle::PrepareSourceError::Lex { error, .. }) => {
+                    let line = offset_to_line(&content, error.pos);
+                    findings.push(MigrationCheckFinding {
+                        file: file.clone(),
+                        line,
+                        category: "source_error".to_string(),
+                        message: format!("lexical error: {}", error.message),
+                        recommendation: "Fix lexical errors before checking migration compatibility".to_string(),
+                    });
+                }
+                Err(crate::executable_bundle::PrepareSourceError::Read(e)) => {
+                    findings.push(MigrationCheckFinding {
+                        file: file.clone(),
+                        line: 1,
+                        category: "source_error".to_string(),
+                        message: format!("failed to read source: {}", e),
+                        recommendation: "Verify file permissions and accessibility".to_string(),
+                    });
+                }
+            }
+
+            for (line_idx, line) in content.lines().enumerate() {
+                let line_num = line_idx + 1;
+                let trimmed = line.trim();
+                if trimmed.starts_with("#[deprecated") || trimmed.contains("// @deprecated") {
+                    findings.push(MigrationCheckFinding {
+                        file: file.clone(),
+                        line: line_num,
+                        category: "deprecated_attribute".to_string(),
+                        message: "explicitly deprecated item in source".to_string(),
+                        recommendation: "Review deprecation note and replace with current API"
+                            .to_string(),
+                    });
+                }
             }
         }
     }
+
+    // Sort findings deterministically
+    findings.sort_by(|a, b| {
+        (&a.file, a.line, &a.category, &a.message).cmp(&(&b.file, b.line, &b.category, &b.message))
+    });
 
     let classification = if findings.iter().any(|f| f.category.contains("error")) {
         CompatibilityClassification::Incompatible
@@ -676,25 +827,9 @@ pub fn inspect_migration(target: &Path) -> Result<MigrationReport, String> {
         target: target.to_path_buf(),
         classification,
         findings,
+        inspected_files: files_to_check,
+        manifest_path: discovered_manifest,
         mutations_performed: 0,
         status: "dry-run preview completed successfully with zero mutations".to_string(),
     })
-}
-
-fn collect_sm_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = fs::read_dir(dir)
-        .map_err(|e| format!("failed to read directory '{}': {}", dir.display(), e))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.starts_with('.') && name != "target" {
-                collect_sm_files(&path, out)?;
-            }
-        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "sm") {
-            out.push(path);
-        }
-    }
-    Ok(())
 }
