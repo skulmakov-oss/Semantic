@@ -126,28 +126,16 @@ task:
 
 intent:
   summary: >-
-    Before repairing any individual diagnostic/span/formatter/editor
-    finding, first freeze a Diagnostic Authority decision answering: source
-    surface authority, diagnostic identity authority, file identity
-    authority, and source range authority — this is SSF-09's required first
-    step, not an implementation-order convenience, mirroring SSF-08's own
-    Position A/B precedent. A read-only entry reconnaissance
-    (SSF09-E0 predecessor checkpoint) already reconstructed the current
-    state: no single canonical diagnostic type exists (FrontendError/
-    SemanticDiagnostic/VerificationDiagnostic/RuntimeError are four
-    independent shapes), no single span authority exists (four incompatible
-    position models, `file_id` always 0), and no machine-readable schema
-    exists at all. Only after the Diagnostic Authority decision is recorded:
-    work the diagnostic repair DAG in dependency order (#1670 -> #1697 +
-    #1698 + #1699 -> catalog coherence (#1704 and the E0243 gap) -> a
-    canonical internal carrier -> a versioned external schema), each
-    grounded in the selected authority rather than patched independently.
-    Editor/LSP work may only orchestrate this canonical authority — it must
-    never become a second parser/typechecker/verifier/diagnostic authority.
-    Add positive end-to-end tests and deterministic negative cases for every
-    included diagnostic/span form; give every deferred form an explicit
-    non-goal and a deterministic rejection diagnostic instead of leaving it
-    silently unsupported.
+    Execute SSF-10 (#1581) in a single bounded implementation pass: establish
+    explicit, deterministic, and testable compatibility/trust contracts across
+    source language, package manifest (semantic.toml), diagnostic schemas,
+    standard library, SemCode wire format, verifier admission, and deterministic
+    runtime execution. Bind canonical compiled-artifact identity to SHA-256
+    digests following FIPS PUB 180-4, separate producer provenance from
+    inspecting toolchain identity via companion provenance sidecars, enforce
+    digest-based staleness and mismatch authority immune to mtime backdating,
+    provide strictly non-destructive fail-closed migration inspection, and
+    maintain complete signing honesty (explicitly unsigned).
 
 scope:
   allowed_paths:
@@ -270,20 +258,16 @@ constraints:
   ownership_position: A
   ownership_position_decision_record: >-
     docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md
-  sm_diagnostic_c0_scope: superseded_by_1580_completion_authorization
-  sm_diagnostic_c0_dependency_rule: >-
-    During C0, `dependency_changes: true` authorizes only creation of
-    `crates/sm-diagnostic`, its root workspace membership in `Cargo.toml`, and its own
-    zero-internal-dependency manifest (`crates/sm-diagnostic/Cargo.toml`). It does not
-    authorize new dependency edges from or between existing crates, modifications to
-    existing crate manifests, or external dependencies beyond C0 requirements.
+  compatibility_dimensions_explicit_and_enforced: true
+  canonical_artifact_identity_sha256_bound: true
+  producer_provenance_distinguished_from_inspecting_toolchain: true
+  digest_based_staleness_immune_to_mtime_spoofing: true
+  verifier_token_strictly_bound_to_verified_bytes: true
+  migration_inspection_strictly_zero_mutation: true
+  migration_inspection_fails_closed_on_errors: true
+  migration_traversal_project_root_contained: true
+  release_signing_posture_explicitly_unsigned: true
   no_rust_equivalent_lifetime_region_claim: true
-  diagnostic_authority_decision_required_before_any_implementation: true
-  diagnostic_repair_dag_worked_in_dependency_order_not_independently: true
-  public_claims_match_actual_diagnostic_and_span_qualification_state: true
-  no_second_parser_typechecker_verifier_diagnostic_authority: true
-  positive_and_deterministic_negative_tests_required_per_included_diagnostic_form: true
-  deferred_forms_have_explicit_non_goals_and_deterministic_rejection: true
   no_global_refactor_unless_invariant_cannot_be_preserved_otherwise: true
   no_stable_abstraction_depends_on_unstable_internal_crate_apis: true
   no_async_await: true

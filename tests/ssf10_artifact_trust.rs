@@ -22,9 +22,9 @@ use smc_cli::artifact_identity::{
     generate_and_save_companion_provenance, ArtifactIdentity, ProvenanceStatus,
 };
 use smc_cli::compatibility::{
-    detect_artifact_staleness, DiagnosticCompatibilityPolicy, ManifestCompatibilityPolicy,
-    RuntimeCompatibilityPolicy, SourceCompatibilityPolicy, StalenessStatus,
-    StdlibCompatibilityPolicy,
+    detect_artifact_staleness, CompatibilityClassification, DiagnosticCompatibilityPolicy,
+    ManifestCompatibilityPolicy, RuntimeCompatibilityPolicy, SourceCompatibilityPolicy,
+    StalenessStatus, StdlibCompatibilityPolicy,
 };
 use std::fs;
 use std::path::Path;
@@ -406,8 +406,12 @@ fn test_8_cli_artifact_hash_and_inspect_real_binary() {
     let (code_hash_json, stdout_hash_json, _) =
         run_smc(&["artifact", "hash", art_path_str, "--json"]);
     assert_eq!(code_hash_json, 0);
-    assert!(stdout_hash_json.contains("\"artifact_hash\""));
-    assert!(stdout_hash_json.contains(&sha256_prefixed_hex(&artifact)));
+    let hash_parsed: serde_json::Value = serde_json::from_str(&stdout_hash_json)
+        .expect("artifact hash --json must produce valid JSON");
+    assert_eq!(
+        hash_parsed["artifact_hash"].as_str().unwrap(),
+        sha256_prefixed_hex(&artifact)
+    );
 
     // 3. `smc artifact inspect` real binary invocation
     let (code_insp, stdout_insp, stderr_insp) = run_smc(&["artifact", "inspect", art_path_str]);
@@ -424,9 +428,11 @@ fn test_8_cli_artifact_hash_and_inspect_real_binary() {
     let (code_insp_json, stdout_insp_json, _) =
         run_smc(&["artifact", "inspect", art_path_str, "--json"]);
     assert_eq!(code_insp_json, 0);
-    assert!(stdout_insp_json.contains("\"schema_version\": \"semantic-artifact-v1\""));
-    assert!(stdout_insp_json.contains("\"producer_provenance\""));
-    assert!(stdout_insp_json.contains("\"inspecting_toolchain\""));
+    let insp_parsed: serde_json::Value = serde_json::from_str(&stdout_insp_json)
+        .expect("artifact inspect --json must produce valid JSON");
+    assert_eq!(insp_parsed["schema_version"], "semantic-artifact-v1");
+    assert!(insp_parsed["producer_provenance"].is_object());
+    assert!(insp_parsed["inspecting_toolchain"].is_object());
 
     let _ = fs::remove_file(art_path);
 }
@@ -437,16 +443,19 @@ fn test_9_cli_version_real_binary() {
     let (code, stdout, stderr) = run_smc(&["version"]);
     assert_eq!(code, 0, "smc version must exit with 0. stderr: {}", stderr);
     assert!(stdout.contains("Semantic Language Toolchain v0.1.0"));
-    assert!(stdout.contains("Source Commit:"));
+    assert!(stdout.contains("Source Fingerprint:"));
     assert!(stdout.contains("Enabled Features:"));
 
     // 2. `smc version --json` real binary invocation
     let (code_json, stdout_json, _) = run_smc(&["version", "--json"]);
     assert_eq!(code_json, 0);
-    assert!(stdout_json.contains("\"schema_version\": \"semantic-version-v1\""));
-    assert!(stdout_json.contains("\"toolchain_version\": \"0.1.0\""));
-    assert!(stdout_json.contains("\"semcode_format\""));
-    assert!(stdout_json.contains("\"signing\": \"unsigned\""));
+    let ver_parsed: serde_json::Value = serde_json::from_str(&stdout_json)
+        .expect("version --json must produce valid JSON");
+    assert_eq!(ver_parsed["schema_version"], "semantic-version-v1");
+    assert_eq!(ver_parsed["toolchain_version"], "0.1.0");
+    assert!(ver_parsed["source_fingerprint"].is_string());
+    assert_eq!(ver_parsed["verifier_profile"], "verifier-canonical-v1");
+    assert_eq!(ver_parsed["signing"], "unsigned");
 }
 
 #[test]
@@ -456,7 +465,7 @@ fn test_10_cli_migrate_preview_real_binary_zero_mutation() {
 
     // Capture file contents and lengths before dry-run
     let main_sm = fixture_dir.join("main.sm");
-    let toml = fixture_dir.join("Semantic.toml");
+    let toml = fixture_dir.join("semantic.toml");
     let main_before = fs::read(&main_sm).expect("read main before");
     let toml_before = fs::read(&toml).expect("read toml before");
 
@@ -490,7 +499,9 @@ fn test_10_cli_migrate_preview_real_binary_zero_mutation() {
         "--dry-run",
     ]);
     assert_eq!(code_json, 0);
-    assert!(stdout_json.contains("\"mutations_performed\": 0"));
+    let mig_parsed: serde_json::Value = serde_json::from_str(&stdout_json)
+        .expect("migrate preview --json must produce valid JSON");
+    assert_eq!(mig_parsed["mutations_performed"], 0);
 
     // STRICT MUTATION VERIFICATION: verify files on disk were not touched
     let main_after = fs::read(&main_sm).expect("read main after");
@@ -498,7 +509,7 @@ fn test_10_cli_migrate_preview_real_binary_zero_mutation() {
     assert_eq!(main_before, main_after, "dry-run must not mutate main.sm");
     assert_eq!(
         toml_before, toml_after,
-        "dry-run must not mutate Semantic.toml"
+        "dry-run must not mutate semantic.toml"
     );
 }
 
@@ -613,3 +624,528 @@ fn test_12_release_artifact_trust_and_toolchain_binding() {
     assert!(script_content.contains("release toolchain version"));
     assert!(script_content.contains("toolchainEvidence = [ordered]@{"));
 }
+
+/// Helper for creating directory symlink or junction across platforms.
+fn create_dir_link(target: &Path, link: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+            return Ok(());
+        }
+        let status = std::process::Command::new("cmd")
+            .args(&[
+                "/c",
+                "mklink",
+                "/J",
+                &link.to_string_lossy(),
+                &target.to_string_lossy(),
+            ])
+            .output()?;
+        if status.status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                String::from_utf8_lossy(&status.stderr),
+            ))
+        }
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link)
+    }
+}
+
+#[test]
+fn test_13_symlink_escaping_project_root_rejected() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test13_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    let outside_dir = temp_dir.join("outside");
+    fs::create_dir_all(&project_dir).expect("create project dir");
+    fs::create_dir_all(&outside_dir).expect("create outside dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"escaped_test\"\nversion = 1\n",
+    )
+    .expect("write manifest");
+    fs::write(project_dir.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
+    fs::write(outside_dir.join("secret.sm"), "fn secret() { return; }\n").expect("write secret.sm");
+
+    let link_path = project_dir.join("link_to_outside");
+    if let Err(e) = create_dir_link(&outside_dir, &link_path) {
+        eprintln!("Skipping symlink escaping test due to OS limitation: {e}");
+        let _ = fs::remove_dir_all(&temp_dir);
+        return;
+    }
+
+    let report_res = smc_cli::compatibility::inspect_migration(&project_dir);
+    assert!(
+        report_res.is_err(),
+        "project traversal must fail-closed when symlink escapes project root"
+    );
+    let err_msg = report_res.unwrap_err();
+    assert!(
+        err_msg.contains("security violation") || err_msg.contains("escapes project root"),
+        "error message must describe security violation: {err_msg}"
+    );
+
+    let _ = fs::remove_dir(&link_path).or_else(|_| fs::remove_file(&link_path));
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_14_recursive_symlink_cycle_rejected() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test14_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    let sub_dir = project_dir.join("sub");
+    fs::create_dir_all(&sub_dir).expect("create sub dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"cycle_test\"\nversion = 1\n",
+    )
+    .expect("write manifest");
+    fs::write(project_dir.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
+
+    let cycle_link = sub_dir.join("cycle");
+    if let Err(e) = create_dir_link(&project_dir, &cycle_link) {
+        eprintln!("Skipping cycle test due to OS limitation: {e}");
+        let _ = fs::remove_dir_all(&temp_dir);
+        return;
+    }
+
+    let report_res = smc_cli::compatibility::inspect_migration(&project_dir);
+    assert!(
+        report_res.is_err(),
+        "project traversal must fail-closed on recursive directory cycles"
+    );
+    let err_msg = report_res.unwrap_err();
+    assert!(
+        err_msg.contains("security violation")
+            && (err_msg.contains("cycle") || err_msg.contains("forbidden")),
+        "error message must describe cycle violation: {err_msg}"
+    );
+
+    let _ = fs::remove_dir(&cycle_link).or_else(|_| fs::remove_file(&cycle_link));
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_15_nested_directory_remains_admitted() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test15_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    let nested_dir = project_dir.join("src").join("nested").join("sub");
+    fs::create_dir_all(&nested_dir).expect("create nested dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"nested_test\"\nversion = 1\n",
+    )
+    .expect("write manifest");
+    fs::write(
+        project_dir.join("src").join("main.sm"),
+        "fn main() { return; }\n",
+    )
+    .expect("write main.sm");
+    fs::write(
+        nested_dir.join("helper.sm"),
+        "fn helper() -> i32 { return 42; }\n",
+    )
+    .expect("write helper.sm");
+
+    let report = smc_cli::compatibility::inspect_migration(&project_dir)
+        .expect("migration inspection on nested directories must succeed");
+
+    assert_eq!(
+        report.classification,
+        CompatibilityClassification::Compatible
+    );
+    let inspected_files: Vec<String> = report
+        .inspected_files
+        .iter()
+        .map(|p| p.display().to_string().replace('\\', "/"))
+        .collect();
+    assert!(
+        inspected_files.iter().any(|f| f.ends_with("src/main.sm")),
+        "main.sm must be inspected"
+    );
+    assert!(
+        inspected_files
+            .iter()
+            .any(|f| f.ends_with("src/nested/sub/helper.sm")),
+        "nested helper.sm must be admitted and inspected"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_16_target_and_hidden_directories_excluded() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test16_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    let target_dir = project_dir.join("target");
+    let hidden_dir = project_dir.join(".git_sub");
+    fs::create_dir_all(&target_dir).expect("create target dir");
+    fs::create_dir_all(&hidden_dir).expect("create hidden dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"exclusion_test\"\nversion = 1\n",
+    )
+    .expect("write manifest");
+    fs::write(project_dir.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
+
+    // Intentionally invalid syntax in excluded directories to prove they are never parsed or admitted
+    fs::write(
+        target_dir.join("junk.sm"),
+        "THIS IS COMPLETELY INVALID SYNTAX !@#$%^&*()\n",
+    )
+    .expect("write target junk.sm");
+    fs::write(
+        hidden_dir.join("secret.sm"),
+        "ANOTHER SYNTAX ERROR IN HIDDEN DIR !@#$%\n",
+    )
+    .expect("write hidden secret.sm");
+
+    let report = smc_cli::compatibility::inspect_migration(&project_dir)
+        .expect("migration inspection must exclude target/ and hidden dirs without error");
+
+    assert_eq!(
+        report.classification,
+        CompatibilityClassification::Compatible,
+        "syntax errors in target/ or hidden dirs must NOT affect compatibility because they are excluded"
+    );
+
+    for file in &report.inspected_files {
+        let f_str = file.display().to_string().replace('\\', "/");
+        assert!(
+            !f_str.contains("/target/") && !f_str.contains("/.git_sub/"),
+            "excluded dirs must not appear in inspected files: {f_str}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_17_invalid_source_fails_migration_compatibility() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test17_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    fs::create_dir_all(&project_dir).expect("create project dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"invalid_source_test\"\nversion = 1\n",
+    )
+    .expect("write manifest");
+    fs::write(
+        project_dir.join("broken.sm"),
+        "fn broken( { syntax error unclosed brace\n",
+    )
+    .expect("write broken.sm");
+
+    let report = smc_cli::compatibility::inspect_migration(&project_dir)
+        .expect("inspect_migration must succeed and report incompatibility fail-closed");
+
+    assert_eq!(
+        report.classification,
+        CompatibilityClassification::Incompatible,
+        "invalid source must fail-closed to Incompatible"
+    );
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.category == "source_error" || f.category == "syntax_error"),
+        "findings must contain source_error for broken syntax: {:?}",
+        report.findings
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_18_malformed_manifest_fails_migration_compatibility() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test18_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    fs::create_dir_all(&project_dir).expect("create project dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package\nthis is invalid toml content !!!\n",
+    )
+    .expect("write malformed manifest");
+    fs::write(project_dir.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
+
+    let report = smc_cli::compatibility::inspect_migration(&project_dir)
+        .expect("inspect_migration must succeed and report incompatibility fail-closed");
+
+    assert_eq!(
+        report.classification,
+        CompatibilityClassification::Incompatible,
+        "malformed manifest must fail-closed to Incompatible"
+    );
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.category == "manifest_error"),
+        "findings must contain manifest_error for invalid toml: {:?}",
+        report.findings
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_19_canonical_lowercase_manifest_precedence() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test19_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    fs::create_dir_all(&project_dir).expect("create project dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"canonical_name\"\nversion = 1\n",
+    )
+    .expect("write lowercase manifest");
+    fs::write(project_dir.join("main.sm"), "fn main() { return; }\n").expect("write main.sm");
+
+    let report = smc_cli::compatibility::inspect_migration(&project_dir)
+        .expect("inspection should succeed");
+
+    assert_eq!(
+        report.classification,
+        CompatibilityClassification::Compatible
+    );
+    let manifest_path = report.manifest_path.expect("manifest path present");
+    assert!(
+        manifest_path.ends_with("semantic.toml"),
+        "manifest path must reference canonical lowercase semantic.toml: {}",
+        manifest_path.display()
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_20_deterministic_finding_order() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test20_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    fs::create_dir_all(&project_dir).expect("create project dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"sort_test\"\nversion = 1\n",
+    )
+    .expect("write manifest");
+    fs::write(project_dir.join("z_last.sm"), "fn z( { syntax error\n").expect("write z_last.sm");
+    fs::write(project_dir.join("a_first.sm"), "fn a( { syntax error\n").expect("write a_first.sm");
+
+    let report1 = smc_cli::compatibility::inspect_migration(&project_dir).expect("report 1");
+    let report2 = smc_cli::compatibility::inspect_migration(&project_dir).expect("report 2");
+
+    assert_eq!(
+        report1.findings, report2.findings,
+        "findings must be deterministic across runs"
+    );
+    assert!(report1.findings.len() >= 2, "must have at least 2 findings");
+
+    for window in report1.findings.windows(2) {
+        let cmp = (
+            &window[0].file,
+            window[0].line,
+            &window[0].category,
+            &window[0].message,
+        )
+            .cmp(&(
+                &window[1].file,
+                window[1].line,
+                &window[1].category,
+                &window[1].message,
+            ));
+        assert!(
+            cmp != std::cmp::Ordering::Greater,
+            "findings must be strictly sorted"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_21_json_special_character_escaping_in_artifact_inspect() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test21_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).expect("create temp dir");
+    let src_path = temp_dir.join("test_escape.sm");
+    let art_path = temp_dir.join("test_escape.smc");
+
+    fs::write(
+        &src_path,
+        "// test with \"quotes\" and \\backslashes\\ and newline\nfn main() { return; }\n",
+    )
+    .expect("write src");
+
+    let (c_code, _, c_err) = run_smc(&[
+        "compile",
+        src_path.to_str().unwrap(),
+        "-o",
+        art_path.to_str().unwrap(),
+    ]);
+    assert_eq!(c_code, 0, "compile failed: {c_err}");
+
+    let (code, stdout, stderr) =
+        run_smc(&["artifact", "inspect", art_path.to_str().unwrap(), "--json"]);
+    assert_eq!(code, 0, "inspect failed: {stderr}");
+
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .expect("artifact inspect --json output must be valid, well-escaped JSON");
+
+    assert!(parsed.get("artifact_hash").is_some());
+    assert!(parsed.get("producer_provenance").is_some());
+    assert!(parsed.get("inspecting_toolchain").is_some());
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_22_json_special_character_escaping_in_migration_report() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test22_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    fs::create_dir_all(&project_dir).expect("create temp dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"escape_test\"\nversion = 1\n",
+    )
+    .expect("write manifest");
+    fs::write(
+        project_dir.join("main.sm"),
+        "// \"quotes\" and \\escapes\\\nfn broken( { syntax error\n",
+    )
+    .expect("write main.sm");
+
+    let (_code, stdout, stderr) =
+        run_smc(&["migrate", "check", "--json", project_dir.to_str().unwrap()]);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|e| {
+        panic!(
+            "migrate check --json output must be valid JSON: {e}\nstdout: {stdout}\nstderr: {stderr}"
+        )
+    });
+
+    assert!(parsed.get("classification").is_some());
+    assert!(parsed.get("findings").is_some());
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_23_provenance_tampering_corrupted_mismatch() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test23_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).expect("create temp dir");
+    let src_path = temp_dir.join("main.sm");
+    let art_path = temp_dir.join("main.smc");
+
+    fs::write(&src_path, "fn main() { return; }\n").expect("write src");
+
+    let (c_code, _, c_err) = run_smc(&[
+        "compile",
+        src_path.to_str().unwrap(),
+        "-o",
+        art_path.to_str().unwrap(),
+    ]);
+    assert_eq!(c_code, 0, "compile failed: {c_err}");
+
+    let status_before = detect_artifact_staleness(&art_path, &src_path).expect("staleness before");
+    assert!(status_before.is_fresh());
+
+    // Tamper with 1 byte of the artifact file
+    let mut bytes = fs::read(&art_path).expect("read artifact");
+    let len = bytes.len();
+    bytes[len - 1] ^= 0x55;
+    fs::write(&art_path, &bytes).expect("write tampered artifact");
+
+    let status_after = detect_artifact_staleness(&art_path, &src_path).expect("staleness after");
+    assert!(
+        matches!(status_after, StalenessStatus::CorruptedMismatch { .. }),
+        "artifact digest divergence from companion provenance must yield CorruptedMismatch: {:?}",
+        status_after
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_24_imported_module_change_invalidates_provenance() {
+    let temp_dir = std::env::temp_dir().join(format!("ssf10_test24_{}", std::process::id()));
+    let project_dir = temp_dir.join("project");
+    let src_dir = project_dir.join("src");
+    fs::create_dir_all(&src_dir).expect("create src dir");
+
+    fs::write(
+        project_dir.join("semantic.toml"),
+        "[package]\nname = \"mod_change_test\"\nversion = 1\n",
+    )
+    .expect("write manifest");
+    let main_sm = src_dir.join("main.sm");
+    let helper_sm = src_dir.join("helper.sm");
+    let art_path = project_dir.join("main.smc");
+
+    fs::write(&main_sm, "fn main() { return; }\n").expect("write main.sm");
+    fs::write(&helper_sm, "fn helper() -> i32 { return 1; }\n").expect("write helper.sm");
+
+    let (c_code, _, c_err) = run_smc(&[
+        "compile",
+        main_sm.to_str().unwrap(),
+        "-o",
+        art_path.to_str().unwrap(),
+    ]);
+    assert_eq!(c_code, 0, "compile failed: {c_err}");
+
+    let status_before = detect_artifact_staleness(&art_path, &main_sm).expect("staleness before");
+    assert!(status_before.is_fresh());
+
+    // Modify the helper module (not main.sm)
+    fs::write(&helper_sm, "fn helper() -> i32 { return 2; }\n").expect("modify helper.sm");
+
+    let status_after = detect_artifact_staleness(&art_path, &main_sm).expect("staleness after");
+    assert!(
+        matches!(status_after, StalenessStatus::StaleSourceChanged { .. }),
+        "modifying helper module must invalidate provenance via project source fingerprint: {:?}",
+        status_after
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_25_compatibility_dimensions_canonical_drift_guard() {
+    let dims = smc_cli::compatibility::CompatibilityDimensions::default();
+    assert_eq!(
+        dims.verifier_profile, "verifier-canonical-v1",
+        "verifier ID must match canonical specification"
+    );
+    assert_eq!(
+        dims.runtime_engine, "deterministic-v1",
+        "runtime ID must match canonical specification"
+    );
+    assert_eq!(
+        dims.stdlib_version, "semantic-stdlib-v1",
+        "stdlib ID must match canonical specification"
+    );
+    assert_eq!(
+        dims.diagnostic_schema, "semantic.diagnostics",
+        "diagnostic schema must match canonical specification"
+    );
+    assert_eq!(
+        dims.semcode_format, "SEMCOD22",
+        "format epoch must match canonical specification"
+    );
+    assert_eq!(
+        dims.semcode_revision, 23,
+        "format revision must match canonical specification"
+    );
+}
+

@@ -18,9 +18,20 @@ pub struct ProducerToolchainIdentity {
     pub compiler_name: String,
     pub compiler_version: String,
     pub build_target: String,
-    pub commit_hash: String,
+    /// Build source fingerprint (derived from SM_COMPILER_SOURCE_HASH, an FNV hash of the compiler source closure).
+    #[serde(alias = "commit_hash")]
+    pub source_fingerprint: String,
+    /// Optional Git commit SHA if built from a git checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
     pub profile: String,
     pub enabled_features: Vec<String>,
+}
+
+impl ProducerToolchainIdentity {
+    pub fn commit_hash(&self) -> &str {
+        &self.source_fingerprint
+    }
 }
 
 impl Default for ProducerToolchainIdentity {
@@ -31,9 +42,12 @@ impl Default for ProducerToolchainIdentity {
             build_target: option_env!("TARGET")
                 .unwrap_or("x86_64-pc-windows-msvc")
                 .to_string(),
-            commit_hash: option_env!("SM_COMPILER_SOURCE_HASH")
+            source_fingerprint: option_env!("SM_COMPILER_SOURCE_HASH")
                 .unwrap_or("release-build")
                 .to_string(),
+            git_commit: option_env!("SM_COMPILER_GIT_COMMIT")
+                .or(option_env!("GIT_HASH"))
+                .map(ToString::to_string),
             profile: if cfg!(debug_assertions) {
                 "dev".to_string()
             } else {
@@ -78,10 +92,10 @@ impl Default for ProvenanceContractIdentity {
             semcode_format: "SEMCOD22".to_string(),
             semcode_epoch: 0,
             semcode_revision: 23,
-            verifier_profile: "VerifiedLocal".to_string(),
-            runtime_profile: "SVM-Deterministic-v1".to_string(),
-            stdlib_version: "0.1.0".to_string(),
-            diagnostic_contract: "semantic.diagnostics/v1".to_string(),
+            verifier_profile: "verifier-canonical-v1".to_string(),
+            runtime_profile: "deterministic-v1".to_string(),
+            stdlib_version: "semantic-stdlib-v1".to_string(),
+            diagnostic_contract: "semantic.diagnostics".to_string(),
         }
     }
 }
@@ -117,17 +131,29 @@ pub enum ProvenanceStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolchainIdentity {
     pub compiler_version: String,
-    pub source_hash: String,
+    #[serde(alias = "source_hash")]
+    pub source_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
     pub enabled_features: Vec<String>,
+}
+
+impl ToolchainIdentity {
+    pub fn source_hash(&self) -> &str {
+        &self.source_fingerprint
+    }
 }
 
 impl Default for ToolchainIdentity {
     fn default() -> Self {
         Self {
             compiler_version: env!("CARGO_PKG_VERSION").to_string(),
-            source_hash: option_env!("SM_COMPILER_SOURCE_HASH")
+            source_fingerprint: option_env!("SM_COMPILER_SOURCE_HASH")
                 .unwrap_or("release-build")
                 .to_string(),
+            git_commit: option_env!("SM_COMPILER_GIT_COMMIT")
+                .or(option_env!("GIT_HASH"))
+                .map(ToString::to_string),
             enabled_features: option_env!("SM_ENABLED_FEATURES")
                 .unwrap_or("std,profile-rust,profile-logos,debug-symbols")
                 .split(',')
@@ -140,7 +166,7 @@ impl Default for ToolchainIdentity {
 }
 
 /// Decoded SemCode header summary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactHeaderSummary {
     pub magic: String,
     pub epoch: u16,
@@ -150,7 +176,7 @@ pub struct ArtifactHeaderSummary {
 }
 
 /// Individual function summary in compiled artifact.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactFunctionSummary {
     pub name: String,
     pub code_len: usize,
@@ -161,11 +187,61 @@ pub struct ArtifactFunctionSummary {
 }
 
 /// Verifier admission status bound to artifact.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactVerifierBinding {
     pub admitted: bool,
     pub admission_code: Option<String>,
     pub diagnostics: Vec<String>,
+}
+
+/// Canonical inspection report format serialized to standard JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactInspectionReport {
+    pub schema_version: String,
+    pub artifact_hash: String,
+    pub size_bytes: usize,
+    pub header: ArtifactHeaderSummary,
+    pub function_count: usize,
+    pub functions: Vec<ArtifactFunctionSummary>,
+    pub adt_count: usize,
+    pub adt_names: Vec<String>,
+    pub has_debug_symbols: bool,
+    pub has_ownership_tracks: bool,
+    pub has_signatures: bool,
+    pub verifier: ArtifactVerifierBinding,
+    pub signing: String,
+    pub producer_provenance: Option<ProducerProvenanceReport>,
+    pub inspecting_toolchain: ToolchainReport,
+    pub toolchain: ToolchainReport,
+}
+
+/// Producer provenance section in the inspection report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProducerProvenanceReport {
+    pub status: String,
+    pub compiler_name: Option<String>,
+    pub compiler_version: Option<String>,
+    pub build_target: Option<String>,
+    pub source_fingerprint: Option<String>,
+    pub commit_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
+    pub profile: Option<String>,
+    pub source_hash: Option<String>,
+    pub entry_file: Option<String>,
+    pub manifest_hash: Option<String>,
+    pub package_name: Option<String>,
+}
+
+/// Toolchain section in the inspection report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolchainReport {
+    pub compiler_version: String,
+    pub source_fingerprint: String,
+    pub source_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
+    pub enabled_features: Vec<String>,
 }
 
 /// Comprehensive canonical compiled-artifact identity.
@@ -453,12 +529,13 @@ impl ArtifactIdentity {
         out.push_str("\n--- Producer Toolchain (from Provenance) ---\n");
         match &self.provenance_status {
             ProvenanceStatus::Recorded(prov) => {
+                out.push_str("Trust Model:    Integrity-only sidecar bound to artifact SHA-256 (unsigned)\n");
                 out.push_str(&format!(
-                    "Compiler:       {} v{} (target={}, commit={}, profile={})\n",
+                    "Compiler:       {} v{} (target={}, fingerprint={}, profile={})\n",
                     prov.producer.compiler_name,
                     prov.producer.compiler_version,
                     prov.producer.build_target,
-                    prov.producer.commit_hash,
+                    prov.producer.source_fingerprint,
                     prov.producer.profile,
                 ));
                 out.push_str(&format!(
@@ -510,9 +587,9 @@ impl ArtifactIdentity {
 
         out.push_str("\n--- Inspecting Toolchain (Current Process) ---\n");
         out.push_str(&format!(
-            "Inspector:      Semantic v{} (commit={}, features=[{}])\n",
+            "Inspector:      Semantic v{} (fingerprint={}, features=[{}])\n",
             self.inspecting_toolchain.compiler_version,
-            self.inspecting_toolchain.source_hash,
+            self.inspecting_toolchain.source_fingerprint,
             self.inspecting_toolchain.enabled_features.join(", ")
         ));
 
@@ -521,138 +598,21 @@ impl ArtifactIdentity {
 
     /// Render deterministic JSON inspection output.
     pub fn render_json(&self) -> String {
-        let mut json = String::new();
-        json.push_str("{\n");
-        json.push_str(&format!(
-            "  \"schema_version\": \"semantic-artifact-v1\",\n"
-        ));
-        json.push_str(&format!(
-            "  \"artifact_hash\": \"{}\",\n",
-            self.artifact_hash
-        ));
-        json.push_str(&format!("  \"size_bytes\": {},\n", self.size_bytes));
-        json.push_str("  \"header\": {\n");
-        json.push_str(&format!("    \"magic\": \"{}\",\n", self.header.magic));
-        json.push_str(&format!("    \"epoch\": {},\n", self.header.epoch));
-        json.push_str(&format!("    \"revision\": {},\n", self.header.revision));
-        json.push_str(&format!(
-            "    \"capabilities\": {},\n",
-            self.header.capabilities
-        ));
-        json.push_str(&format!(
-            "    \"capability_flags\": [{}]\n",
-            self.header
-                .capability_flags
-                .iter()
-                .map(|f| format!("\"{}\"", f))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        json.push_str("  },\n");
-        json.push_str(&format!("  \"function_count\": {},\n", self.function_count));
-        json.push_str("  \"functions\": [\n");
-        for (i, f) in self.functions.iter().enumerate() {
-            let comma = if i + 1 < self.functions.len() {
-                ","
-            } else {
-                ""
-            };
-            json.push_str(&format!(
-                "    {{\"name\": \"{}\", \"code_len\": {}, \"string_count\": {}, \"debug_symbol_count\": {}, \"has_signature\": {}, \"has_ownership\": {}}}{}\n",
-                f.name, f.code_len, f.string_count, f.debug_symbol_count, f.has_signature, f.has_ownership, comma
-            ));
-        }
-        json.push_str("  ],\n");
-        json.push_str(&format!("  \"adt_count\": {},\n", self.adt_count));
-        json.push_str(&format!(
-            "  \"adt_names\": [{}],\n",
-            self.adt_names
-                .iter()
-                .map(|n| format!("\"{}\"", n))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        json.push_str(&format!(
-            "  \"has_debug_symbols\": {},\n",
-            self.has_debug_symbols
-        ));
-        json.push_str(&format!(
-            "  \"has_ownership_tracks\": {},\n",
-            self.has_ownership_tracks
-        ));
-        json.push_str(&format!("  \"has_signatures\": {},\n", self.has_signatures));
-        json.push_str("  \"verifier\": {\n");
-        json.push_str(&format!("    \"admitted\": {},\n", self.verifier.admitted));
-        json.push_str(&format!(
-            "    \"admission_code\": {},\n",
-            self.verifier
-                .admission_code
-                .as_ref()
-                .map(|c| format!("\"{}\"", c))
-                .unwrap_or_else(|| "null".to_string())
-        ));
-        json.push_str(&format!(
-            "    \"diagnostics\": [{}]\n",
-            self.verifier
-                .diagnostics
-                .iter()
-                .map(|d| format!("\"{}\"", d.replace('\"', "\\\"")))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        json.push_str("  },\n");
-        json.push_str(&format!("  \"signing\": \"{}\",\n", self.signing));
-
-        // Producer provenance
-        json.push_str("  \"producer_provenance\": {\n");
-        match &self.producer_provenance {
-            Some(prov) => {
-                json.push_str("    \"status\": \"recorded\",\n");
-                json.push_str(&format!(
-                    "    \"compiler_name\": \"{}\",\n",
-                    prov.producer.compiler_name
-                ));
-                json.push_str(&format!(
-                    "    \"compiler_version\": \"{}\",\n",
-                    prov.producer.compiler_version
-                ));
-                json.push_str(&format!(
-                    "    \"build_target\": \"{}\",\n",
-                    prov.producer.build_target
-                ));
-                json.push_str(&format!(
-                    "    \"commit_hash\": \"{}\",\n",
-                    prov.producer.commit_hash
-                ));
-                json.push_str(&format!(
-                    "    \"profile\": \"{}\",\n",
-                    prov.producer.profile
-                ));
-                json.push_str(&format!(
-                    "    \"source_hash\": \"{}\",\n",
-                    prov.source.source_hash
-                ));
-                json.push_str(&format!(
-                    "    \"entry_file\": \"{}\",\n",
-                    prov.source.entry_file
-                ));
-                json.push_str(&format!(
-                    "    \"manifest_hash\": {},\n",
-                    prov.source
-                        .manifest_hash
-                        .as_ref()
-                        .map(|h| format!("\"{}\"", h))
-                        .unwrap_or_else(|| "null".to_string())
-                ));
-                json.push_str(&format!(
-                    "    \"package_name\": {}\n",
-                    prov.source
-                        .package_name
-                        .as_ref()
-                        .map(|p| format!("\"{}\"", p))
-                        .unwrap_or_else(|| "null".to_string())
-                ));
-            }
+        let producer_provenance = match &self.producer_provenance {
+            Some(prov) => Some(ProducerProvenanceReport {
+                status: "recorded".to_string(),
+                compiler_name: Some(prov.producer.compiler_name.clone()),
+                compiler_version: Some(prov.producer.compiler_version.clone()),
+                build_target: Some(prov.producer.build_target.clone()),
+                source_fingerprint: Some(prov.producer.source_fingerprint.clone()),
+                commit_hash: Some(prov.producer.source_fingerprint.clone()),
+                git_commit: prov.producer.git_commit.clone(),
+                profile: Some(prov.producer.profile.clone()),
+                source_hash: Some(prov.source.source_hash.clone()),
+                entry_file: Some(prov.source.entry_file.clone()),
+                manifest_hash: prov.source.manifest_hash.clone(),
+                package_name: prov.source.package_name.clone(),
+            }),
             None => {
                 let status_str = match &self.provenance_status {
                     ProvenanceStatus::Missing => "missing",
@@ -660,58 +620,60 @@ impl ArtifactIdentity {
                     ProvenanceStatus::Unsupported(_) => "unsupported",
                     ProvenanceStatus::Recorded(_) => "recorded",
                 };
-                json.push_str(&format!("    \"status\": \"{}\",\n", status_str));
-                json.push_str("    \"compiler_name\": null,\n");
-                json.push_str("    \"compiler_version\": null,\n");
-                json.push_str("    \"source_hash\": null\n");
+                Some(ProducerProvenanceReport {
+                    status: status_str.to_string(),
+                    compiler_name: None,
+                    compiler_version: None,
+                    build_target: None,
+                    source_fingerprint: None,
+                    commit_hash: None,
+                    git_commit: None,
+                    profile: None,
+                    source_hash: None,
+                    entry_file: None,
+                    manifest_hash: None,
+                    package_name: None,
+                })
             }
-        }
-        json.push_str("  },\n");
+        };
 
-        // Inspecting toolchain
-        json.push_str("  \"inspecting_toolchain\": {\n");
-        json.push_str(&format!(
-            "    \"compiler_version\": \"{}\",\n",
-            self.inspecting_toolchain.compiler_version
-        ));
-        json.push_str(&format!(
-            "    \"source_hash\": \"{}\",\n",
-            self.inspecting_toolchain.source_hash
-        ));
-        json.push_str(&format!(
-            "    \"enabled_features\": [{}]\n",
-            self.inspecting_toolchain
-                .enabled_features
-                .iter()
-                .map(|f| format!("\"{}\"", f))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        json.push_str("  },\n");
+        let inspecting = ToolchainReport {
+            compiler_version: self.inspecting_toolchain.compiler_version.clone(),
+            source_fingerprint: self.inspecting_toolchain.source_fingerprint.clone(),
+            source_hash: self.inspecting_toolchain.source_fingerprint.clone(),
+            git_commit: self.inspecting_toolchain.git_commit.clone(),
+            enabled_features: self.inspecting_toolchain.enabled_features.clone(),
+        };
 
-        // Backwards-compatible toolchain key
-        json.push_str("  \"toolchain\": {\n");
-        json.push_str(&format!(
-            "    \"compiler_version\": \"{}\",\n",
-            self.toolchain.compiler_version
-        ));
-        json.push_str(&format!(
-            "    \"source_hash\": \"{}\",\n",
-            self.toolchain.source_hash
-        ));
-        json.push_str(&format!(
-            "    \"enabled_features\": [{}]\n",
-            self.toolchain
-                .enabled_features
-                .iter()
-                .map(|f| format!("\"{}\"", f))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        json.push_str("  }\n");
+        let toolchain = ToolchainReport {
+            compiler_version: self.toolchain.compiler_version.clone(),
+            source_fingerprint: self.toolchain.source_fingerprint.clone(),
+            source_hash: self.toolchain.source_fingerprint.clone(),
+            git_commit: self.toolchain.git_commit.clone(),
+            enabled_features: self.toolchain.enabled_features.clone(),
+        };
 
-        json.push_str("}\n");
-        json
+        let report = ArtifactInspectionReport {
+            schema_version: "semantic-artifact-v1".to_string(),
+            artifact_hash: self.artifact_hash.clone(),
+            size_bytes: self.size_bytes,
+            header: self.header.clone(),
+            function_count: self.function_count,
+            functions: self.functions.clone(),
+            adt_count: self.adt_count,
+            adt_names: self.adt_names.clone(),
+            has_debug_symbols: self.has_debug_symbols,
+            has_ownership_tracks: self.has_ownership_tracks,
+            has_signatures: self.has_signatures,
+            verifier: self.verifier.clone(),
+            signing: self.signing.clone(),
+            producer_provenance,
+            inspecting_toolchain: inspecting,
+            toolchain,
+        };
+
+        serde_json::to_string_pretty(&report)
+            .unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
     }
 }
 
@@ -756,6 +718,24 @@ pub fn save_companion_provenance(
     Ok(prov_path)
 }
 
+/// Find project root directory by searching ancestors for `semantic.toml` or `Semantic.toml`.
+pub(crate) fn find_project_root_ancestor(start: &Path) -> Option<PathBuf> {
+    let mut current = if start.is_file() {
+        start.parent()?.to_path_buf()
+    } else {
+        start.to_path_buf()
+    };
+    loop {
+        if current.join("semantic.toml").is_file() || current.join("Semantic.toml").is_file() {
+            return Some(current);
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+    None
+}
+
 /// Generate and save companion provenance for a compiled artifact.
 pub fn generate_and_save_companion_provenance(
     artifact_path: &Path,
@@ -765,37 +745,69 @@ pub fn generate_and_save_companion_provenance(
     package_version: Option<String>,
 ) -> Result<PathBuf, String> {
     let artifact_hash = sha256_prefixed_hex(artifact_bytes);
-    let source_bytes = if source_path.is_file() {
-        fs::read(source_path)
-            .map_err(|e| format!("failed to read source '{}': {}", source_path.display(), e))?
-    } else {
-        let mut combined = Vec::new();
-        collect_project_source_bytes(source_path, &mut combined)?;
-        combined
-    };
-    let source_hash = sha256_prefixed_hex(&source_bytes);
 
-    let manifest_hash = {
-        let manifest_path = if source_path.is_dir() {
-            source_path.join("Semantic.toml")
-        } else if let Some(parent) = source_path.parent() {
-            parent.join("Semantic.toml")
-        } else {
-            PathBuf::from("Semantic.toml")
-        };
-        if manifest_path.is_file() {
-            let m_bytes = fs::read(&manifest_path).map_err(|e| {
-                format!(
-                    "failed to read manifest '{}': {}",
-                    manifest_path.display(),
-                    e
-                )
-            })?;
-            Some(sha256_prefixed_hex(&m_bytes))
-        } else {
-            None
+    let project_root = if source_path.is_dir() {
+        Some(source_path.to_path_buf())
+    } else {
+        find_project_root_ancestor(source_path)
+    };
+
+    let (source_bytes, manifest_hash, resolved_package_name) = match project_root {
+        Some(ref root) => {
+            let mut combined = Vec::new();
+            collect_project_source_bytes(root, &mut combined)?;
+            let manifest_path = if root.join("semantic.toml").is_file() {
+                root.join("semantic.toml")
+            } else if root.join("Semantic.toml").is_file() {
+                root.join("Semantic.toml")
+            } else {
+                PathBuf::new()
+            };
+            let (m_hash, pkg_name) = if manifest_path.is_file() {
+                let m_bytes = fs::read(&manifest_path).map_err(|e| {
+                    format!(
+                        "failed to read manifest '{}': {}",
+                        manifest_path.display(),
+                        e
+                    )
+                })?;
+                let mut found_pkg = None;
+                if let Ok(m_str) = std::str::from_utf8(&m_bytes) {
+                    for line in m_str.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("name =") {
+                            let name = trimmed
+                                .strip_prefix("name =")
+                                .unwrap_or("")
+                                .trim()
+                                .trim_matches('"');
+                            if !name.is_empty() {
+                                found_pkg = Some(name.to_string());
+                            }
+                        }
+                    }
+                }
+                (Some(sha256_prefixed_hex(&m_bytes)), found_pkg)
+            } else {
+                (None, None)
+            };
+            (combined, m_hash, package_name.or(pkg_name))
+        }
+        None => {
+            let s_bytes = if source_path.is_file() {
+                fs::read(source_path).map_err(|e| {
+                    format!("failed to read source '{}': {}", source_path.display(), e)
+                })?
+            } else {
+                let mut combined = Vec::new();
+                collect_project_source_bytes(source_path, &mut combined)?;
+                combined
+            };
+            (s_bytes, None, package_name)
         }
     };
+
+    let source_hash = sha256_prefixed_hex(&source_bytes);
 
     let provenance = ArtifactProvenance {
         schema_version: 1,
@@ -803,7 +815,7 @@ pub fn generate_and_save_companion_provenance(
         artifact_size_bytes: artifact_bytes.len(),
         producer: ProducerToolchainIdentity::default(),
         source: ProvenanceSourceIdentity {
-            package_name,
+            package_name: resolved_package_name,
             package_version,
             entry_file: source_path
                 .file_name()
@@ -819,36 +831,116 @@ pub fn generate_and_save_companion_provenance(
     save_companion_provenance(artifact_path, &provenance)
 }
 
-fn collect_project_source_bytes(dir: &Path, out: &mut Vec<u8>) -> Result<(), String> {
-    let mut entries = Vec::new();
-    collect_sm_files_sorted(dir, &mut entries)?;
-    for path in entries {
-        let b =
-            fs::read(&path).map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
-        out.extend_from_slice(path.to_string_lossy().as_bytes());
-        out.push(0);
-        out.extend_from_slice(&b);
-        out.push(0);
-    }
-    Ok(())
-}
+/// Securely collect all `.sm` files under a project root, enforcing containment,
+/// reparse-point rejection, and cycle prevention.
+pub(crate) fn collect_project_files_secure(
+    _root: &Path,
+    canonical_root: &Path,
+    current_dir: &Path,
+    visited_dirs: &mut std::collections::HashSet<PathBuf>,
+    out_sm: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    let canonical_current = fs::canonicalize(current_dir).map_err(|e| {
+        format!(
+            "failed to canonicalize directory '{}': {}",
+            current_dir.display(),
+            e
+        )
+    })?;
 
-fn collect_sm_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    let read_dir = fs::read_dir(dir)
-        .map_err(|e| format!("failed to read directory '{}': {}", dir.display(), e))?;
+    if !canonical_current.starts_with(canonical_root) {
+        return Err(format!(
+            "security violation: directory '{}' escapes project root '{}'",
+            current_dir.display(),
+            canonical_root.display()
+        ));
+    }
+
+    if !visited_dirs.insert(canonical_current.clone()) {
+        return Err(format!(
+            "security violation: recursive directory cycle detected at '{}'",
+            current_dir.display()
+        ));
+    }
+
+    let read_dir = fs::read_dir(current_dir).map_err(|e| {
+        format!("failed to read directory '{}': {}", current_dir.display(), e)
+    })?;
+
     let mut entries: Vec<_> = read_dir.filter_map(Result::ok).collect();
     entries.sort_by_key(|e| e.path());
 
     for entry in entries {
         let path = entry.path();
-        if path.is_dir() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.starts_with('.') && name != "target" {
-                collect_sm_files_sorted(&path, out)?;
-            }
-        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "sm") {
-            out.push(path);
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        // Skip hidden entries and build target directory
+        if name.starts_with('.') || name == "target" {
+            continue;
         }
+
+        let is_reparse = crate::package_manifest::path_is_reparse(&path).unwrap_or(false);
+        if is_reparse {
+            match fs::canonicalize(&path) {
+                Ok(canon) => {
+                    if !canon.starts_with(canonical_root) {
+                        return Err(format!(
+                            "security violation: reparse path '{}' escapes project root '{}'",
+                            path.display(),
+                            canonical_root.display()
+                        ));
+                    }
+                    if path.is_dir() {
+                        if visited_dirs.contains(&canon) {
+                            return Err(format!(
+                                "security violation: recursive symlink cycle detected at '{}'",
+                                path.display()
+                            ));
+                        }
+                        return Err(format!(
+                            "security violation: symlinked directory '{}' is forbidden in project traversal",
+                            path.display()
+                        ));
+                    }
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "security violation: failed to resolve reparse path '{}': {}",
+                        path.display(),
+                        e
+                    ));
+                }
+            }
+        }
+
+        if path.is_dir() {
+            collect_project_files_secure(_root, canonical_root, &path, visited_dirs, out_sm)?;
+        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "sm") {
+            out_sm.push(path);
+        }
+    }
+
+    Ok(())
+}
+
+/// Collect sorted project source bytes across all `.sm` files, normalized with relative paths.
+pub(crate) fn collect_project_source_bytes(dir: &Path, out: &mut Vec<u8>) -> Result<(), String> {
+    let canonical_root = fs::canonicalize(dir)
+        .map_err(|e| format!("failed to canonicalize directory '{}': {}", dir.display(), e))?;
+    let mut visited_dirs = std::collections::HashSet::new();
+    let mut entries = Vec::new();
+    collect_project_files_secure(dir, &canonical_root, dir, &mut visited_dirs, &mut entries)?;
+    entries.sort();
+
+    for path in entries {
+        let b =
+            fs::read(&path).map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
+        let rel = path.strip_prefix(dir).unwrap_or(&path);
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        out.extend_from_slice(rel_str.as_bytes());
+        out.push(0);
+        out.extend_from_slice(&b);
+        out.push(0);
     }
     Ok(())
 }

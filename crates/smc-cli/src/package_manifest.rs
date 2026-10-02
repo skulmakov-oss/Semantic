@@ -1389,13 +1389,13 @@ fn resolve_manifest_context(
 }
 
 #[derive(Debug)]
-struct ParsedSemanticTomlManifest {
-    manifest: PackageManifest,
-    entry: String,
+pub(crate) struct ParsedSemanticTomlManifest {
+    pub(crate) manifest: PackageManifest,
+    pub(crate) entry: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SemanticTomlManifestErrorCode {
+pub(crate) enum SemanticTomlManifestErrorCode {
     MalformedSectionHeader,
     EntryOutsideSection,
     UnsupportedSection,
@@ -1411,9 +1411,9 @@ enum SemanticTomlManifestErrorCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SemanticTomlManifestError {
-    code: SemanticTomlManifestErrorCode,
-    message: String,
+pub(crate) struct SemanticTomlManifestError {
+    pub(crate) code: SemanticTomlManifestErrorCode,
+    pub(crate) message: String,
 }
 
 impl fmt::Display for SemanticTomlManifestError {
@@ -1432,7 +1432,7 @@ fn semantic_toml_error(
     }
 }
 
-fn parse_semantic_toml_manifest(
+pub(crate) fn parse_semantic_toml_manifest(
     manifest_path: &Path,
     source: &str,
 ) -> Result<ParsedSemanticTomlManifest, SemanticTomlManifestError> {
@@ -2177,7 +2177,7 @@ fn reject_nested_manifests_under(
     Ok(())
 }
 
-fn reject_reparse_path(path: &Path) -> Result<(), String> {
+pub(crate) fn reject_reparse_path(path: &Path) -> Result<(), String> {
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());
@@ -2192,7 +2192,7 @@ fn reject_reparse_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn path_is_reparse(path: &Path) -> Result<bool, String> {
+pub(crate) fn path_is_reparse(path: &Path) -> Result<bool, String> {
     let metadata = fs::symlink_metadata(path).map_err(|error| {
         format!(
             "failed to inspect package path '{}': {error}",

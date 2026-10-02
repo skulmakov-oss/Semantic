@@ -697,13 +697,14 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     let t_compile = Instant::now();
     std::fs::write(out, &bytes).map_err(|e| format!("failed to write '{}': {}", out, e))?;
-    let _ = crate::artifact_identity::generate_and_save_companion_provenance(
+    crate::artifact_identity::generate_and_save_companion_provenance(
         Path::new(out),
         &bytes,
         &root,
         None,
         None,
-    );
+    )
+    .map_err(|e| format!("failed to record artifact provenance: {}", e))?;
     let t_write = Instant::now();
     println!("compiled '{}' -> '{}' ({} bytes)", input, out, bytes.len());
     if debug_symbols {
@@ -5020,18 +5021,51 @@ fn cmd_version(args: &[String]) -> Result<(), String> {
         .collect();
 
     if json {
-        let features_json = features
-            .iter()
-            .map(|f| format!("\"{}\"", f))
-            .collect::<Vec<_>>()
-            .join(", ");
+        #[derive(serde::Serialize)]
+        struct SemcodeFormatVersionJson {
+            magic: &'static str,
+            epoch: u16,
+            revision: u16,
+        }
+
+        #[derive(serde::Serialize)]
+        struct ToolchainVersionJson<'a> {
+            schema_version: &'static str,
+            toolchain_version: &'a str,
+            source_fingerprint: &'a str,
+            source_hash: &'a str,
+            enabled_features: Vec<&'a str>,
+            semcode_format: SemcodeFormatVersionJson,
+            verifier_profile: &'static str,
+            runtime_profile: &'static str,
+            stdlib_version: &'static str,
+            signing: &'static str,
+        }
+
+        let report = ToolchainVersionJson {
+            schema_version: "semantic-version-v1",
+            toolchain_version: version,
+            source_fingerprint: source_hash,
+            source_hash,
+            enabled_features: features,
+            semcode_format: SemcodeFormatVersionJson {
+                magic: "SEMCOD22",
+                epoch: 0,
+                revision: 23,
+            },
+            verifier_profile: "verifier-canonical-v1",
+            runtime_profile: "deterministic-v1",
+            stdlib_version: "semantic-stdlib-v1",
+            signing: "unsigned",
+        };
         println!(
-            "{{\n  \"schema_version\": \"semantic-version-v1\",\n  \"toolchain_version\": \"{}\",\n  \"source_hash\": \"{}\",\n  \"enabled_features\": [{}],\n  \"semcode_format\": {{\n    \"magic\": \"SEMCOD22\",\n    \"epoch\": 0,\n    \"revision\": 23\n  }},\n  \"verifier_profile\": \"VerifiedLocal\",\n  \"signing\": \"unsigned\"\n}}",
-            version, source_hash, features_json
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
         );
     } else {
         println!("Semantic Language Toolchain v{}", version);
-        println!("Source Commit:      {}", source_hash);
+        println!("Source Fingerprint: {}", source_hash);
         println!(
             "Enabled Features:   {}",
             if features.is_empty() {
@@ -5041,7 +5075,7 @@ fn cmd_version(args: &[String]) -> Result<(), String> {
             }
         );
         println!("SemCode Format:     SEMCOD22 (epoch=0, rev=23)");
-        println!("Verifier Profile:   VerifiedLocal");
+        println!("Verifier Profile:   verifier-canonical-v1");
         println!("Release Signing:    unsigned");
     }
     Ok(())
@@ -5069,7 +5103,21 @@ fn cmd_artifact(args: &[String]) -> Result<(), String> {
                 .map_err(|e| format!("failed to read artifact '{}': {}", path.display(), e))?;
             let hash = sm_format::sha256::sha256_prefixed_hex(&bytes);
             if json {
-                println!("{{\n  \"path\": \"{}\",\n  \"artifact_hash\": \"{}\"\n}}", path.display(), hash);
+                #[derive(serde::Serialize)]
+                struct ArtifactHashJson<'a> {
+                    path: String,
+                    artifact_hash: &'a str,
+                }
+                let path_str = path.display().to_string().replace('\\', "/");
+                let report = ArtifactHashJson {
+                    path: path_str,
+                    artifact_hash: &hash,
+                };
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report)
+                        .unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
+                );
             } else {
                 println!("{hash}");
             }
