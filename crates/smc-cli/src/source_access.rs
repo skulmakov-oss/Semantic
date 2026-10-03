@@ -93,7 +93,9 @@ impl<'a> CanonicalSources<'a> {
     pub(crate) fn new(overlay: &'a SourceOverlay, anchor: &Path) -> Self {
         Self {
             overlay,
-            anchor: anchor.canonicalize().unwrap_or_else(|_| lexical(anchor)),
+            anchor: strip_verbatim_prefix(
+                &anchor.canonicalize().unwrap_or_else(|_| lexical(anchor)),
+            ),
         }
     }
 }
@@ -142,15 +144,40 @@ impl SourceAccess for CanonicalSources<'_> {
     }
 }
 
+/// SSF-09: Strips Windows verbatim disk prefix (`\\?\C:` or `//?/C:`)
+/// from a path, preserving normal drive paths (`C:\...`).
+pub(crate) fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    if !cfg!(windows) {
+        return path.to_path_buf();
+    }
+    let s = path.to_string_lossy();
+    let s_clean = s.replace('/', "\\");
+    if let Some(rest) = s_clean.strip_prefix(r"\\?\") {
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            if bytes.len() == 2 || bytes[2] == b'\\' {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
 /// `path` relative to `anchor`, with `..` for each anchor component not
 /// shared and `/` separators. Injective for normalized absolute paths, and
 /// independent of where the checkout containing both lives.
 pub(crate) fn relative_display(anchor: &Path, path: &Path) -> String {
-    let path = if path.is_absolute() {
-        path.canonicalize().unwrap_or_else(|_| lexical(path))
+    let anchor = strip_verbatim_prefix(anchor);
+    let path_stripped = strip_verbatim_prefix(path);
+    let path = if path_stripped.is_absolute() {
+        path_stripped
+            .canonicalize()
+            .map(|p| strip_verbatim_prefix(&p))
+            .unwrap_or_else(|_| lexical(&path_stripped))
     } else {
-        lexical(&anchor.join(path))
+        lexical(&anchor.join(&path_stripped))
     };
+    let path = strip_verbatim_prefix(&path);
     let anchor_parts: Vec<Component> = anchor.components().collect();
     let path_parts: Vec<Component> = path.components().collect();
     let shared = anchor_parts
@@ -285,5 +312,30 @@ mod tests {
             .read_source(Path::new("/nonexistent-anchor/missing.sm"))
             .unwrap_err();
         assert_eq!(error, "failed to read 'missing.sm': entity not found");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_relative_display_handles_verbatim_and_nonexistent_paths() {
+        let anchor = Path::new(r"\\?\C:\repo\src");
+        let path = Path::new(r"C:\repo\src\gone.sm");
+        let display = relative_display(anchor, path);
+        assert_eq!(display, "gone.sm");
+
+        let anchor2 = Path::new(r"C:\repo\src");
+        let path2 = Path::new(r"\\?\C:\repo\src\gone.sm");
+        assert_eq!(relative_display(anchor2, path2), "gone.sm");
+
+        let slash_anchor = Path::new("//?/C:/repo/src");
+        let slash_path = Path::new("//?/C:/repo/src/gone.sm");
+        assert_eq!(relative_display(slash_anchor, slash_path), "gone.sm");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_relative_display_handles_parent_and_sibling_directories() {
+        let anchor = Path::new(r"\\?\C:\repo\src\deep");
+        let path = Path::new(r"C:\repo\src\other\helper.sm");
+        assert_eq!(relative_display(anchor, path), "../other/helper.sm");
     }
 }

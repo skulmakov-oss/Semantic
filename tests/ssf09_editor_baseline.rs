@@ -1699,3 +1699,25 @@ fn mutation_campaign_selection_fails_closed() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("1 mutant(s) selected: M1"), "{out}");
 }
+
+#[test]
+#[cfg(windows)]
+fn lsp_windows_uri_roundtrip_and_no_verbatim_prefix_leak() {
+    let dir = fixture_dir("project_ok");
+    let main = dir.join("src/main.sm");
+    let uri = smc_cli::lsp::path_to_uri(&main.canonicalize().unwrap());
+    assert!(
+        !uri.contains("%3F") && !uri.contains("?"),
+        "LSP URI contains verbatim question mark: {uri}"
+    );
+    assert!(
+        uri.starts_with("file:///"),
+        "LSP URI does not start with standard file:/// : {uri}"
+    );
+    let mut msgs = init(Some(&dir));
+    msgs.push(open(&uri, 1, &fs::read_to_string(&main).unwrap()));
+    msgs.extend(shutdown_exit(9));
+    let (_, out) = run_lsp(&msgs);
+    let publish = last_publish_for(&out, &uri);
+    assert_eq!(publish["diagnostics"], json!([]));
+}
