@@ -1,0 +1,75 @@
+{
+  "schema_version": "semantic.ssf12.qualification_manifest.v1",
+  "candidate_sha": "89641da8237f4fcefb50cf1958a50e4d4003aea7",
+  "evidence_branch": "feat/ssf12-requalification-c1",
+  "toolchain": {
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "1.97.1 (c980f4866 2026-06-30)",
+    "rustfmt": "1.9.0-stable (8bab26f4f6 2026-07-14)",
+    "clippy": "0.1.97 (8bab26f4f6 2026-07-14)"
+  },
+  "host": {
+    "os": "Windows",
+    "architecture": "x86_64",
+    "build": "10.0.26340.0",
+    "triple": "x86_64-pc-windows-msvc"
+  },
+  "artifact_hashes": {
+    "target_release_smc_exe": {
+      "sha256": "e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a",
+      "size_bytes": 4572160,
+      "signing": "unsigned"
+    },
+    "target_release_svm_exe": {
+      "sha256": "9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf",
+      "size_bytes": 442880,
+      "signing": "unsigned"
+    },
+    "candidate_zip": {
+      "name": "semantic-language-windows-x64-v1.2.0-candidate.zip",
+      "sha256": "97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17",
+      "size_bytes": 2260731
+    }
+  },
+  "summary": {
+    "total_gates": 78,
+    "pass": 76,
+    "fail": 0,
+    "blocked": 1,
+    "not_applicable": 1,
+    "skipped": 0,
+    "inconclusive": 0
+  },
+  "foundation_oracle_verdict": "ORACLE QUALIFIED WITH EXPLICIT LIMITS",
+  "stable_foundation_promotion_recommendation": "PROMOTE WITH EXPLICIT LIMITS",
+  "remediation_verification": {
+    "DEFECT-SSF12-001": {
+      "owning_phase": "SSF-09",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1979,
+      "commit": "f208ef4fffc9afb35499c634540d188d16fd6b8a",
+      "summary": "Windows LSP host-path transport and relative display normalization in smc-lsp and sm-front"
+    },
+    "DEFECT-SSF12-002": {
+      "owning_phase": "SSF-09",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1980,
+      "commit": "a4706ec9c93d57d50eb46b0a42500d315318021e",
+      "summary": "Windows provider module IDs normalization at cycle boundary in sm-sema"
+    },
+    "DEFECT-SSF12-003": {
+      "owning_phase": "SSF-12",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1981,
+      "commit": "1f8df7606340027ba17582bb44d62ec4dc5a1d3f",
+      "summary": "Provider module-id test-contract expectation on Windows in sm-sema unit tests"
+    },
+    "DEFECT-SSF12-004": {
+      "owning_phase": "SSF-12",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1982,
+      "commit": "89641da8237f4fcefb50cf1958a50e4d4003aea7",
+      "summary": "Windows CreateProcess command line limit reuse of Invoke-WorkspaceFmtCheck in tools/7hell/run.ps1"
+    }
+  }
+}
