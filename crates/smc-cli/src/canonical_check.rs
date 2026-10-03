@@ -482,13 +482,18 @@ mod tests {
         ));
         std::fs::create_dir_all(temp_dir.join("src")).expect("mkdir");
         let manifest = temp_dir.join("package.toml");
-        std::fs::write(&manifest, "[package]\nname = \"test_pkg\"\nversion = \"0.1.0\"\nmodule_root = \"src\"\n").unwrap();
+        std::fs::write(
+            &manifest,
+            "[package]\nname = \"test_pkg\"\nversion = \"0.1.0\"\nmodule_root = \"src\"\n",
+        )
+        .unwrap();
         let file_a = temp_dir.join("src").join("a.sm");
         let file_b = temp_dir.join("src").join("b.sm");
         std::fs::write(&file_a, "import \"b.sm\";").unwrap();
         std::fs::write(&file_b, "import \"a.sm\";").unwrap();
 
-        let root_canon = crate::source_access::strip_verbatim_prefix(&file_a.canonicalize().unwrap());
+        let root_canon =
+            crate::source_access::strip_verbatim_prefix(&file_a.canonicalize().unwrap());
         let overlay = SourceOverlay::new();
         let access = CanonicalSources::new(&overlay, &temp_dir);
         let provider = OverlayModuleProvider {
