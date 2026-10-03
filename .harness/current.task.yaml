@@ -1,17 +1,17 @@
 task:
   id: SEMANTIC-STABLE-FOUNDATION-SSF-12
-  title: "SSF-12 Full 7HELL Windows Workspace Format Gate Remediation"
-  type: ssf12_full_7hell_windows_format_gate_remediation
+  title: "SSF-12 C1 Full Requalification and Foundation Oracle Verdict"
+  type: ssf12_c1_full_requalification_and_foundation_oracle_verdict
   mode: active
   supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-11
   authorized_by: >-
-    Repository owner direct instruction (2026-10-03) authorizing narrow
-    qualification-tooling remediation of DEFECT-SSF12-004 (Full 7HELL
-    workspace-format gate exceeds the Windows process command-line limit).
-    Permitted task type: ssf12_full_7hell_windows_format_gate_remediation.
-    Permitted writes: .harness/current.task.yaml, tools/7hell/run.ps1.
-    Strictly forbidden: scripts/** (including workspace_fmt_check.ps1),
-    .github/**, crates/**, src/**, Cargo.toml, Cargo.lock, release promotion.
+    Repository owner direct instruction (2026-10-03, #1583 under umbrella #1569)
+    authorizing fresh SSF-12 qualification campaign against candidate C1
+    (89641da8237f4fcefb50cf1958a50e4d4003aea7). Permitted task type:
+    ssf12_c1_full_requalification_and_foundation_oracle_verdict. Permitted writes:
+    .harness/current.task.yaml, reports/ssf12/**, reports/semantic_stable_foundation_final_verdict.md,
+    tests/ssf12_qualification_guards.rs. Strictly forbidden: crates/**, src/**,
+    tools/**, scripts/**, .github/**, Cargo.toml, Cargo.lock, examples/**, release promotion.
   prior_phase_authorization_history: >-
     RETIRED (historical record of SSF-11 and earlier envelopes; grants no
     authority to SSF-12).
@@ -144,32 +144,38 @@ task:
 
 intent:
   summary: >-
-    Execute narrow SSF-12 qualification-tooling remediation for DEFECT-SSF12-004:
-    updating tools/7hell/run.ps1 to reuse the repository's authoritative,
-    Windows-safe Invoke-WorkspaceFmtCheck helper from scripts/workspace_fmt_check.ps1.
+    Full independent requalification of frozen Stable Foundation candidate C1
+    (89641da8237f4fcefb50cf1958a50e4d4003aea7); Foundation Oracle qualification
+    for Bootstrap reference; fresh 78-gate matrix evidence collection and dual
+    verdict; no feature development; no implementation repairs; no release;
+    no tag; no promotion without human owner decision.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - tools/7hell/run.ps1
+    - reports/semantic_stable_foundation_final_verdict.md
+    - reports/ssf12/**
+    - tests/ssf12_qualification_guards.rs
 
   forbidden_paths:
     - .github/**
     - apps/**
     - crates/**
     - src/**
+    - tools/**
     - scripts/**
     - Cargo.toml
     - Cargo.lock
-    - examples/workbench_semantic/**
+    - examples/**
     - experiments/**
     - third_party/**
     - ton618_legacy/**
+    - prom-ui*
 
 authorization:
   rust_implementation: false
   language_implementation: false
-  documentation_addition: false
+  documentation_addition: true
   documentation_correction: true
   test_addition: true
   workflow_changes: false
@@ -183,21 +189,29 @@ constraints:
   one_active_ssf_phase: true
   active_phase: SSF-12
   issue: 1583
-  remediation_phase: SSF-12
-  remediation_target: DEFECT-SSF12-004
-  owner_authorized: true
-  reason: >
-    Repository owner authorized narrow qualification-tooling remediation of
-    DEFECT-SSF12-004 (Full 7HELL workspace-format gate exceeds Windows command-line limit).
   umbrella_issue: 1569
+  owner_authorized: true
+  candidate_id: C1
+  candidate_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
+  candidate_sha_frozen: true
+  frozen_candidate_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
+  qualification_only: true
+  mandatory_gate_skip_is_not_pass: true
+  earlier_phase_defects_return_to_owner: true
+  no_fixing_core_defects_inside_ssf12: true
+  no_release_or_tag: true
+  no_issue_close: true
+  human_promotion_decision_required: true
+  oracle_verdict_required: true
+  stable_publication_verdict_separate_from_oracle_verdict: true
   base_branch: main
-  base_sha: 1f8df7606340027ba17582bb44d62ec4dc5a1d3f
+  base_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
   stable_promotion: false
-  activation_only_no_verdict: false
-  no_release_or_tag: true
+  release_authorized: false
+  tag_authorized: false
   ownership_position: A
   ownership_position_decision_record: >-
     docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md
