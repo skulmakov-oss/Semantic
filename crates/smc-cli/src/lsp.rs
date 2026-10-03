@@ -730,8 +730,18 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
     }
     let decoded = percent_decode(path)?;
     if cfg!(windows) {
-        // `/C:/x` -> `C:/x`
+        // `/C:/x` -> `C:/x`, `//?/C:/x` -> `C:/x`
         let trimmed = decoded.strip_prefix('/').unwrap_or(&decoded);
+        let trimmed = if let Some(rest) = trimmed.strip_prefix("/?/") {
+            let bytes = rest.as_bytes();
+            if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+                rest
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        };
         Some(PathBuf::from(trimmed))
     } else {
         Some(PathBuf::from(decoded))
@@ -741,7 +751,15 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
 /// The `file:` URI of an absolute path, percent-encoding every byte outside
 /// the RFC 3986 unreserved set and `/`.
 pub fn path_to_uri(path: &Path) -> String {
-    let text = path.to_string_lossy().replace('\\', "/");
+    let mut text = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        if let Some(rest) = text.strip_prefix("//?/") {
+            let bytes = rest.as_bytes();
+            if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+                text = rest.to_string();
+            }
+        }
+    }
     let mut out = String::from("file://");
     if !text.starts_with('/') {
         out.push('/');
@@ -806,5 +824,62 @@ mod tests {
         assert_eq!(uri_to_path("untitled:Untitled-1"), None);
         assert_eq!(uri_to_path("file://remote/x.sm"), None);
         assert_eq!(uri_to_path("file:///bad%zz"), None);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_path_to_uri_handles_verbatim_disk_prefix() {
+        let p1 = Path::new(r"\\?\C:\repo\src\main.sm");
+        let uri1 = path_to_uri(p1);
+        assert_eq!(uri1, "file:///C:/repo/src/main.sm");
+
+        let p2 = Path::new(r"C:\repo\src\main.sm");
+        let uri2 = path_to_uri(p2);
+        assert_eq!(uri2, "file:///C:/repo/src/main.sm");
+    }
+
+    #[cfg(windows)]
+    fn mk_temp_dir(prefix: &str) -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let base = std::env::temp_dir().join(format!(
+            "{}_{}_{}",
+            prefix,
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("mkdir");
+        base
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_canonical_and_raw_path_produce_identical_uri() {
+        let temp_dir = mk_temp_dir("lsp_uri_roundtrip");
+        let file = temp_dir.join("test.sm");
+        std::fs::write(&file, "mod test;").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        assert_eq!(path_to_uri(&file), path_to_uri(&canonical));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_file_uri_round_trip() {
+        let uri = "file:///C:/projects/demo/src/main.sm";
+        let path = uri_to_path(uri).expect("uri should resolve to path");
+        assert_eq!(path, PathBuf::from(r"C:\projects\demo\src\main.sm"));
+        assert_eq!(path_to_uri(&path), uri);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn unsaved_file_uri_does_not_require_disk_existence() {
+        let uri = "file:///C:/nonexistent/unsaved_module.sm";
+        let path = uri_to_path(uri).expect("unsaved uri converts to path");
+        assert_eq!(path, PathBuf::from(r"C:\nonexistent\unsaved_module.sm"));
+        assert_eq!(path_to_uri(&path), uri);
     }
 }
