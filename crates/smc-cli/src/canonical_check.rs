@@ -64,7 +64,8 @@ impl SourceOverlay {
 }
 
 fn overlay_key(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    crate::source_access::strip_verbatim_prefix(&canon)
 }
 
 /// Canonical logical source identity (SSF-09 Decision C): the admitting
@@ -198,6 +199,7 @@ pub fn check_canonical(request: &CheckRequest) -> Result<CanonicalCheckReport, H
             e.kind()
         ))
     })?;
+    let root_canon = crate::source_access::strip_verbatim_prefix(&root_canon);
     let anchor = root_canon
         .parent()
         .map(Path::to_path_buf)
@@ -281,8 +283,10 @@ impl Session {
             registry: SourceRegistry::new(),
             sources: Vec::new(),
             by_path: BTreeMap::new(),
-            display_base: display_base
-                .map(|base| base.canonicalize().unwrap_or_else(|_| base.to_path_buf())),
+            display_base: display_base.map(|base| {
+                let canon = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+                crate::source_access::strip_verbatim_prefix(&canon)
+            }),
         }
     }
 
@@ -313,6 +317,7 @@ impl Session {
 
     fn display_path(&self, path: &Path) -> Option<String> {
         let base = self.display_base.as_ref()?;
+        let path = crate::source_access::strip_verbatim_prefix(path);
         let relative = path.strip_prefix(base).ok()?;
         let parts = relative
             .components()
@@ -335,6 +340,7 @@ impl Session {
     ) -> Option<SourceId> {
         let path = PathBuf::from(module_id);
         let canonical = path.canonicalize().unwrap_or(path);
+        let canonical = crate::source_access::strip_verbatim_prefix(&canonical);
         if let Some(id) = self.by_path.get(&canonical) {
             return Some(*id);
         }
@@ -430,6 +436,7 @@ impl ModuleProvider for OverlayModuleProvider<'_> {
     fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String> {
         resolve_package_import_path(Path::new(importer_module_id), spec)
             .map(|path| {
+                let path = crate::source_access::strip_verbatim_prefix(&path);
                 let text = path.to_string_lossy();
                 if cfg!(windows) {
                     text.replace('\\', "/")
@@ -453,4 +460,158 @@ pub fn line_column(text: &str, offset: usize) -> (usize, usize) {
     let line = before.matches('\n').count() + 1;
     let column = before[line_start..].chars().count() + 1;
     (line, column)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::path::{Component, Prefix};
+
+    #[test]
+    fn windows_root_and_resolved_import_representation_equivalence() {
+        // Create an isolated temp directory following the PID + timestamp convention.
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let temp_dir = std::env::temp_dir().join(format!(
+            "canonical_check_test_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).expect("mkdir");
+        let manifest = temp_dir.join("package.toml");
+        std::fs::write(
+            &manifest,
+            "[package]\nname = \"test_pkg\"\nversion = \"0.1.0\"\nmodule_root = \"src\"\n",
+        )
+        .unwrap();
+        let file_a = temp_dir.join("src").join("a.sm");
+        let file_b = temp_dir.join("src").join("b.sm");
+        std::fs::write(&file_a, "import \"b.sm\";").unwrap();
+        std::fs::write(&file_b, "import \"a.sm\";").unwrap();
+
+        let root_canon =
+            crate::source_access::strip_verbatim_prefix(&file_a.canonicalize().unwrap());
+        let overlay = SourceOverlay::new();
+        let access = CanonicalSources::new(&overlay, &temp_dir);
+        let provider = OverlayModuleProvider {
+            access: &access,
+            served: RefCell::new(BTreeMap::new()),
+        };
+
+        // When a.sm imports b.sm, and b.sm imports a.sm:
+        let importer_a = root_canon.to_string_lossy().replace('\\', "/");
+        let resolved_b = provider.resolve_import(&importer_a, "b.sm").unwrap();
+        let resolved_a = provider.resolve_import(&resolved_b, "a.sm").unwrap();
+
+        let root_comp = Path::new(&root_canon).components().next();
+        let resolved_comp = Path::new(&resolved_a).components().next();
+
+        // R1: Both must have identical prefix representation, and neither may be Prefix::UNC.
+        assert_eq!(
+            root_comp, resolved_comp,
+            "root module and resolved import must share identical prefix component"
+        );
+        if let Some(Component::Prefix(p)) = resolved_comp {
+            assert!(
+                !matches!(p.kind(), Prefix::UNC(_, _)),
+                "resolved import must not be parsed as a UNC network share: {resolved_a}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn windows_cycle_boundary_produces_three_hop_chain_and_forbids_four_hop() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let temp_dir = std::env::temp_dir().join(format!(
+            "canonical_check_cycle_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).expect("mkdir");
+        let manifest = temp_dir.join("package.toml");
+        std::fs::write(
+            &manifest,
+            "[package]\nname = \"cycle_pkg\"\nversion = \"0.1.0\"\nmodule_root = \"src\"\n",
+        )
+        .unwrap();
+        let file_a = temp_dir.join("src").join("a.sm");
+        let file_b = temp_dir.join("src").join("b.sm");
+        std::fs::write(
+            &file_a,
+            "Import \"b.sm\"\nLaw \"A\" [priority 1]:\n    When true ->\n        System.recovery()\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &file_b,
+            "Import \"a.sm\"\nLaw \"B\" [priority 1]:\n    When true ->\n        System.recovery()\n",
+        )
+        .unwrap();
+
+        let request = CheckRequest {
+            entry: file_a.clone(),
+            overlay: SourceOverlay::new(),
+            display_base: Some(temp_dir.clone()),
+            root_display_fallback: None,
+        };
+        let report = check_canonical(&request).expect("check_canonical succeeds with report");
+        assert_eq!(report.status, CheckStatus::Failed);
+        let msg = report.diagnostics[0].message.as_str();
+        // R2: must produce exactly a.sm -> b.sm -> a.sm and forbid 4 hops:
+        assert_eq!(msg, "cyclic import detected: a.sm -> b.sm -> a.sm");
+        assert!(!msg.contains("a.sm -> b.sm -> a.sm -> b.sm"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn windows_non_cycle_import_loads_cleanly() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let temp_dir = std::env::temp_dir().join(format!(
+            "canonical_check_norm_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).expect("mkdir");
+        let manifest = temp_dir.join("package.toml");
+        std::fs::write(
+            &manifest,
+            "[package]\nname = \"norm_pkg\"\nversion = \"0.1.0\"\nmodule_root = \"src\"\n",
+        )
+        .unwrap();
+        let file_main = temp_dir.join("src").join("main.sm");
+        let file_helper = temp_dir.join("src").join("helper.sm");
+        std::fs::write(
+            &file_main,
+            "Import \"helper.sm\"\nLaw \"Main\" [priority 1]:\n    When true ->\n        System.recovery()\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &file_helper,
+            "Law \"Helper\" [priority 1]:\n    When true ->\n        System.recovery()\n",
+        )
+        .unwrap();
+
+        let request = CheckRequest {
+            entry: file_main.clone(),
+            overlay: SourceOverlay::new(),
+            display_base: Some(temp_dir.clone()),
+            root_display_fallback: None,
+        };
+        let report = check_canonical(&request).expect("check_canonical succeeds with report");
+        // R3: non-cycle import loads cleanly:
+        assert_eq!(report.status, CheckStatus::Passed);
+        assert_eq!(report.error_count(), 0);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
