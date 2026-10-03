@@ -462,13 +462,12 @@ pub fn line_column(text: &str, offset: usize) -> (usize, usize) {
     (line, column)
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use std::path::{Component, Prefix};
 
     #[test]
-    #[cfg(windows)]
     fn windows_root_and_resolved_import_representation_equivalence() {
         // Create an isolated temp directory following the PID + timestamp convention.
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -525,7 +524,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
     fn windows_cycle_boundary_produces_three_hop_chain_and_forbids_four_hop() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let temp_dir = std::env::temp_dir().join(format!(
@@ -573,7 +571,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
     fn windows_non_cycle_import_loads_cleanly() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let temp_dir = std::env::temp_dir().join(format!(
