@@ -1,20 +1,19 @@
 task:
   id: SEMANTIC-STABLE-FOUNDATION-SSF-12
-  title: "full qualification and stable promotion"
-  type: governance_activation_only
+  title: "SSF-09 Windows LSP Host-Path Transport Remediation"
+  type: ssf09_windows_path_remediation
   mode: active
   supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-11
   authorized_by: >-
-    Repository owner direct instruction (2026-10-02) to record the SSF-11 ->
-    SSF-12 phase transition after #1582 closed as completed through merged
-    PR #1976 (squash commit bd4e34ebe219037bcb5330c1c3666d03dd0ec11d), so
-    that `.harness/current.task.yaml` and the dependency map stop presenting
-    a closed phase as active. This envelope is ACTIVATION-ONLY: it records
-    SSF-12 as the active phase and authorizes nothing beyond that record.
-    No qualification run, no PROMOTE / DO NOT PROMOTE verdict, no release,
-    no tag, no workflow change, no closing of #1583 or #1569. Any SSF-12
-    implementation work requires a separate explicit owner authorization
-    that widens this envelope.
+    Repository owner direct instruction (2026-10-03) authorizing narrow SSF-09
+    remediation for empirically proven Windows host-path / LSP URI defects
+    (S1/S2) discovered by SSF-12 qualification on candidate SHA
+    a1591bc1b3c0458ec617d704c4a0dcb9670b1fb5. Permitted task type:
+    ssf09_windows_path_remediation. Permitted writes: .harness/current.task.yaml,
+    crates/smc-cli/src/lsp.rs, crates/smc-cli/src/source_access.rs,
+    tests/ssf09_editor_baseline.rs, and narrowly justified unit tests in
+    crates/smc-cli. Strictly forbidden: sm-front, sm-sema, sm-ir, sm-format,
+    sm-verify, sm-vm, SourceIdentity, diagnostic codes, release promotion.
   prior_phase_authorization_history: >-
     RETIRED (historical record of SSF-11 and earlier envelopes; grants no
     authority to SSF-12).
@@ -147,24 +146,32 @@ task:
 
 intent:
   summary: >-
-    Record SSF-12 (#1583) as the single active Stable Foundation phase after
-    SSF-11 (#1582) completion, keeping the two independent active-phase
-    authorities (this file and the dependency map) consistent. No SSF-12
-    work, verdict, or promotion is performed or implied.
+    Execute narrow SSF-09 remediation pass for Windows host-path / LSP URI
+    transport defects S1 and S2 discovered during SSF-12 qualification on
+    candidate a1591bc1b3c0458ec617d704c4a0dcb9670b1fb5.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - docs/roadmap/stable_foundation/**
-    - docs/getting_started.md
-    - docs/examples_index.md
-    - tests/ssf_status_drift.rs
-    - tests/ssf11_onboarding_docs.rs
+    - crates/smc-cli/src/lsp.rs
+    - crates/smc-cli/src/source_access.rs
+    - crates/smc-cli/**
+    - tests/ssf09_editor_baseline.rs
 
   forbidden_paths:
     - .github/**
     - apps/**
-    - crates/**
+    - crates/sm-front/**
+    - crates/sm-sema/**
+    - crates/sm-ir/**
+    - crates/sm-format/**
+    - crates/sm-verify/**
+    - crates/sm-vm/**
+    - crates/sm-runtime-core/**
+    - crates/sm-diagnostic/**
+    - crates/sm-emit/**
+    - crates/ton618-core/**
+    - crates/prom-*/**
     - src/**
     - Cargo.toml
     - Cargo.lock
@@ -174,11 +181,11 @@ scope:
     - ton618_legacy/**
 
 authorization:
-  rust_implementation: false
+  rust_implementation: true
   language_implementation: false
   documentation_addition: false
   documentation_correction: true
-  test_addition: false
+  test_addition: true
   workflow_changes: false
   dependency_changes: false
   github_issue_lifecycle: false
@@ -190,18 +197,20 @@ constraints:
   one_active_ssf_phase: true
   active_phase: SSF-12
   issue: 1583
+  remediation_phase: SSF-09
+  remediation_target: DEFECT-SSF12-001
   owner_authorized: true
   reason: >
-    Governance-state honesty after SSF-11 (#1582) completion. SSF-12 is
-    recorded as active; no SSF-12 qualification, verdict, or promotion is
-    authorized by this envelope.
+    Repository owner authorized remediation of Windows LSP host-path / URI
+    defects S1/S2 discovered during SSF-12 qualification.
   umbrella_issue: 1569
-  base_branch: main
+  base_branch: fix/ssf09-windows-lsp-path-remediation
+  base_sha: a1591bc1b3c0458ec617d704c4a0dcb9670b1fb5
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
   stable_promotion: false
-  activation_only_no_verdict: true
+  activation_only_no_verdict: false
   no_release_or_tag: true
   ownership_position: A
   ownership_position_decision_record: >-
