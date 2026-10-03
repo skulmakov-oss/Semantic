@@ -1,18 +1,17 @@
 task:
   id: SEMANTIC-STABLE-FOUNDATION-SSF-12
-  title: "SSF-09 Windows Cycle Module ID Remediation"
-  type: ssf09_windows_cycle_module_id_remediation
+  title: "SSF-12 sm-sema Provider Module ID Contract Remediation"
+  type: ssf12_sm_sema_provider_module_id_contract_remediation
   mode: active
   supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-11
   authorized_by: >-
-    Repository owner direct instruction (2026-10-03, Stage B) authorizing
-    remediation of DEFECT-SSF12-002 (S3 import cycle path representation mismatch)
-    without modifying sm-sema or compiler semantics. Permitted task type:
-    ssf09_windows_cycle_module_id_remediation. Permitted writes:
-    .harness/current.task.yaml, crates/smc-cli/src/canonical_check.rs,
-    tests/ssf09_editor_baseline.rs, and colocated unit tests in canonical_check.rs.
-    Strictly forbidden: sm-front, sm-sema, sm-ir, sm-format, sm-verify, sm-vm,
-    sm-diagnostic, ton618-core, SourceIdentity, diagnostic codes, release promotion.
+    Repository owner direct instruction (2026-10-03) authorizing narrow
+    remediation of DEFECT-SSF12-003 (sm-sema provider module-id path-contract
+    test is host-separator dependent on Windows). Permitted task type:
+    ssf12_sm_sema_provider_module_id_contract_remediation. Permitted writes:
+    .harness/current.task.yaml, crates/sm-sema/src/std_adapters.rs (test contract
+    correction only). Strictly forbidden: smc-cli, sm-front, sm-ir, sm-format,
+    sm-verify, sm-vm, sm-diagnostic, ton618-core, tools, scripts, release promotion.
   prior_phase_authorization_history: >-
     RETIRED (historical record of SSF-11 and earlier envelopes; grants no
     authority to SSF-12).
@@ -145,21 +144,20 @@ task:
 
 intent:
   summary: >-
-    Execute narrow SSF-09 remediation pass for Windows import cycle module ID
-    representation defect DEFECT-SSF12-002 (S3) discovered during SSF-12
-    qualification.
+    Execute narrow SSF-12 remediation for DEFECT-SSF12-003: correcting
+    sm-sema provider_module_id test expectation to match canonical forward-slash
+    contract.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/smc-cli/src/canonical_check.rs
-    - tests/ssf09_editor_baseline.rs
+    - crates/sm-sema/src/std_adapters.rs
 
   forbidden_paths:
     - .github/**
     - apps/**
+    - crates/smc-cli/**
     - crates/sm-front/**
-    - crates/sm-sema/**
     - crates/sm-ir/**
     - crates/sm-format/**
     - crates/sm-verify/**
@@ -170,6 +168,8 @@ scope:
     - crates/ton618-core/**
     - crates/prom-*/**
     - src/**
+    - tools/**
+    - scripts/**
     - Cargo.toml
     - Cargo.lock
     - examples/workbench_semantic/**
@@ -178,7 +178,7 @@ scope:
     - ton618_legacy/**
 
 authorization:
-  rust_implementation: true
+  rust_implementation: false
   language_implementation: false
   documentation_addition: false
   documentation_correction: true
@@ -194,15 +194,15 @@ constraints:
   one_active_ssf_phase: true
   active_phase: SSF-12
   issue: 1583
-  remediation_phase: SSF-09
-  remediation_target: DEFECT-SSF12-002
+  remediation_phase: SSF-12
+  remediation_target: DEFECT-SSF12-003
   owner_authorized: true
   reason: >
-    Repository owner authorized remediation of Windows cycle module ID
-    representation defect DEFECT-SSF12-002 (S3).
+    Repository owner authorized narrow remediation of DEFECT-SSF12-003
+    (sm-sema provider module-id path-contract test expectation).
   umbrella_issue: 1569
   base_branch: main
-  base_sha: f208ef4fffc9afb35499c634540d188d16fd6b8a
+  base_sha: a4706ec9c93d57d50eb46b0a42500d315318021e
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true

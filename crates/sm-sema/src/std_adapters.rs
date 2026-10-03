@@ -1544,9 +1544,16 @@ Law "L" [priority 1]:
         // SSF-09 #1580 AC2: the failing module is structurally known here,
         // so the error now carries that module's provider identity (it is
         // still never the *warning* provenance of another module).
-        assert_eq!(
-            err.diag.provider_module_id.as_deref(),
-            Some(expected_helper.as_ref())
+        // DEFECT-SSF12-003: provider_module_id is the canonical forward-slash
+        // module identifier, independent of host OS path separators.
+        assert_eq!(err.diag.provider_module_id.as_deref(), Some(helper));
+        assert!(
+            !err.diag
+                .provider_module_id
+                .as_deref()
+                .unwrap_or("")
+                .contains('\\'),
+            "provider_module_id must not leak host backslashes"
         );
     }
 
