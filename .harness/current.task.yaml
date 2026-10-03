@@ -201,8 +201,8 @@ constraints:
     Repository owner authorized remediation of Windows cycle module ID
     representation defect DEFECT-SSF12-002 (S3).
   umbrella_issue: 1569
-  base_branch: fix/ssf09-windows-lsp-path-remediation
-  base_sha: 46e9dfc2b4954bfaba8647d6c0473e2a2654c63f
+  base_branch: main
+  base_sha: f208ef4fffc9afb35499c634540d188d16fd6b8a
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
