@@ -47,7 +47,7 @@
     "issue": 1580,
     "test_suite": "tests/ssf09_editor_baseline.rs",
     "failed_tests_count": 10,
-    "description": "On Windows hosts, tests/ssf09_editor_baseline.rs experiences 10 test failures due to verbatim UNC/drive path handling (\\\\?\\C:\\), relative path normalization differences, and CLI vs LSP diagnostics/URI discrepancies.",
+    "description": "On Windows hosts, tests/ssf09_editor_baseline.rs experiences 10 test failures. Leading root-cause hypothesis is verbatim extended path prefix handling (\\\\?\\C:\\), relative path normalization differences, and CLI vs LSP stdio URI discrepancies. Causal proof and remediation layer owned by SSF-09.",
     "blocks_oracle": false,
     "blocks_promotion": true
   }

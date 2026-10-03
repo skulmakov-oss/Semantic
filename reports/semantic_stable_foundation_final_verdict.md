@@ -213,11 +213,13 @@ Refer to [`reports/ssf12/qualification_matrix.md`](qualification_matrix.md) and 
 
 - **Canonical Carrier**: `crates/sm-diagnostic` clean and isolated.
 - **Formatter**: Idempotent and semantic-preserving (`tests/canonical_source_style.rs`).
-- **Defect Discovery**: On Windows hosts, `tests/ssf09_editor_baseline.rs` failed 10 tests:
-  1. `canonical_json_is_byte_identical_across_checkout_roots`: Path diff calculation embeds verbatim `\\?\C:\` prefix, producing mismatched `../` traversals between shallow and deep checkouts.
+- **Defect Discovery (DEFECT-SSF12-001)**: On Windows hosts, `tests/ssf09_editor_baseline.rs` failed 10 tests:
+  1. `canonical_json_is_byte_identical_across_checkout_roots`: JSON path diff calculation emits mismatched `../` relative traversals between shallow and deep checkouts.
   2. `portable_messages_name_modules_by_project_relative_path`: Cycle detection message printed 4 hops instead of 3.
   3. `cli_lsp_parity_rootless_matrix` & `cli_lsp_parity_project_matrix`: Diagnostic codes and URI formatting differ between CLI and LSP over stdio on Windows.
   4. `lsp_rustlike_overlay_*`: In-memory overlay synchronization fails to resolve imported helper modules over stdio on Windows.
+- **Evidence-Supported Suspected Cause (Leading Hypothesis)**: Initial code inspection and failure analysis point toward Windows extended-length verbatim path prefixing (`\\?\C:\`), relative path traversal calculations, and CLI vs LSP stdio URI normalization divergences.
+- **Qualification vs Ownership Boundary**: In accordance with SSF-12 discipline (*"qualification discovers, ownership phases repair"*), SSF-12 establishes the empirical defect facts and failure taxonomy. Rigorous causal proof (`prefix normalization -> mismatch -> failing behavior -> narrow fix -> exact tests green`) and architectural ownership of the fix belong to the SSF-09 remediation phase.
 
 ---
 
@@ -269,6 +271,7 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 - **Hell 6 (Source to SemCode Smoke)**: PASS
 - **Hell 7 (PCC Documentation Integrity)**: PASS
 - **Result**: `ALL 7 GATES PASSED!`
+- **Architectural Scope Adjudication**: `Full 7HELL PASS does not imply overall SSF-12 PASS; the broader mandatory qualification contour contains independent failing gates.` (Full 7HELL validates its seven specific foundational compiler, verifier, VM, and boundary gates; the broader SSF-12 qualification contour discovered independent failures in the editor baseline and full workspace test suite).
 
 ---
 
@@ -323,17 +326,22 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 
 ---
 
-## 28. Clean-clone Rehearsal
+## 28. Clean-clone Rehearsal / Clean Worktree & Public Clone Verification
 
-- **Directory**: Isolated temp directory (`ssf12_rehearsal_4c90f46171164eb380ab789f40114526`).
-- **Execution**: Followed published `docs/getting_started.md` strictly using documented commands only.
-- **Results**:
-  - Toolchain detection and building `smc` succeeded.
-  - `smc version`, `check`, `compile`, `verify`, `run-smc` on `f01_minimal/main.sm` succeeded.
-  - `artifact inspect`, `artifact hash`, `disasm` succeeded.
-  - Canonical examples (`cli_batch_core`, `match_control_flow`) succeeded.
-  - Project model test (`smc test examples/qualification/ssf11/f06_project`) succeeded (`ok tests/double.sm`).
-- **Result**: **PASS** (Zero undocumented prerequisites or unexpected friction).
+- **Evidence Tier 1 — Zero-State Worktree Rehearsal**:
+  - **Directory**: Isolated detached worktree (`ssf12_rehearsal_4c90f46171164eb380ab789f40114526`) pinned to `a1591bc1b3c0458ec617d704c4a0dcb9670b1fb5`.
+  - **Execution**: Followed published `docs/getting_started.md` strictly using documented commands only.
+  - **Results**:
+    - Toolchain detection and building `smc` succeeded.
+    - `smc version`, `check`, `compile`, `verify`, `run-smc` on `f01_minimal/main.sm` succeeded.
+    - `artifact inspect`, `artifact hash`, `disasm` succeeded.
+    - Canonical examples (`cli_batch_core`, `match_control_flow`) succeeded.
+    - Project model test (`smc test examples/qualification/ssf11/f06_project`) succeeded (`ok tests/double.sm`).
+- **Evidence Tier 2 — Fresh Public Clone Checkout**:
+  - **Execution**: Performed a fresh clone from the public repository `https://github.com/skulmakov-oss/Semantic.git` into an isolated temporary directory, checking out candidate SHA `a1591bc1b3c0458ec617d704c4a0dcb9670b1fb5`.
+  - **Results**: Executed `cargo check --bin smc --bin svm` from the fresh public checkout; compiled and checked cleanly in 1m 25s with exit code `0`.
+- **Honest Dependency Boundary**: Verified that no local author paths, uncommitted files, or undocumented environment variables are required to check, build, and run the Getting Started developer workflow from a clean checkout. (Note: standard Cargo package resolution relies on standard network crates.io registries).
+- **Result**: **PASS** (Zero undocumented prerequisites or unexpected friction in documented getting-started workflows).
 
 ---
 
@@ -360,6 +368,8 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
   - **Owning Phase**: SSF-09 (#1580).
   - **Failing Tests**: 10 tests in `tests/ssf09_editor_baseline.rs`.
   - **Impact**: Fails full workspace test and release readiness gates (`PRReady`, `CIParity`, `FullPreflight`) on Windows x64.
+  - **Evidence-Supported Suspected Cause**: Leading root-cause hypothesis is Windows verbatim extended-length path prefixing (`\\?\C:\`) and URI discrepancies during stdio JSON-RPC roundtrips.
+  - **Possible Remediation Direction (Non-Prescriptive Guidance)**: SSF-09 must determine the appropriate ownership layer for path normalization (e.g., evaluating a single shared path abstraction versus subsystem-specific handling in `smc-lsp` and `sm-front`) to avoid authority bifurcation. Potential approaches include stripping verbatim prefixes or adopting standard path normalization utilities. The exact causal chain (`normalization -> mismatch -> failing behavior -> fix -> tests green`) must be proven by SSF-09.
   - **Disposition**: Blocks stable promotion recommendation.
 
 ---
