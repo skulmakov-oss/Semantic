@@ -838,15 +838,31 @@ mod tests {
         assert_eq!(uri2, "file:///C:/repo/src/main.sm");
     }
 
+    #[cfg(windows)]
+    fn mk_temp_dir(prefix: &str) -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let base = std::env::temp_dir().join(format!(
+            "{}_{}_{}",
+            prefix,
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("mkdir");
+        base
+    }
+
     #[test]
     #[cfg(windows)]
     fn windows_canonical_and_raw_path_produce_identical_uri() {
-        let temp = std::env::temp_dir();
-        let file = temp.join("test_lsp_uri_roundtrip.sm");
+        let temp_dir = mk_temp_dir("lsp_uri_roundtrip");
+        let file = temp_dir.join("test.sm");
         std::fs::write(&file, "mod test;").unwrap();
         let canonical = file.canonicalize().unwrap();
         assert_eq!(path_to_uri(&file), path_to_uri(&canonical));
-        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
