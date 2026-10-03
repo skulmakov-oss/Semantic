@@ -26,20 +26,20 @@ fn ssf12_frozen_candidate_sha_matches_across_artifacts() {
     let harness = read(".harness/current.task.yaml");
 
     assert!(
-        verdict.contains(CANDIDATE_SHA),
-        "verdict file missing candidate SHA {CANDIDATE_SHA}"
+        verdict.contains(&format!("- **Candidate SHA**: `{CANDIDATE_SHA}`")),
+        "verdict file missing authoritative Candidate SHA field `- **Candidate SHA**: `{CANDIDATE_SHA}``"
     );
     assert!(
-        matrix.contains(CANDIDATE_SHA),
-        "matrix file missing candidate SHA {CANDIDATE_SHA}"
+        matrix.contains(&format!("Frozen Candidate SHA: `{CANDIDATE_SHA}`")),
+        "matrix file missing authoritative Frozen Candidate SHA header field"
     );
     assert!(
-        manifest.contains(CANDIDATE_SHA),
-        "manifest file missing candidate SHA {CANDIDATE_SHA}"
+        manifest.contains(&format!("\"candidate_sha\": \"{CANDIDATE_SHA}\"")),
+        "manifest file missing authoritative candidate_sha JSON field"
     );
     assert!(
-        harness.contains(CANDIDATE_SHA),
-        "harness file missing candidate SHA {CANDIDATE_SHA}"
+        harness.contains(&format!("candidate_sha: {CANDIDATE_SHA}")),
+        "harness file missing authoritative candidate_sha YAML field"
     );
 }
 
@@ -119,6 +119,8 @@ fn ssf12_does_not_falsely_claim_promotion_or_release() {
     assert!(harness.contains("no_release_or_tag: true"));
 
     let verdict = read(VERDICT_FILE);
-    assert!(!verdict.contains("VERDICT: PROMOTE\n"));
+    assert!(!verdict.contains("```text\nPROMOTE\n```"));
+    assert!(!verdict.contains("\nPROMOTE\n"));
+    assert!(!verdict.contains("VERDICT: PROMOTE"));
     assert!(!verdict.contains("RELEASE AUTHORIZED"));
 }

@@ -31,9 +31,9 @@
     }
   },
   "summary": {
-    "total_gates": 52,
-    "pass": 46,
-    "fail": 4,
+    "total_gates": 78,
+    "pass": 70,
+    "fail": 6,
     "blocked": 1,
     "not_applicable": 1,
     "skipped": 0,

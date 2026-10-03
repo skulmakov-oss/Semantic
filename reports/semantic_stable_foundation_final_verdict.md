@@ -17,7 +17,7 @@ This report delivers the final qualification assessment of the frozen Rust Seman
 ```text
 ORACLE QUALIFIED WITH EXPLICIT LIMITS
 ```
-**Finding**: The core deterministic compiler, SemCode binary format, verifier admission gate, deterministic VM execution engine, Quad four-state logic (`N/F/T/S`), runtime quotas/traps, Position A ownership semantics, application capability boundary, and the SSF-11 conformance corpus (F01–F11) are **fully qualified, bit-deterministic, and trustworthy** as the behavioral reference oracle for the future Semantic → Semantic Bootstrap compiler transition.
+**Finding**: The core deterministic compiler, SemCode binary format, verifier admission gate, deterministic VM execution engine, Quad four-state logic (`N/F/T/S`), runtime quotas/traps, Position A ownership semantics, application capability boundary, and the admitted Bootstrap-comparable SSF-11 conformance corpus cases are **fully qualified, bit-deterministic, and trustworthy** as the behavioral reference oracle for the future Semantic → Semantic Bootstrap compiler transition.
 
 ### B. Stable Foundation Promotion Recommendation
 ```text
@@ -115,12 +115,12 @@ The following surfaces are intentionally outside the qualified Foundation contou
 
 ## 9. Qualification Gate Matrix
 
-Refer to [`reports/ssf12/qualification_matrix.md`](qualification_matrix.md) and [`reports/ssf12/qualification_manifest.json`](qualification_manifest.json) for the full 52-gate inventory.
-- **Total Gates**: 52
-- **PASS**: 46
-- **FAIL**: 4
-- **BLOCKED**: 1
-- **NOT_APPLICABLE**: 1
+Refer to [`reports/ssf12/qualification_matrix.md`](ssf12/qualification_matrix.md) and [`reports/ssf12/qualification_manifest.json`](ssf12/qualification_manifest.json) for the full 78-gate inventory.
+- **Total Gates**: 78
+- **PASS**: 70
+- **FAIL**: 6 (`A-05`, `A-06`, `K-02`, `K-04`, `O-01`, `O-03` — all tracking DEFECT-SSF12-001)
+- **BLOCKED**: 1 (`Q-02`)
+- **NOT_APPLICABLE**: 1 (`G-08`)
 
 ---
 
@@ -378,9 +378,10 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 
 1. **Gate A-05**: `cargo test --workspace --quiet` (failed on `tests/ssf09_editor_baseline.rs`).
 2. **Gate A-06**: `cargo test --all-targets --quiet` (failed on `tests/ssf09_editor_baseline.rs`).
-3. **Gate K-02 / K-04**: Windows path portability and LSP stdio server parity in `tests/ssf09_editor_baseline.rs`.
-4. **Gate O-01**: `scripts/admission_guard.ps1 -PRReady`.
-5. **Gate O-03**: `scripts/admission_guard.ps1 -CIParity` / `-FullPreflight`.
+3. **Gate K-02**: Windows path portability in `tests/ssf09_editor_baseline.rs`.
+4. **Gate K-04**: LSP stdio server parity in `tests/ssf09_editor_baseline.rs`.
+5. **Gate O-01**: `scripts/admission_guard.ps1 -PRReady` (fails on workspace tests).
+6. **Gate O-03**: `scripts/admission_guard.ps1 -CIParity` / `-FullPreflight` (fails on `test-std`).
 
 ---
 
