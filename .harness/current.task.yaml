@@ -155,7 +155,6 @@ scope:
     - .harness/current.task.yaml
     - crates/smc-cli/src/lsp.rs
     - crates/smc-cli/src/source_access.rs
-    - crates/smc-cli/**
     - tests/ssf09_editor_baseline.rs
 
   forbidden_paths:
@@ -204,7 +203,7 @@ constraints:
     Repository owner authorized remediation of Windows LSP host-path / URI
     defects S1/S2 discovered during SSF-12 qualification.
   umbrella_issue: 1569
-  base_branch: fix/ssf09-windows-lsp-path-remediation
+  base_branch: main
   base_sha: a1591bc1b3c0458ec617d704c4a0dcb9670b1fb5
   one_logical_change_per_pr: true
   evidence_before_claims: true
