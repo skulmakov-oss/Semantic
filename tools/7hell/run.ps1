@@ -13,11 +13,19 @@ Write-Host "  7hell PCC Qualification Mini-Runner    "
 Write-Host "========================================="
 Write-Host ""
 
+# Shared with scripts/admission_guard.ps1 and tools/7hell/run_ci.ps1:
+# one authoritative fmt-check mechanism, not copies that can drift apart.
+. (Join-Path $PSScriptRoot "..\..\scripts\workspace_fmt_check.ps1")
+
 # -----------------------------------------------------------------------------
 # Hell 1
 Write-Host "[ Hell 1 ] Workspace Health..." -ForegroundColor Cyan
-cargo fmt --check
-Assert-Success "cargo fmt failed"
+try {
+    Invoke-WorkspaceFmtCheck
+} catch {
+    Write-Host "FAIL: cargo fmt failed - $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
 cargo check --workspace --all-features
 Assert-Success "cargo check failed"
 Write-Host "PASS: Hell 1" -ForegroundColor Green
