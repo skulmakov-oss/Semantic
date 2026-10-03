@@ -129,9 +129,109 @@ fn ssf12_does_not_falsely_claim_promotion_or_release() {
     let harness = read(".harness/current.task.yaml");
     assert!(harness.contains("stable_promotion: false"));
     assert!(harness.contains("no_release_or_tag: true"));
+    assert!(harness.contains("release_authorized: false"));
+    assert!(harness.contains("tag_authorized: false"));
 
     let verdict = read(VERDICT_FILE);
     assert!(!verdict.contains("```text\nPROMOTE\n```"));
     assert!(!verdict.contains("RELEASE AUTHORIZED"));
     assert!(verdict.contains("Promotion decision remains reserved to the repository owner."));
+}
+
+#[test]
+fn ssf12_summary_counts_agree_across_all_artifacts() {
+    let verdict = read(VERDICT_FILE);
+    let matrix = read(MATRIX_FILE);
+    let manifest = read(MANIFEST_FILE);
+
+    // Summary counts in verdict section 9
+    assert!(verdict.contains("- **Total Gates**: 78"));
+    assert!(verdict.contains("- **PASS**: 76"));
+    assert!(verdict.contains("- **FAIL**: 0"));
+    assert!(verdict.contains("- **BLOCKED**: 1 (`Q-02`)"));
+    assert!(verdict.contains("- **NOT_APPLICABLE**: 1 (`G-08`)"));
+
+    // Summary counts in matrix section 3
+    assert!(matrix.contains("- **Total Qualification Gates**: 78"));
+    assert!(matrix.contains("- **PASS**: 76"));
+    assert!(matrix.contains("- **FAIL**: 0"));
+    assert!(matrix.contains("- **BLOCKED**: 1 (`Q-02`"));
+    assert!(matrix.contains("- **NOT_APPLICABLE**: 1 (`G-08`"));
+
+    // Summary counts in manifest json
+    assert!(manifest.contains("\"total\": 78"));
+    assert!(manifest.contains("\"pass\": 76"));
+    assert!(manifest.contains("\"fail\": 0"));
+    assert!(manifest.contains("\"blocked\": 1"));
+    assert!(manifest.contains("\"not_applicable\": 1"));
+    assert!(manifest.contains("\"skipped\": 0"));
+    assert!(manifest.contains("\"inconclusive\": 0"));
+}
+
+#[test]
+fn ssf12_manifest_gate_level_integrity() {
+    let manifest_str = read(MANIFEST_FILE);
+    let json: serde_json::Value =
+        serde_json::from_str(&manifest_str).expect("manifest must be valid JSON");
+
+    let gates = json["gates"].as_array().expect("gates must be an array");
+    assert_eq!(gates.len(), 78, "manifest must contain exactly 78 gates");
+
+    let mut ids = std::collections::HashSet::new();
+    let mut pass = 0;
+    let mut fail = 0;
+    let mut blocked = 0;
+    let mut na = 0;
+
+    for g in gates {
+        let id = g["id"].as_str().expect("gate must have id string");
+        assert!(ids.insert(id.to_string()), "duplicate gate id: {id}");
+        match g["status"].as_str().expect("status string") {
+            "PASS" => pass += 1,
+            "FAIL" => fail += 1,
+            "BLOCKED" => {
+                blocked += 1;
+                assert_eq!(id, "Q-02", "only Q-02 may be BLOCKED");
+            }
+            "NOT_APPLICABLE" => {
+                na += 1;
+                assert_eq!(id, "G-08", "only G-08 may be NOT_APPLICABLE");
+            }
+            other => panic!("unexpected gate status {other} for gate {id}"),
+        }
+    }
+
+    assert_eq!(pass, 76, "derived pass count must be 76");
+    assert_eq!(fail, 0, "derived fail count must be 0");
+    assert_eq!(blocked, 1, "derived blocked count must be 1");
+    assert_eq!(na, 1, "derived not_applicable count must be 1");
+}
+
+#[test]
+fn ssf12_stale_c0_claims_are_prohibited_in_active_verdict() {
+    let verdict = read(VERDICT_FILE);
+
+    // Active C1 sections must not have stale C0 failure counts or blockers
+    assert!(
+        !verdict.contains("- **FAIL**: 6"),
+        "verdict contains stale C0 fail count"
+    );
+    assert!(
+        !verdict.contains("FAIL = 6"),
+        "verdict contains stale C0 fail equation"
+    );
+    assert!(
+        !verdict.contains("DEFECT-SSF12-001 blocks promotion"),
+        "verdict contains stale C0 blocker claim"
+    );
+    assert!(
+        !verdict.contains("10 failing editor tests"),
+        "verdict contains stale C0 test failure phrasing"
+    );
+
+    // Ensure candidate commit subject is accurate
+    assert!(
+        verdict.contains("fix(ssf12): reuse Windows-safe workspace fmt gate in full 7hell (#1982)"),
+        "verdict missing candidate C1 commit message"
+    );
 }

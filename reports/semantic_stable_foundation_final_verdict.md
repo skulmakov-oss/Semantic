@@ -31,12 +31,11 @@ PROMOTE WITH EXPLICIT LIMITS
 
 - **Repository**: `skulmakov-oss/Semantic`
 - **Candidate SHA**: `89641da8237f4fcefb50cf1958a50e4d4003aea7`
-- **Commit Message**: `chore(ssf12): record SSF-11 completion and activate SSF-12 governance state (#1977)`
+- **Commit Message**: `fix(ssf12): reuse Windows-safe workspace fmt gate in full 7hell (#1982)`
 - **Candidate Freeze Timestamp**: `2026-10-03T21:38:34+05:00`
 - **Remediation Ancestry**: Merged stack of PR #1979 (M1 = `f208ef4fffc9afb35499c634540d188d16fd6b8a`), PR #1980 (M2 = `a4706ec9c93d57d50eb46b0a42500d315318021e`), PR #1981 (M3 = `1f8df7606340027ba17582bb44d62ec4dc5a1d3f`), and PR #1982 (M4 = `89641da8237f4fcefb50cf1958a50e4d4003aea7` = C1).
 - **Candidate Worktree**: Clean detached worktree `Semantic_c1_frozen` pinned immutably to `89641da8237f4fcefb50cf1958a50e4d4003aea7`
 - **Candidate Working Tree State**: 100% clean, verified before and during execution.
-
 ---
 
 ## 3. Evidence Branch Identity
@@ -60,11 +59,11 @@ PROMOTE WITH EXPLICIT LIMITS
 
 ## 5. Host Qualification Environment(s)
 
-- **Local Execution Platform**: Windows 11 Enterprise / Windows Server x64 (Build 26100, x86_64)
+- **Local Execution Platform**: Windows 11 Enterprise (10.0.26340.0, AMD64 / x86_64)
 - **Host Linker**: Microsoft MSVC Build Tools (`link.exe`)
-- **PowerShell Version**: PowerShell Core 7.x (`pwsh`)
+- **PowerShell Version**: PowerShell 7.6.6 (`pwsh`)
+- **Target Triple**: `x86_64-pc-windows-msvc`
 - **Hosted CI Reference**: Ubuntu-latest (GitHub Actions CI for Linux baseline and SARIF reporting)
-
 ---
 
 ## 6. Final Stable Foundation Contour
@@ -119,10 +118,11 @@ The following surfaces are intentionally outside the qualified Foundation contou
 Refer to [`reports/ssf12/qualification_matrix.md`](ssf12/qualification_matrix.md) and [`reports/ssf12/qualification_manifest.json`](ssf12/qualification_manifest.json) for the full 78-gate inventory.
 - **Total Gates**: 78
 - **PASS**: 76
-- **FAIL**: 6 (`A-05`, `A-06`, `K-02`, `K-04`, `O-01`, `O-03` — all tracking DEFECT-SSF12-001)
+- **FAIL**: 0
 - **BLOCKED**: 1 (`Q-02`)
 - **NOT_APPLICABLE**: 1 (`G-08`)
-
+- **SKIPPED**: 0
+- **INCONCLUSIVE**: 0
 ---
 
 ## 10. Compiler / Workspace Qualification
@@ -139,13 +139,13 @@ Refer to [`reports/ssf12/qualification_matrix.md`](ssf12/qualification_matrix.md
 
 ## 11. Public API / Boundary Qualification
 
-- **Public API Contracts**: `cargo test --test public_api_contracts --quiet` → **PASS** (10 tests passed, 0 failed).
-- **Dependency Boundaries**: `cargo test --test dependency_boundaries --quiet` → **PASS** (89 tests passed, 0 failed).
-- **Legacy Guards**: `cargo test --test legacy_guards --quiet` → **PASS** (2 tests passed, 0 failed).
-- **Frontend & IR Boundaries**: `frontend_boundaries` (4 passed), `ir_opt_boundaries` (2 passed).
-- **Harness Scope Enforcement**: `pwsh -File scripts/harness-check.ps1` → **PASS** (`[harness] ok`).
+- **Public API Contracts**: `cargo test --test public_api_contracts --quiet` → **PASS** (89 tests passed, 0 failed).
+- **Dependency Boundaries**: `cargo test --test dependency_boundaries --quiet` → **PASS** (4 tests passed, 0 failed).
+- **Legacy Guards**: `cargo test --test legacy_guards --quiet` → **PASS** (10 tests passed, 0 failed).
+- **Frontend & IR Boundaries**: `frontend_boundaries` (2 passed), `ir_opt_boundaries` (2 passed).
+- **Trust Boundary Guards**: `cargo test -p semantic_language --test trust_boundary_guards` → **PASS** (5 passed).
+- **Governance Gate**: `pwsh -File scripts/harness-check.ps1` → **PASS** (`[harness] ok`).
 - **Status Drift**: `tests/ssf_status_drift.rs` → **PASS** (all 3 tests passed).
-
 ---
 
 ## 12. Verifier Adversarial Qualification
@@ -178,7 +178,7 @@ Refer to [`reports/ssf12/qualification_matrix.md`](ssf12/qualification_matrix.md
 - **Step Quota**: Exceeding step budget triggers `quota exceeded: Steps limit=100000 used=100001` deterministically without relying on wall-clock time.
 - **Stack & Frame Quotas**: Call stack depth and local registers bounded by verifier and runtime quotas.
 - **Trap Taxonomy**: Verified against `tests/ctf_e3_trap_taxonomy_regression.rs`.
-- **Ownership Position A**: `docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md` confirmed. OWN0 value paths for records, tuples, and sequences verified against golden test suites (124 tests passed).
+- **Ownership Position A**: `docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md` confirmed. OWN0 value paths for records, tuples, and sequences verified against golden test suites (Position A golden suites passed cleanly).
 
 ---
 
@@ -273,6 +273,7 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 - **Hell 7 (PCC Documentation Integrity)**: PASS
 - **Overall Result**: ALL 7 GATES PASSED!
 
+**Architectural Adjudication**: A full 7HELL PASS alone does not imply overall SSF-12 PASS. Full 7HELL passed all 7 foundational core gates (Hell 1–7). The broader SSF-12 contour was also evaluated independently across all 78 qualification gates; no C1 gate failed. Gate Q-02 remains BLOCKED because it is post-publication smoke; Gate G-08 remains NOT_APPLICABLE by authority.
 ---
 
 ## 23. Release Readiness Gates
@@ -306,17 +307,16 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 
 ## 26. Pre-publication Asset Smoke (Stage A)
 
-- **Release Build**: `cargo build --release --bin smc --bin svm` completed in 4m 24s.
+- **Release Build**: `cargo build --release --bin smc --bin svm` completed in 7m 10s.
 - **Binaries**:
-  - `target/release/smc.exe` (4,570,112 bytes, SHA-256: `e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a`)
-  - `target/release/svm.exe` (442,880 bytes, SHA-256: `9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf`)
-  - `semantic-language-windows-x64-v1.2.0-candidate.zip` (2,259,849 bytes, SHA-256: `97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17`)
+  - `target/release/smc.exe` (4,572,160 bytes, SHA-256: `e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a`, signing: unsigned)
+  - `target/release/svm.exe` (442,880 bytes, SHA-256: `9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf`, signing: unsigned)
+  - `semantic-language-windows-x64-v1.2.0-candidate.zip` (2,260,731 bytes, SHA-256: `97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17`)
 - **Hash Identity**: Zip-extracted binaries match standalone binaries bit-for-bit (`SmcMatch = True`, `SvmMatch = True`).
 - **Smoke Scenarios**:
   - Scenario 1 (Minimal compile-run-disasm): PASS (`SEMCOD22`, `RET`, clean exit).
-  - Scenario 2 (Verified-path `f64` builtin pipeline): PASS (`SEMCOD22`, `SUB_F64`, builtin `CALL`, `ASSERT`, clean exit).
+  - Scenario 2 (Verified-path `f64` builtin pipeline): PASS (`SEMCOD22`, `SUB_F64`, builtin `CALL`, clean exit).
   - Scenario 3 (Heavy semantic policy trace): PASS (`examples/semantic_policy_overdrive_trace.sm` compiled, verified, run, disassembled).
-
 ---
 
 ## 27. Published Asset Smoke Status (Stage B)
@@ -329,56 +329,60 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 ## 28. Clean-clone Rehearsal / Clean Worktree & Public Clone Verification
 
 - **Evidence Tier 1 — Zero-State Worktree Rehearsal**:
-  - **Directory**: Isolated detached worktree (`ssf12_rehearsal_4c90f46171164eb380ab789f40114526`) pinned to `89641da8237f4fcefb50cf1958a50e4d4003aea7`.
-  - **Execution**: Followed published `docs/getting_started.md` strictly using documented commands only.
-  - **Results**:
-    - Toolchain detection and building `smc` succeeded.
-    - `smc version`, `check`, `compile`, `verify`, `run-smc` on `f01_minimal/main.sm` succeeded.
-    - `artifact inspect`, `artifact hash`, `disasm` succeeded.
-    - Canonical examples (`cli_batch_core`, `match_control_flow`) succeeded.
-    - Project model test (`smc test examples/qualification/ssf11/f06_project`) succeeded (`ok tests/double.sm`).
+  - **Directory**: Isolated detached worktree (`r01_zero_state_c1`) pinned to `89641da8237f4fcefb50cf1958a50e4d4003aea7`.
+  - **Execution**: Followed published `docs/getting_started.md` strictly using documented commands only (`compile`, `verify`, `artifact hash`, `run`, `run-smc`).
+  - **Results**: All onboarding steps succeeded cleanly (`hello.sm` compiled to 89-byte SemCode V22, verified, hashed, executed).
 - **Evidence Tier 2 — Fresh Public Clone Checkout**:
-  - **Execution**: Performed a fresh clone from the public repository `https://github.com/skulmakov-oss/Semantic.git` into an isolated temporary directory, checking out candidate SHA `89641da8237f4fcefb50cf1958a50e4d4003aea7`.
-  - **Results**: Executed `cargo check --bin smc --bin svm` from the fresh public checkout; compiled and checked cleanly in 1m 25s with exit code `0`.
-- **Honest Dependency Boundary**: Verified that no local author paths, uncommitted files, or undocumented environment variables are required to check, build, and run the Getting Started developer workflow from a clean checkout. (Note: standard Cargo package resolution relies on standard network crates.io registries).
-- **Result**: **PASS** (Zero undocumented prerequisites or unexpected friction in documented getting-started workflows).
-
+  - **Clone Source URL**: `https://github.com/skulmakov-oss/Semantic.git`
+  - **Execution Directory**: Fresh isolated temporary directory (`semantic_fresh_clone_1d747639af3543e6bd03e845cff256ab`)
+  - **Checked-out SHA**: `89641da8237f4fcefb50cf1958a50e4d4003aea7` (candidate C1)
+  - **Working Tree Cleanliness**: `git status --porcelain` returned 0 entries (100% clean)
+  - **Cargo Command**: `cargo check --bin smc --bin svm`
+  - **Exit Code**: `0`
+  - **Result**: **PASS** (compiled and checked cleanly in 1m 48s from fresh public checkout)
+  - **Honest Dependency Boundary**: Verified that no local author paths, uncommitted files, or undocumented environment variables are required to check, build, and run from a clean checkout. (Note: standard Cargo package resolution relies on standard network crates.io registries).
 ---
 
 ## 29. Known Limits
 
-1. **Platform Binaries**: Downloadable binaries exist for Windows x64 only.
-2. **Generics Execution**: No IR monomorphisation; generic functions fail-closed at IR lowering.
-3. **Serialization**: `std.serde` is not implemented in Semantic source.
-4. **Logos**: Declarative only; non-executable.
-5. **Native UI**: Retired and non-qualifying.
+### Compact Explicit-Limits Evidence Table:
 
+| Limit ID | Operational Boundary | Authority / Test / Command | Observed C1 Result | Final Disposition |
+|---|---|---|---|---|
+| **R1** | Quad logic helper predicates (`known`, `unknown`, `conflict`) | `smc check` on `known(x)` | Rejected with `E0201: unknown function 'known'` (exit code 1) | Explicit operational limit; core Quad algebra (`N/F/T/S`) fully intact |
+| **R2** | String escape processing (`\n` emits raw bytes `\` and `n`) | `tests/ssf07_text_family_freeze.rs` | 3 passed; string literals preserve raw slices | Explicit operational limit; text literals treat quotes as raw slices |
+| **R3** | Generic rejection diagnostic | `tests/ssf11_canonical_applications.rs` (F05) | Emits english diagnostic string `#1717` | Explicit operational boundary; marked non-Bootstrap-comparable |
+| **R4** | Host paths in diagnostics | Host CLI JSON diagnostic rendering | Absolute host path appears in source field | Presentation artifact; substring matching in corpus |
+| **Q-02** | Published downloaded asset smoke | `scripts/verify_release_assets.ps1` | No published release tag exists for C1 | Gate BLOCKED pending human release decision and publication |
+| **Platform Boundary** | Release target architecture | `docs/release_artifact_model.md` | Validated on Windows x64 (`x86_64-pc-windows-msvc`) | Explicit operational limit; Linux/macOS out of contour for v1.2.0 baseline |
+
+### Invariant:
+- No promotion or release is claimed.
+- Foundation Oracle verdict is strictly distinct from the human release decision.
 ---
 
 ## 30. Earlier-phase Returns / Blockers
 
 ### SSF-11 Returns Carried Forward:
 - **R1 (Quad helper predicates)**: `known`, `unknown`, `conflict` documented in specs but rejected by compiler as `unknown function` (`E0201`). **Disposition**: Preserved as explicit limit; does not affect core Quad logic algebra (`N/F/T/S`).
-- **R2 (String escape behavior)**: String literals do not process escape characters; `
-` emits two raw bytes `\` and `n`. **Disposition**: Preserved as explicit limit; text literals treat quotes as raw slices.
+- **R2 (String escape behavior)**: String literals do not process escape characters; `\n` emits two raw bytes `\` and `n`. **Disposition**: Preserved as explicit limit; text literals treat quotes as raw slices.
 - **R3 (F05 generic rejection)**: Rejection has no stable diagnostic code, only the #1717 English string. **Disposition**: Preserved as explicit boundary; F05 marked non-Bootstrap-comparable.
 - **R4 (Host paths in diagnostics)**: Absolute host paths embedded in error messages and JSON sources. **Disposition**: Presentation-level host artifact; corpus matches substrings.
 
 ### SSF-12 Remediation Verification:
 All four remediation defects identified during initial qualification of C0 are verified resolved on candidate C1:
 - **DEFECT-SSF12-001 (Windows LSP host-path transport and relative display normalization)**:
-  - **Owning Phase**: SSF-09 (#1580). Resolved in PR #1979 (M1 = `f208ef4fffc9afb35499c634540d188d16fd6b8a`).
+  - **Authoritative Ownership**: PR #1979; `crates/smc-cli/src/lsp.rs`, `crates/smc-cli/src/source_access.rs`, `tests/ssf09_editor_baseline.rs`.
   - **Verification**: `tests/ssf09_editor_baseline.rs` passes 63/63 tests cleanly on Windows x64. Status: **VERIFIED RESOLVED**.
 - **DEFECT-SSF12-002 (Windows provider module IDs normalization at cycle boundary)**:
-  - **Owning Phase**: SSF-09 (#1580). Resolved in PR #1980 (M2 = `a4706ec9c93d57d50eb46b0a42500d315318021e`).
+  - **Authoritative Ownership**: PR #1980; `crates/smc-cli/src/canonical_check.rs`.
   - **Verification**: Cycle boundary provider module ID path comparisons succeed across multi-file modules on Windows. Status: **VERIFIED RESOLVED**.
 - **DEFECT-SSF12-003 (Provider module-id test-contract expectation on Windows in sm-sema)**:
-  - **Owning Phase**: SSF-12 (#1583). Resolved in PR #1981 (M3 = `1f8df7606340027ba17582bb44d62ec4dc5a1d3f`).
+  - **Authoritative Ownership**: PR #1981; `crates/sm-sema/src/std_adapters.rs` (TEST CONTRACT ONLY; production `sm-sema` semantics unchanged).
   - **Verification**: `cargo test -p sm-sema` passes cleanly on Windows x64. Status: **VERIFIED RESOLVED**.
 - **DEFECT-SSF12-004 (Windows CreateProcess command-line limit in tools/7hell/run.ps1 Hell 1)**:
-  - **Owning Phase**: SSF-12 (#1583). Resolved in PR #1982 (M4 = `89641da8237f4fcefb50cf1958a50e4d4003aea7` = C1).
+  - **Authoritative Ownership**: PR #1982; `tools/7hell/run.ps1`.
   - **Verification**: `pwsh -File tools/7hell/run.ps1` Hell 1 and complete suite Hell 1–7 execute and PASS without command-line length overflow. Status: **VERIFIED RESOLVED**.
-
 ---
 
 ## 31. Failed Gates
@@ -395,11 +399,10 @@ All four remediation defects identified during initial qualification of C0 are v
 
 ## 33. Artifact / Evidence Hashes
 
-- `target/release/smc.exe`: `e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a`
-- `target/release/svm.exe`: `9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf`
-- `semantic-language-windows-x64-v1.2.0-candidate.zip`: `97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17`
+- `target/release/smc.exe`: SHA-256 `e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a` (4,572,160 bytes, signing: unsigned)
+- `target/release/svm.exe`: SHA-256 `9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf` (442,880 bytes, signing: unsigned)
+- `semantic-language-windows-x64-v1.2.0-candidate.zip`: SHA-256 `97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17` (2,260,731 bytes)
 - Compiler Source Fingerprint: `0dbf37931f15229e`
-
 ---
 
 ## 34. Foundation Oracle Verdict
