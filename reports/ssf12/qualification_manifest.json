@@ -1,0 +1,54 @@
+{
+  "schema_version": "semantic.ssf12.qualification_manifest.v1",
+  "candidate_sha": "a1591bc1b3c0458ec617d704c4a0dcb9670b1fb5",
+  "evidence_branch": "feat/ssf12-full-qualification",
+  "toolchain": {
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "1.97.1 (c980f4866 2026-06-30)",
+    "rustfmt": "1.9.0-stable (8bab26f4f6 2026-07-14)",
+    "clippy": "0.1.97 (8bab26f4f6 2026-07-14)"
+  },
+  "host": {
+    "os": "Windows",
+    "architecture": "x86_64",
+    "build": "26100"
+  },
+  "artifact_hashes": {
+    "target_release_smc_exe": {
+      "sha256": "c4d6dd966361ceeeed9bf8526e2e7b2f4ad9b0d5261c4e50079c2a4bb39b9f27",
+      "size_bytes": 4570112,
+      "signing": "unsigned"
+    },
+    "target_release_svm_exe": {
+      "sha256": "9e6e470edb0f8d613859603a5c6e2942294e67a90574a846752b62cd839b3669",
+      "size_bytes": 442880,
+      "signing": "unsigned"
+    },
+    "candidate_zip": {
+      "name": "semantic-language-windows-x64-v1.2.0-candidate.zip",
+      "sha256": "c46d926d129b8e3779c167de942afc19308a3747b730f10777c7c4db5f6db72b",
+      "size_bytes": 2259849
+    }
+  },
+  "summary": {
+    "total_gates": 78,
+    "pass": 70,
+    "fail": 6,
+    "blocked": 1,
+    "not_applicable": 1,
+    "skipped": 0,
+    "inconclusive": 0
+  },
+  "foundation_oracle_verdict": "ORACLE QUALIFIED WITH EXPLICIT LIMITS",
+  "stable_foundation_promotion_recommendation": "DO NOT PROMOTE",
+  "primary_defect": {
+    "defect_id": "DEFECT-SSF12-001",
+    "owning_phase": "SSF-09",
+    "issue": 1580,
+    "test_suite": "tests/ssf09_editor_baseline.rs",
+    "failed_tests_count": 10,
+    "description": "On Windows hosts, tests/ssf09_editor_baseline.rs experiences 10 test failures. Leading root-cause hypothesis is verbatim extended path prefix handling (\\\\?\\C:\\), relative path normalization differences, and CLI vs LSP stdio URI discrepancies. Causal proof and remediation layer owned by SSF-09.",
+    "blocks_oracle": false,
+    "blocks_promotion": true
+  }
+}
