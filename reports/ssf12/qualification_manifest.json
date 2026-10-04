@@ -4,7 +4,7 @@
   "candidate_sha": "89641da8237f4fcefb50cf1958a50e4d4003aea7",
   "evidence_branch": "feat/ssf12-requalification-c1",
   "qualification_pr": "https://github.com/skulmakov-oss/Semantic/pull/1983",
-  "evidence_content_sha": "1b4a4be0f23839ab1887b70250d3979e35250c48",
+  "evidence_content_sha": "38b92f0a18bad98f6191d35ade2036c6861680ac",
   "toolchain": {
     "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
     "cargo": "1.97.1 (c980f4866 2026-06-30)",
