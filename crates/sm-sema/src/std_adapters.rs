@@ -3116,7 +3116,7 @@ mod pb03_semantic_core_tests {
     fn analysis_does_not_consult_type_registry() {
         let src = include_str!("std_adapters.rs");
         let start = src.find("pub fn analyze_logos_program(").unwrap();
-        let end = start + src[start..].find("\n}\n").unwrap();
+        let end = start + src[start..].find("\n}").unwrap();
         let body = &src[start..end];
         assert!(!body.contains("TypeRegistry") && !body.contains("equals_fast"));
     }

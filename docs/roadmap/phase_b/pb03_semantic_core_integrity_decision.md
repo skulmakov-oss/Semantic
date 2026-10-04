@@ -71,7 +71,7 @@ Typing:
 ## Cross-crate changes
 
 - `sm-front`: the `LogosWhen` projection (`structure`, `condition_atoms`, `effect_atoms`) and the `LogosAtom`/`LogosCondition`/`LogosCompareOp`/`LogosEvidenceOp`/`NumericLiteral` re-exports. Built once in the parser from canonical tokens, it is the single syntax authority.
-- `ton618-core` catalog and `docs/ERROR_CODES.md` mirror: E0221 text now says "Duplicate Law name within one module." (#1694); the W0241 entry is kept and marked not emitted (#1678).
+- TON618 diagnostics catalog (`diagnostic_catalog()`) and `docs/ERROR_CODES.md` mirror: E0221 text now says "Duplicate Law name within one module." (#1694); the W0241 entry is kept and marked not emitted (#1678).
 - `smc-cli` and `tests/sema_diagnostic_catalog_coherence.rs`: warning fixtures that used `When N` as a W0240 generator now use `When false` (#1677); the W0241 rendered-help case is removed (#1678).
 
 ## Model-B contract preservation exposed by FA-03-002
@@ -104,3 +104,21 @@ derived goldens were regenerated through `SM_UPDATE_SSF09_GOLDENS=1`; only the
 quoted source-snippet line changes. `canonical_check`, LSP transport, the schema
 format, W0240's code, severity and rendering are unchanged.
 `quad_n_is_not_always_false` pins `When N` → no W0240 and `When false` → W0240.
+
+## Test-fixture migration required by restoration of the sealed Model-B legacy-check boundary; no cache/project semantics changed
+
+Eight tests used Logos projects only as convenient successful fixtures for
+legacy `smc check`. They now use the established RustLike forms; RustLike
+check results are equally cache-eligible. Their assertions (SEMP pack reuse,
+rebuild settling, `DEP_CHANGED`, trace reasons, project mechanism) are
+unchanged:
+
+- `tests/cache_reuse_smoke.rs` (2)
+- `tests/cache_trace_dep_changed.rs` (1)
+- `tests/cache_trace_reason_matrix.rs` (`write_basic_project`, 4 tests)
+- `tests/project_check_authority.rs` T2: the T9 `Import "dep.sm"` executable
+  project form, plus a negative assertion that the former Logos project hits
+  `SOURCE SURFACE BOUNDARY`.
+
+Tests whose subject is Logos diagnostics, inspection, parser/semantic behavior,
+or canonical_check/LSP parity were not migrated.

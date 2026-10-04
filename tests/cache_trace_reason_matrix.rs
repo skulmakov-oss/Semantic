@@ -15,13 +15,15 @@ fn mk_temp_dir(prefix: &str) -> std::path::PathBuf {
     dir
 }
 
+// PB-03: test-fixture migration required by restoration of the sealed
+// Model-B legacy-check boundary; no cache/project semantics changed.
 fn write_basic_project(dir: &std::path::Path) {
     std::fs::write(
         dir.join("root.sm"),
         r#"
-Law "Main" [priority 1]:
-    When true ->
-        System.recovery()
+fn main() {
+    return;
+}
 "#,
     )
     .expect("write root");
