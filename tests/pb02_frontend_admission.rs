@@ -26,16 +26,22 @@ fn qtruth_builtin_calls_lower_to_dedicated_ir() {
     for (name, call) in QTRUTH {
         let src = format!("fn main() {{\n    let x: quad = {call};\n    return;\n}}\n");
         let ir = main_ir(&src);
-        let lowered = ir.iter().any(|i| match (name, i) {
-            ("qtruth_and", IrInstr::QTruthAnd { .. })
-            | ("qtruth_or", IrInstr::QTruthOr { .. })
-            | ("qtruth_impl", IrInstr::QTruthImpl { .. })
-            | ("qtruth_not", IrInstr::QTruthNot { .. }) => true,
-            _ => false,
+        let lowered = ir.iter().any(|i| {
+            matches!(
+                (name, i),
+                ("qtruth_and", IrInstr::QTruthAnd { .. })
+                    | ("qtruth_or", IrInstr::QTruthOr { .. })
+                    | ("qtruth_impl", IrInstr::QTruthImpl { .. })
+                    | ("qtruth_not", IrInstr::QTruthNot { .. })
+            )
         });
-        assert!(lowered, "{name} must lower to its QTruth instruction: {ir:?}");
         assert!(
-            !ir.iter().any(|i| matches!(i, IrInstr::Call { name: n, .. } if n == name)),
+            lowered,
+            "{name} must lower to its QTruth instruction: {ir:?}"
+        );
+        assert!(
+            !ir.iter()
+                .any(|i| matches!(i, IrInstr::Call { name: n, .. } if n == name)),
             "{name} must not lower to an ordinary call"
         );
     }
@@ -46,12 +52,19 @@ fn qtruth_builtin_calls_lower_to_dedicated_ir() {
 #[test]
 fn user_qtruth_function_is_rejected_before_lowering() {
     for (name, call) in QTRUTH {
-        let params = if name == "qtruth_not" { "a: quad" } else { "a: quad, b: quad" };
+        let params = if name == "qtruth_not" {
+            "a: quad"
+        } else {
+            "a: quad, b: quad"
+        };
         let src = format!(
             "fn {name}({params}) -> quad {{\n    return T;\n}}\nfn main() {{\n    let x: quad = {call};\n    return;\n}}\n"
         );
         let err = compile_program_to_ir(&src).expect_err(name);
         let msg = format!("{err:?}");
-        assert!(msg.contains(name) && msg.contains("reserved"), "{name}: {msg}");
+        assert!(
+            msg.contains(name) && msg.contains("reserved"),
+            "{name}: {msg}"
+        );
     }
 }

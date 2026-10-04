@@ -710,9 +710,7 @@ pub fn parse_import_directive(
     col: u32,
     decl_order: u32,
 ) -> Option<ImportDirective> {
-    let Some(after_kw) = directive.strip_prefix("Import") else {
-        return None;
-    };
+    let after_kw = directive.strip_prefix("Import")?;
     let mut rest = after_kw.trim();
     if rest.is_empty() {
         return None;

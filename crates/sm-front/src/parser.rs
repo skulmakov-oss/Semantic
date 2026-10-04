@@ -4,14 +4,14 @@ use crate::types::{
     BlockExpr, CallArg, CaptureMode, ClosureCapturePolicy, ClosureLiteral, ClosureValueFamily,
     ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, FrontendErrorDetail,
     FrontendErrorItem, Function, GrammarAdmission, IfExpr, IfLetExpr, ImplDecl, IntRangePattern,
-    IterableLoopDesugaring, LogosEntity, LogosEntityField, LogosEntityFieldKind, LogosLaw,
-    LogosImport, LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm,
-    MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl, RecordField,
-    RecordFieldExpr, RecordInitField, RecordLiteralExpr, RecordPatternItem, RecordPatternTarget,
-    RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole, SchemaShape, SchemaVariant,
-    SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral, SequenceType,
-    Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind, TraitBound,
-    TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
+    IterableLoopDesugaring, LogosEntity, LogosEntityField, LogosEntityFieldKind, LogosImport,
+    LogosLaw, LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr,
+    MatchExprArm, MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl,
+    RecordField, RecordFieldExpr, RecordInitField, RecordLiteralExpr, RecordPatternItem,
+    RecordPatternTarget, RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole, SchemaShape,
+    SchemaVariant, SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral,
+    SequenceType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind,
+    TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
 };
 use crate::CompilePolicyView;
 use alloc::boxed::Box;
@@ -9336,8 +9336,8 @@ mod pb02_admission_tests {
         assert_eq!(names, ["b", "a", "c"]);
         assert_eq!(p.functions[0].params[1].1, Type::F64);
 
-        let err =
-            rustlike("trait Tr {\n    fn m(x: i32, x: i32) -> i32;\n}\n").expect_err("trait method");
+        let err = rustlike("trait Tr {\n    fn m(x: i32, x: i32) -> i32;\n}\n")
+            .expect_err("trait method");
         assert!(
             err.message.contains("duplicate parameter name 'x'"),
             "{}",

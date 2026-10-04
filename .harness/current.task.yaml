@@ -30,6 +30,7 @@ scope:
     - .github/workflows/ci.yml
     - crates/sm-front/**
     - crates/sm-sema/**
+    - crates/sm-ir/src/legacy_lowering.rs
     - docs/spec/types.md
     - docs/LOGOS_GRAMMAR_v0_1.md
     - docs/NO_STD.md

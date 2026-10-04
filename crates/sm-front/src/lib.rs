@@ -58,9 +58,10 @@ pub use types::{
     IfExpr,
     ImplDecl,
     IterableLoopDesugaring,
-    LogosEntity, LogosImport,
+    LogosEntity,
     LogosEntityField,
     LogosEntityFieldKind,
+    LogosImport,
     LogosLaw,
     LogosProgram,
     LogosSystem,
@@ -214,6 +215,19 @@ const BUILTIN_NAMESPACE: &[(&str, BuiltinNamePolicy)] = &[
     ("pow", BuiltinNamePolicy::UserShadowable),
     // Statement builtin: user-first in typecheck and IR (`is_builtin_assert_name`).
     ("assert", BuiltinNamePolicy::UserShadowable),
+];
+
+/// Reserved entries owned by the application boundary (SSF-04 diagnostic
+/// wording). A subset of `BUILTIN_NAMESPACE`, not a second policy list.
+const APPLICATION_BOUNDARY_BUILTINS: &[&str] = &[
+    "args_read",
+    "stdin_read_text",
+    "stdout_write",
+    "stderr_write",
+    "path_inspect",
+    "fs_read_text",
+    "fs_write_text",
+    "time_duration_ms",
 ];
 
 fn builtin_name_policy(name: &str) -> Option<BuiltinNamePolicy> {
@@ -752,12 +766,16 @@ pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
     for f in &program.functions {
         let name = resolve_symbol_name(&program.arena, f.name)?;
         if builtin_name_policy(name) == Some(BuiltinNamePolicy::Reserved) {
+            // The application-boundary wording is the sealed SSF-04 contract.
+            let owner = if APPLICATION_BOUNDARY_BUILTINS.contains(&name) {
+                "the application boundary".to_string()
+            } else {
+                format!("the language builtin '{name}'")
+            };
             return Err(FrontendError {
                 detail: None,
                 pos: 0,
-                message: format!(
-                    "function name '{name}' is reserved for the language builtin '{name}'"
-                ),
+                message: format!("function name '{name}' is reserved for {owner}"),
             });
         }
         if out.contains_key(&f.name) {
@@ -1972,6 +1990,13 @@ fn main() {
         let total = names.len();
         names.dedup();
         assert_eq!(names.len(), total, "BUILTIN_NAMESPACE lists a name twice");
+        for name in APPLICATION_BOUNDARY_BUILTINS {
+            assert_eq!(
+                builtin_name_policy(name),
+                Some(BuiltinNamePolicy::Reserved),
+                "{name}"
+            );
+        }
     }
 
     // FA-02-002 / #1634: first-wave generic-capable definitions admit at
