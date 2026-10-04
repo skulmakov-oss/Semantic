@@ -1,4 +1,6 @@
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 pub use ton618_core::{ExprId, StmtId, SymbolId};
@@ -1214,11 +1216,24 @@ pub struct LogosLaw {
     pub mark: SourceMark,
 }
 
+/// FA-02-013 / #1645: one admitted Logos `Import` directive, preserved
+/// losslessly instead of being skipped. `sm-front` imposes no import grammar
+/// here: `directive` is the exact source text from the `Import` keyword to the
+/// end of its line. `sm-sema` is the sole owner of import semantics and
+/// consumes these nodes (and only these) when loading modules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogosImport {
+    pub directive: String,
+    pub span: core::ops::Range<usize>,
+    pub mark: SourceMark,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LogosProgram {
     pub system: Option<LogosSystem>,
     pub entities: Vec<LogosEntity>,
     pub laws: Vec<LogosLaw>,
+    pub imports: Vec<LogosImport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

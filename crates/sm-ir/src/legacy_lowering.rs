@@ -14999,7 +14999,8 @@ mod opt_tests {
         // so this must fail specifically at the new callable-signature
         // boundary inside lowering - not at parse/typecheck - and must never
         // reach SemCode emission.
-        let src = "fn f(x: qvec) -> i32 { return 0; } fn main() { return; }";
+        // PB-02 / #1641: the dimension is now mandatory at parse time.
+        let src = "fn f(x: qvec[8]) -> i32 { return 0; } fn main() { return; }";
 
         let ir_err = match compile_program_to_ir(src)
             .expect_err("qvec callable parameter must be rejected, not silently lowered")

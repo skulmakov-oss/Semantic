@@ -136,3 +136,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check (no default features)
         run: cargo check --no-default-features --quiet
+      # FA-02-034 / #1666: docs/NO_STD.md alloc-only contract for sm-front.
+      - name: Check sm-front (alloc only)
+        run: cargo check -p sm-front --no-default-features --features alloc --quiet

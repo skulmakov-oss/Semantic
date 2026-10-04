@@ -3,7 +3,7 @@ use crate::alloc_core::{
     evaluate_law_header_policy_core, fold_fx_const_call_core, has_magic_number_core,
     infer_law_entity_core, infer_when_condition_type_core, insert_name_core,
     insert_scoped_name_core, is_dead_when_condition, is_valid_when_result_type_core,
-    parse_import_directives, parse_law_local_decl, track_entity_field_usage_core,
+    parse_import_directive, parse_law_local_decl, track_entity_field_usage_core,
     validate_import_bindings_core,
     validate_import_namespace_rules as validate_import_namespace_rules_core,
     validate_select_imports_core, validate_when_non_empty_core, ExportBuildModule, ExportKind,
@@ -568,7 +568,12 @@ fn load_module_recursive(
         via_reexport,
     });
     let importer_module_id = path_contract_key(&key);
-    let imports = parse_import_directives(&source);
+    // PB-02 / #1645: consume exactly the Import directives sm-front
+    // preserved, never a second scan of the raw source.
+    let imports = preserved_import_directives(&logos, &source).map_err(|mut e| {
+        e.diag.provider_module_id = Some(importer_module_id.clone());
+        e
+    })?;
     validate_import_namespace_rules(&imports, &logos, &source).map_err(|mut e| {
         e.diag.provider_module_id = Some(importer_module_id.clone());
         e
@@ -600,6 +605,37 @@ fn load_module_recursive(
     let _ = visiting.pop();
     loaded.insert(key, (source, logos));
     Ok(())
+}
+
+/// Interprets each `LogosProgram::imports` node exactly once, in order. A
+/// preserved directive that carries no usable import spec is a deterministic
+/// error, never a silent skip.
+fn preserved_import_directives(
+    logos: &LogosProgram,
+    source: &str,
+) -> Result<Vec<ImportDirective>, SemanticError> {
+    logos
+        .imports
+        .iter()
+        .enumerate()
+        .map(|(order, import)| {
+            parse_import_directive(
+                &import.directive,
+                import.mark.line,
+                import.mark.col,
+                order as u32,
+            )
+            .ok_or_else(|| SemanticError {
+                diag: render_diag(
+                    DiagLevel::Error,
+                    "E0239",
+                    format!("malformed Import directive '{}'", import.directive),
+                    import.mark,
+                    source,
+                ),
+            })
+        })
+        .collect()
 }
 
 fn validate_import_namespace_rules(
@@ -678,8 +714,8 @@ fn validate_select_imports(
     }
 
     for module in modules {
-        let (src, _) = loaded.get(&module).expect("module key from loaded.keys()");
-        let imports = parse_import_directives(src);
+        let (src, logos) = loaded.get(&module).expect("module key from loaded.keys()");
+        let imports = preserved_import_directives(logos, src)?;
         let module_id = path_contract_key(&module);
         let module_key = display_key(provider, &module);
         id_by_key.insert(module_key.clone(), module_id.clone());
@@ -757,7 +793,7 @@ fn build_export_sets(
         let module_id = path_contract_key(module);
         let module_key = display_key(provider, module);
         path_by_key.insert(module_key.clone(), module.clone());
-        let imports = parse_import_directives(source);
+        let imports = preserved_import_directives(logos, source)?;
         for import in &imports {
             let dep = provider
                 .resolve_import(&module_id, &import.spec)
@@ -2007,8 +2043,10 @@ Law "A" [priority 1]:
             (
                 "Import pub \"b.sm\"\nLaw \"A\" [priority 1]:\n    When true -> System.recovery()\n"
                     .to_string(),
+                // PB-02 / #1645: parsed from the same source; imports are
+                // read only from the preserved LogosProgram nodes.
                 parse_logos_program(
-                    "Law \"A\" [priority 1]:\n    When true -> System.recovery()\n",
+                    "Import pub \"b.sm\"\nLaw \"A\" [priority 1]:\n    When true -> System.recovery()\n",
                 )
                 .expect("logos a"),
             ),
@@ -2019,7 +2057,7 @@ Law "A" [priority 1]:
                 "Import pub \"a.sm\"\nLaw \"B\" [priority 1]:\n    When true -> System.recovery()\n"
                     .to_string(),
                 parse_logos_program(
-                    "Law \"B\" [priority 1]:\n    When true -> System.recovery()\n",
+                    "Import pub \"a.sm\"\nLaw \"B\" [priority 1]:\n    When true -> System.recovery()\n",
                 )
                 .expect("logos b"),
             ),
@@ -2702,6 +2740,96 @@ Law "Alpha" [priority 7]:
             !err.to_string().to_lowercase().contains("ambiguous"),
             "a lex failure must not be reported as cross-grammar ambiguity: {}",
             err
+        );
+    }
+}
+
+#[cfg(test)]
+mod pb02_logos_import_tests {
+    use super::*;
+    use sm_front::parse_logos_program;
+
+    fn key(d: &[ImportDirective]) -> Vec<(String, Option<String>, bool, u32)> {
+        d.iter()
+            .map(|d| (d.spec.clone(), d.alias.clone(), d.reexport, d.decl_order))
+            .collect()
+    }
+
+    // #1645: an accepted Import is preserved, never discarded.
+    #[test]
+    fn accepted_logos_imports_are_preserved_losslessly() {
+        let src = "Import \"dep.sm\" as D\nImport a.sm\nImport \"b.sm\" as 123\nSystem A():\n";
+        let logos = parse_logos_program(src).expect("parse");
+        let directives: Vec<&str> = logos.imports.iter().map(|i| i.directive.as_str()).collect();
+        assert_eq!(
+            directives,
+            [
+                "Import \"dep.sm\" as D",
+                "Import a.sm",
+                "Import \"b.sm\" as 123"
+            ]
+        );
+        for import in &logos.imports {
+            assert_eq!(&src[import.span.clone()], import.directive);
+            assert_eq!(import.mark.col, 1);
+        }
+        assert_eq!(
+            logos
+                .imports
+                .iter()
+                .map(|i| i.mark.line)
+                .collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+    }
+
+    // #1645: parse -> preserved imports -> sema consumes exactly those, in
+    // order; unrelated raw source text can never create a new import.
+    #[test]
+    fn sema_consumes_exactly_the_preserved_imports() {
+        let src = "Import \"dep.sm\" as D\nImport pub \"re.sm\"\nSystem A():\n";
+        let logos = parse_logos_program(src).expect("parse");
+        let got = preserved_import_directives(&logos, src).expect("consume");
+        assert_eq!(got.len(), logos.imports.len());
+        assert_eq!(
+            got.iter()
+                .map(|d| (
+                    d.spec.as_str(),
+                    d.alias.as_deref(),
+                    d.reexport,
+                    d.decl_order
+                ))
+                .collect::<Vec<_>>(),
+            [("dep.sm", Some("D"), false, 0), ("re.sm", None, true, 1)]
+        );
+
+        let tampered = format!("{src}Import \"evil.sm\"\n    Import \"evil2.sm\"\n");
+        let again = preserved_import_directives(&logos, &tampered).expect("consume");
+        assert_eq!(
+            key(&again),
+            key(&got),
+            "raw source text outside preserved nodes must not add imports"
+        );
+        assert!(again.iter().all(|d| !d.spec.starts_with("evil")));
+
+        let no_imports = parse_logos_program("System A():\n").expect("parse");
+        assert!(preserved_import_directives(&no_imports, &tampered)
+            .unwrap()
+            .is_empty());
+    }
+
+    // A preserved directive that carries no import spec fails closed in the
+    // semantic owner instead of being silently skipped.
+    #[test]
+    fn unusable_preserved_directive_is_rejected_not_skipped() {
+        let logos = parse_logos_program("Import\nSystem A():\n").expect("parse");
+        assert_eq!(logos.imports.len(), 1, "accepted Import must be preserved");
+        let err = preserved_import_directives(&logos, "Import\nSystem A():\n")
+            .expect_err("empty directive");
+        assert_eq!(err.diag.code, "E0239");
+        assert!(
+            err.to_string().contains("malformed Import directive"),
+            "{err}"
         );
     }
 }

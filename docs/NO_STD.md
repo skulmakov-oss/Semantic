@@ -42,6 +42,10 @@ cargo check -p sm-front --no-default-features --features alloc --quiet
 cargo check -p sm-sema --no-default-features --features alloc --quiet
 ```
 
+`sm-front`'s alloc-only check is enforced in CI (`check-no-std` job). In that
+mode `sm-profile` is built with `alloc` only; `std` (and serde) are enabled
+only through `sm-front/std` (#1666).
+
 ## Scope
 
 `no_std` is intended for embedding core compiler/runtime primitives into VectorOS contexts.

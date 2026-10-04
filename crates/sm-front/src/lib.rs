@@ -13,9 +13,13 @@
 extern crate alloc;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
+use alloc::boxed::Box;
+#[cfg(any(feature = "alloc", feature = "std"))]
 use alloc::collections::BTreeMap;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use alloc::format;
+#[cfg(any(feature = "alloc", feature = "std"))]
+use alloc::string::ToString;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use alloc::vec;
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -57,6 +61,7 @@ pub use types::{
     LogosEntity,
     LogosEntityField,
     LogosEntityFieldKind,
+    LogosImport,
     LogosLaw,
     LogosProgram,
     LogosSystem,
@@ -150,7 +155,71 @@ pub type RecordTable = BTreeMap<SymbolId, RecordDecl>;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub type AdtTable = BTreeMap<SymbolId, AdtDecl>;
 
-const APPLICATION_BUILTIN_NAMES: &[&str] = &[
+/// FA-02-022 / #1654, FA-02-023 / #1655: whether a user function may take
+/// the name of a language-owned bare builtin/helper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuiltinNamePolicy {
+    /// Typechecking and IR lowering resolve the name to the language builtin
+    /// before (or instead of) any user function, so a same-name user
+    /// declaration is rejected at declaration admission.
+    Reserved,
+    /// Calls resolve a same-name user function first in every phase
+    /// (`FnTable` lookup precedes the builtin), so shadowing is the contract.
+    UserShadowable,
+}
+
+/// The one frontend builtin/helper namespace authority. Every bare name the
+/// frontend or IR lowering gives builtin meaning to is listed here exactly
+/// once with its collision policy; `build_fn_table` enforces it, and
+/// `builtin_namespace_registry_covers_every_dispatched_name` fails if any
+/// phase dispatches on a name missing from this table. Typecheck/IR name
+/// matches are implementation consumers of this classification, not
+/// independent admission authorities.
+const BUILTIN_NAMESPACE: &[(&str, BuiltinNamePolicy)] = &[
+    // Application boundary: lowered to host effects.
+    ("args_read", BuiltinNamePolicy::Reserved),
+    ("stdin_read_text", BuiltinNamePolicy::Reserved),
+    ("stdout_write", BuiltinNamePolicy::Reserved),
+    ("stderr_write", BuiltinNamePolicy::Reserved),
+    ("path_inspect", BuiltinNamePolicy::Reserved),
+    ("fs_read_text", BuiltinNamePolicy::Reserved),
+    ("fs_write_text", BuiltinNamePolicy::Reserved),
+    ("time_duration_ms", BuiltinNamePolicy::Reserved),
+    // QTruth intrinsics: lowered to dedicated `IrInstr::QTruth*`.
+    ("qtruth_and", BuiltinNamePolicy::Reserved),
+    ("qtruth_or", BuiltinNamePolicy::Reserved),
+    ("qtruth_not", BuiltinNamePolicy::Reserved),
+    ("qtruth_impl", BuiltinNamePolicy::Reserved),
+    // Sequence/map/text/random helpers: typechecked and lowered by name
+    // before any FnTable lookup.
+    ("len", BuiltinNamePolicy::Reserved),
+    ("push", BuiltinNamePolicy::Reserved),
+    ("prepend", BuiltinNamePolicy::Reserved),
+    ("contains", BuiltinNamePolicy::Reserved),
+    ("is_empty", BuiltinNamePolicy::Reserved),
+    ("pop", BuiltinNamePolicy::Reserved),
+    ("map_empty", BuiltinNamePolicy::Reserved),
+    ("map_contains", BuiltinNamePolicy::Reserved),
+    ("map_get", BuiltinNamePolicy::Reserved),
+    ("map_set", BuiltinNamePolicy::Reserved),
+    ("print", BuiltinNamePolicy::Reserved),
+    ("to_text", BuiltinNamePolicy::Reserved),
+    ("random_seed", BuiltinNamePolicy::Reserved),
+    ("random_next_i32", BuiltinNamePolicy::Reserved),
+    // Math: user-first resolution (#1653/#1750).
+    ("sin", BuiltinNamePolicy::UserShadowable),
+    ("cos", BuiltinNamePolicy::UserShadowable),
+    ("tan", BuiltinNamePolicy::UserShadowable),
+    ("sqrt", BuiltinNamePolicy::UserShadowable),
+    ("abs", BuiltinNamePolicy::UserShadowable),
+    ("pow", BuiltinNamePolicy::UserShadowable),
+    // Statement builtin: user-first in typecheck and IR (`is_builtin_assert_name`).
+    ("assert", BuiltinNamePolicy::UserShadowable),
+];
+
+/// Reserved entries owned by the application boundary (SSF-04 diagnostic
+/// wording). A subset of `BUILTIN_NAMESPACE`, not a second policy list.
+const APPLICATION_BOUNDARY_BUILTINS: &[&str] = &[
     "args_read",
     "stdin_read_text",
     "stdout_write",
@@ -160,6 +229,13 @@ const APPLICATION_BUILTIN_NAMES: &[&str] = &[
     "fs_write_text",
     "time_duration_ms",
 ];
+
+fn builtin_name_policy(name: &str) -> Option<BuiltinNamePolicy> {
+    BUILTIN_NAMESPACE
+        .iter()
+        .find(|(builtin, _)| *builtin == name)
+        .map(|(_, policy)| *policy)
+}
 
 /// SSF-09 D2: the built-in ADT identities. A user enum must not take one of
 /// these names, or its ADT descriptor would collide with the built-in's.
@@ -689,11 +765,17 @@ pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
     let mut out = BTreeMap::new();
     for f in &program.functions {
         let name = resolve_symbol_name(&program.arena, f.name)?;
-        if APPLICATION_BUILTIN_NAMES.contains(&name) {
+        if builtin_name_policy(name) == Some(BuiltinNamePolicy::Reserved) {
+            // The application-boundary wording is the sealed SSF-04 contract.
+            let owner = if APPLICATION_BOUNDARY_BUILTINS.contains(&name) {
+                "the application boundary".to_string()
+            } else {
+                format!("the language builtin '{name}'")
+            };
             return Err(FrontendError {
                 detail: None,
                 pos: 0,
-                message: format!("function name '{name}' is reserved for the application boundary"),
+                message: format!("function name '{name}' is reserved for {owner}"),
             });
         }
         if out.contains_key(&f.name) {
@@ -1787,6 +1869,134 @@ fn main() {
             "unexpected error: {}",
             err.message
         );
+    }
+
+    // --- PB-02 (#1654/#1655): one builtin namespace authority ---
+
+    fn fn_table_for(src: &str) -> Result<FnTable, FrontendError> {
+        build_fn_table(&parse_program(src).expect("parse"))
+    }
+
+    #[test]
+    fn build_fn_table_rejects_every_reserved_builtin_name() {
+        let reserved: Vec<&str> = BUILTIN_NAMESPACE
+            .iter()
+            .filter(|(_, p)| *p == BuiltinNamePolicy::Reserved)
+            .map(|(n, _)| *n)
+            .collect();
+        for required in [
+            "qtruth_and",
+            "qtruth_or",
+            "qtruth_not",
+            "qtruth_impl",
+            "len",
+            "push",
+            "prepend",
+            "contains",
+            "is_empty",
+            "pop",
+            "map_empty",
+            "map_contains",
+            "map_get",
+            "map_set",
+            "print",
+            "to_text",
+            "random_seed",
+            "random_next_i32",
+            "stdout_write",
+        ] {
+            assert!(reserved.contains(&required), "{required} must be Reserved");
+        }
+        for name in reserved {
+            let src = format!(
+                "fn {name}(x: i32) -> i32 {{\n    return x;\n}}\nfn main() {{\n    return;\n}}\n"
+            );
+            let err = fn_table_for(&src).expect_err(name);
+            assert!(
+                err.message.contains(name) && err.message.contains("reserved"),
+                "{name}: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn build_fn_table_admits_every_user_shadowable_builtin_name() {
+        for (name, policy) in BUILTIN_NAMESPACE {
+            if *policy != BuiltinNamePolicy::UserShadowable {
+                continue;
+            }
+            let src = format!(
+                "fn {name}(x: f64) -> f64 {{\n    return x;\n}}\nfn main() {{\n    return;\n}}\n"
+            );
+            fn_table_for(&src).unwrap_or_else(|e| panic!("{name}: {}", e.message));
+        }
+    }
+
+    /// Structural guard: every bare name that typechecking, IR lowering or
+    /// `builtin_sig` gives builtin meaning to must be classified exactly once
+    /// in `BUILTIN_NAMESPACE`. Adding a new string-dispatched builtin without
+    /// a registry entry fails here, so no second collision list can drift.
+    #[test]
+    fn builtin_namespace_registry_covers_every_dispatched_name() {
+        fn quoted_after<'a>(src: &'a str, marker: &str, out: &mut Vec<&'a str>) {
+            for (i, _) in src.match_indices(marker) {
+                let rest = &src[i + marker.len()..];
+                if let Some(end) = rest.find('"') {
+                    out.push(&rest[..end]);
+                }
+            }
+        }
+        let typecheck = include_str!("typecheck.rs");
+        let lowering = include_str!("../../sm-ir/src/legacy_lowering.rs");
+        let lib = include_str!("lib.rs");
+        let sig_start = lib.find("pub fn builtin_sig(").expect("builtin_sig");
+        let sig_body = &lib[sig_start..sig_start + lib[sig_start..].find("_ => None").unwrap()];
+
+        let mut dispatched = Vec::new();
+        for src in [typecheck, lowering] {
+            quoted_after(src, ")? == \"", &mut dispatched);
+        }
+        // QTruth intrinsics are matched as `"qtruth_*" =>` arms in lowering;
+        // a bare `"qtruth_"` prefix literal is not a dispatched name.
+        for (i, _) in lowering.match_indices("\"qtruth_") {
+            let end = lowering[i + 1..].find('"').unwrap();
+            let name = &lowering[i + 1..i + 1 + end];
+            if name != "qtruth_" {
+                dispatched.push(name);
+            }
+        }
+        for line in sig_body.lines().filter(|l| l.contains("=> Some(FnSig")) {
+            for part in line.split('|') {
+                if let Some(name) = part.split('"').nth(1) {
+                    dispatched.push(name);
+                }
+            }
+        }
+        // `result` is the ensures-clause binding, not a call name.
+        dispatched.retain(|n| *n != "result");
+        assert!(
+            dispatched.len() > 30,
+            "scanner found too few names: {dispatched:?}"
+        );
+        for name in &dispatched {
+            assert!(
+                builtin_name_policy(name).is_some(),
+                "'{name}' is dispatched as a builtin but missing from BUILTIN_NAMESPACE"
+            );
+        }
+        let mut names: Vec<&str> = BUILTIN_NAMESPACE.iter().map(|(n, _)| *n).collect();
+        names.sort_unstable();
+        let total = names.len();
+        names.dedup();
+        assert_eq!(names.len(), total, "BUILTIN_NAMESPACE lists a name twice");
+        for name in APPLICATION_BOUNDARY_BUILTINS {
+            assert_eq!(
+                builtin_name_policy(name),
+                Some(BuiltinNamePolicy::Reserved),
+                "{name}"
+            );
+        }
     }
 
     // FA-02-002 / #1634: first-wave generic-capable definitions admit at

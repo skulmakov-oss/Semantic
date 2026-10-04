@@ -676,6 +676,9 @@ pub fn default_import_alias(spec: &str) -> String {
     last.to_string()
 }
 
+/// Line-scanning convenience over [`parse_import_directive`]. The module
+/// loader does not use it: it consumes the `Import` directives `sm-front`
+/// preserved in `LogosProgram::imports` (PB-02 / #1645).
 pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
     let mut out = Vec::new();
     let mut decl_order = 0u32;
@@ -688,72 +691,89 @@ pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
             continue;
         }
         let ws = line.len().saturating_sub(trimmed.len());
-        let mut rest = trimmed["Import".len()..].trim();
-        if rest.is_empty() {
-            continue;
+        if let Some(directive) =
+            parse_import_directive(trimmed, (idx + 1) as u32, (ws + 1) as u32, decl_order)
+        {
+            out.push(directive);
+            decl_order += 1;
         }
-        let mut reexport = false;
-        if let Some(after_pub) = rest.strip_prefix("pub ") {
-            reexport = true;
-            rest = after_pub.trim_start();
-        }
-
-        let spec = if let Some(stripped) = rest.strip_prefix('"') {
-            if let Some(end) = stripped.find('"') {
-                stripped[..end].to_string()
-            } else {
-                stripped.to_string()
-            }
-        } else {
-            rest.split_whitespace().next().unwrap_or("").to_string()
-        };
-        if spec.is_empty() {
-            continue;
-        }
-
-        let mut alias = None;
-        let mut tail = "";
-        if let Some(stripped) = rest.strip_prefix('"') {
-            if let Some(end) = stripped.find('"') {
-                tail = stripped[end + 1..].trim_start();
-            }
-        } else if let Some(pos) = rest.find(char::is_whitespace) {
-            tail = rest[pos..].trim_start();
-        }
-        let mut wildcard = false;
-        let mut select_items: Vec<(String, Option<String>)> = Vec::new();
-        if let Some(after_as) = tail.strip_prefix("as ") {
-            let mut split = after_as.splitn(2, char::is_whitespace);
-            let head = split.next().unwrap_or("").trim_matches('"');
-            if !head.is_empty() {
-                alias = Some(head.to_string());
-            }
-            tail = split.next().unwrap_or("").trim_start();
-        }
-        if let Some(after_star) = tail.strip_prefix('*') {
-            wildcard = true;
-            tail = after_star.trim_start();
-        }
-        if let Some(after_lbrace) = tail.strip_prefix('{') {
-            if let Some(end) = after_lbrace.find('}') {
-                let inside = &after_lbrace[..end];
-                select_items = parse_select_items(inside);
-            }
-        }
-
-        out.push(ImportDirective {
-            spec,
-            alias,
-            reexport,
-            select_items,
-            wildcard,
-            line: (idx + 1) as u32,
-            col: (ws + 1) as u32,
-            decl_order,
-        });
-        decl_order += 1;
     }
     out
+}
+
+/// The one Logos import-directive parser: interprets a single directive whose
+/// text starts at the `Import` keyword. `None` means the text carries no
+/// usable import spec.
+pub fn parse_import_directive(
+    directive: &str,
+    line: u32,
+    col: u32,
+    decl_order: u32,
+) -> Option<ImportDirective> {
+    let after_kw = directive.strip_prefix("Import")?;
+    let mut rest = after_kw.trim();
+    if rest.is_empty() {
+        return None;
+    }
+    let mut reexport = false;
+    if let Some(after_pub) = rest.strip_prefix("pub ") {
+        reexport = true;
+        rest = after_pub.trim_start();
+    }
+
+    let spec = if let Some(stripped) = rest.strip_prefix('"') {
+        if let Some(end) = stripped.find('"') {
+            stripped[..end].to_string()
+        } else {
+            stripped.to_string()
+        }
+    } else {
+        rest.split_whitespace().next().unwrap_or("").to_string()
+    };
+    if spec.is_empty() {
+        return None;
+    }
+
+    let mut alias = None;
+    let mut tail = "";
+    if let Some(stripped) = rest.strip_prefix('"') {
+        if let Some(end) = stripped.find('"') {
+            tail = stripped[end + 1..].trim_start();
+        }
+    } else if let Some(pos) = rest.find(char::is_whitespace) {
+        tail = rest[pos..].trim_start();
+    }
+    let mut wildcard = false;
+    let mut select_items: Vec<(String, Option<String>)> = Vec::new();
+    if let Some(after_as) = tail.strip_prefix("as ") {
+        let mut split = after_as.splitn(2, char::is_whitespace);
+        let head = split.next().unwrap_or("").trim_matches('"');
+        if !head.is_empty() {
+            alias = Some(head.to_string());
+        }
+        tail = split.next().unwrap_or("").trim_start();
+    }
+    if let Some(after_star) = tail.strip_prefix('*') {
+        wildcard = true;
+        tail = after_star.trim_start();
+    }
+    if let Some(after_lbrace) = tail.strip_prefix('{') {
+        if let Some(end) = after_lbrace.find('}') {
+            let inside = &after_lbrace[..end];
+            select_items = parse_select_items(inside);
+        }
+    }
+
+    Some(ImportDirective {
+        spec,
+        alias,
+        reexport,
+        select_items,
+        wildcard,
+        line,
+        col,
+        decl_order,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

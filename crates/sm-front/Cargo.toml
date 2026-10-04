@@ -8,10 +8,10 @@ path = "src/lib.rs"
 
 [features]
 default = ["std"]
-std = ["alloc", "ton618-core/std"]
-alloc = ["ton618-core/alloc"]
+std = ["alloc", "ton618-core/std", "sm-profile/std"]
+alloc = ["ton618-core/alloc", "sm-profile/alloc"]
 
 [dependencies]
 ton618-core = { path = "../ton618-core", default-features = false, features = ["alloc"] }
-sm-profile = { path = "../sm-profile", default-features = false, features = ["std"] }
+sm-profile = { path = "../sm-profile", default-features = false, features = ["alloc"] }
 sm-diagnostic = { path = "../sm-diagnostic" }

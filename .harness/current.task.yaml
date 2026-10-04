@@ -1,45 +1,43 @@
 task:
-  id: PHASE-B-PB-01
-  title: "ParserProfile Contract Hardening"
-  type: phase_b_profile_contract_hardening
-  target: "Phase-B PB-01 / Module 01 sm-profile (#1618-#1632)"
+  id: PHASE-B-PB-02
+  title: "Frontend Admission Hardening"
+  type: phase_b_frontend_admission_hardening
+  target: "Phase-B PB-02 / Module 02 sm-front (#1636 #1640-#1645 #1652 #1654 #1655 #1666)"
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-12-FINAL-CLOSEOUT
+  supersedes: PHASE-B-PB-01
   umbrella: 1617
-  issues: [1618, 1619, 1620, 1621, 1622, 1623, 1624, 1625, 1626, 1627, 1628, 1629, 1630, 1631, 1632]
-  base_sha: 8ebd32945df2a8df80d89dcc8b1dd3f49b41fbf6
+  issues: [1636, 1640, 1641, 1642, 1643, 1644, 1645, 1652, 1654, 1655, 1666]
+  base_sha: 10d1eafaa8b8508120c60416ad1412a654f4260a
   authorized_by: >-
-    Repository owner direct instruction (2026-10-04, "GO — Phase B / PB-01 —
-    ParserProfile Contract Hardening") plus owner decision (2026-10-04):
-    aliases are legacy-only (TON618 compatibility perimeter) and fail closed at
-    canonical Semantic admission; currently inert profile fields default to
-    RESERVED / NON-AUTHORITATIVE. Implementation, spec correction, tests and PR
-    creation are authorized. Merge, release, tag and manual issue closure are
-    NOT authorized. SSF historical envelopes are retired and grant no authority
-    here; SSF reports, C0/C1 records and v1.2.0 assets stay immutable.
+    Repository owner direct instruction (2026-10-04, "GO — Phase B / PB-02 —
+    Frontend Admission Hardening") plus owner decision (2026-10-04) for #1645:
+    preserve Logos Import directives in LogosProgram and have sm-sema consume
+    them, without tightening SSF-09 Decision E outcomes. Implementation, spec
+    correction, tests, the sm-front alloc CI step and PR creation are
+    authorized. Merge, release, tag, manual issue closure and PB-03 are NOT
+    authorized. PB-01 (#1985) and SSF history stay untouched.
 
 intent:
   summary: >-
-    Give ParserProfile one public baseline, one validator, one alias rule, one
-    version admission policy and honest ACTIVE/RESERVED policy semantics;
-    move legacy alias training/normalization into the TON618 perimeter.
-  decision_record: docs/roadmap/phase_b/pb01_profile_contract_decision.md
+    Frontend admission fails closed for duplicate parameters, qvec dimensions,
+    Logos System/Import fidelity, discard expressions and the builtin
+    namespace; restore the documented sm-front alloc-only build.
+  decision_record: docs/roadmap/phase_b/pb02_frontend_admission_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/sm-profile/**
+    - .github/workflows/ci.yml
     - crates/sm-front/**
     - crates/sm-sema/**
-    - crates/smc-cli/**
-    - src/lib.rs
-    - src/bin/ton618_core.rs
-    - docs/spec/profile.md
+    - crates/sm-ir/src/legacy_lowering.rs
+    - docs/spec/types.md
+    - docs/LOGOS_GRAMMAR_v0_1.md
+    - docs/NO_STD.md
     - docs/roadmap/phase_b/**
     - tests/**
 
   forbidden_paths:
-    - .github/**
     - apps/**
     - reports/**
     - tools/**
@@ -58,7 +56,7 @@ authorization:
   documentation_addition: true
   documentation_correction: true
   test_addition: true
-  workflow_changes: false
+  workflow_changes: true
   dependency_changes: false
   github_issue_lifecycle: false
   git_commit_push_pr: true
@@ -67,7 +65,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 8ebd32945df2a8df80d89dcc8b1dd3f49b41fbf6
+  base_sha: 10d1eafaa8b8508120c60416ad1412a654f4260a
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true

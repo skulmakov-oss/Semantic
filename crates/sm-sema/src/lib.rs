@@ -17,7 +17,7 @@ pub use alloc_core::{
     infer_atom_type_core, infer_law_entity_core, infer_when_condition_type_core, insert_name_core,
     insert_scoped_name_core, is_assignment_compatible, is_compatible_cmp, is_dead_when_condition,
     is_large_law_core, is_law_name_style_ok, is_valid_when_result_type_core,
-    parse_import_directives, parse_law_local_decl, parse_select_items,
+    parse_import_directive, parse_import_directives, parse_law_local_decl, parse_select_items,
     track_entity_field_usage_core, validate_import_bindings_core, validate_import_namespace_rules,
     validate_select_imports_core, validate_when_non_empty_core, ConditionInferError,
     ExportBuildError, ExportBuildModule, ExportItem, ExportKind, ExportOrigin, ExportSet,

@@ -1,6 +1,7 @@
 use crate::hello_parser::{HelloFile, HelloStmt};
 use crate::types::FrontendError;
 use alloc::collections::BTreeSet;
+use alloc::format;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelloCheckedFile {

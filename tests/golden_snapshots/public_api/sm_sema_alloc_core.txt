@@ -131,6 +131,7 @@ pub fn collect_local_exports_core(module_key: &str, locals: &[LocalExportDecl]) 
 pub fn parse_select_items(inside: &str) -> Vec<(String, Option<String>)> {
 pub fn default_import_alias(spec: &str) -> String {
 pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
+pub fn parse_import_directive( directive: &str, line: u32, col: u32, decl_order: u32, ) -> Option<ImportDirective> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportPolicyError {
 pub code: &'static str,
