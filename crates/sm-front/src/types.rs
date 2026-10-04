@@ -1206,6 +1206,65 @@ pub struct LogosWhen {
     pub condition: String,
     pub effect: String,
     pub mark: SourceMark,
+    /// PB-03: structural projection of `condition`, built by `sm-front` (the
+    /// syntax owner) from canonical tokens. `sm-sema` interprets only this.
+    pub structure: LogosCondition,
+    /// Every lexical atom of `condition`, in source order.
+    pub condition_atoms: Vec<LogosAtom>,
+    /// Every lexical atom of `effect`, in source order.
+    pub effect_atoms: Vec<LogosAtom>,
+}
+
+/// PB-03: one lexical atom of a Logos `When` fragment, classified by the
+/// canonical lexer (string literals, numbers, quad/bool literals and names are
+/// distinct tokens, so text inside a string is never a name or number).
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogosAtom {
+    Bool(bool),
+    Quad(QuadVal),
+    /// A numeric literal with its canonical frontend family (the same
+    /// suffix/default rules as RustLike numeric literals).
+    Number(NumericLiteral),
+    Text(String),
+    Name(String),
+    Field {
+        entity: String,
+        field: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogosCompareOp {
+    Eq,
+    Ne,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogosEvidenceOp {
+    And,
+    Or,
+}
+
+/// PB-03: the modeled Logos `When` condition surface.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogosCondition {
+    Atom(LogosAtom),
+    Compare {
+        lhs: LogosAtom,
+        op: LogosCompareOp,
+        rhs: LogosAtom,
+    },
+    /// `Present(name)` or `Present(Entity.field)`.
+    Present(LogosAtom),
+    /// `!atom`.
+    Not(LogosAtom),
+    /// A same-operator chain `a && b && ...` / `a || b || ...` (2+ operands).
+    Evidence {
+        op: LogosEvidenceOp,
+        operands: Vec<LogosAtom>,
+    },
+    /// Well-lexed tokens that form no modeled shape; `sm-sema` rejects it.
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq)]

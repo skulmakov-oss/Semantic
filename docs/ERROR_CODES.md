@@ -36,7 +36,7 @@ CLI source: `smc explain <code>` and `smc explain --list`.
 - `E0216`: Expected `:` in Entity field declaration.
 - `E0217`: Expected a quoted Law name.
 - `E0220`: Duplicate Entity declaration.
-- `E0221`: Duplicate Law inside the same Entity scope.
+- `E0221`: Duplicate Law name within one module.
 - `E0222`: Law body is empty.
 - `E0223`: Shadowing is forbidden inside a Law scope.
 - `E0224`: Empty When condition.
@@ -101,7 +101,7 @@ CLI source: `smc explain <code>` and `smc explain --list`.
 - `V0031`: Verifier rejection: ADT payload arity mismatch (AdtPayloadArityMismatch).
 - `V0032`: Verifier rejection: ADT payload index out of range (AdtPayloadIndexOutOfRange).
 - `W0240`: Dead law branch detected: When condition is always false.
-- `W0241`: Constant folding candidate detected for `fx.*` call with literals.
+- `W0241`: Constant folding candidate detected for `fx.*` call with literals (catalogued; not currently emitted, PB-03 #1678).
 - `W0250`: Law name style warning (expected `UpperCamelCase`).
 - `W0251`: Large Law block warning (too many `When` clauses).
 - `W0252`: Unused Entity field warning (`state/prop` not referenced).

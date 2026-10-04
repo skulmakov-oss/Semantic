@@ -1,14 +1,13 @@
+use crate::alloc_core::ConditionInferError;
 use crate::alloc_core::{
     build_export_sets_core, collect_local_exports_core, diagnostic_help_core,
-    evaluate_law_header_policy_core, fold_fx_const_call_core, has_magic_number_core,
-    infer_law_entity_core, infer_when_condition_type_core, insert_name_core,
-    insert_scoped_name_core, is_dead_when_condition, is_valid_when_result_type_core,
-    parse_import_directive, parse_law_local_decl, track_entity_field_usage_core,
-    validate_import_bindings_core,
+    evaluate_law_header_policy_core, infer_when_condition_type_core, insert_name_core,
+    is_dead_when_condition, is_magic_number_atom, is_valid_when_result_type_core,
+    parse_import_directive, parse_law_local_decl, validate_import_bindings_core,
     validate_import_namespace_rules as validate_import_namespace_rules_core,
     validate_select_imports_core, validate_when_non_empty_core, ExportBuildModule, ExportKind,
     ExportSet, ImportDirective, LawScheduler, LocalExportDecl, ScopeKind, SelectImportModule,
-    SemanticType, Symbol, SymbolTable, TypeRegistry,
+    SemanticType, Symbol, SymbolTable,
 };
 use crate::frontend::{
     admit_logos_program_with_profile, admit_program_with_profile, lex,
@@ -25,7 +24,8 @@ use sm_front::diagnostic_authority::{
     FRONTEND_AMBIGUOUS_SURFACE_CODE, FRONTEND_NO_SURFACE_CLAIM_CODE,
 };
 use sm_front::lexer::lex_tokens_with_authority;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use sm_front::LogosAtom;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use ton618_core::diagnostics::{
@@ -36,15 +36,17 @@ use ton618_core::{Arena, SourceMap};
 impl From<Type> for SemanticType {
     fn from(value: Type) -> Self {
         match value {
-            Type::I32 => SemanticType::Int,
-            Type::Fx | Type::F64 => SemanticType::Fx,
-            Type::Quad => SemanticType::QVec(1),
+            // PB-03 (#1671, #1672): exact source families.
+            Type::I32 => SemanticType::I32,
+            Type::F64 => SemanticType::F64,
+            Type::Fx => SemanticType::Fx,
+            Type::Quad => SemanticType::Quad,
             Type::QVec(n) => SemanticType::QVec(n),
             Type::Bool => SemanticType::Bool,
             Type::Text => SemanticType::Unknown,
             Type::Sequence(_) => SemanticType::Unknown,
             Type::Closure(_) => SemanticType::Unknown,
-            Type::U32 => SemanticType::Int,
+            Type::U32 => SemanticType::U32,
             Type::Unit => SemanticType::Unit,
             Type::Measured(base, _) => SemanticType::from((*base).clone()),
             Type::RangeI32 => SemanticType::Unknown,
@@ -883,7 +885,6 @@ pub fn analyze_logos_program(
     source: &str,
 ) -> Result<SemanticReport, SemanticError> {
     let mut symbols = SymbolTable::new();
-    let mut type_registry = TypeRegistry::new();
     symbols.push(ScopeKind::Module);
 
     let mut entity_map: HashMap<String, &LogosEntity> = HashMap::new();
@@ -899,10 +900,12 @@ pub fn analyze_logos_program(
                 ),
             });
         }
+        // An Entity name is a declaration, not a value: it never types an
+        // operand (PB-03 / #1671).
         symbols
             .insert(Symbol {
                 name: entity.name.clone(),
-                ty: SemanticType::QVec(1),
+                ty: SemanticType::Unknown,
                 scope: symbols.scope_kind(),
             })
             .map_err(|_| SemanticError {
@@ -914,9 +917,27 @@ pub fn analyze_logos_program(
                     source,
                 ),
             })?;
+        // FA-03-026 / #1695: an Entity field set is a namespace; a collision
+        // is an error, never a silently surviving symbol.
+        let mut field_names = BTreeSet::new();
+        for field in &entity.fields {
+            if !field_names.insert(field.name.as_str()) {
+                return Err(SemanticError {
+                    diag: render_diag(
+                        DiagLevel::Error,
+                        "E0220",
+                        format!("duplicate field '{}.{}'", entity.name, field.name),
+                        field.mark,
+                        source,
+                    ),
+                });
+            }
+        }
     }
 
-    let mut law_names_by_entity: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    // FA-03-024/025 (#1693, #1694): Law names are module-level. Logos syntax
+    // declares no Law owner, so none is inferred and there is no `_global`.
+    let mut law_names = BTreeSet::new();
     let mut warnings = Vec::new();
     let mut arena = Arena::<String>::new();
     let mut entity_field_usage: HashMap<String, HashSet<String>> = HashMap::new();
@@ -927,6 +948,15 @@ pub fn analyze_logos_program(
         }
         entity_field_usage.insert(entity.name.clone(), fields);
     }
+    let resolve_field = |ent: &str, field: &str| {
+        entity_map.get(ent).and_then(|entity| {
+            entity
+                .fields
+                .iter()
+                .find(|x| x.name == field)
+                .map(|f| SemanticType::from(f.ty.clone()))
+        })
+    };
 
     for law in &program.laws {
         let law_policy = evaluate_law_header_policy_core(&law.name, law.whens.len());
@@ -956,20 +986,12 @@ pub fn analyze_logos_program(
             ));
         }
 
-        let owner_entity =
-            infer_law_entity_core(law.whens.first().map(|w| w.condition.as_str()), |name| {
-                entity_map.contains_key(name)
-            })
-            .unwrap_or_else(|| "_global".into());
-        if !insert_scoped_name_core(&mut law_names_by_entity, &owner_entity, &law.name) {
+        if !insert_name_core(&mut law_names, &law.name) {
             return Err(SemanticError {
                 diag: render_diag(
                     DiagLevel::Error,
                     "E0221",
-                    format!(
-                        "duplicate Law '{}' inside Entity '{}'",
-                        law.name, owner_entity
-                    ),
+                    format!("duplicate Law '{}' in module", law.name),
                     law.mark,
                     source,
                 ),
@@ -988,17 +1010,6 @@ pub fn analyze_logos_program(
             });
         }
 
-        symbols.push(ScopeKind::Law);
-        if let Some(ent) = entity_map.get(&owner_entity) {
-            for field in &ent.fields {
-                let _ = symbols.insert(Symbol {
-                    name: field.name.clone(),
-                    ty: SemanticType::from(field.ty.clone()),
-                    scope: symbols.scope_kind(),
-                });
-            }
-        }
-
         let mut law_locals = BTreeSet::new();
         for when in &law.whens {
             validate_when_non_empty_core(&when.condition, &when.effect).map_err(|e| {
@@ -1006,49 +1017,44 @@ pub fn analyze_logos_program(
                     diag: render_diag(DiagLevel::Error, e.code, e.message, when.mark, source),
                 }
             })?;
-            track_entity_field_usage_core(&when.condition, |ent, field| {
-                if entity_map.contains_key(ent) {
-                    if let Some(rem) = entity_field_usage.get_mut(ent) {
-                        rem.remove(field);
+            // FA-03-010 / #1679: only parsed `Entity.field` atoms that resolve
+            // count as a use; text inside string literals is never a field.
+            for atom in when.condition_atoms.iter().chain(&when.effect_atoms) {
+                if let LogosAtom::Field { entity, field } = atom {
+                    if resolve_field(entity, field).is_some() {
+                        if let Some(rem) = entity_field_usage.get_mut(entity) {
+                            rem.remove(field);
+                        }
                     }
                 }
-            });
-            track_entity_field_usage_core(&when.effect, |ent, field| {
-                if entity_map.contains_key(ent) {
-                    if let Some(rem) = entity_field_usage.get_mut(ent) {
-                        rem.remove(field);
-                    }
-                }
-            });
+            }
             let ty = infer_when_condition_type_core(
-                &when.condition,
+                &when.structure,
                 |name| symbols.resolve(name).map(|s| s.ty),
-                |ent, field| {
-                    entity_map.get(ent).and_then(|entity| {
-                        entity
-                            .fields
-                            .iter()
-                            .find(|x| x.name == field)
-                            .map(|f| SemanticType::from(f.ty.clone()))
-                    })
-                },
+                resolve_field,
             )
-            .map_err(|e| match e {
-                crate::alloc_core::ConditionInferError::MismatchedTypes { left, right } => {
-                    SemanticError {
-                        diag: render_diag(
-                            DiagLevel::Error,
-                            "E0201",
-                            format!("Mismatched types. Expected {}, found {}", left, right),
-                            when.mark,
-                            source,
-                        ),
+            .map_err(|e| {
+                let message = match e {
+                    ConditionInferError::MismatchedTypes { left, right } => {
+                        format!("Mismatched types. Expected {}, found {}", left, right)
                     }
+                    ConditionInferError::Unresolved(name) => {
+                        format!("unresolved name '{}' in When condition", name)
+                    }
+                    ConditionInferError::InvalidOperands(ty) => {
+                        format!("When condition operator cannot take {} operands", ty)
+                    }
+                    ConditionInferError::InvalidPresent => {
+                        "Present(...) requires a name or Entity.field".to_string()
+                    }
+                    ConditionInferError::Unsupported => {
+                        format!("unsupported When condition '{}'", when.condition.trim())
+                    }
+                };
+                SemanticError {
+                    diag: render_diag(DiagLevel::Error, "E0201", message, when.mark, source),
                 }
             })?;
-            let ty_id = type_registry.intern(ty);
-            let bool_id = type_registry.intern(SemanticType::Bool);
-            let quad_id = type_registry.intern(SemanticType::Quad);
             if !is_valid_when_result_type_core(ty) {
                 return Err(SemanticError {
                     diag: render_diag(
@@ -1056,17 +1062,15 @@ pub fn analyze_logos_program(
                         "E0201",
                         format!(
                             "Mismatched types. Expected {} or {}, found {}",
-                            type_registry.pretty(quad_id),
-                            type_registry.pretty(bool_id),
-                            type_registry.pretty(ty_id)
+                            SemanticType::Quad,
+                            SemanticType::Bool,
+                            ty
                         ),
                         when.mark,
                         source,
                     ),
                 });
             }
-            let _ = type_registry.equals_fast(ty_id, bool_id)
-                || type_registry.equals_fast(ty_id, quad_id);
 
             if let Some(local) = parse_law_local_decl(&when.effect) {
                 if !insert_name_core(&mut law_locals, &local) {
@@ -1082,7 +1086,7 @@ pub fn analyze_logos_program(
                 }
             }
 
-            if is_dead_when_condition(&when.condition) {
+            if is_dead_when_condition(&when.structure) {
                 warnings.push(render_diag(
                     DiagLevel::Warning,
                     "W0240",
@@ -1094,21 +1098,14 @@ pub fn analyze_logos_program(
                     source,
                 ));
             }
-            if let Some(folded) = fold_fx_const_call_core(&when.effect) {
-                warnings.push(render_diag(
-                    DiagLevel::Warning,
-                    "W0241",
-                    format!(
-                        "constant folding candidate in Law '{}': '{}' -> '{}'",
-                        law.name,
-                        when.effect.trim(),
-                        folded
-                    ),
-                    when.mark,
-                    source,
-                ));
-            }
-            if has_magic_number_core(&when.condition) || has_magic_number_core(&when.effect) {
+            // FA-03-009 / #1678: no W0241 fx constant folding; no fx evaluator
+            // is available to sm-sema, and host f64 is not fx semantics.
+            if when
+                .condition_atoms
+                .iter()
+                .chain(&when.effect_atoms)
+                .any(is_magic_number_atom)
+            {
                 warnings.push(render_diag(
                     DiagLevel::Warning,
                     "W0253",
@@ -1122,7 +1119,6 @@ pub fn analyze_logos_program(
             }
             let _ = arena.alloc(format!("{}::{}", law.name, when.condition));
         }
-        symbols.pop();
     }
 
     for entity in &program.entities {
@@ -1324,13 +1320,19 @@ mod tests {
     }
 
     #[test]
-    fn compat_policy_int_fx() {
+    fn compat_policy_is_family_exact() {
+        // PB-03 / #1672: no implicit cross-family numeric coercion.
+        for (dst, src) in [
+            (SemanticType::Fx, SemanticType::I32),
+            (SemanticType::I32, SemanticType::Fx),
+            (SemanticType::U32, SemanticType::I32),
+            (SemanticType::Fx, SemanticType::F64),
+            (SemanticType::Unknown, SemanticType::Unknown),
+        ] {
+            assert!(!crate::alloc_core::is_assignment_compatible(dst, src));
+        }
         assert!(crate::alloc_core::is_assignment_compatible(
             SemanticType::Fx,
-            SemanticType::Int
-        ));
-        assert!(!crate::alloc_core::is_assignment_compatible(
-            SemanticType::Int,
             SemanticType::Fx
         ));
     }
@@ -1354,7 +1356,7 @@ Entity A:
 Entity A:
     state x: quad
 Law "L" [priority 1]:
-    When N ->
+    When false ->
         Pulse.emit("x")
 "#;
         let p = parse_logos_program(src).expect("logos parse");
@@ -1413,10 +1415,11 @@ Law "CheckSignal" [priority 10]:
     }
 
     fn warning_fixture_source() -> &'static str {
+        // PB-03 / #1677: `When N` is not dead (N is unknown); `false` is.
         r#"Entity A:
     state x: quad
 Law "L" [priority 1]:
-    When N ->
+    When false ->
         Pulse.emit("x")
 "#
     }
@@ -1853,10 +1856,10 @@ Law "L" [priority 1]:
 
     #[test]
     fn type_registry_is_canonical() {
-        let mut reg = TypeRegistry::new();
-        let a = reg.intern(SemanticType::Fx);
-        let b = reg.intern(SemanticType::Fx);
-        let c = reg.intern(SemanticType::QVec(32));
+        let mut reg = crate::alloc_core::TypeRegistry::new();
+        let a = reg.intern(SemanticType::Fx).expect("intern");
+        let b = reg.intern(SemanticType::Fx).expect("intern");
+        let c = reg.intern(SemanticType::QVec(32)).expect("intern");
         assert!(reg.equals_fast(a, b));
         assert!(!reg.equals_fast(a, c));
         assert_eq!(reg.pretty(a), "Fx");
@@ -1864,14 +1867,19 @@ Law "L" [priority 1]:
     }
 
     #[test]
-    fn crystal_fold_warns_for_fx_add_constants() {
+    fn no_host_f64_fx_constant_fold_warning() {
+        // PB-03 / #1678: W0241 is no longer computed with host f64.
         let src = r#"
 Law "L" [priority 1]:
-    When true -> fx.add(1.0, 2.0)
+    When true -> fx.add(0.1, 0.2)
 "#;
         let p = parse_logos_program(src).expect("logos parse");
         let report = analyze_logos_program(&p, src).expect("semantics");
-        assert!(report.warnings.iter().any(|w| w.code == "W0241"));
+        assert!(!report.warnings.iter().any(|w| w.code == "W0241"));
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("0.30000000000000004")));
     }
 
     #[test]
@@ -2831,5 +2839,285 @@ mod pb02_logos_import_tests {
             err.to_string().contains("malformed Import directive"),
             "{err}"
         );
+    }
+}
+
+#[cfg(test)]
+mod pb03_semantic_core_tests {
+    use super::*;
+    use crate::alloc_core::{is_compatible_cmp, TypeId, TypeRegistry, TypeRegistryError};
+    use sm_front::parse_logos_program;
+
+    fn analyze(src: &str) -> Result<SemanticReport, SemanticError> {
+        analyze_logos_program(&parse_logos_program(src).expect("parse"), src)
+    }
+
+    fn codes(src: &str) -> Vec<&'static str> {
+        analyze(src)
+            .expect("analyze")
+            .warnings
+            .iter()
+            .map(|w| w.code)
+            .collect()
+    }
+
+    fn rejected(src: &str) -> String {
+        analyze(src).expect_err(src).to_string()
+    }
+
+    /// Parse may reject some malformed text itself; either way it must never
+    /// be semantically admitted.
+    fn never_admitted(src: &str) -> bool {
+        match parse_logos_program(src) {
+            Ok(p) => analyze_logos_program(&p, src).is_err(),
+            Err(_) => true,
+        }
+    }
+
+    const QUAD_SENSOR: &str = "Entity Sensor:\n    state val: quad\n";
+
+    fn law(cond: &str) -> String {
+        format!("{QUAD_SENSOR}Law \"L\":\n    When {cond} -> System.recovery()\n")
+    }
+
+    // #1671
+    #[test]
+    fn quad_field_is_quad_not_qvec1() {
+        assert_eq!(SemanticType::from(Type::Quad), SemanticType::Quad);
+        assert_ne!(SemanticType::from(Type::Quad), SemanticType::QVec(1));
+        assert_eq!(SemanticType::from(Type::QVec(1)), SemanticType::QVec(1));
+        for q in ["N", "F", "T", "S"] {
+            analyze(&law(&format!("Sensor.val == {q}")))
+                .unwrap_or_else(|e| panic!("Sensor.val == {q}: {e}"));
+        }
+        let qvec = "Entity Sensor:\n    state val: qvec[1]\nLaw \"L\":\n    When Sensor.val == T -> System.recovery()\n";
+        assert!(rejected(qvec).contains("Mismatched types"));
+    }
+
+    // #1672
+    #[test]
+    fn source_numeric_families_stay_distinct() {
+        for (src_ty, sem) in [
+            (Type::I32, SemanticType::I32),
+            (Type::U32, SemanticType::U32),
+            (Type::F64, SemanticType::F64),
+            (Type::Fx, SemanticType::Fx),
+            (Type::Bool, SemanticType::Bool),
+            (Type::Unit, SemanticType::Unit),
+        ] {
+            assert_eq!(SemanticType::from(src_ty), sem);
+        }
+        let fields =
+            "Entity E:\n    state a: i32\n    state b: u32\n    state c: f64\n    state d: fx\n";
+        for (l, r, ok) in [
+            ("E.a", "E.a", true),
+            ("E.b", "E.b", true),
+            ("E.c", "E.c", true),
+            ("E.d", "E.d", true),
+            ("E.a", "E.b", false),
+            ("E.c", "E.d", false),
+            ("E.a", "E.d", false),
+            ("E.a", "5", true),
+            ("E.b", "5", false),
+            ("E.b", "5u32", true),
+            ("E.d", "1.5fx", true),
+            ("E.d", "1.5", false),
+        ] {
+            let src = format!("{fields}Law \"L\":\n    When {l} == {r} -> System.recovery()\n");
+            assert_eq!(analyze(&src).is_ok(), ok, "{l} == {r}");
+        }
+    }
+
+    // #1673
+    #[test]
+    fn unknown_never_proves_compatibility() {
+        assert!(!is_compatible_cmp(
+            SemanticType::Unknown,
+            SemanticType::Unknown
+        ));
+        assert!(!is_compatible_cmp(
+            SemanticType::Unknown,
+            SemanticType::Quad
+        ));
+        assert!(!is_compatible_cmp(
+            SemanticType::Quad,
+            SemanticType::Unknown
+        ));
+        for cond in [
+            "MissingA == MissingB",
+            "MissingA == T",
+            "T == MissingB",
+            "Sensor.nope == T",
+            "Nope.val == T",
+            "Sensor == T",
+        ] {
+            assert!(rejected(&law(cond)).contains("unresolved name"), "{cond}");
+        }
+    }
+
+    // #1674
+    #[test]
+    fn evidence_operators_require_structure_and_resolved_quad_operands() {
+        let ok = format!(
+            "{QUAD_SENSOR}Entity B:\n    state v: quad\nLaw \"L\":\n    When Sensor.val && B.v -> System.recovery()\n    When T || F || S -> System.recovery()\n    When !Sensor.val -> System.recovery()\n"
+        );
+        analyze(&ok).expect("structured evidence ops");
+        for cond in [
+            "nope && junk",
+            "T && \"a\"",
+            "T && Sensor.missing",
+            "T && F || S",
+            "T &&",
+            "\"a && b\"",
+            "\"x | y\"",
+            "T && true",
+        ] {
+            assert!(never_admitted(&law(cond)), "{cond}");
+        }
+    }
+
+    // #1675
+    #[test]
+    fn present_requires_structural_resolved_target() {
+        analyze(&law("Present(Sensor.val)")).expect("Present(field)");
+        for cond in [
+            "Present(Sensor.nope)",
+            "Present(Unknown)",
+            "Present(\"Sensor.val\")",
+            "Present(T)",
+            "\"Present(x)\"",
+            "Present(",
+            "fooPresent(x)",
+            "Present(Sensor.val) == T",
+        ] {
+            assert!(never_admitted(&law(cond)), "{cond}");
+        }
+    }
+
+    // #1676
+    #[test]
+    fn malformed_numeric_text_never_gets_a_numeric_type() {
+        for num in [".", "1..2", "1.2.3", "1.2.3fx"] {
+            let src = format!(
+                "Entity E:\n    state d: fx\nLaw \"L\":\n    When E.d == {num} -> System.recovery()\n"
+            );
+            assert!(never_admitted(&src), "{num}");
+        }
+    }
+
+    // #1677
+    #[test]
+    fn quad_n_is_not_always_false() {
+        for (cond, dead) in [
+            ("N", false),
+            ("F", false),
+            ("T", false),
+            ("S", false),
+            ("N == N", false),
+            ("true", false),
+            ("false", true),
+            ("T == F", true),
+            ("T != T", true),
+        ] {
+            let src = format!("Law \"L\":\n    When {cond} -> System.recovery()\n");
+            assert_eq!(codes(&src).contains(&"W0240"), dead, "When {cond}");
+        }
+    }
+
+    // #1679
+    #[test]
+    fn field_usage_counts_only_parsed_resolved_references() {
+        assert!(!codes(&law("Sensor.val == T")).contains(&"W0252"));
+        for effect in ["Log.emit(\"Sensor.val\")", "Log.emit(\"Sensor . val\")"] {
+            let src = format!("{QUAD_SENSOR}Law \"L\":\n    When true -> {effect}\n");
+            assert!(
+                codes(&src).contains(&"W0252"),
+                "{effect} must not count as use"
+            );
+        }
+    }
+
+    // #1680
+    #[test]
+    fn magic_number_lint_sees_only_numeric_literals() {
+        let real =
+            "Entity E:\n    state a: i32\nLaw \"L\":\n    When E.a == 42 -> System.recovery()\n";
+        assert!(codes(real).contains(&"W0253"));
+        for effect in [
+            "Log.emit(\"42\")",
+            "Log.emit(\"version2\")",
+            "Sensor2.go()",
+            "identifier_123()",
+        ] {
+            let src = format!("Law \"L\":\n    When true -> {effect}\n");
+            assert!(!codes(&src).contains(&"W0253"), "{effect}");
+        }
+        let exempt =
+            "Entity E:\n    state a: i32\nLaw \"L\":\n    When E.a == 1 -> System.recovery()\n";
+        assert!(!codes(exempt).contains(&"W0253"));
+    }
+
+    // #1693 / #1694
+    #[test]
+    fn law_names_are_module_level_and_never_owner_inferred() {
+        let dup = "Entity A:\n    state v: bool\nEntity B:\n    state v: bool\nLaw \"Check\":\n    When A.v == true -> System.recovery()\nLaw \"Check\":\n    When B.v == true -> System.recovery()\n";
+        assert!(rejected(dup).contains("duplicate Law 'Check' in module"));
+        for src in [
+            "Entity A:\n    state v: bool\nLaw \"L\":\n    When A.v == true -> System.recovery()\n    When v == true -> System.recovery()\n",
+            "Entity A:\n    state v: bool\nLaw \"L\":\n    When v == true -> System.recovery()\n    When A.v == true -> System.recovery()\n",
+        ] {
+            assert!(rejected(src).contains("unresolved name 'v'"), "{src}");
+        }
+        let unknown_first = "Law \"L\":\n    When Ghost.v == true -> System.recovery()\n";
+        assert!(rejected(unknown_first).contains("unresolved name 'Ghost.v'"));
+    }
+
+    // #1695: public analyze_logos_program input with colliding fields.
+    #[test]
+    fn hand_built_duplicate_entity_field_is_rejected() {
+        let src =
+            "Entity A:\n    state v: bool\nLaw \"L\":\n    When A.v == true -> System.recovery()\n";
+        let mut program = parse_logos_program(src).expect("parse");
+        let mut dup = program.entities[0].fields[0].clone();
+        dup.ty = Type::Quad;
+        program.entities[0].fields.push(dup);
+        let err = analyze_logos_program(&program, src).expect_err("collision");
+        assert!(err.to_string().contains("duplicate field 'A.v'"), "{err}");
+    }
+
+    // #1696
+    #[test]
+    fn type_registry_capacity_is_enforced_without_aliasing() {
+        let mut reg = TypeRegistry::new();
+        let first = reg.intern(SemanticType::Bool).expect("first");
+        for n in 0..TypeRegistry::CAPACITY - 1 {
+            reg.intern(SemanticType::QVec(n)).expect("within capacity");
+        }
+        assert_eq!(reg.len(), TypeRegistry::CAPACITY);
+        let last_ty = SemanticType::QVec(TypeRegistry::CAPACITY - 2);
+        let last = reg.intern(last_ty).expect("existing");
+        assert_eq!(last, TypeId(u16::MAX));
+        assert_eq!(
+            reg.intern(SemanticType::Quad),
+            Err(TypeRegistryError::CapacityExhausted)
+        );
+        assert_eq!(
+            reg.len(),
+            TypeRegistry::CAPACITY,
+            "failed intern changes nothing"
+        );
+        assert_eq!(reg.get(first), Some(SemanticType::Bool));
+        assert_eq!(reg.intern(SemanticType::Bool), Ok(first));
+        assert_eq!(reg.get(last), Some(last_ty));
+    }
+
+    // #1705: registry identity is not admission authority.
+    #[test]
+    fn analysis_does_not_consult_type_registry() {
+        let src = include_str!("std_adapters.rs");
+        let start = src.find("pub fn analyze_logos_program(").unwrap();
+        let end = start + src[start..].find("\n}").unwrap();
+        let body = &src[start..end];
+        assert!(!body.contains("TypeRegistry") && !body.contains("equals_fast"));
     }
 }

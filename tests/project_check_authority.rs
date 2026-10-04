@@ -81,14 +81,33 @@ fn t2_valid_project_succeeds_through_project_mechanism() {
     let dir = mk_temp_dir("p1919_t2_project_ok");
     let root = dir.join("root.sm");
     let dep = dir.join("dep.sm");
+    // PB-03: test-fixture migration required by restoration of the sealed
+    // Model-B legacy-check boundary; no cache/project semantics changed.
+    // Same established RustLike project form as T9: a real imported module
+    // that the root executable uses.
+    std::fs::write(
+        &root,
+        "Import \"dep.sm\"\n\nfn main() {\n    let value: i32 = score(1);\n    assert(value == 1);\n    return;\n}\n",
+    )
+    .expect("write root");
+    std::fs::write(
+        &dep,
+        "fn score(value: i32) -> i32 {\n    return value;\n}\n",
+    )
+    .expect("write dep");
+
+    cli_ok("check", &root);
+
+    // Negative: the former Logos project now hits the Model-B boundary on
+    // legacy `smc check` (it must never succeed there again).
     std::fs::write(
         &root,
         "\nImport \"dep.sm\"\nLaw \"R\" [priority 1]:\n    When true -> System.recovery()\n",
     )
-    .expect("write root");
-    std::fs::write(&dep, "\nEntity A:\n    state x: quad\n").expect("write dep");
-
-    cli_ok("check", &root);
+    .expect("write logos root");
+    std::fs::write(&dep, "\nEntity A:\n    state x: quad\n").expect("write logos dep");
+    let err = cli_err("check", &root);
+    assert!(err.contains("SOURCE SURFACE BOUNDARY"), "{err}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

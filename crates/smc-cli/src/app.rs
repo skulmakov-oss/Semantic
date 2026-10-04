@@ -825,6 +825,9 @@ fn is_check_result_cache_eligible(prepared: &PreparedSource) -> bool {
     )
 }
 
+/// Stable diagnostic for Logos-owned input on the legacy `smc check` path.
+pub(crate) const LOGOS_CHECK_BOUNDARY: &str = "SOURCE SURFACE BOUNDARY: `smc check` admits executable RustLike source only; Logos is an inspection profile (use `smc dump-ast` or `smc dump-ir --profile logos`, or `smc check --format human|json` for diagnostics)";
+
 fn cmd_check(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
@@ -894,6 +897,14 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
         Ok(value) => value,
         Err(error) => return check_preparation_error(error, &parser_profile).map(|_| ()),
     };
+    // PB-03 Model-B contract preservation exposed by FA-03-002 (#1671):
+    // unformatted `smc check` is executable-source admission, which Logos
+    // is not, so Logos-owned input can never complete it successfully.
+    // Existing failure output is unchanged; only a would-be success becomes
+    // this rejection. Logos inspection stays on `dump-ast` / `dump-ir
+    // --profile logos`, and `--format human|json` / `smc lsp` (canonical
+    // SSF-09 diagnostics, `cmd_check_canonical`) are deliberately unaffected.
+    let logos_owned = matches!(prepared, PreparedSource::LogosOwned(Ok(_)));
     let t_read = Instant::now();
     let is_cache_eligible = is_check_result_cache_eligible(&prepared);
     let prev_graph_hash = read_graph_hash(Path::new(CACHE_GRAPH_FILE));
@@ -907,6 +918,9 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
             let cache_path = cache_file_for_root(&root)?;
             match load_cache_entry_ex(&cache_path, fp) {
                 Ok(CacheLookup::Hit(cached)) => {
+                    if logos_owned {
+                        return Err(LOGOS_CHECK_BOUNDARY.to_string());
+                    }
                     let key = format!("{:016x}", fp);
                     trace_cache(
                         trace_cache_enabled,
@@ -971,6 +985,9 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
     let report =
         check_root_with_project_authority(&root_canon, &src, prepared, &provider, &parser_profile)
             .map_err(|e| e.to_string())?;
+    if logos_owned {
+        return Err(LOGOS_CHECK_BOUNDARY.to_string());
+    }
     let t_check = Instant::now();
     let color_enabled = resolve_color_mode(color);
     for w in &report.warnings {
@@ -3078,7 +3095,7 @@ mod tests {
         .expect("write root");
         std::fs::write(
             &dep,
-            "\nEntity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When N ->\n        Pulse.emit(\"x\")\n",
+            "\nEntity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When false ->\n        Pulse.emit(\"x\")\n",
         )
         .expect("write dep");
 

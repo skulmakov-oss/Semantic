@@ -1,7 +1,9 @@
 source: crates/sm-sema/src/alloc_core.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SemanticType {
-Int,
+I32,
+U32,
+F64,
 Fx,
 QVec(usize),
 Mask,
@@ -10,15 +12,21 @@ Bool,
 Quad,
 Unit,
 Unknown,
+pub const fn name(self) -> &'static str {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TypeId(pub u16);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeRegistryError {
+CapacityExhausted,
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
+pub const CAPACITY: usize = u16::MAX as usize + 1;
 pub fn new() -> Self {
-pub fn intern(&mut self, ty: SemanticType) -> TypeId {
+pub fn intern(&mut self, ty: SemanticType) -> Result<TypeId, TypeRegistryError> {
 pub fn get(&self, id: TypeId) -> Option<SemanticType> {
 pub fn equals_fast(&self, a: TypeId, b: TypeId) -> bool {
 pub fn len(&self) -> usize {
+pub fn is_empty(&self) -> bool {
 pub fn pretty(&self, id: TypeId) -> &'static str {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScopeKind {
@@ -59,24 +67,25 @@ pub struct LawScheduler;
 pub fn schedule_by_priority_desc<T, F>(items: &[T], mut priority: F) -> Vec<T> where T: Clone, F: FnMut(&T) -> u32, {
 pub fn is_assignment_compatible(dst: SemanticType, src: SemanticType) -> bool {
 pub fn collect_duplicates<'a, I>(items: I) -> BTreeSet<String> where I: IntoIterator<Item = &'a str>, {
-pub fn is_dead_when_condition(condition: &str) -> bool {
+pub fn is_dead_when_condition(condition: &LogosCondition) -> bool {
 pub fn parse_law_local_decl(effect: &str) -> Option<String> {
 pub fn is_law_name_style_ok(name: &str) -> bool {
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConditionInferError {
 MismatchedTypes { left: SemanticType, right: SemanticType },
+Unresolved(String),
+InvalidOperands(SemanticType),
+InvalidPresent,
+Unsupported,
 pub fn is_compatible_cmp(left: SemanticType, right: SemanticType) -> bool {
-pub fn infer_atom_type_core<FS, FF>( token: &str, resolve_symbol: FS, resolve_field: FF, ) -> SemanticType where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(&str, &str) -> Option<SemanticType>, {
-pub fn infer_when_condition_type_core<FS, FF>( expr: &str, resolve_symbol: FS, resolve_field: FF, ) -> Result<SemanticType, ConditionInferError> where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(&str, &str) -> Option<SemanticType>, {
-pub fn track_entity_field_usage_core<F>(text: &str, mut on_field: F) where F: FnMut(&str, &str), {
-pub fn has_magic_number_core(text: &str) -> bool {
-pub fn fold_fx_const_call_core(effect: &str) -> Option<String> {
+pub fn infer_atom_type_core<FS, FF>( atom: &LogosAtom, resolve_symbol: FS, resolve_field: FF, ) -> Result<SemanticType, ConditionInferError> where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(&str, &str) -> Option<SemanticType>, {
+pub fn infer_when_condition_type_core<FS, FF>( condition: &LogosCondition, resolve_symbol: FS, resolve_field: FF, ) -> Result<SemanticType, ConditionInferError> where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(&str, &str) -> Option<SemanticType>, {
+pub fn is_magic_number_atom(atom: &LogosAtom) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhenValidationError {
 pub code: &'static str,
 pub message: String,
 pub fn validate_when_non_empty_core( condition: &str, effect: &str, ) -> Result<(), WhenValidationError> {
-pub fn infer_law_entity_core<F>(first_when_condition: Option<&str>, has_entity: F) -> Option<String> where F: Fn(&str) -> bool, {
 pub fn is_large_law_core(when_count: usize) -> bool {
 pub fn diagnostic_help_core(code: &str) -> Option<&'static str> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

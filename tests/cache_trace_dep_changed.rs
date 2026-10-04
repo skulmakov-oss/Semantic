@@ -14,6 +14,8 @@ fn run_check(dir: &std::path::Path, input: &str) -> std::process::Output {
 
 #[test]
 fn trace_cache_reports_dep_changed_on_import_update() {
+    // PB-03: test-fixture migration required by restoration of the sealed
+    // Model-B legacy-check boundary; no cache/project semantics changed.
     let base = std::env::temp_dir().join(format!(
         "exo_cache_dep_changed_{}_{}",
         std::process::id(),
@@ -30,18 +32,21 @@ fn trace_cache_reports_dep_changed_on_import_update() {
         &root,
         r#"
 Import "dep.sm"
-Law "Root" [priority 1]:
-    When true ->
-        System.recovery()
+
+fn main() {
+    let value: i32 = score(1);
+    assert(value == 1);
+    return;
+}
 "#,
     )
     .expect("write root");
     std::fs::write(
         &dep,
         r#"
-Law "Dep" [priority 1]:
-    When true ->
-        System.recovery()
+fn score(value: i32) -> i32 {
+    return value;
+}
 "#,
     )
     .expect("write dep");
@@ -63,12 +68,13 @@ Law "Dep" [priority 1]:
     std::fs::write(
         &dep,
         r#"
-Law "Dep" [priority 1]:
-    When true ->
-        System.recovery()
-Law "Dep2" [priority 2]:
-    When true ->
-        System.recovery()
+fn score(value: i32) -> i32 {
+    return value;
+}
+
+fn score_twice(value: i32) -> i32 {
+    return value + value;
+}
 "#,
     )
     .expect("rewrite dep");

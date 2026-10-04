@@ -45,6 +45,34 @@ LogosProgram {
                         col: 5,
                         file_id: 0,
                     },
+                    structure: Compare {
+                        lhs: Field {
+                            entity: "Sensor",
+                            field: "val",
+                        },
+                        op: Eq,
+                        rhs: Quad(
+                            T,
+                        ),
+                    },
+                    condition_atoms: [
+                        Field {
+                            entity: "Sensor",
+                            field: "val",
+                        },
+                        Quad(
+                            T,
+                        ),
+                    ],
+                    effect_atoms: [
+                        Field {
+                            entity: "Log",
+                            field: "emit",
+                        },
+                        Text(
+                            "\"Signal OK\"",
+                        ),
+                    ],
                 },
                 LogosWhen {
                     condition: "Sensor . val == S",
@@ -54,6 +82,30 @@ LogosProgram {
                         col: 5,
                         file_id: 0,
                     },
+                    structure: Compare {
+                        lhs: Field {
+                            entity: "Sensor",
+                            field: "val",
+                        },
+                        op: Eq,
+                        rhs: Quad(
+                            S,
+                        ),
+                    },
+                    condition_atoms: [
+                        Field {
+                            entity: "Sensor",
+                            field: "val",
+                        },
+                        Quad(
+                            S,
+                        ),
+                    ],
+                    effect_atoms: [
+                        Name(
+                            "recovery",
+                        ),
+                    ],
                 },
             ],
             mark: SourceMark {

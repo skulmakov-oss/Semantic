@@ -68,13 +68,15 @@ fn assert_trace(stderr: &str, event: &str, reason: &str, pack_kind: &str) {
 
 #[test]
 fn semantic_check_reuses_pack_on_unchanged_rerun() {
+    // PB-03: test-fixture migration required by restoration of the sealed
+    // Model-B legacy-check boundary; no cache/project semantics changed.
     let dir = mk_temp_dir("exo_cache_reuse_sem");
     std::fs::write(
         dir.join("root.sm"),
         r#"
-Law "Main" [priority 1]:
-    When true ->
-        System.recovery()
+fn main() {
+    return;
+}
 "#,
     )
     .expect("write root");
@@ -96,23 +98,28 @@ Law "Main" [priority 1]:
 
 #[test]
 fn dependency_rebuild_settles_back_to_reuse_on_next_clean_run() {
+    // PB-03: test-fixture migration required by restoration of the sealed
+    // Model-B legacy-check boundary; no cache/project semantics changed.
     let dir = mk_temp_dir("exo_cache_reuse_dep");
     std::fs::write(
         dir.join("root.sm"),
         r#"
 Import "dep.sm"
-Law "Root" [priority 1]:
-    When true ->
-        System.recovery()
+
+fn main() {
+    let value: i32 = score(1);
+    assert(value == 1);
+    return;
+}
 "#,
     )
     .expect("write root");
     std::fs::write(
         dir.join("dep.sm"),
         r#"
-Law "Dep" [priority 1]:
-    When true ->
-        System.recovery()
+fn score(value: i32) -> i32 {
+    return value;
+}
 "#,
     )
     .expect("write dep");
@@ -127,12 +134,13 @@ Law "Dep" [priority 1]:
     std::fs::write(
         dir.join("dep.sm"),
         r#"
-Law "Dep" [priority 1]:
-    When true ->
-        System.recovery()
-Law "Dep2" [priority 2]:
-    When true ->
-        System.recovery()
+fn score(value: i32) -> i32 {
+    return value;
+}
+
+fn score_twice(value: i32) -> i32 {
+    return value + value;
+}
 "#,
     )
     .expect("rewrite dep");

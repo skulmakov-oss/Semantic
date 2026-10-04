@@ -8,9 +8,12 @@
 - supported status: **parse-qualified and IR-lowering-qualified only**. It is
   explicitly **not** `check`/`compile`/`verify`/`run`-qualified: those commands
   target the Rust-like SemCode/VM path, which does not accept Logos source.
-  Feeding this file to `smc check` produces a Rust-like parser/type diagnostic,
-  not a Logos result — that is expected and is exercised by
-  `tests/canonical_source_style.rs` as an honesty-boundary check.
+  Feeding this file to `smc check` fails with the deterministic
+  `SOURCE SURFACE BOUNDARY` diagnostic (Logos is an inspection profile) —
+  that is expected and is exercised by `tests/canonical_source_style.rs` and
+  `tests/pb03_logos_check_boundary.rs` as an honesty-boundary check.
+  `smc check --format human|json` (canonical diagnostics, also used by
+  `smc lsp`) still reports Logos diagnostics without admitting execution.
 - demonstrates (`docs/spec/source_style.md` section B.12):
   - one blank line between `System`, `Entity`, and `Law` blocks
   - 4-space indentation for `Entity` fields and `Law`/`When` clauses even
@@ -26,8 +29,9 @@
     `Law` carrying two ordered `When` clauses
   - `dump-ir --profile logos` prints one `LogosIrLaw` for `"CheckSignal"` with
     `when_count: 2`
-  - `smc check` / `smc run` on this file fail with a Rust-like frontend
-    diagnostic — this is the expected, documented boundary, not a bug
+  - `smc check` fails with the `SOURCE SURFACE BOUNDARY` diagnostic and
+    `smc run` fails with a Rust-like frontend diagnostic — this is the
+    expected, documented boundary, not a bug
 - non-claims:
   - does not execute through SemCode, the verifier, or the VM
   - `When` condition/effect bodies are structured text fragments at this
