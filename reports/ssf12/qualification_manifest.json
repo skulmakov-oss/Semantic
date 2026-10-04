@@ -1,0 +1,782 @@
+{
+  "schema_version": "semantic.ssf12.qualification_manifest.v1",
+  "candidate_id": "C1",
+  "candidate_sha": "89641da8237f4fcefb50cf1958a50e4d4003aea7",
+  "evidence_branch": "feat/ssf12-requalification-c1",
+  "qualification_pr": "https://github.com/skulmakov-oss/Semantic/pull/1983",
+  "evidence_content_sha": "38b92f0a18bad98f6191d35ade2036c6861680ac",
+  "toolchain": {
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "1.97.1 (c980f4866 2026-06-30)",
+    "rustfmt": "1.9.0-stable (8bab26f4f6 2026-07-14)",
+    "clippy": "0.1.97 (8bab26f4f6 2026-07-14)"
+  },
+  "host": {
+    "os": "Windows",
+    "edition": "Windows 11 Enterprise",
+    "build": "10.0.26340.0",
+    "architecture": "x86_64",
+    "target_triple": "x86_64-pc-windows-msvc",
+    "powershell": "7.6.6"
+  },
+  "validated_targets": [
+    "x86_64-pc-windows-msvc"
+  ],
+  "summary": {
+    "total": 78,
+    "pass": 77,
+    "fail": 0,
+    "blocked": 0,
+    "not_applicable": 1,
+    "skipped": 0,
+    "inconclusive": 0
+  },
+  "gates": [
+    {
+      "id": "A-01",
+      "family": "Family A (Compiler)",
+      "command": "`pwsh -File scripts/workspace_fmt_check.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Exit code 0, clean"
+    },
+    {
+      "id": "A-02",
+      "family": "Family A (Compiler)",
+      "command": "`cargo check --workspace --all-targets`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Exit code 0, 3m 47s"
+    },
+    {
+      "id": "A-03",
+      "family": "Family A (Compiler)",
+      "command": "`cargo check --no-default-features --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Exit code 0"
+    },
+    {
+      "id": "A-04",
+      "family": "Family A (Compiler)",
+      "command": "`cargo clippy --workspace --all-targets -- -D warnings`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Exit code 0, 1m 16s"
+    },
+    {
+      "id": "A-05",
+      "family": "Family A (Compiler)",
+      "command": "cargo test --workspace --quiet",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "All tests pass cleanly (exit 0, 0 failures)"
+    },
+    {
+      "id": "A-06",
+      "family": "Family A (Compiler)",
+      "command": "cargo test --all-targets --quiet",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "All targets pass (including ssf09_editor_baseline 63/63)"
+    },
+    {
+      "id": "A-07",
+      "family": "Family A (Compiler)",
+      "command": "`cargo test --doc --quiet`",
+      "status": "PASS",
+      "mandatory": false,
+      "evidence_summary": "Exit code 0 (0 tests)"
+    },
+    {
+      "id": "B-01",
+      "family": "Family B (Boundary)",
+      "command": "`cargo test --test public_api_contracts --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "10 passed, 0 failed (1.39s)"
+    },
+    {
+      "id": "B-02",
+      "family": "Family B (Boundary)",
+      "command": "`cargo test --test dependency_boundaries --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "89 passed, 0 failed (0.33s)"
+    },
+    {
+      "id": "B-03",
+      "family": "Family B (Boundary)",
+      "command": "`cargo test --test legacy_guards --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "2 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "B-04",
+      "family": "Family B (Boundary)",
+      "command": "`cargo test --test frontend_boundaries --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "4 passed, 0 failed (0.23s)"
+    },
+    {
+      "id": "B-05",
+      "family": "Family B (Boundary)",
+      "command": "`cargo test --test ir_opt_boundaries --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "2 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "B-06",
+      "family": "Family B (Boundary)",
+      "command": "`cargo test -p semantic_language --test trust_boundary_guards`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Exit code 0 (7hell Hell 2)"
+    },
+    {
+      "id": "B-07",
+      "family": "Family B (Boundary)",
+      "command": "`pwsh -File scripts/harness-check.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "`[harness] ok`"
+    },
+    {
+      "id": "B-08",
+      "family": "Family B (Boundary)",
+      "command": "`cargo test --test ssf_status_drift --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "3 passed, 0 failed (0.01s)"
+    },
+    {
+      "id": "C-01",
+      "family": "Family C (Verifier)",
+      "command": "`cargo test -p sm-verify --all-features`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "223 passed, 0 failed (9.54s)"
+    },
+    {
+      "id": "C-02",
+      "family": "Family C (Verifier)",
+      "command": "`cargo test --test golden_semcode --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "4 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "C-03",
+      "family": "Family C (Verifier)",
+      "command": "`cargo test --test vm_token_first_policy_guard --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "1 passed, 0 failed (0.33s)"
+    },
+    {
+      "id": "C-04",
+      "family": "Family C (Verifier)",
+      "command": "`cargo test --test ssf10_artifact_trust --quiet`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "1 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "D-01",
+      "family": "Family D (Determinism)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "4 passed, 0 failed (5.47s & 7.86s second-run)"
+    },
+    {
+      "id": "D-02",
+      "family": "Family D (Determinism)",
+      "command": "`cargo test -p sm-vm --test ...`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: T&&T=T, T&&F=N, T &#124;&#124; F = S, S &#124;&#124; T = S, !T=F"
+    },
+    {
+      "id": "D-03",
+      "family": "Family D (Determinism)",
+      "command": "`cargo test -p sm-vm`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "All pass (185 passed in sm-vm)"
+    },
+    {
+      "id": "D-04",
+      "family": "Family D (Determinism)",
+      "command": "`cargo test --test ssf_stdlib_v0_contract`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "6 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "D-05",
+      "family": "Family D (Determinism)",
+      "command": "`cargo test --test prometheus_runtime_matrix ...`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "All 4 pass (goldens, matrix, negative, compat)"
+    },
+    {
+      "id": "E-01",
+      "family": "Family E (Traps/Quotas)",
+      "command": "`cargo test --test ctf_e3_trap_taxonomy_regression`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Traps with `DivisionByZero`"
+    },
+    {
+      "id": "E-02",
+      "family": "Family E (Traps/Quotas)",
+      "command": "`cargo test --test ctf_e3_trap_taxonomy_regression`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Fails with `assertion failed`"
+    },
+    {
+      "id": "E-03",
+      "family": "Family E (Traps/Quotas)",
+      "command": "`cargo test --test ctf_e3_trap_taxonomy_regression`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "`quota exceeded: Steps limit=100000 used=100001`"
+    },
+    {
+      "id": "E-04",
+      "family": "Family E (Traps/Quotas)",
+      "command": "`cargo test -p sm-vm`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: frames and stack depths bounded"
+    },
+    {
+      "id": "E-05",
+      "family": "Family E (Traps/Quotas)",
+      "command": "`cargo test --test ctf_e3_trap_taxonomy_regression`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "3 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "F-01",
+      "family": "Family F (Ownership)",
+      "command": "`cargo test --test ssf_status_drift`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: bounded deterministic VM, no Rust lifetime claims"
+    },
+    {
+      "id": "F-02",
+      "family": "Family F (Ownership)",
+      "command": "`cargo test --test record_field_ownership_golden --test tuple_ownership_golden`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "124 passed, 0 failed (4.98s)"
+    },
+    {
+      "id": "F-03",
+      "family": "Family F (Ownership)",
+      "command": "`cargo test --test runtime_ownership_e2e`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "33 passed, 0 failed (0.01s)"
+    },
+    {
+      "id": "G-01",
+      "family": "Family G (Stdlib v0)",
+      "command": "`cargo test --test ssf03_assert_positional_only`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "9 passed, 0 failed (0.01s)"
+    },
+    {
+      "id": "G-02",
+      "family": "Family G (Stdlib v0)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Passed (F02)"
+    },
+    {
+      "id": "G-03",
+      "family": "Family G (Stdlib v0)",
+      "command": "`cargo test -p sm-vm`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed; transcendentals sin/cos remain Roadmap"
+    },
+    {
+      "id": "G-04",
+      "family": "Family G (Stdlib v0)",
+      "command": "`cargo test --test ssf07_text_family_freeze`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "2 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "G-05",
+      "family": "Family G (Stdlib v0)",
+      "command": "`cargo test --test pcc8_stdlib_acceptance`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "6 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "G-06",
+      "family": "Family G (Stdlib v0)",
+      "command": "`cargo test --test pcc6_option_acceptance --test pcc6_result_acceptance`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed in SSF-11 corpus F03"
+    },
+    {
+      "id": "G-07",
+      "family": "Family G (Stdlib v0)",
+      "command": "`cargo test --test ssf_stdlib_v0_contract`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "6 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "G-08",
+      "family": "Family G (Stdlib v0)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "NOT_APPLICABLE",
+      "mandatory": false,
+      "evidence_summary": "Rejected fail-closed at check (`E0201`)"
+    },
+    {
+      "id": "H-01",
+      "family": "Family H (Project)",
+      "command": "`cargo test --test ssf05_project_model`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "10 passed, 0 failed (1.05s)"
+    },
+    {
+      "id": "H-02",
+      "family": "Family H (Project)",
+      "command": "`cargo test --test ssf05_test_path_utf8_and_entry_symlink`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed"
+    },
+    {
+      "id": "H-03",
+      "family": "Family H (Project)",
+      "command": "`cargo test --test pcc9_project_model_acceptance`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "4 passed, 0 failed (0.13s)"
+    },
+    {
+      "id": "H-04",
+      "family": "Family H (Project)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Rejected fail-closed"
+    },
+    {
+      "id": "I-01",
+      "family": "Family I (Package)",
+      "command": "`cargo test --test ssf06_package_baseline`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "3 passed, 0 failed (0.23s)"
+    },
+    {
+      "id": "I-02",
+      "family": "Family I (Package)",
+      "command": "`cargo test --test ssf06_package_baseline`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed fnv1a64 hashes"
+    },
+    {
+      "id": "I-03",
+      "family": "Family I (Package)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed"
+    },
+    {
+      "id": "I-04",
+      "family": "Family I (Package)",
+      "command": "`cargo test --test ssf06_package_baseline`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: capability inventory is descriptive only"
+    },
+    {
+      "id": "J-01",
+      "family": "Family J (Capabilities)",
+      "command": "`cargo test --test ssf04_application_boundary`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "38 passed, 0 failed (0.44s)"
+    },
+    {
+      "id": "J-02",
+      "family": "Family J (Capabilities)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "`transformed:hello\\n` written inside sandbox"
+    },
+    {
+      "id": "J-03",
+      "family": "Family J (Capabilities)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Write to `../escaped.txt` denied, audit logged"
+    },
+    {
+      "id": "K-01",
+      "family": "Family K (Diagnostics)",
+      "command": "`cargo test -p sm-diagnostic`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: UTF-8 byte ranges, producer codes"
+    },
+    {
+      "id": "K-02",
+      "family": "Family K (Diagnostics)",
+      "command": "cargo test --test ssf09_editor_baseline",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Byte-identical JSON across checkout roots verified"
+    },
+    {
+      "id": "K-03",
+      "family": "Family K (Diagnostics)",
+      "command": "`cargo test --test canonical_source_style`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: checked before write"
+    },
+    {
+      "id": "K-04",
+      "family": "Family K (Diagnostics)",
+      "command": "cargo test --test ssf09_editor_baseline",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "63 passed, 0 failed; full CLI/LSP parity confirmed on Windows"
+    },
+    {
+      "id": "L-01",
+      "family": "Family L (Compatibility)",
+      "command": "`cargo test --test ssf10_artifact_trust`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "1 passed, 0 failed (0.00s)"
+    },
+    {
+      "id": "L-02",
+      "family": "Family L (Compatibility)",
+      "command": "`cargo test --test cli_command_shape_diagnostics`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: preview/dry-run leaves files untouched"
+    },
+    {
+      "id": "L-03",
+      "family": "Family L (Compatibility)",
+      "command": "`cargo test --test ssf05_project_model`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "`Semantic.toml` diagnosed as legacy; `semantic.toml` canonical"
+    },
+    {
+      "id": "M-01",
+      "family": "Family M (Artifact Trust)",
+      "command": "`cargo test --test ssf10_artifact_trust`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: `smc artifact hash` matches bit-for-bit"
+    },
+    {
+      "id": "M-02",
+      "family": "Family M (Artifact Trust)",
+      "command": "`target/release/smc.exe version --json`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Exact JSON emitted: `\"signing\": \"unsigned\"`"
+    },
+    {
+      "id": "M-03",
+      "family": "Family M (Artifact Trust)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Tampered artifact fails verifier"
+    },
+    {
+      "id": "N-01",
+      "family": "Family N (7HELL)",
+      "command": "`pwsh -File tools/7hell/run.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "PASS: Hell 1"
+    },
+    {
+      "id": "N-02",
+      "family": "Family N (7HELL)",
+      "command": "`pwsh -File tools/7hell/run.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "PASS: Hell 2"
+    },
+    {
+      "id": "N-03",
+      "family": "Family N (7HELL)",
+      "command": "`pwsh -File tools/7hell/run.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "PASS: Hell 3"
+    },
+    {
+      "id": "N-04",
+      "family": "Family N (7HELL)",
+      "command": "`pwsh -File tools/7hell/run.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "PASS: Hell 4"
+    },
+    {
+      "id": "N-05",
+      "family": "Family N (7HELL)",
+      "command": "`pwsh -File tools/7hell/run.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "PASS: Hell 5"
+    },
+    {
+      "id": "N-06",
+      "family": "Family N (7HELL)",
+      "command": "`pwsh -File tools/7hell/run.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "PASS: Hell 6"
+    },
+    {
+      "id": "N-07",
+      "family": "Family N (7HELL)",
+      "command": "`pwsh -File tools/7hell/run.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "PASS: Hell 7"
+    },
+    {
+      "id": "O-01",
+      "family": "Family O (Readiness)",
+      "command": "pwsh -File scripts/admission_guard.ps1 -PRReady",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "ADMISSION GUARD PR-READY PASS (exit code 0)"
+    },
+    {
+      "id": "O-02",
+      "family": "Family O (Readiness)",
+      "command": "`pwsh -File scripts/admission_guard.ps1 -Readiness`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "ADMISSION GUARD READINESS PASS"
+    },
+    {
+      "id": "O-03",
+      "family": "Family O (Readiness)",
+      "command": "pwsh -File scripts/admission_guard.ps1 -FullPreflight",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "ADMISSION GUARD FULL PREFLIGHT PASS (exit code 0)"
+    },
+    {
+      "id": "P-01",
+      "family": "Family P (Bundle)",
+      "command": "`pwsh -File scripts/verify_release_bundle.ps1`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "release bundle verification passed"
+    },
+    {
+      "id": "Q-01",
+      "family": "Family Q (Asset Smoke)",
+      "command": "`cargo build --release --bin smc --bin svm; smoke scenarios`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "All 3 smoke scenarios pass, zip hash match is True"
+    },
+    {
+      "id": "Q-02",
+      "family": "Family Q (Asset Smoke)",
+      "command": "`pwsh -File scripts/verify_release_assets.ps1 -Tag v1.2.0 -Repository skulmakov-oss/Semantic`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "release asset smoke verification passed (exit code 0; Minimal, Builtin f64, Heavy trace PASS against public v1.2.0 download)"
+    },
+    {
+      "id": "R-01",
+      "family": "Family R (Rehearsal)",
+      "command": "Step-by-step Getting Started execution & remote clone check",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "All steps succeed (compile, verify, hash, run, test) + fresh public clone cargo check clean"
+    },
+    {
+      "id": "S-01",
+      "family": "Family S (Corpus)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "4 passed, 0 failed (5.47s)"
+    },
+    {
+      "id": "S-02",
+      "family": "Family S (Corpus)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Replay determinism confirmed across runs"
+    },
+    {
+      "id": "S-03",
+      "family": "Family S (Corpus)",
+      "command": "`cargo test --test ssf11_canonical_applications`",
+      "status": "PASS",
+      "mandatory": true,
+      "evidence_summary": "Confirmed: real child process invocation"
+    }
+  ],
+  "non_pass_gates": [
+    {
+      "id": "G-08",
+      "status": "NOT_APPLICABLE",
+      "signal": "DEFERRED_BY_SSF03_AUTHORITY",
+      "reason": "std.serde serialization status is explicitly deferred beyond v0 standard library boundary by SSF-03 authority."
+    }
+  ],
+  "artifact_hashes": {
+    "target_release_smc_exe": {
+      "sha256": "e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a",
+      "size_bytes": 4572160,
+      "signing": "unsigned"
+    },
+    "target_release_svm_exe": {
+      "sha256": "9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf",
+      "size_bytes": 442880,
+      "signing": "unsigned"
+    },
+    "candidate_zip": {
+      "name": "semantic-language-windows-x64-v1.2.0-candidate.zip",
+      "sha256": "97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17",
+      "size_bytes": 2260731
+    }
+  },
+  "known_limits": [
+    {
+      "id": "R1",
+      "boundary": "Quad helper predicates (known, unknown, conflict)",
+      "finding": "Rejected with E0201: unknown function 'known'",
+      "disposition": "Explicit operational limit; core Quad algebra (N/F/T/S) fully intact"
+    },
+    {
+      "id": "R2",
+      "boundary": "String escape processing (\\n emits raw bytes \\ and n)",
+      "finding": "String literals preserve raw slice bytes without interpretation",
+      "disposition": "Explicit operational limit; text literals treat quotes as raw slices"
+    },
+    {
+      "id": "R3",
+      "boundary": "Generic rejection diagnostic",
+      "finding": "F05 generic rejection emits english diagnostic string #1717",
+      "disposition": "Explicit operational boundary; marked non-Bootstrap-comparable"
+    },
+    {
+      "id": "R4",
+      "boundary": "Host paths in diagnostics",
+      "finding": "Absolute host paths appear in diagnostic error source field",
+      "disposition": "Presentation artifact; substring matching in corpus"
+    },
+    {
+      "id": "Q-02",
+      "boundary": "Published downloaded asset smoke",
+      "finding": "Public v1.2.0 release assets downloaded and verified; all 3 smoke scenarios pass cleanly",
+      "disposition": "Gate PASS; verified against public GitHub release download"
+    },
+    {
+      "id": "platform",
+      "boundary": "Release target architecture",
+      "finding": "Validated on Windows x64 (x86_64-pc-windows-msvc) only",
+      "disposition": "Explicit operational limit; Linux/macOS out of contour for v1.2.0 baseline"
+    }
+  ],
+  "remediation_verification": {
+    "DEFECT-SSF12-001": {
+      "owning_phase": "SSF-09",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1979,
+      "commit": "f208ef4fffc9afb35499c634540d188d16fd6b8a",
+      "authoritative_ownership": "crates/smc-cli/src/lsp.rs, crates/smc-cli/src/source_access.rs, tests/ssf09_editor_baseline.rs",
+      "summary": "Windows LSP host-path transport and relative display normalization in smc-lsp"
+    },
+    "DEFECT-SSF12-002": {
+      "owning_phase": "SSF-09",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1980,
+      "commit": "a4706ec9c93d57d50eb46b0a42500d315318021e",
+      "authoritative_ownership": "crates/smc-cli/src/canonical_check.rs",
+      "summary": "Windows provider module IDs normalization at cycle boundary"
+    },
+    "DEFECT-SSF12-003": {
+      "owning_phase": "SSF-12",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1981,
+      "commit": "1f8df7606340027ba17582bb44d62ec4dc5a1d3f",
+      "authoritative_ownership": "crates/sm-sema/src/std_adapters.rs",
+      "summary": "Provider module-id test-contract expectation on Windows in sm-sema (TEST CONTRACT ONLY; production sm-sema semantics unchanged)"
+    },
+    "DEFECT-SSF12-004": {
+      "owning_phase": "SSF-12",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1982,
+      "commit": "89641da8237f4fcefb50cf1958a50e4d4003aea7",
+      "authoritative_ownership": "tools/7hell/run.ps1",
+      "summary": "Windows CreateProcess command line limit reuse of Invoke-WorkspaceFmtCheck in tools/7hell/run.ps1"
+    },
+    "DEFECT-SSF12-005": {
+      "classification": "QUALIFICATION_TOOLING_DEFECT",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1984,
+      "commit": "d7578ab761a80c795ac0f67c23d9eec4ec4012f0",
+      "authoritative_ownership": "scripts/verify_release_assets.ps1",
+      "summary": "Release-asset smoke verifier scripts/verify_release_assets.ps1 bound dynamically to downloaded release toolchain SemCode format (SEMCOD22 rev 23); did not affect C1 implementation, binary bytes, or release assets"
+    }
+  },
+  "foundation_oracle_verdict": "ORACLE QUALIFIED WITH EXPLICIT LIMITS",
+  "stable_foundation_promotion_recommendation": "PROMOTE WITH EXPLICIT LIMITS",
+  "stable_foundation_promotion_decision": "PROMOTE WITH EXPLICIT LIMITS",
+  "qualification_tool_sha": "d7578ab761a80c795ac0f67c23d9eec4ec4012f0",
+  "published_release": {
+    "tag": "v1.2.0",
+    "url": "https://github.com/skulmakov-oss/Semantic/releases/tag/v1.2.0",
+    "published_at": "2026-10-04T02:06:12Z",
+    "candidate_sha": "89641da8237f4fcefb50cf1958a50e4d4003aea7",
+    "qualification_tool_sha": "d7578ab761a80c795ac0f67c23d9eec4ec4012f0",
+    "smc_exe_sha256": "e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a",
+    "svm_exe_sha256": "9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf",
+    "zip_sha256": "97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17",
+    "semcode_magic": "SEMCOD22",
+    "semcode_revision": 23
+  },
+  "evidence_content_sha_description": "This SHA anchors the complete substantive matrix/verdict/guard evidence immediately before manifest sealing."
+}
