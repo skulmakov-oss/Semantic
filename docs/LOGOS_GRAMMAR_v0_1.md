@@ -53,8 +53,21 @@ Condition    = Expr ;
 Effect       = Expr | Newline ExprLine ;
 ExprLine     = { token_except(Newline, DEDENT) } ;
 
-Type         = "quad" | "bool" | "i32" | "u32" | "fx" | "f64" | "qvec" ["[" Num "]"] ;
+Type         = "quad" | "bool" | "i32" | "u32" | "fx" | "f64" | "qvec" "[" Num "]" ;
 ```
+
+Admission rules (PB-02):
+
+- `qvec` requires an explicit dimension: `qvec[N]` with `N >= 1` that fits
+  `usize`, closed by `]`. There is no implicit or default dimension (#1641,
+  #1643); bare `qvec`, `qvec[]`, `qvec[0]`, overflowing or non-numeric
+  dimensions, and `qvec(N)` are rejected.
+- A program declares at most one `SystemDecl`; a second `System` is rejected
+  with `E0201`, never a replacement of the first (#1644).
+- Every accepted `ImportDecl` is preserved verbatim in
+  `LogosProgram::imports` (directive text, byte span and source mark). The
+  parser applies no further import grammar; `sm-sema` is the sole owner of
+  import semantics and consumes exactly those preserved directives (#1645).
 
 ## Import v0.1 Policy
 

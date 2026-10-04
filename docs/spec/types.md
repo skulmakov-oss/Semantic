@@ -372,6 +372,12 @@ Current honest limits:
 `qvec(N)` exists as a parser-level family and should be treated as reserved or
 partial rather than fully stabilized in the current public source contract.
 
+Admission (PB-02, #1640-#1642): RustLike spells the family `qvec(N)` or
+`qvec[N]` with the matching closer. `N` is required, must be a positive integer
+(`N >= 1`) that fits `usize`, and is preserved exactly. There is no implicit or
+default dimension; bare `qvec`, empty delimiters, mismatched or missing closers,
+and invalid dimensions are frontend errors.
+
 Until the repository documents a fuller execution and library story for
 `qvec(N)`, it should not be treated as a broadly stable user-facing type family.
 
