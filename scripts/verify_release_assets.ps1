@@ -212,33 +212,41 @@ Set-Content -LiteralPath $builtinSourcePath -Value $builtinSource -NoNewline
 
 $steps = [System.Collections.Generic.List[object]]::new()
 
+$steps.Add((Invoke-CapturedStep -Name "release toolchain version" -FilePath $extractedSmc -ArgumentList @("version", "--json") -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
+$releaseToolchainJson = Get-Content -LiteralPath $steps[$steps.Count - 1].stdoutPath -Raw | ConvertFrom-Json
+$sourceFingerprint = if ($releaseToolchainJson.source_fingerprint) { $releaseToolchainJson.source_fingerprint } else { $releaseToolchainJson.source_hash }
+$expectedSemcodeFormat = if ($releaseToolchainJson.semcode_format.magic) {
+    [string]$releaseToolchainJson.semcode_format.magic
+} else {
+    [string]$releaseToolchainJson.semcode_format
+}
+if ([string]::IsNullOrWhiteSpace($expectedSemcodeFormat)) {
+    throw "release toolchain did not report semcode_format"
+}
+
 $steps.Add((Invoke-CapturedStep -Name "minimal compile" -FilePath $extractedSmc -ArgumentList @("compile", $minimalSourcePath, "-o", $minimalSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $steps.Add((Invoke-CapturedStep -Name "minimal run" -FilePath $extractedSvm -ArgumentList @("run", $minimalSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $steps.Add((Invoke-CapturedStep -Name "minimal disasm" -FilePath $extractedSvm -ArgumentList @("disasm", $minimalSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 Copy-Item -LiteralPath $steps[$steps.Count - 1].stdoutPath -Destination $minimalDisasmPath
-Assert-FileContains -Path $minimalDisasmPath -Patterns @("SEMCODE0", "RET")
+Assert-FileContains -Path $minimalDisasmPath -Patterns @($expectedSemcodeFormat, "RET")
 
 $steps.Add((Invoke-CapturedStep -Name "builtin-f64 compile" -FilePath $extractedSmc -ArgumentList @("compile", $builtinSourcePath, "-o", $builtinSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $steps.Add((Invoke-CapturedStep -Name "builtin-f64 run" -FilePath $extractedSvm -ArgumentList @("run", $builtinSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $steps.Add((Invoke-CapturedStep -Name "builtin-f64 disasm" -FilePath $extractedSvm -ArgumentList @("disasm", $builtinSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 Copy-Item -LiteralPath $steps[$steps.Count - 1].stdoutPath -Destination $builtinDisasmPath
-Assert-FileContains -Path $builtinDisasmPath -Patterns @("SEMCODE1", "CALL", "SUB_F64")
+Assert-FileContains -Path $builtinDisasmPath -Patterns @($expectedSemcodeFormat, "CALL", "SUB_F64")
 
 $steps.Add((Invoke-CapturedStep -Name "semantic-trace compile" -FilePath $extractedSmc -ArgumentList @("compile", $traceSourcePath, "-o", $traceSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $steps.Add((Invoke-CapturedStep -Name "semantic-trace run" -FilePath $extractedSvm -ArgumentList @("run", $traceSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $steps.Add((Invoke-CapturedStep -Name "semantic-trace disasm" -FilePath $extractedSvm -ArgumentList @("disasm", $traceSemcodePath) -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 Copy-Item -LiteralPath $steps[$steps.Count - 1].stdoutPath -Destination $traceDisasmPath
 Assert-FileContains -Path $traceDisasmPath -Patterns @(
-    "SEMCODE1",
+    $expectedSemcodeFormat,
     "fusion_consensus_state",
     "policy_trace_guard",
     "policy_trace_quality",
     "policy_trace"
 )
-
-$steps.Add((Invoke-CapturedStep -Name "release toolchain version" -FilePath $extractedSmc -ArgumentList @("version", "--json") -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
-$releaseToolchainJson = Get-Content -LiteralPath $steps[$steps.Count - 1].stdoutPath -Raw | ConvertFrom-Json
-$sourceFingerprint = if ($releaseToolchainJson.source_fingerprint) { $releaseToolchainJson.source_fingerprint } else { $releaseToolchainJson.source_hash }
 
 $report = [ordered]@{
     generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
@@ -262,21 +270,21 @@ $report = [ordered]@{
         [ordered]@{
             name = "Minimal compile-run-disasm"
             source = (Get-RepoRelativePath -RepoRoot $repoRoot -AbsolutePath $minimalSourcePath)
-            expectedSignals = @("SEMCODE0", "RET")
+            expectedSignals = @($expectedSemcodeFormat, "RET")
             disasm = (Get-RepoRelativePath -RepoRoot $repoRoot -AbsolutePath $minimalDisasmPath)
             result = "pass"
         },
         [ordered]@{
             name = "Verified-path f64 builtin pipeline"
             source = (Get-RepoRelativePath -RepoRoot $repoRoot -AbsolutePath $builtinSourcePath)
-            expectedSignals = @("SEMCODE1", "CALL", "SUB_F64")
+            expectedSignals = @($expectedSemcodeFormat, "CALL", "SUB_F64")
             disasm = (Get-RepoRelativePath -RepoRoot $repoRoot -AbsolutePath $builtinDisasmPath)
             result = "pass"
         },
         [ordered]@{
             name = "Heavy semantic policy trace"
             source = (Get-RepoRelativePath -RepoRoot $repoRoot -AbsolutePath $traceSourcePath)
-            expectedSignals = @("SEMCODE1", "fusion_consensus_state", "policy_trace_guard", "policy_trace_quality", "policy_trace")
+            expectedSignals = @($expectedSemcodeFormat, "fusion_consensus_state", "policy_trace_guard", "policy_trace_quality", "policy_trace")
             disasm = (Get-RepoRelativePath -RepoRoot $repoRoot -AbsolutePath $traceDisasmPath)
             result = "pass"
         }

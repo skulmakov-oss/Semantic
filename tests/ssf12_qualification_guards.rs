@@ -235,3 +235,28 @@ fn ssf12_stale_c0_claims_are_prohibited_in_active_verdict() {
         "verdict missing candidate C1 commit message"
     );
 }
+
+#[test]
+fn ssf12_q02_smoke_script_uses_dynamic_toolchain_semcode_format() {
+    let script = read("scripts/verify_release_assets.ps1");
+
+    // Script must not use legacy hardcoded format headers as expected signals
+    assert!(
+        !script.contains("\"SEMCODE0\""),
+        "verify_release_assets.ps1 must not hardcode SEMCODE0 as expected signal"
+    );
+    assert!(
+        !script.contains("\"SEMCODE1\""),
+        "verify_release_assets.ps1 must not hardcode SEMCODE1 as expected signal"
+    );
+
+    // Script must extract semcode_format from release toolchain version metadata
+    assert!(
+        script.contains(".semcode_format"),
+        "verify_release_assets.ps1 must extract semcode_format from toolchain metadata"
+    );
+    assert!(
+        script.contains("$expectedSemcodeFormat"),
+        "verify_release_assets.ps1 must bind expected signals to $expectedSemcodeFormat"
+    );
+}
