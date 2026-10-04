@@ -5,6 +5,7 @@ use crate::types::{
     MatchPattern, NumericLiteral, PathAvailability, PatternPath, RecordPatternTarget, ScrutineeUse,
 };
 use crate::*;
+use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -1679,34 +1680,42 @@ fn check_stmt(
             Ok(())
         }
         Stmt::Discard { ty, value } => {
-            if let Some(ann) = ty {
-                ensure_type_resolved(
-                    ann,
-                    record_table,
-                    adt_table,
-                    arena,
-                    "discard binding".to_string(),
-                )?;
-                ensure_storage_type_supported(
-                    &canonicalize_declared_type(ann, record_table, adt_table, arena)?,
-                    arena,
-                    "discard binding".to_string(),
-                )?;
-            }
-            if let Some(ann) = ty {
-                let expected_ty = canonicalize_declared_type(ann, record_table, adt_table, arena)?;
-                let vt = infer_expr_type_with_expected(
-                    *value,
-                    arena,
-                    env,
-                    table,
-                    record_table,
-                    adt_table,
-                    Some(expected_ty.clone()),
-                    ret_ty,
-                    loop_stack,
-                    impl_list,
-                )?;
+            // FA-02-020 / #1652: `let _ = expr;` evaluates and discards, so
+            // the RHS is inferred exactly once whether or not it is annotated;
+            // an annotation only adds the expected-type constraint.
+            let expected_ty = match ty {
+                Some(ann) => {
+                    ensure_type_resolved(
+                        ann,
+                        record_table,
+                        adt_table,
+                        arena,
+                        "discard binding".to_string(),
+                    )?;
+                    let expected_ty =
+                        canonicalize_declared_type(ann, record_table, adt_table, arena)?;
+                    ensure_storage_type_supported(
+                        &expected_ty,
+                        arena,
+                        "discard binding".to_string(),
+                    )?;
+                    Some(expected_ty)
+                }
+                None => None,
+            };
+            let vt = infer_expr_type_with_expected(
+                *value,
+                arena,
+                env,
+                table,
+                record_table,
+                adt_table,
+                expected_ty.clone(),
+                ret_ty,
+                loop_stack,
+                impl_list,
+            )?;
+            if let Some(expected_ty) = expected_ty {
                 ensure_binding_value_type(
                     expected_ty,
                     vt,
@@ -5531,8 +5540,8 @@ mod tests {
 
     #[test]
     fn type_check_function_rejects_reserved_application_builtin_name() {
-        // FND-372 regression: type_check_function must enforce reservations
-        // from APPLICATION_BUILTIN_NAMES (e.g. stdout_write) via build_fn_table.
+        // FND-372 regression: type_check_function must enforce Reserved
+        // BUILTIN_NAMESPACE entries (e.g. stdout_write) via build_fn_table.
         let src = r#"
             fn stdout_write(text: text) {
                 return;
@@ -17623,5 +17632,49 @@ fn infer_expr_type_no_check(
             loop_stack,
             impl_list,
         ),
+    }
+}
+
+#[cfg(test)]
+mod pb02_discard_tests {
+    use super::*;
+
+    fn check_body(body: &str) -> Result<(), FrontendError> {
+        let src = format!(
+            "fn one() -> i32 {{\n    return 1;\n}}\nfn main() {{\n{body}\n    return;\n}}\n"
+        );
+        type_check_program(&parse_program(&src)?)
+    }
+
+    // #1652: the same invalid RHS rejects whether bound, discarded, or
+    // discarded with an annotation.
+    #[test]
+    fn discard_rhs_is_always_checked() {
+        for rhs in [
+            "nope()",
+            "missing_var",
+            "one(1)",
+            "len(1, 2)",
+            "len(5)",
+            "to_text()",
+            "one() + true",
+            "assert(true)",
+        ] {
+            let bound = check_body(&format!("    let v: i32 = {rhs};"));
+            let discarded = check_body(&format!("    let _ = {rhs};"));
+            let typed = check_body(&format!("    let _: i32 = {rhs};"));
+            assert!(bound.is_err(), "bound {rhs} must reject");
+            assert!(discarded.is_err(), "let _ = {rhs}; must reject");
+            assert!(typed.is_err(), "let _: i32 = {rhs}; must reject");
+        }
+    }
+
+    #[test]
+    fn valid_and_typed_discards_keep_their_contract() {
+        check_body("    let _ = one();").expect("valid discard");
+        check_body("    let _ = 1 + 2;").expect("side-effect-free discard");
+        check_body("    let _: i32 = one();").expect("typed discard");
+        let err = check_body("    let _: i32 = 1.5;").expect_err("f64 into i32 discard");
+        assert!(err.message.contains("discard binding"), "{}", err.message);
     }
 }

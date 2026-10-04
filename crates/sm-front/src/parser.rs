@@ -5,7 +5,7 @@ use crate::types::{
     ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, FrontendErrorDetail,
     FrontendErrorItem, Function, GrammarAdmission, IfExpr, IfLetExpr, ImplDecl, IntRangePattern,
     IterableLoopDesugaring, LogosEntity, LogosEntityField, LogosEntityFieldKind, LogosLaw,
-    LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm,
+    LogosImport, LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm,
     MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl, RecordField,
     RecordFieldExpr, RecordInitField, RecordLiteralExpr, RecordPatternItem, RecordPatternTarget,
     RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole, SchemaShape, SchemaVariant,
@@ -14,6 +14,7 @@ use crate::types::{
     TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
 };
 use crate::CompilePolicyView;
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -32,6 +33,13 @@ fn canonical_profile_admission(profile: &ParserProfile) -> Result<(), FrontendEr
     profile
         .validate_for_canonical_source()
         .map_err(|e| FrontendError::policy_violation(0, format!("profile: {e}")))
+}
+
+/// Which surface's qvec spelling [`Parser::parse_qvec_dimension`] admits.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum QvecSurface {
+    RustLike,
+    Logos,
 }
 
 pub fn parse_rustlike_with_profile(
@@ -450,7 +458,9 @@ impl<'a> Parser<'a> {
         let mut default_seen = false;
         if !self.check(TokenKind::RParen) {
             loop {
+                let pname_pos = self.pos();
                 let pname = self.expect_symbol()?;
+                self.reject_duplicate_param(&params, pname, pname_pos)?;
                 self.expect(TokenKind::Colon, "expected ':'")?;
                 let pty = self.parse_type()?;
                 let default = if self.eat(TokenKind::Assign) {
@@ -668,7 +678,9 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         if !self.check(TokenKind::RParen) {
             loop {
+                let pname_pos = self.pos();
                 let pname = self.expect_symbol()?;
+                self.reject_duplicate_param(&params, pname, pname_pos)?;
                 self.expect(TokenKind::Colon, "expected ':' after parameter name")?;
                 let pty = self.parse_type()?;
                 params.push((pname, pty));
@@ -3080,17 +3092,7 @@ impl<'a> Parser<'a> {
                 }
             } else if t == "qvec" {
                 let _ = self.advance();
-                if self.eat(TokenKind::LBracket) || self.eat(TokenKind::LParen) {
-                    let n = if self.check(TokenKind::Num) {
-                        self.advance().text.parse::<usize>().unwrap_or(32)
-                    } else {
-                        32
-                    };
-                    let _ = self.eat(TokenKind::RBracket) || self.eat(TokenKind::RParen);
-                    Type::QVec(n)
-                } else {
-                    Type::QVec(32)
-                }
+                self.parse_qvec_dimension(QvecSurface::RustLike)?
             } else if t == "Option" {
                 let lookahead = self.next_non_layout_idx_from(self.next_non_layout_idx() + 1);
                 if self
@@ -3296,8 +3298,15 @@ impl<'a> Parser<'a> {
                 break;
             }
             if self.check_raw(TokenKind::KwSystem) {
+                let system_tok = self.tokens[self.idx].clone();
                 match self.parse_logos_system() {
-                    Ok(system) => out.system = Some(system),
+                    Ok(system) => {
+                        if let Some(err) = self.duplicate_logos_system(&out, &system_tok) {
+                            errors.push(err);
+                        } else {
+                            out.system = Some(system);
+                        }
+                    }
                     Err(e) => {
                         errors.push(e);
                         self.recover_logos_anchor();
@@ -3332,6 +3341,9 @@ impl<'a> Parser<'a> {
                 self.require_legacy_compatibility(
                     "legacy Logos directives require legacy compatibility mode",
                 )?;
+                if self.check_raw(TokenKind::KwImport) {
+                    out.imports.push(self.preserve_logos_import());
+                }
                 while !self.check_raw(TokenKind::Newline) && self.idx < self.tokens.len() {
                     self.idx += 1;
                 }
@@ -3445,8 +3457,15 @@ impl<'a> Parser<'a> {
             }
             if self.check_raw(TokenKind::KwSystem) {
                 basis.promote(EvidenceBasis::Exclusive);
+                let system_tok = self.tokens[self.idx].clone();
                 match self.parse_logos_system() {
-                    Ok(system) => out.system = Some(system),
+                    Ok(system) => {
+                        if let Some(err) = self.duplicate_logos_system(&out, &system_tok) {
+                            errors.push(err);
+                        } else {
+                            out.system = Some(system);
+                        }
+                    }
                     Err(e) => {
                         errors.push(e);
                         self.recover_logos_anchor();
@@ -3504,6 +3523,7 @@ impl<'a> Parser<'a> {
                     self.recover_logos_anchor();
                     continue;
                 }
+                out.imports.push(self.preserve_logos_import());
                 while !self.check_raw(TokenKind::Newline) && self.idx < self.tokens.len() {
                     self.idx += 1;
                 }
@@ -3821,7 +3841,9 @@ impl<'a> Parser<'a> {
             let t = self.tokens[self.idx].text.clone();
             if t == "qvec" {
                 self.idx += 1;
-                Type::QVec(32)
+                // The dimension is part of the qvec type itself, never a
+                // unit-annotation suffix.
+                return self.parse_qvec_dimension(QvecSurface::Logos);
             } else {
                 return Err(self.error_at_current("expected type", "E0234"));
             }
@@ -3842,6 +3864,117 @@ impl<'a> Parser<'a> {
             return Err(self.error_at_current("expected type", "E0234"));
         };
         self.parse_optional_measure_annotation_raw(base)
+    }
+
+    /// FA-02-008..011 (#1640-#1643): the one qvec dimension admission, called
+    /// right after the `qvec` token. There is no implicit dimension: an
+    /// explicit `N >= 1` that fits `usize` is required, enclosed by matching
+    /// delimiters. RustLike admits `qvec[N]` and `qvec(N)`; Logos admits
+    /// `qvec[N]` only (`docs/LOGOS_GRAMMAR_v0_1.md`). Any failure is a
+    /// `FrontendError`, never a substituted dimension.
+    fn parse_qvec_dimension(&mut self, surface: QvecSurface) -> Result<Type, FrontendError> {
+        let raw = surface == QvecSurface::Logos;
+        let fail = |p: &Self, msg: &str| {
+            if raw {
+                p.error_at_current(msg, "E0234")
+            } else {
+                FrontendError {
+                    detail: None,
+                    pos: p.pos(),
+                    message: msg.to_string(),
+                }
+            }
+        };
+        let eat = |p: &mut Self, kind| if raw { p.eat_raw(kind) } else { p.eat(kind) };
+        let closer = if eat(self, TokenKind::LBracket) {
+            TokenKind::RBracket
+        } else if !raw && eat(self, TokenKind::LParen) {
+            TokenKind::RParen
+        } else {
+            return Err(fail(
+                self,
+                if raw {
+                    "qvec requires an explicit dimension: qvec[N]"
+                } else {
+                    "qvec requires an explicit dimension: qvec[N] or qvec(N)"
+                },
+            ));
+        };
+        let num = if raw {
+            self.check_raw(TokenKind::Num)
+        } else {
+            self.check(TokenKind::Num)
+        };
+        if !num {
+            return Err(fail(self, "expected qvec dimension (a positive integer)"));
+        }
+        let dim = match self.tokens.get(self.next_dim_idx(raw)) {
+            Some(tok) => tok.text.parse::<usize>().ok().filter(|n| *n >= 1),
+            None => None,
+        };
+        let Some(dim) = dim else {
+            return Err(fail(
+                self,
+                "invalid qvec dimension: expected a positive integer that fits usize",
+            ));
+        };
+        if raw {
+            self.idx += 1;
+        } else {
+            let _ = self.advance();
+        }
+        if !eat(self, closer) {
+            return Err(fail(
+                self,
+                if closer == TokenKind::RBracket {
+                    "expected ']' to close qvec dimension"
+                } else {
+                    "expected ')' to close qvec dimension"
+                },
+            ));
+        }
+        Ok(Type::QVec(dim))
+    }
+
+    fn next_dim_idx(&self, raw: bool) -> usize {
+        if raw {
+            self.idx
+        } else {
+            self.next_non_layout_idx()
+        }
+    }
+
+    /// FA-02-012 / #1644: a Logos program declares at most one `System`
+    /// (`LogosProgram::system` is an `Option`). A second declaration is a
+    /// deterministic error, never a last-write-wins replacement.
+    /// FA-02-013 / #1645: called at a `KwImport` token; captures the exact
+    /// directive text (keyword to end of line) without interpreting it.
+    fn preserve_logos_import(&self) -> LogosImport {
+        let tok = &self.tokens[self.idx];
+        let start = tok.pos;
+        let mut end = self.source[start..]
+            .find('\n')
+            .map_or(self.source.len(), |n| start + n);
+        if self.source[..end].ends_with('\r') {
+            end -= 1;
+        }
+        LogosImport {
+            directive: self.source[start..end].to_string(),
+            span: start..end,
+            mark: tok.mark,
+        }
+    }
+
+    fn duplicate_logos_system(&self, out: &LogosProgram, second: &Token) -> Option<FrontendError> {
+        let first = out.system.as_ref()?;
+        Some(self.error_at_token(
+            second,
+            &format!(
+                "duplicate System declaration (System '{}' already declared at line {})",
+                first.name, first.mark.line
+            ),
+            "E0201",
+        ))
     }
 
     fn parse_optional_measure_annotation_raw(&mut self, base: Type) -> Result<Type, FrontendError> {
@@ -4164,6 +4297,28 @@ impl<'a> Parser<'a> {
                 message: "expected type parameter name".to_string(),
             })
         }
+    }
+
+    /// FA-02-004 / #1636: one parameter list binds each name once. Rejected
+    /// here, before any `FnSig`/`ScopeEnv` exists, so no later map insertion
+    /// can silently pick one of two same-named parameters.
+    fn reject_duplicate_param(
+        &self,
+        params: &[(SymbolId, Type)],
+        name: SymbolId,
+        pos: usize,
+    ) -> Result<(), FrontendError> {
+        if params.iter().any(|(existing, _)| *existing == name) {
+            return Err(FrontendError {
+                detail: None,
+                pos,
+                message: format!(
+                    "duplicate parameter name '{}'",
+                    self.arena.symbol_name(name)
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn expect_symbol(&mut self) -> Result<SymbolId, FrontendError> {
@@ -9131,5 +9286,154 @@ mod grammar_admission_tests {
              never reaches require_legacy_compatibility once the surface \
              gate has already failed"
         );
+    }
+}
+
+#[cfg(test)]
+mod pb02_admission_tests {
+    use super::*;
+
+    fn rustlike(src: &str) -> Result<Program, FrontendError> {
+        parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+    }
+
+    fn logos(src: &str) -> Result<LogosProgram, FrontendError> {
+        parse_logos_with_profile(src, &ParserProfile::foundation_default())
+    }
+
+    fn param_types(sig: &str) -> Result<Vec<Type>, FrontendError> {
+        let p = rustlike(&format!("fn f({sig}) -> i32 {{\n    return 0;\n}}\n"))?;
+        Ok(p.functions[0]
+            .params
+            .iter()
+            .map(|(_, t)| t.clone())
+            .collect())
+    }
+
+    // #1636
+    #[test]
+    fn duplicate_parameter_names_reject_and_distinct_names_keep_order() {
+        for sig in [
+            "x: i32, x: i32",
+            "x: i32, x: f64",
+            "x: i32, y: i32, x: bool",
+            "a: i32, x: i32 = 1, x: i32 = 2",
+        ] {
+            let err = param_types(sig).expect_err(sig);
+            assert!(
+                err.message.contains("duplicate parameter name 'x'"),
+                "{sig}: {}",
+                err.message
+            );
+        }
+        let p =
+            rustlike("fn f(b: i32, a: f64, c: bool = true) -> i32 {\n    return 0;\n}\n").unwrap();
+        let names: Vec<&str> = p.functions[0]
+            .params
+            .iter()
+            .map(|(n, _)| p.arena.symbol_name(*n))
+            .collect();
+        assert_eq!(names, ["b", "a", "c"]);
+        assert_eq!(p.functions[0].params[1].1, Type::F64);
+
+        let err =
+            rustlike("trait Tr {\n    fn m(x: i32, x: i32) -> i32;\n}\n").expect_err("trait method");
+        assert!(
+            err.message.contains("duplicate parameter name 'x'"),
+            "{}",
+            err.message
+        );
+    }
+
+    // #1640-#1642
+    #[test]
+    fn rustlike_qvec_requires_explicit_checked_dimension_and_matching_closer() {
+        for (sig, n) in [
+            ("x: qvec[1]", 1),
+            ("x: qvec(1)", 1),
+            ("x: qvec[8]", 8),
+            ("x: qvec(32)", 32),
+            ("x: qvec[4096]", 4096),
+        ] {
+            assert_eq!(param_types(sig).unwrap(), vec![Type::QVec(n)], "{sig}");
+        }
+        assert_eq!(
+            param_types(&format!("x: qvec[{}]", usize::MAX)).unwrap(),
+            vec![Type::QVec(usize::MAX)]
+        );
+        for sig in [
+            "x: qvec",   // #1641 missing dimension
+            "x: qvec[]", // #1641 empty delimiters
+            "x: qvec()",
+            "x: qvec[0]",                          // dimension must be >= 1
+            "x: qvec[99999999999999999999999999]", // #1640 overflow
+            "x: qvec[n]",                          // #1640 non-numeric
+            "x: qvec[1.5]",
+            "x: qvec[-1]",
+            "x: qvec[8",  // #1642 missing closer
+            "x: qvec[8)", // #1642 mismatched
+            "x: qvec(8]",
+            "x: qvec[8 8]", // trailing malformed token
+        ] {
+            let err = param_types(sig).expect_err(sig);
+            assert!(err.message.contains("qvec"), "{sig}: {}", err.message);
+        }
+    }
+
+    // #1643
+    #[test]
+    fn logos_qvec_preserves_exact_bracket_dimension() {
+        let field_ty = |src: &str| logos(src).map(|p| p.entities[0].fields[0].ty.clone());
+        assert_eq!(
+            field_ty("Entity E:\n    state s: qvec[8]\n").unwrap(),
+            Type::QVec(8)
+        );
+        assert_eq!(
+            field_ty("Entity E:\n    state s: qvec[1]\n").unwrap(),
+            Type::QVec(1)
+        );
+        for ty in [
+            "qvec",
+            "qvec[]",
+            "qvec[0]",
+            "qvec(8)",
+            "qvec[8",
+            "qvec[x]",
+            "qvec[99999999999999999999999999]",
+        ] {
+            let err = field_ty(&format!("Entity E:\n    state s: {ty}\n")).expect_err(ty);
+            assert!(err.message.contains("qvec"), "{ty}: {}", err.message);
+        }
+    }
+
+    // #1644
+    #[test]
+    fn logos_second_system_is_rejected_not_overwritten() {
+        assert!(logos("Entity E:\n    state s: quad\n")
+            .unwrap()
+            .system
+            .is_none());
+        assert_eq!(logos("System A():\n").unwrap().system.unwrap().name, "A");
+        let err = logos("System A():\nSystem B():\n").expect_err("second System");
+        assert!(
+            err.message.contains("duplicate System declaration"),
+            "{}",
+            err.message
+        );
+        let tokens = lex_tokens("System A():\nSystem B():\n").unwrap();
+        match admit_logos_program_with_profile(
+            "System A():\nSystem B():\n",
+            &tokens,
+            &ParserProfile::foundation_default(),
+        ) {
+            GrammarAdmission::Exclusive(Err(e)) => {
+                assert!(
+                    e.message.contains("duplicate System declaration"),
+                    "{}",
+                    e.message
+                )
+            }
+            other => panic!("admission must fail closed, got {other:?}"),
+        }
     }
 }
