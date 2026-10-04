@@ -36,6 +36,14 @@ fn ssf12_frozen_candidate_sha_matches_across_artifacts() {
         manifest.contains(&format!("\"candidate_sha\": \"{CANDIDATE_SHA}\"")),
         "manifest file missing authoritative candidate_sha JSON field"
     );
+
+    // Post-SSF epoch: the active (Phase-B) harness carries the promoted C1 as
+    // a historical anchor, not as an SSF candidate.
+    let harness = read(".harness/current.task.yaml");
+    assert!(
+        harness.contains(&format!("c1_sha: {CANDIDATE_SHA}")),
+        "active Phase-B harness must retain the historical promoted C1 anchor"
+    );
 }
 
 #[test]
@@ -121,12 +129,36 @@ fn ssf12_verdicts_are_explicit_and_honest() {
 
 #[test]
 fn ssf12_does_not_falsely_claim_promotion_or_release() {
-    // PB-01: the SSF-12 envelope was retired by the Phase-B task envelope;
-    // its sealed form remains at 8ebd32945df2a8df80d89dcc8b1dd3f49b41fbf6.
+    // Historical: the sealed verdict records the Stable Foundation promotion.
     let verdict = read(VERDICT_FILE);
     assert!(verdict.contains("Stable Foundation Promotion Decision"));
     assert!(verdict.contains("PROMOTE WITH EXPLICIT LIMITS"));
     assert!(!verdict.contains("```text\nPROMOTE\n```"));
+
+    // Current: post-SSF tasks must not reacquire promotion/release/tag
+    // authority. The sealed SSF-12 envelope remains at
+    // 8ebd32945df2a8df80d89dcc8b1dd3f49b41fbf6.
+    let harness = read(".harness/current.task.yaml");
+    for required in [
+        "stable_promotion: false",
+        "no_release_or_tag: true",
+        "no_merge_without_owner_go: true",
+    ] {
+        assert!(
+            harness.contains(required),
+            "active harness must explicitly carry `{required}`"
+        );
+    }
+    for forbidden in [
+        "stable_promotion: true",
+        "release_authorized: true",
+        "tag_authorized: true",
+    ] {
+        assert!(
+            !harness.contains(forbidden),
+            "active harness must not reacquire `{forbidden}`"
+        );
+    }
 }
 
 #[test]
