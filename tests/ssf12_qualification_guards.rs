@@ -23,7 +23,6 @@ fn ssf12_frozen_candidate_sha_matches_across_artifacts() {
     let verdict = read(VERDICT_FILE);
     let matrix = read(MATRIX_FILE);
     let manifest = read(MANIFEST_FILE);
-    let harness = read(".harness/current.task.yaml");
 
     assert!(
         verdict.contains(&format!("- **Candidate SHA**: `{CANDIDATE_SHA}`")),
@@ -36,10 +35,6 @@ fn ssf12_frozen_candidate_sha_matches_across_artifacts() {
     assert!(
         manifest.contains(&format!("\"candidate_sha\": \"{CANDIDATE_SHA}\"")),
         "manifest file missing authoritative candidate_sha JSON field"
-    );
-    assert!(
-        harness.contains(&format!("candidate_sha: {CANDIDATE_SHA}")),
-        "harness file missing authoritative candidate_sha YAML field"
     );
 }
 
@@ -126,11 +121,8 @@ fn ssf12_verdicts_are_explicit_and_honest() {
 
 #[test]
 fn ssf12_does_not_falsely_claim_promotion_or_release() {
-    let harness = read(".harness/current.task.yaml");
-    assert!(harness.contains("stable_promotion: true"));
-    assert!(harness.contains("release_authorized: true"));
-    assert!(harness.contains("tag_authorized: true"));
-
+    // PB-01: the SSF-12 envelope was retired by the Phase-B task envelope;
+    // its sealed form remains at 8ebd32945df2a8df80d89dcc8b1dd3f49b41fbf6.
     let verdict = read(VERDICT_FILE);
     assert!(verdict.contains("Stable Foundation Promotion Decision"));
     assert!(verdict.contains("PROMOTE WITH EXPLICIT LIMITS"));

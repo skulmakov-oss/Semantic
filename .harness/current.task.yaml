@@ -1,167 +1,47 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-12-FINAL-CLOSEOUT
-  title: "SSF-12 C1 Final Evidence Reseal and Stable Foundation Closeout"
-  type: ssf12_c1_final_evidence_reseal_and_closeout
-  target: SSF-12 #1583 / Stable Foundation #1569
+  id: PHASE-B-PB-01
+  title: "ParserProfile Contract Hardening"
+  type: phase_b_profile_contract_hardening
+  target: "Phase-B PB-01 / Module 01 sm-profile (#1618-#1632)"
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-12-Q02-REMEDIATION
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-12-FINAL-CLOSEOUT
+  umbrella: 1617
+  issues: [1618, 1619, 1620, 1621, 1622, 1623, 1624, 1625, 1626, 1627, 1628, 1629, 1630, 1631, 1632]
+  base_sha: 8ebd32945df2a8df80d89dcc8b1dd3f49b41fbf6
   authorized_by: >-
-    Repository owner direct instruction (2026-10-04, FINAL GO — C1 Evidence Reseal, PR #1983 Merge and Stable Foundation Closeout)
-    authorizing final evidence reseal, qualification PR #1983 merge, and Stable Foundation closeout. Permitted writes:
-    .harness/current.task.yaml, reports/semantic_stable_foundation_final_verdict.md, reports/ssf12/**,
-    tests/ssf12_qualification_guards.rs. Strictly forbidden: crates/**, src/**, tools/**, scripts/**,
-    .github/**, Cargo.toml, Cargo.lock, examples/**, experiments/**.
-    Implementation candidate C1 (89641da8237f4fcefb50cf1958a50e4d4003aea7) and published release v1.2.0 assets
-    remain byte-identical and immutable.
-  prior_phase_authorization_history: >-
-    RETIRED (historical record of SSF-11 and earlier envelopes; grants no
-    authority to SSF-12).
-    SSF-11 (retired):
-    Repository owner direct instruction (2026-10-02) to execute #1582
-    (SSF-11) under umbrella #1569 in one bounded PR from main
-    ea0d6dcacc70cada5b1fc80e23a5560ecddccb94, after SSF-10 (#1581) closed
-    through merged PR #1975. SSF-11 is evidence and onboarding work only:
-    no new language/runtime features, no core crate changes, no SSF-12
-    work, no stable promotion, no merge without owner MERGE GO.
-    SSF-10 and earlier (retired):
-    Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
-    umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-08 closed 2026-09-11 through a final acceptance-reconciliation
-    PR (#1916), which freshly re-derived all seven of #1579's acceptance
-    criteria as SATISFIED at merge commit
-    bb4beec123e729c41e244ab204a66bf9cee81344 (Lane 5 — #1759, #1760, #1761,
-    #1762, #1763, #1900, #1902 — fully closed beforehand). Full evidence:
-    docs/roadmap/stable_foundation/ssf08_closure_audit.md. This file's own
-    prior activation (chore(ssf07): ..., commit 5ddb703b) established the
-    precedent this transition follows. SSF-09 is closed; only SSF-10 is now active.
-    Repository owner explicit governance authorization (2026-09-21) to allow
-    the root .gitattributes change required by #1698 for deterministic LF
-    materialization of byte-sensitive 7HELL fixtures.
-    Repository owner explicit governance authorization (2026-09-21) to allow
-    exactly crates/ton618-core/src/diagnostics.rs and docs/ERROR_CODES.md for
-    the #1704 sm-sema catalog-coherence repair (central catalog entries and
-    its derived ERROR_CODES mirror).
-    Repository owner explicit governance authorization (2026-09-22) to allow
-    exactly docs/architecture/dependency_boundary_rules.md and
-    docs/architecture/module_ownership_map.md for the SSF-09 carrier-owner
-    governance architectural decision.
-    Repository owner explicit governance authorization (2026-09-22) to widen
-    the governance envelope for the frozen canonical diagnostic carrier Phase C0.
-    This authorization permits ONLY:
-    1. creation of crates/sm-diagnostic/**;
-    2. addition of crates/sm-diagnostic as a root workspace member in Cargo.toml;
-    3. Cargo metadata necessary for the new crate itself;
-    4. C0 qualification/public-API/boundary tests already under tests/**.
-    It explicitly does NOT authorize: sm-front, sm-sema, sm-verify,
-    sm-runtime-core, sm-vm, or smc-cli dependency on sm-diagnostic; prom-*
-    dependency changes; any existing crate Cargo.toml modification; adapter
-    implementation; renderer implementation; external JSON/LSP schema work;
-    or subsequent phases C1A/C1B/C2/C3A/C3B/C4/C5/C6.
-    Repository owner explicit governance authorization (2026-09-24) to widen
-    the governance envelope to allow exactly `src/bin/smc.rs` in `allowed_paths`
-    for the downstream mechanical adaptation required by the SSF-09 C1A P0B
-    CompilePipelineError migration (SevenHell compile error handling in root smc binary).
-    Repository owner explicit governance authorization (2026-09-25) to allow
-    exactly `src/lib.rs` in `allowed_paths`, solely to restore public facade
-    coherence: `semantic::frontend` re-exports the existing P0A transport types
-    (`CompilePipelineError`, `IrError`, `ConfigurationError`) alongside the
-    functions that return them. No new facade-owned error type; no other
-    `src/**` path is authorized.
-    Architect explicit governance authorization (2026-09-29, SSF-09 D2-2R3,
-    PR #1963) to allow exactly `docs/roadmap/compatibility_statement.md` in
-    `allowed_paths`, solely to record the D2-2 SemCode V22 compatibility
-    migration required by `docs/spec/semcode.md`'s Backward Compatibility
-    Rule. The same decision extends the existing `src/lib.rs` authority to
-    the D2-2 facade re-exports of the existing sm-format ADT descriptor types
-    (`AdtDescriptor`, `AdtDescriptorTable`, `AdtVariantDescriptor`,
-    new facade-owned type. No other `docs/**` path is authorized.
-    Repository owner explicit governance authorization (2026-09-30, Issue #1966)
-    to allow the exact doc paths required by REM-003 and REM-023:
-    `docs/language/semantic_command_lexicon.md`,
-    `docs/language/semantic_hello_verifier_admission.md`,
-    `docs/research/quad_logic_engineering_decisions_v0_1.md`,
-    `docs/roadmap/core_quad/quad_tile128_layout_boundary.md`,
-    `docs/roadmap/core_quad/v1_compatibility_rollout.md`,
-    `docs/roadmap/first_wave_map_surface.md`
-    in `allowed_paths` for the Ledger Consolidation Phase 1 (#1966) doc reconciliation.
-    Repository owner explicit governance authorization (2026-09-29) to allow
-    exactly the root `Cargo.lock` in `allowed_paths`, solely to track a freshly
-    generated workspace lockfile so that the existing `.gitignore` policy
-    comment ("Cargo.lock intentionally tracked for reproducible workspace
-    builds") matches reality and local builds leave a clean working tree.
-    No dependency version, manifest, or `.gitignore` change is authorized.
-    Repository owner explicit governance authorization (2026-09-29) to also
-    allow exactly `tests/legacy_guards.rs`, solely to add `./Cargo.lock` to the
-    `ton618_content_inventory_is_explicit` expected inventory, because the
-    tracked lockfile names the `ton618-core` package.
-    Repository owner explicit governance authorization (2026-09-29, "CONTINUE
-    GO - SSF-09 #1580 ONE-PR COMPLETION") to complete #1580 end to end in one
-    PR from base 05613f9d874bc5d7099fcb8f237c3ad76bc8bcde. This supersedes the
-    C0-only limits recorded above for exactly the following, and nothing else:
-    1. carrier phases C1A/C1B (sm-front), C2 (sm-sema), C3A/C3B (sm-verify),
-       C4 (sm-vm runtime admission), C5 (human renderer), C6 (versioned
-       external machine schema), all inside already-allowed crate paths;
-    2. dependency edges onto `sm-diagnostic` from exactly sm-front, sm-sema,
-       sm-verify, sm-vm, smc-cli and the root `semantic_language` package
-       (guarded by `tests/dependency_boundaries.rs`); `sm-diagnostic` itself
-       keeps zero dependencies;
-    3. the `smc check --format human|json` canonical path, the `smc lsp`
-       diagnostics-first stdio server, and the canonical formatter's
-       semantic-safety guard, all in `crates/smc-cli/**`;
-    4. catalog/mirror entries in the already-allowed
-       `crates/ton618-core/src/diagnostics.rs` and `docs/ERROR_CODES.md`.
-    It does NOT authorize SSF-10 work, prom-* changes, new external
-    dependencies, stable promotion, or merging without owner MERGE GO.
-    Repository owner explicit governance authorization (2026-09-30, "GO SSF-09
-    R3 REPAIR + MAIN INTEGRATION") to integrate main
-    f6b5f6d60230c7ff2229fef441df14562836fc5a into the #1580 branch by a
-    normal merge commit and to include the tracked `Cargo.lock` delta that
-    ordinary Cargo resolution produces for the `sm-diagnostic` dependency
-    edges authorized above (no other dependency or version change), together
-    with the R3 review repairs inside the paths already listed.
-    Repository owner explicit governance authorization (2026-09-30, Issue #1967)
-    to execute the Ledger 2/4 Execution, CLI, and Trust Boundary closure as one
-    macro PR. This controlled transition authorizes only the implementation,
-    regression, specification-reconciliation, and derived Ledger/dashboard paths
-    required by REM-007, REM-008, REM-009, REM-010, REM-011, REM-012, REM-013,
-    REM-018, REM-019, REM-020, REM-021, REM-024, and REM-026. It does not
-    authorize UI remediation packages, workflow changes, stable-promotion claims,
-    or historical audit evidence rewrites.
-    Repository owner explicit governance authorization (2026-09-30, Issue #1969,
-    "OWNER AUTHORIZATION — Issue #1969 Harness Envelope Update") to widen the
-    task envelope only by the exact paths the #1969 diff requires and that the
-    prior envelope did not cover: the REM-022 script files listed under
-    `allowed_paths`, `ARCHITECTURE.md`, `CONTRIBUTING.md`,
-    `docs/wiki/current_status.md`, the `docs/workbench/*.md` retirement banners,
-    `docs/architecture/ui_boundary_index.md`, and the machine-local path
-    redaction in `reports/cold_start_rehearsal_2026-04-24.md`. #1969 is
-    unblocked by the owner's retirement of native Semantic UI, Workbench, and
-    Semantic Studio (#1968 and #1862 closed not planned), not by #1968
-    implementation. Native UI implementation paths are added to
-    `forbidden_paths` and remain forbidden. This does not authorize disabling or
-    weakening Harness enforcement, Workbench repair or CI reinstatement,
-    self-hosting (#1910) implementation, workflow changes, stable-promotion
-    claims, or rewrites of the immutable historical audit CSV/JSON.
+    Repository owner direct instruction (2026-10-04, "GO — Phase B / PB-01 —
+    ParserProfile Contract Hardening") plus owner decision (2026-10-04):
+    aliases are legacy-only (TON618 compatibility perimeter) and fail closed at
+    canonical Semantic admission; currently inert profile fields default to
+    RESERVED / NON-AUTHORITATIVE. Implementation, spec correction, tests and PR
+    creation are authorized. Merge, release, tag and manual issue closure are
+    NOT authorized. SSF historical envelopes are retired and grant no authority
+    here; SSF reports, C0/C1 records and v1.2.0 assets stay immutable.
 
 intent:
   summary: >-
-    Final evidence reseal, PR #1983 merge, and Stable Foundation promotion closeout.
-    Reconciles gate Q-02 to PASS following successful dynamic toolchain SemCode verifier execution (#1984);
-    records DEFECT-SSF12-005 as RESOLVED qualification tooling defect; seals 78-gate matrix (77 PASS, 0 FAIL, 0 BLOCKED, 1 N/A);
-    records explicit owner Stable Foundation decision PROMOTE WITH EXPLICIT LIMITS.
+    Give ParserProfile one public baseline, one validator, one alias rule, one
+    version admission policy and honest ACTIVE/RESERVED policy semantics;
+    move legacy alias training/normalization into the TON618 perimeter.
+  decision_record: docs/roadmap/phase_b/pb01_profile_contract_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - reports/semantic_stable_foundation_final_verdict.md
-    - reports/ssf12/**
-    - tests/ssf12_qualification_guards.rs
+    - crates/sm-profile/**
+    - crates/sm-front/**
+    - crates/sm-sema/**
+    - crates/smc-cli/**
+    - src/lib.rs
+    - src/bin/ton618_core.rs
+    - docs/spec/profile.md
+    - docs/roadmap/phase_b/**
+    - tests/**
 
   forbidden_paths:
     - .github/**
     - apps/**
-    - crates/**
-    - src/**
+    - reports/**
     - tools/**
     - scripts/**
     - Cargo.toml
@@ -171,62 +51,30 @@ scope:
     - third_party/**
     - ton618_legacy/**
     - prom-ui*
-    - docs/**
 
 authorization:
-  rust_implementation: false
+  rust_implementation: true
   language_implementation: false
   documentation_addition: true
   documentation_correction: true
   test_addition: true
   workflow_changes: false
   dependency_changes: false
-  github_issue_lifecycle: true
+  github_issue_lifecycle: false
   git_commit_push_pr: true
-  merge_after_review_and_checks: true
-  stable_promotion: true
+  merge_after_review_and_checks: false
+  stable_promotion: false
 
 constraints:
-  one_active_ssf_phase: true
-  active_phase: SSF-12
-  issue: 1583
-  umbrella_issue: 1569
-  owner_authorized: true
-  defect_id: DEFECT-SSF12-005
-  candidate_id: C1
-  candidate_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
-  candidate_sha_frozen: true
-  frozen_candidate_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
-  release_assets_immutable: true
-  qualification_tooling_only: false
-  qualification_only: true
-  mandatory_gate_skip_is_not_pass: true
-  earlier_phase_defects_return_to_owner: true
-  no_fixing_core_defects_inside_ssf12: true
-  no_release_or_tag: false
-  no_issue_close: false
-  human_promotion_decision_required: true
-  oracle_verdict_required: true
-  stable_publication_verdict_separate_from_oracle_verdict: true
   base_branch: main
-  base_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
+  base_sha: 8ebd32945df2a8df80d89dcc8b1dd3f49b41fbf6
+  c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
+  release_tag: v1.2.0
+  release_assets_immutable: true
+  no_release_or_tag: true
+  no_issue_close: true
+  no_merge_without_owner_go: true
+  no_historical_document_rewrite: true
   one_logical_change_per_pr: true
   evidence_before_claims: true
-  current_main_is_not_stable: false
-  stable_promotion: true
-  release_authorized: true
-  tag_authorized: true
-  ownership_position: A
-  ownership_position_decision_record: >-
-    docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md
-  no_rust_equivalent_lifetime_region_claim: true
-  no_hidden_host_authority: true
-  no_global_refactor_unless_invariant_cannot_be_preserved_otherwise: true
-  no_stable_abstraction_depends_on_unstable_internal_crate_apis: true
-  no_async_await: true
-  no_broad_dynamic_dispatch_or_reflection: true
-  no_macro_system: true
-  no_gc_object_runtime: true
-  no_systems_language_claims_beyond_evidence: true
-  no_stable_release_claim: false
-  no_historical_document_rewrite: true
+  unrelated_fa_findings_out_of_scope: true
