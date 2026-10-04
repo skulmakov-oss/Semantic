@@ -82,8 +82,8 @@ fn ssf12_verdict_contains_all_mandatory_sections() {
         "32. Skipped Gates",
         "33. Artifact / Evidence Hashes",
         "34. Foundation Oracle Verdict",
-        "35. Stable Foundation Promotion Recommendation",
-        "36. Human Decision Required",
+        "35. Stable Foundation Promotion Decision",
+        "36. Human Decision",
     ];
 
     for section in required_sections {
@@ -127,15 +127,14 @@ fn ssf12_verdicts_are_explicit_and_honest() {
 #[test]
 fn ssf12_does_not_falsely_claim_promotion_or_release() {
     let harness = read(".harness/current.task.yaml");
-    assert!(harness.contains("stable_promotion: false"));
-    assert!(harness.contains("no_release_or_tag: true"));
-    assert!(harness.contains("release_authorized: false"));
-    assert!(harness.contains("tag_authorized: false"));
+    assert!(harness.contains("stable_promotion: true"));
+    assert!(harness.contains("release_authorized: true"));
+    assert!(harness.contains("tag_authorized: true"));
 
     let verdict = read(VERDICT_FILE);
+    assert!(verdict.contains("Stable Foundation Promotion Decision"));
+    assert!(verdict.contains("PROMOTE WITH EXPLICIT LIMITS"));
     assert!(!verdict.contains("```text\nPROMOTE\n```"));
-    assert!(!verdict.contains("RELEASE AUTHORIZED"));
-    assert!(verdict.contains("Promotion decision remains reserved to the repository owner."));
 }
 
 #[test]
@@ -146,23 +145,23 @@ fn ssf12_summary_counts_agree_across_all_artifacts() {
 
     // Summary counts in verdict section 9
     assert!(verdict.contains("- **Total Gates**: 78"));
-    assert!(verdict.contains("- **PASS**: 76"));
+    assert!(verdict.contains("- **PASS**: 77"));
     assert!(verdict.contains("- **FAIL**: 0"));
-    assert!(verdict.contains("- **BLOCKED**: 1 (`Q-02`)"));
+    assert!(verdict.contains("- **BLOCKED**: 0"));
     assert!(verdict.contains("- **NOT_APPLICABLE**: 1 (`G-08`)"));
 
     // Summary counts in matrix section 3
     assert!(matrix.contains("- **Total Qualification Gates**: 78"));
-    assert!(matrix.contains("- **PASS**: 76"));
+    assert!(matrix.contains("- **PASS**: 77"));
     assert!(matrix.contains("- **FAIL**: 0"));
-    assert!(matrix.contains("- **BLOCKED**: 1 (`Q-02`"));
+    assert!(matrix.contains("- **BLOCKED**: 0"));
     assert!(matrix.contains("- **NOT_APPLICABLE**: 1 (`G-08`"));
 
     // Summary counts in manifest json
     assert!(manifest.contains("\"total\": 78"));
-    assert!(manifest.contains("\"pass\": 76"));
+    assert!(manifest.contains("\"pass\": 77"));
     assert!(manifest.contains("\"fail\": 0"));
-    assert!(manifest.contains("\"blocked\": 1"));
+    assert!(manifest.contains("\"blocked\": 0"));
     assert!(manifest.contains("\"not_applicable\": 1"));
     assert!(manifest.contains("\"skipped\": 0"));
     assert!(manifest.contains("\"inconclusive\": 0"));
@@ -189,10 +188,7 @@ fn ssf12_manifest_gate_level_integrity() {
         match g["status"].as_str().expect("status string") {
             "PASS" => pass += 1,
             "FAIL" => fail += 1,
-            "BLOCKED" => {
-                blocked += 1;
-                assert_eq!(id, "Q-02", "only Q-02 may be BLOCKED");
-            }
+            "BLOCKED" => blocked += 1,
             "NOT_APPLICABLE" => {
                 na += 1;
                 assert_eq!(id, "G-08", "only G-08 may be NOT_APPLICABLE");
@@ -201,9 +197,9 @@ fn ssf12_manifest_gate_level_integrity() {
         }
     }
 
-    assert_eq!(pass, 76, "derived pass count must be 76");
+    assert_eq!(pass, 77, "derived pass count must be 77");
     assert_eq!(fail, 0, "derived fail count must be 0");
-    assert_eq!(blocked, 1, "derived blocked count must be 1");
+    assert_eq!(blocked, 0, "derived blocked count must be 0");
     assert_eq!(na, 1, "derived not_applicable count must be 1");
 }
 

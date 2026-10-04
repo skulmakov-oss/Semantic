@@ -19,11 +19,11 @@ ORACLE QUALIFIED WITH EXPLICIT LIMITS
 ```
 **Finding**: The core deterministic compiler, SemCode binary format, verifier admission gate, deterministic VM execution engine, Quad four-state logic (`N/F/T/S`), runtime quotas/traps, Position A ownership semantics, application capability boundary, and the admitted Bootstrap-comparable SSF-11 conformance corpus cases are **fully qualified, bit-deterministic, and trustworthy** as the behavioral reference oracle for the future Semantic → Semantic Bootstrap compiler transition.
 
-### B. Stable Foundation Promotion Recommendation
+### B. Stable Foundation Promotion Decision
 ```text
 PROMOTE WITH EXPLICIT LIMITS
 ```
-**Finding**: Promotion of candidate C1 to a published Stable Foundation release is **evidence-recommended within the validated Windows x64 platform boundary and documented explicit limits**. All four remediation defects (DEFECT-SSF12-001 through DEFECT-SSF12-004) across layers PR #1979 through PR #1982 have been verified resolved on C1. All 76 executable qualification gates pass 100%, including `cargo test --workspace`, `cargo test --all-targets`, Full 7HELL (Hell 1–7), PRReady, Readiness, and FullPreflight. Zero gates fail. Gate Q-02 remains BLOCKED as an honest consequence of pre-publication status. Promotion recommendation is evidence-derived. Promotion decision remains reserved to the repository owner.
+**Finding**: Promotion of candidate C1 to a published Stable Foundation release has been **authorized by the repository owner and successfully executed within the validated Windows x64 platform boundary and documented explicit limits**. All four C1 remediation defects (DEFECT-SSF12-001 through DEFECT-SSF12-004) and the qualification tooling defect (DEFECT-SSF12-005) have been verified resolved. All 77 applicable qualification gates pass 100%, including `cargo test --workspace`, `cargo test --all-targets`, Full 7HELL (Hell 1–7), PRReady, Readiness, FullPreflight, and Gate Q-02 (Published Downloaded Asset Smoke). Zero gates fail. Zero gates are blocked. The Semantic Stable Foundation has been promoted with explicit limits.
 
 ---
 
@@ -117,9 +117,9 @@ The following surfaces are intentionally outside the qualified Foundation contou
 
 Refer to [`reports/ssf12/qualification_matrix.md`](ssf12/qualification_matrix.md) and [`reports/ssf12/qualification_manifest.json`](ssf12/qualification_manifest.json) for the full 78-gate inventory.
 - **Total Gates**: 78
-- **PASS**: 76
+- **PASS**: 77
 - **FAIL**: 0
-- **BLOCKED**: 1 (`Q-02`)
+- **BLOCKED**: 0
 - **NOT_APPLICABLE**: 1 (`G-08`)
 - **SKIPPED**: 0
 - **INCONCLUSIVE**: 0
@@ -273,7 +273,7 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 - **Hell 7 (PCC Documentation Integrity)**: PASS
 - **Overall Result**: ALL 7 GATES PASSED!
 
-**Architectural Adjudication**: A full 7HELL PASS alone does not imply overall SSF-12 PASS. Full 7HELL passed all 7 foundational core gates (Hell 1–7). The broader SSF-12 contour was also evaluated independently across all 78 qualification gates; no C1 gate failed. Gate Q-02 remains BLOCKED because it is post-publication smoke; Gate G-08 remains NOT_APPLICABLE by authority.
+**Architectural Adjudication**: A full 7HELL PASS alone does not imply overall SSF-12 PASS. Full 7HELL passed all 7 foundational core gates (Hell 1–7). The broader SSF-12 contour was also evaluated independently across all 78 qualification gates; no C1 gate failed. Gate Q-02 passed against the public release download; Gate G-08 remains NOT_APPLICABLE by authority.
 ---
 
 ## 23. Release Readiness Gates
@@ -321,8 +321,15 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 
 ## 27. Published Asset Smoke Status (Stage B)
 
-- **Status**: `PENDING_HUMAN_PROMOTION_AND_PUBLICATION`.
-- *Rationale*: Candidate SHA `89641da8237f4fcefb50cf1958a50e4d4003aea7` has not been published as a release asset. Post-publication verification cannot be evaluated before publication.
+- **Status**: **PASS**.
+- **Command**: `pwsh -File scripts/verify_release_assets.ps1 -Tag v1.2.0 -Repository skulmakov-oss/Semantic`
+- **Result**: `release asset smoke verification passed` (exit code 0; Minimal, Builtin f64, and Heavy trace scenarios all PASS).
+- **Public Release**: `https://github.com/skulmakov-oss/Semantic/releases/tag/v1.2.0` (Tag `v1.2.0` dereferences strictly to candidate SHA `89641da8237f4fcefb50cf1958a50e4d4003aea7`).
+- **Verified Download Hashes**:
+  - `smc.exe`: 4,572,160 bytes, SHA-256 `e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a`
+  - `svm.exe`: 442,880 bytes, SHA-256 `9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf`
+  - `semantic-language-windows-x64-v1.2.0.zip`: 2,260,731 bytes, SHA-256 `97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17`
+- **Toolchain Identity**: `semcode_format` = `SEMCOD22` (rev 23).
 
 ---
 
@@ -353,12 +360,12 @@ Authoritative script `pwsh -File tools/7hell/run.ps1` was executed end-to-end on
 | **R2** | String escape processing (`\n` emits raw bytes `\` and `n`) | `tests/ssf07_text_family_freeze.rs` | 3 passed; string literals preserve raw slices | Explicit operational limit; text literals treat quotes as raw slices |
 | **R3** | Generic rejection diagnostic | `tests/ssf11_canonical_applications.rs` (F05) | Emits english diagnostic string `#1717` | Explicit operational boundary; marked non-Bootstrap-comparable |
 | **R4** | Host paths in diagnostics | Host CLI JSON diagnostic rendering | Absolute host path appears in source field | Presentation artifact; substring matching in corpus |
-| **Q-02** | Published downloaded asset smoke | `scripts/verify_release_assets.ps1` | No published release tag exists for C1 | Gate BLOCKED pending human release decision and publication |
+| **Q-02** | Published downloaded asset smoke | pwsh -File scripts/verify_release_assets.ps1 -Tag v1.2.0 -Repository skulmakov-oss/Semantic | Verified against public GitHub release download; all 3 scenarios PASS | Gate PASS (publicly verified release assets) |
 | **Platform Boundary** | Release target architecture | `docs/release_artifact_model.md` | Validated on Windows x64 (`x86_64-pc-windows-msvc`) | Explicit operational limit; Linux/macOS out of contour for v1.2.0 baseline |
 
 ### Invariant:
-- No promotion or release is claimed.
-- Foundation Oracle verdict is strictly distinct from the human release decision.
+- Foundation Oracle verdict (`ORACLE QUALIFIED WITH EXPLICIT LIMITS`) is strictly distinct from the owner release/promotion decision (`PROMOTE WITH EXPLICIT LIMITS`).
+- Candidate C1 (`89641da8237f4fcefb50cf1958a50e4d4003aea7`) is immutable, release `v1.2.0` is published and publicly verified, and all documented explicit operational limits are strictly preserved.
 ---
 
 ## 30. Earlier-phase Returns / Blockers
@@ -383,6 +390,14 @@ All four remediation defects identified during initial qualification of C0 are v
 - **DEFECT-SSF12-004 (Windows CreateProcess command-line limit in tools/7hell/run.ps1 Hell 1)**:
   - **Authoritative Ownership**: PR #1982; `tools/7hell/run.ps1`.
   - **Verification**: `pwsh -File tools/7hell/run.ps1` Hell 1 and complete suite Hell 1–7 execute and PASS without command-line length overflow. Status: **VERIFIED RESOLVED**.
+
+### Qualification Tooling Remediation (DEFECT-SSF12-005):
+- **DEFECT-SSF12-005 (Release-asset smoke verifier stale SemCode format expectations)**:
+  - **Classification**: QUALIFICATION TOOLING DEFECT (did NOT affect C1 implementation, binary bytes, or release assets).
+  - **Affected**: `scripts/verify_release_assets.ps1`.
+  - **Root Cause**: Q-02 asset smoke script retained historical hardcoded `SEMCODE0`/`SEMCODE1` assertions while C1 canonical format is `SEMCOD22` revision 23.
+  - **Authoritative Ownership**: PR #1984 (`QUALIFICATION_TOOL_SHA = d7578ab761a80c795ac0f67c23d9eec4ec4012f0`).
+  - **Verification**: `pwsh -File scripts/verify_release_assets.ps1 -Tag v1.2.0 -Repository skulmakov-oss/Semantic` executed against fresh public download from GitHub Releases; all 3 smoke scenarios PASS with exit code 0. Status: **VERIFIED RESOLVED**.
 ---
 
 ## 31. Failed Gates
@@ -415,34 +430,29 @@ The Rust Semantic Foundation candidate `89641da8237f4fcefb50cf1958a50e4d4003aea7
 
 ---
 
-## 35. Stable Foundation Promotion Recommendation
+## 35. Stable Foundation Promotion Decision
 
 ```text
 PROMOTE WITH EXPLICIT LIMITS
 ```
 
-Promotion of candidate `89641da8237f4fcefb50cf1958a50e4d4003aea7` (C1) to a published Stable Foundation release is **evidence-recommended within the validated Windows x64 platform boundary and documented explicit limits**. All 76 executable qualification gates pass, zero gates fail, and all four remediation defects are verified resolved.
-
-Promotion recommendation is evidence-derived. Promotion decision remains reserved to the repository owner.
+The repository owner has explicitly authorized the Stable Foundation promotion decision: **`PROMOTE WITH EXPLICIT LIMITS`**.
+Candidate `89641da8237f4fcefb50cf1958a50e4d4003aea7` (C1) is promoted to a published Stable Foundation release within the validated Windows x64 platform boundary and documented explicit limits. All 77 applicable qualification gates pass 100%, zero gates fail, zero gates are blocked, Gate Q-02 is verified against the public GitHub release download, all four C1 remediation defects (DEFECT-SSF12-001 through DEFECT-SSF12-004) are verified resolved, and the qualification tooling defect (DEFECT-SSF12-005) is resolved. The Semantic Stable Foundation has been promoted with explicit limits.
 
 ---
 
-## 36. Human Decision Required
+## 36. Human Decision and Closeout
 
-This qualification report provides empirical evidence and architectural assessment.
-
-In accordance with Section 34, 42, and 43 of the SSF-12 requalification directive:
-- Promotion recommendation is evidence-derived. Promotion decision remains reserved to the repository owner.
-- No human Stable Foundation promotion decision has been made by this qualification task.
+In accordance with Section 34, 42, and 43 of the SSF-12 requalification directive and explicit repository-owner instruction:
+- The repository owner has reviewed the empirical evidence and rendered the explicit promotion decision: `PROMOTE WITH EXPLICIT LIMITS`.
+- Release `v1.2.0` has been published and dereferences strictly to candidate C1 (`89641da8237f4fcefb50cf1958a50e4d4003aea7`).
+- Gate Q-02 (Published Downloaded Asset Smoke) was re-evaluated against the public GitHub release and verified PASS.
 - Historical separation: Candidate C0 remains immutable historical evidence in PR #1978. PR #1978 was not modified. C0 historical verdict remains `ORACLE QUALIFIED WITH EXPLICIT LIMITS` / `DO NOT PROMOTE`.
-- Prohibited operations confirmation:
-  - No implementation repair performed in qualification branch.
-  - No qualification PR merge performed.
-  - No tag created.
-  - No release published.
-  - No Stable promotion performed.
-  - No #1583 close performed.
-  - No #1569 close performed.
-  - No PR #1978 modification performed.
+- Invariant confirmation:
+  - No C1 implementation changes were performed.
+  - Release assets remain byte-identical and immutable.
+  - Historical C0 evidence remains untouched.
+  - Documented explicit limits are preserved.
+  - The Semantic Stable Foundation has been promoted with explicit limits.
 
-**Next Action**: Awaiting explicit repository owner review and instruction.
+**Final Status**: Stable Foundation qualification and promotion complete; ready for evidence reseal, qualification PR #1983 merge, and roadmap closeout.

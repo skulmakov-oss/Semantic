@@ -24,9 +24,9 @@
   ],
   "summary": {
     "total": 78,
-    "pass": 76,
+    "pass": 77,
     "fail": 0,
-    "blocked": 1,
+    "blocked": 0,
     "not_applicable": 1,
     "skipped": 0,
     "inconclusive": 0
@@ -619,10 +619,10 @@
     {
       "id": "Q-02",
       "family": "Family Q (Asset Smoke)",
-      "command": "`pwsh -File scripts/verify_release_assets.ps1 -Tag ...`",
-      "status": "BLOCKED",
+      "command": "`pwsh -File scripts/verify_release_assets.ps1 -Tag v1.2.0 -Repository skulmakov-oss/Semantic`",
+      "status": "PASS",
       "mandatory": true,
-      "evidence_summary": "**PENDING_HUMAN_PROMOTION_AND_PUBLICATION**"
+      "evidence_summary": "release asset smoke verification passed (exit code 0; Minimal, Builtin f64, Heavy trace PASS against public v1.2.0 download)"
     },
     {
       "id": "R-01",
@@ -658,12 +658,6 @@
     }
   ],
   "non_pass_gates": [
-    {
-      "id": "Q-02",
-      "status": "BLOCKED",
-      "signal": "PENDING_HUMAN_PROMOTION_AND_PUBLICATION",
-      "reason": "Post-publication gate; no published release asset exists for candidate C1."
-    },
     {
       "id": "G-08",
       "status": "NOT_APPLICABLE",
@@ -716,8 +710,8 @@
     {
       "id": "Q-02",
       "boundary": "Published downloaded asset smoke",
-      "finding": "No published release tag exists for candidate C1",
-      "disposition": "Gate BLOCKED pending human release decision and publication"
+      "finding": "Public v1.2.0 release assets downloaded and verified; all 3 smoke scenarios pass cleanly",
+      "disposition": "Gate PASS; verified against public GitHub release download"
     },
     {
       "id": "platform",
@@ -758,9 +752,31 @@
       "commit": "89641da8237f4fcefb50cf1958a50e4d4003aea7",
       "authoritative_ownership": "tools/7hell/run.ps1",
       "summary": "Windows CreateProcess command line limit reuse of Invoke-WorkspaceFmtCheck in tools/7hell/run.ps1"
+    },
+    "DEFECT-SSF12-005": {
+      "classification": "QUALIFICATION_TOOLING_DEFECT",
+      "status": "VERIFIED_RESOLVED",
+      "pr": 1984,
+      "commit": "d7578ab761a80c795ac0f67c23d9eec4ec4012f0",
+      "authoritative_ownership": "scripts/verify_release_assets.ps1",
+      "summary": "Release-asset smoke verifier scripts/verify_release_assets.ps1 bound dynamically to downloaded release toolchain SemCode format (SEMCOD22 rev 23); did not affect C1 implementation, binary bytes, or release assets"
     }
   },
   "foundation_oracle_verdict": "ORACLE QUALIFIED WITH EXPLICIT LIMITS",
   "stable_foundation_promotion_recommendation": "PROMOTE WITH EXPLICIT LIMITS",
+  "stable_foundation_promotion_decision": "PROMOTE WITH EXPLICIT LIMITS",
+  "qualification_tool_sha": "d7578ab761a80c795ac0f67c23d9eec4ec4012f0",
+  "published_release": {
+    "tag": "v1.2.0",
+    "url": "https://github.com/skulmakov-oss/Semantic/releases/tag/v1.2.0",
+    "published_at": "2026-10-04T02:06:12Z",
+    "candidate_sha": "89641da8237f4fcefb50cf1958a50e4d4003aea7",
+    "qualification_tool_sha": "d7578ab761a80c795ac0f67c23d9eec4ec4012f0",
+    "smc_exe_sha256": "e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a",
+    "svm_exe_sha256": "9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf",
+    "zip_sha256": "97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17",
+    "semcode_magic": "SEMCOD22",
+    "semcode_revision": 23
+  },
   "evidence_content_sha_description": "This SHA anchors the complete substantive matrix/verdict/guard evidence immediately before manifest sealing."
 }
