@@ -78,3 +78,13 @@ constraints:
   one_logical_change_per_pr: true
   evidence_before_claims: true
   unrelated_fa_findings_out_of_scope: true
+
+# Standing cross-authority anchors carried forward from the sealed SSF
+# envelope (checked by tests/ssf_status_drift.rs against the immutable
+# dependency map / decision record). Historical reference only: they grant
+# no SSF authority to PB-01.
+ssf_reference:
+  active_phase: SSF-12
+  issue: 1583
+  ownership_position: A
+  no_rust_equivalent_lifetime_region_claim: true
