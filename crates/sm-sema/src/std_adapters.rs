@@ -2412,7 +2412,7 @@ Law "Alpha" [priority 7]:
     #[test]
     fn rustlike_policy_error_preserves_frontend_mark_and_kind() {
         let src = "fn main() {\n    let value: f64 = 1.5;\n    return;\n}\n";
-        let profile = ParserProfile::default();
+        let profile = ParserProfile::core();
         let direct =
             parse_program_with_profile(src, &profile).expect_err("strict profile must reject f64");
         let expected_mark = lex(src)
@@ -2536,7 +2536,7 @@ Law "Alpha" [priority 7]:
         // A RustLike-owned error whose real failing token is at byte zero:
         // the strict profile rejects the leading `schema` token itself.
         let src = "schema S { a: i32 }\nfn main() { return; }\n";
-        let profile = ParserProfile::default();
+        let profile = ParserProfile::core();
         let direct = parse_program_with_profile(src, &profile).expect_err("must fail");
         assert_eq!(direct.pos, 0);
         let via_sema = check_source_with_profile(src, &profile).expect_err("must fail");
