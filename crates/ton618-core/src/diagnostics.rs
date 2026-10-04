@@ -43,7 +43,7 @@ pub fn diagnostic_catalog() -> &'static [(&'static str, &'static str)] {
         ("E0216", "Expected ':' in Entity field declaration."),
         ("E0217", "Expected a quoted Law name."),
         ("E0220", "Duplicate Entity declaration."),
-        ("E0221", "Duplicate Law inside the same Entity scope."),
+        ("E0221", "Duplicate Law name within one module."),
         ("E0222", "Law body is empty."),
         ("E0223", "Shadowing is forbidden inside a Law scope."),
         ("E0224", "Empty When condition."),

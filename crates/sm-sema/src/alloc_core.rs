@@ -3,11 +3,17 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use sm_front::{LogosAtom, LogosCompareOp, LogosCondition, NumericLiteral};
 use ton618_core::SourceMark;
 
+/// PB-03 (#1671, #1672): the Logos semantic type model. Source families stay
+/// distinct: `quad` is never `QVec(1)`, `i32`/`u32` and `f64`/`fx` never
+/// collapse. `Unknown` marks unresolved state and never proves anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SemanticType {
-    Int,
+    I32,
+    U32,
+    F64,
     Fx,
     QVec(usize),
     Mask,
@@ -18,10 +24,12 @@ pub enum SemanticType {
     Unknown,
 }
 
-impl core::fmt::Display for SemanticType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let name = match self {
-            SemanticType::Int => "Int",
+impl SemanticType {
+    pub const fn name(self) -> &'static str {
+        match self {
+            SemanticType::I32 => "I32",
+            SemanticType::U32 => "U32",
+            SemanticType::F64 => "F64",
             SemanticType::Fx => "Fx",
             SemanticType::QVec(_) => "QVec",
             SemanticType::Mask => "Mask",
@@ -30,14 +38,28 @@ impl core::fmt::Display for SemanticType {
             SemanticType::Quad => "Quad",
             SemanticType::Unit => "Unit",
             SemanticType::Unknown => "Unknown",
-        };
-        write!(f, "{name}")
+        }
+    }
+}
+
+impl core::fmt::Display for SemanticType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.name())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TypeId(pub u16);
 
+/// FA-03-027 / #1696: interning more distinct types than `TypeId` can name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeRegistryError {
+    CapacityExhausted,
+}
+
+/// Canonical storage/debug identity for semantic types. PB-03 (#1705): its
+/// IDs are not a semantic admission authority; nothing admits or rejects a
+/// program by comparing them.
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
     by_id: Vec<SemanticType>,
@@ -45,18 +67,25 @@ pub struct TypeRegistry {
 }
 
 impl TypeRegistry {
+    /// Distinct types a registry can hold: every `TypeId(u16)` value.
+    pub const CAPACITY: usize = u16::MAX as usize + 1;
+
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn intern(&mut self, ty: SemanticType) -> TypeId {
+    /// Same type → same ID. A new type past [`Self::CAPACITY`] fails without
+    /// changing the registry (no wrapped/aliased ID).
+    pub fn intern(&mut self, ty: SemanticType) -> Result<TypeId, TypeRegistryError> {
         if let Some(id) = self.ids.get(&ty) {
-            return *id;
+            return Ok(*id);
         }
-        let id = TypeId(self.by_id.len() as u16);
+        let raw =
+            u16::try_from(self.by_id.len()).map_err(|_| TypeRegistryError::CapacityExhausted)?;
+        let id = TypeId(raw);
         self.by_id.push(ty);
         self.ids.insert(ty, id);
-        id
+        Ok(id)
     }
 
     pub fn get(&self, id: TypeId) -> Option<SemanticType> {
@@ -71,18 +100,12 @@ impl TypeRegistry {
         self.by_id.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
+
     pub fn pretty(&self, id: TypeId) -> &'static str {
-        match self.get(id).unwrap_or(SemanticType::Unknown) {
-            SemanticType::Int => "Int",
-            SemanticType::Fx => "Fx",
-            SemanticType::QVec(_) => "QVec",
-            SemanticType::Mask => "Mask",
-            SemanticType::Str => "Str",
-            SemanticType::Bool => "Bool",
-            SemanticType::Quad => "Quad",
-            SemanticType::Unit => "Unit",
-            SemanticType::Unknown => "Unknown",
-        }
+        self.get(id).unwrap_or(SemanticType::Unknown).name()
     }
 }
 
@@ -229,18 +252,10 @@ impl LawScheduler {
     }
 }
 
+/// PB-03 (#1672): assignment requires the exact same known family; there is
+/// no implicit `i32`/`u32` -> `fx` (or any other) coercion.
 pub fn is_assignment_compatible(dst: SemanticType, src: SemanticType) -> bool {
-    if dst == src {
-        return true;
-    }
-    match (dst, src) {
-        (SemanticType::Fx, SemanticType::Int) => true,
-        (SemanticType::Int, SemanticType::Fx) => false,
-        (SemanticType::Mask, SemanticType::QVec(_)) => false,
-        (SemanticType::QVec(_), SemanticType::Mask) => false,
-        (SemanticType::QVec(a), SemanticType::QVec(b)) => a == b,
-        _ => false,
-    }
+    dst != SemanticType::Unknown && dst == src
 }
 
 pub fn collect_duplicates<'a, I>(items: I) -> BTreeSet<String>
@@ -258,15 +273,27 @@ where
     dup
 }
 
-pub fn is_dead_when_condition(condition: &str) -> bool {
-    let raw = condition.replace(' ', "");
-    if matches!(raw.as_str(), "false" | "N" | "F") {
-        return true;
+/// FA-03-008 / #1677: a When condition is dead only when it is proven
+/// `bool`-false: the literal `false`, or a comparison of two literals of one
+/// family whose result is false. Quad-valued conditions (`N`, `F`, `T`, `S`,
+/// evidence operators) are never claimed dead: `N` is unknown, not false, and
+/// no Logos contract defines quad-valued When firing.
+pub fn is_dead_when_condition(condition: &LogosCondition) -> bool {
+    match condition {
+        LogosCondition::Atom(LogosAtom::Bool(false)) => true,
+        LogosCondition::Compare { lhs, op, rhs } => {
+            let equal = match (lhs, rhs) {
+                (LogosAtom::Bool(a), LogosAtom::Bool(b)) => a == b,
+                (LogosAtom::Quad(a), LogosAtom::Quad(b)) => a == b,
+                _ => return false,
+            };
+            match op {
+                LogosCompareOp::Eq => !equal,
+                LogosCompareOp::Ne => equal,
+            }
+        }
+        _ => false,
     }
-    matches!(
-        raw.as_str(),
-        "T&F" | "F&T" | "N&T" | "T&N" | "N|false" | "false|N"
-    )
 }
 
 pub fn parse_law_local_decl(effect: &str) -> Option<String> {
@@ -291,71 +318,43 @@ pub fn is_law_name_style_ok(name: &str) -> bool {
     first.is_ascii_uppercase() && !name.contains('_')
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Why a structured When condition has no admitted semantic type.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConditionInferError {
     MismatchedTypes {
         left: SemanticType,
         right: SemanticType,
     },
+    /// A name or `Entity.field` that does not resolve to a typed value.
+    Unresolved(String),
+    /// Operands an evidence/`!` operator does not accept.
+    InvalidOperands(SemanticType),
+    /// `Present(...)` of something other than a resolvable name or field.
+    InvalidPresent,
+    /// Tokens `sm-front` could not project onto the modeled condition surface.
+    Unsupported,
 }
 
+/// FA-03-004 / #1673: `Unknown` never proves compatibility, not even with
+/// itself. Families are exact (#1672): no `i32`/`u32`, `f64`/`fx` or
+/// `quad`/`qvec` cross-compatibility.
 pub fn is_compatible_cmp(left: SemanticType, right: SemanticType) -> bool {
-    if left == right {
-        return true;
-    }
-    if let (SemanticType::QVec(a), SemanticType::QVec(b)) = (left, right) {
-        return a == b;
-    }
-    matches!(
-        (left, right),
-        (SemanticType::Int, SemanticType::Fx) | (SemanticType::Fx, SemanticType::Int)
-    )
+    left != SemanticType::Unknown && right != SemanticType::Unknown && left == right
 }
 
+fn numeric_literal_type(lit: &NumericLiteral) -> SemanticType {
+    match lit {
+        NumericLiteral::I32(_) => SemanticType::I32,
+        NumericLiteral::U32(_) => SemanticType::U32,
+        NumericLiteral::F64(_) => SemanticType::F64,
+        NumericLiteral::Fx(_) => SemanticType::Fx,
+    }
+}
+
+/// The semantic type of one structured atom. Names/fields must resolve to a
+/// known type; otherwise the atom is `Unresolved` (never `Unknown`-as-valid).
 pub fn infer_atom_type_core<FS, FF>(
-    token: &str,
-    resolve_symbol: FS,
-    resolve_field: FF,
-) -> SemanticType
-where
-    FS: Fn(&str) -> Option<SemanticType>,
-    FF: Fn(&str, &str) -> Option<SemanticType>,
-{
-    let t = token.trim();
-    if t.is_empty() {
-        return SemanticType::Unknown;
-    }
-    if t == "true" || t == "false" {
-        return SemanticType::Bool;
-    }
-    if matches!(t, "N" | "F" | "T" | "S") {
-        return SemanticType::Quad;
-    }
-    if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
-        return SemanticType::Str;
-    }
-    if t.chars().all(|c| c.is_ascii_digit()) {
-        return SemanticType::Int;
-    }
-    if t.contains('.') && t.chars().all(|c| c.is_ascii_digit() || c == '.') {
-        return SemanticType::Fx;
-    }
-    if t.starts_with("Present(") {
-        return SemanticType::Bool;
-    }
-    if let Some((ent, field)) = t.split_once('.') {
-        if let Some(ty) = resolve_field(ent.trim(), field.trim()) {
-            return ty;
-        }
-    }
-    if let Some(ty) = resolve_symbol(t) {
-        return ty;
-    }
-    SemanticType::Unknown
-}
-
-pub fn infer_when_condition_type_core<FS, FF>(
-    expr: &str,
+    atom: &LogosAtom,
     resolve_symbol: FS,
     resolve_field: FF,
 ) -> Result<SemanticType, ConditionInferError>
@@ -363,114 +362,83 @@ where
     FS: Fn(&str) -> Option<SemanticType>,
     FF: Fn(&str, &str) -> Option<SemanticType>,
 {
-    let expr = expr.trim();
-    if expr.contains("==") || expr.contains("!=") {
-        let op = if expr.contains("==") { "==" } else { "!=" };
-        let mut split = expr.splitn(2, op);
-        let left = split.next().unwrap_or("").trim();
-        let right = split.next().unwrap_or("").trim();
-        let lt = infer_atom_type_core(left, &resolve_symbol, &resolve_field);
-        let rt = infer_atom_type_core(right, &resolve_symbol, &resolve_field);
-        if !is_compatible_cmp(lt, rt) {
-            return Err(ConditionInferError::MismatchedTypes {
-                left: lt,
-                right: rt,
-            });
+    let resolved = |ty: Option<SemanticType>, what: String| match ty {
+        Some(ty) if ty != SemanticType::Unknown => Ok(ty),
+        _ => Err(ConditionInferError::Unresolved(what)),
+    };
+    match atom {
+        LogosAtom::Bool(_) => Ok(SemanticType::Bool),
+        LogosAtom::Quad(_) => Ok(SemanticType::Quad),
+        LogosAtom::Number(lit) => Ok(numeric_literal_type(lit)),
+        LogosAtom::Text(_) => Ok(SemanticType::Str),
+        LogosAtom::Name(name) => resolved(resolve_symbol(name), name.clone()),
+        LogosAtom::Field { entity, field } => {
+            resolved(resolve_field(entity, field), format!("{entity}.{field}"))
         }
-        return Ok(SemanticType::Bool);
     }
-    if expr.contains("Present(") {
-        return Ok(SemanticType::Bool);
-    }
-    if expr.contains('&') || expr.contains('|') || expr.contains("->") {
-        return Ok(SemanticType::Quad);
-    }
-    Ok(infer_atom_type_core(expr, resolve_symbol, resolve_field))
 }
 
-pub fn track_entity_field_usage_core<F>(text: &str, mut on_field: F)
+/// FA-03-005/006/007 (#1674-#1676): the semantic type of a structured When
+/// condition. Every result is proven from resolved operands; nothing is
+/// inferred from text.
+pub fn infer_when_condition_type_core<FS, FF>(
+    condition: &LogosCondition,
+    resolve_symbol: FS,
+    resolve_field: FF,
+) -> Result<SemanticType, ConditionInferError>
 where
-    F: FnMut(&str, &str),
+    FS: Fn(&str) -> Option<SemanticType>,
+    FF: Fn(&str, &str) -> Option<SemanticType>,
 {
-    let mut token = String::new();
-    for ch in text.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' {
-            token.push(ch);
-        } else if !token.is_empty() {
-            if let Some((ent, field)) = token.split_once('.') {
-                on_field(ent, field);
+    let atom = |a: &LogosAtom| infer_atom_type_core(a, &resolve_symbol, &resolve_field);
+    match condition {
+        LogosCondition::Atom(a) => atom(a),
+        LogosCondition::Compare { lhs, rhs, .. } => {
+            let (lt, rt) = (atom(lhs)?, atom(rhs)?);
+            if !is_compatible_cmp(lt, rt) {
+                return Err(ConditionInferError::MismatchedTypes {
+                    left: lt,
+                    right: rt,
+                });
             }
-            token.clear();
+            Ok(SemanticType::Bool)
         }
-    }
-    if !token.is_empty() {
-        if let Some((ent, field)) = token.split_once('.') {
-            on_field(ent, field);
-        }
-    }
-}
-
-pub fn has_magic_number_core(text: &str) -> bool {
-    let mut token = String::new();
-    for ch in text.chars() {
-        if ch.is_ascii_digit() || ch == '.' {
-            token.push(ch);
-            continue;
-        }
-        if !token.is_empty() {
-            if is_magic_numeric_token_core(&token) {
-                return true;
+        LogosCondition::Present(target) => match target {
+            LogosAtom::Name(_) | LogosAtom::Field { .. } => {
+                atom(target).map(|_| SemanticType::Bool)
             }
-            token.clear();
+            _ => Err(ConditionInferError::InvalidPresent),
+        },
+        LogosCondition::Not(a) => match atom(a)? {
+            ty @ (SemanticType::Quad | SemanticType::Bool) => Ok(ty),
+            other => Err(ConditionInferError::InvalidOperands(other)),
+        },
+        LogosCondition::Evidence { operands, .. } => {
+            let mut result = None;
+            for operand in operands {
+                let ty = atom(operand)?;
+                match (result, ty) {
+                    (None, SemanticType::Quad | SemanticType::Bool) => result = Some(ty),
+                    (Some(prev), _) if prev == ty => {}
+                    _ => return Err(ConditionInferError::InvalidOperands(ty)),
+                }
+            }
+            result.ok_or(ConditionInferError::Unsupported)
         }
+        LogosCondition::Unsupported => Err(ConditionInferError::Unsupported),
     }
-    if !token.is_empty() && is_magic_numeric_token_core(&token) {
-        return true;
-    }
-    false
 }
 
-fn is_magic_numeric_token_core(tok: &str) -> bool {
-    if tok.chars().all(|c| c == '.' || c.is_ascii_digit()) {
-        if let Ok(v) = tok.parse::<f64>() {
-            return !(v == 0.0 || v == 1.0);
-        }
-    }
-    false
-}
-
-pub fn fold_fx_const_call_core(effect: &str) -> Option<String> {
-    let compact: String = effect.chars().filter(|c| !c.is_whitespace()).collect();
-    let e = compact.as_str();
-    let (op, rest) = if let Some(x) = e.strip_prefix("fx.add(") {
-        ("add", x)
-    } else if let Some(x) = e.strip_prefix("fx.sub(") {
-        ("sub", x)
-    } else if let Some(x) = e.strip_prefix("fx.mul(") {
-        ("mul", x)
-    } else {
-        ("div", e.strip_prefix("fx.div(")?)
+/// FA-03-011 / #1680: W0253 applies to parsed numeric literals only; `0` and
+/// `1` stay exempt (pre-existing policy).
+pub fn is_magic_number_atom(atom: &LogosAtom) -> bool {
+    let value = match atom {
+        LogosAtom::Number(NumericLiteral::I32(v)) => f64::from(*v),
+        LogosAtom::Number(NumericLiteral::U32(v)) => f64::from(*v),
+        LogosAtom::Number(NumericLiteral::F64(v) | NumericLiteral::Fx(v)) => *v,
+        _ => return false,
     };
-    let inner = rest.strip_suffix(')')?;
-    let mut parts = inner.split(',');
-    let a = parts.next()?.trim().parse::<f64>().ok()?;
-    let b = parts.next()?.trim().parse::<f64>().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    let v = match op {
-        "add" => a + b,
-        "sub" => a - b,
-        "mul" => a * b,
-        "div" => {
-            if b == 0.0 {
-                return None;
-            }
-            a / b
-        }
-        _ => return None,
-    };
-    Some(format!("{}", v))
+    value != 0.0 && value != 1.0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -496,19 +464,6 @@ pub fn validate_when_non_empty_core(
         });
     }
     Ok(())
-}
-
-pub fn infer_law_entity_core<F>(first_when_condition: Option<&str>, has_entity: F) -> Option<String>
-where
-    F: Fn(&str) -> bool,
-{
-    let cond = first_when_condition?;
-    let prefix = cond.split('.').next()?.trim();
-    if has_entity(prefix) {
-        Some(prefix.to_string())
-    } else {
-        None
-    }
 }
 
 pub fn is_large_law_core(when_count: usize) -> bool {
@@ -1166,10 +1121,10 @@ mod tests {
     #[test]
     fn type_registry_roundtrip() {
         let mut reg = TypeRegistry::new();
-        let a = reg.intern(SemanticType::Int);
-        let b = reg.intern(SemanticType::Int);
+        let a = reg.intern(SemanticType::I32).expect("intern");
+        let b = reg.intern(SemanticType::I32).expect("intern");
         assert_eq!(a, b);
-        assert_eq!(reg.get(a), Some(SemanticType::Int));
+        assert_eq!(reg.get(a), Some(SemanticType::I32));
         assert_eq!(reg.len(), 1);
     }
 
@@ -1178,7 +1133,7 @@ mod tests {
         let mut st = SymbolTable::new();
         st.insert(Symbol {
             name: "x".to_string(),
-            ty: SemanticType::Int,
+            ty: SemanticType::I32,
             scope: ScopeKind::Global,
         })
         .expect("insert");
@@ -1189,7 +1144,7 @@ mod tests {
             scope: ScopeKind::Law,
         })
         .expect("insert");
-        assert_eq!(st.resolve("x").map(|s| s.ty), Some(SemanticType::Int));
+        assert_eq!(st.resolve("x").map(|s| s.ty), Some(SemanticType::I32));
         assert_eq!(st.resolve("y").map(|s| s.ty), Some(SemanticType::Fx));
         st.pop();
         assert!(st.resolve("y").is_none());
@@ -1394,23 +1349,41 @@ Import pub "a.sm"
 
     #[test]
     fn dead_when_condition_smoke() {
-        assert!(is_dead_when_condition("false"));
-        assert!(is_dead_when_condition("T & F"));
-        assert!(!is_dead_when_condition("Sensor.val == T"));
+        let field = LogosAtom::Field {
+            entity: "Sensor".to_string(),
+            field: "val".to_string(),
+        };
+        assert!(is_dead_when_condition(&LogosCondition::Atom(
+            LogosAtom::Bool(false)
+        )));
+        assert!(is_dead_when_condition(&LogosCondition::Compare {
+            lhs: LogosAtom::Quad(sm_front::QuadVal::T),
+            op: LogosCompareOp::Eq,
+            rhs: LogosAtom::Quad(sm_front::QuadVal::F),
+        }));
+        assert!(!is_dead_when_condition(&LogosCondition::Compare {
+            lhs: field,
+            op: LogosCompareOp::Eq,
+            rhs: LogosAtom::Quad(sm_front::QuadVal::T),
+        }));
     }
 
     #[test]
     fn infer_when_type_mismatch_reports_error() {
         let err = infer_when_condition_type_core(
-            "x == \"s\"",
-            |name| (name == "x").then_some(SemanticType::Int),
+            &LogosCondition::Compare {
+                lhs: LogosAtom::Name("x".to_string()),
+                op: LogosCompareOp::Eq,
+                rhs: LogosAtom::Text("\"s\"".to_string()),
+            },
+            |name| (name == "x").then_some(SemanticType::I32),
             |_e, _f| None,
         )
         .expect_err("must fail");
         assert_eq!(
             err,
             ConditionInferError::MismatchedTypes {
-                left: SemanticType::Int,
+                left: SemanticType::I32,
                 right: SemanticType::Str
             }
         );
@@ -1418,17 +1391,13 @@ Import pub "a.sm"
 
     #[test]
     fn magic_number_detector_smoke() {
-        assert!(has_magic_number_core("x + 2"));
-        assert!(!has_magic_number_core("x + 1"));
-    }
-
-    #[test]
-    fn fold_fx_const_call_smoke() {
-        assert_eq!(
-            fold_fx_const_call_core("fx.add(1.0, 2.0)"),
-            Some("3".to_string())
-        );
-        assert_eq!(fold_fx_const_call_core("fx.div(1.0, 0.0)"), None);
+        assert!(is_magic_number_atom(&LogosAtom::Number(
+            NumericLiteral::I32(2)
+        )));
+        assert!(!is_magic_number_atom(&LogosAtom::Number(
+            NumericLiteral::I32(1)
+        )));
+        assert!(!is_magic_number_atom(&LogosAtom::Text("\"2\"".to_string())));
     }
 
     #[test]
@@ -1437,14 +1406,6 @@ Import pub "a.sm"
         assert_eq!(e1.code, "E0224");
         let e2 = validate_when_non_empty_core("x", "   ").expect_err("must fail");
         assert_eq!(e2.code, "E0225");
-    }
-
-    #[test]
-    fn infer_law_entity_from_first_when() {
-        let got = infer_law_entity_core(Some("Sensor.val == T"), |e| e == "Sensor");
-        assert_eq!(got.as_deref(), Some("Sensor"));
-        let none = infer_law_entity_core(Some("Unknown.val == T"), |e| e == "Sensor");
-        assert!(none.is_none());
     }
 
     #[test]

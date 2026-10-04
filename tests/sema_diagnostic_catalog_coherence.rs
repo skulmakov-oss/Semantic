@@ -114,12 +114,10 @@ fn rendered_dead_when_and_constant_fold_warnings_carry_help() {
     let cases = [
         (
             "W0240",
-            "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When N ->\n        Pulse.emit(\"x\")\n",
+            "Entity A:\n    state x: quad\nLaw \"L\" [priority 1]:\n    When false ->\n        Pulse.emit(\"x\")\n",
         ),
-        (
-            "W0241",
-            "Law \"L\" [priority 1]:\n    When true -> fx.add(1.0, 2.0)\n",
-        ),
+        // PB-03 / #1678: W0241 is no longer emitted (no host-f64 fx folding);
+        // its catalog/help entry is covered by the static help test above.
     ];
     for (code, src) in cases {
         let report = check_source(src).unwrap_or_else(|e| panic!("{code} fixture failed: {e}"));

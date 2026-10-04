@@ -4,14 +4,15 @@ use crate::types::{
     BlockExpr, CallArg, CaptureMode, ClosureCapturePolicy, ClosureLiteral, ClosureValueFamily,
     ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, FrontendErrorDetail,
     FrontendErrorItem, Function, GrammarAdmission, IfExpr, IfLetExpr, ImplDecl, IntRangePattern,
-    IterableLoopDesugaring, LogosEntity, LogosEntityField, LogosEntityFieldKind, LogosImport,
-    LogosLaw, LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr,
-    MatchExprArm, MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl,
-    RecordField, RecordFieldExpr, RecordInitField, RecordLiteralExpr, RecordPatternItem,
-    RecordPatternTarget, RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole, SchemaShape,
-    SchemaVariant, SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral,
-    SequenceType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind,
-    TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
+    IterableLoopDesugaring, LogosAtom, LogosCompareOp, LogosCondition, LogosEntity,
+    LogosEntityField, LogosEntityFieldKind, LogosEvidenceOp, LogosImport, LogosLaw, LogosProgram,
+    LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm, MatchPattern,
+    NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl, RecordField, RecordFieldExpr,
+    RecordInitField, RecordLiteralExpr, RecordPatternItem, RecordPatternTarget, RecordUpdateExpr,
+    SchemaDecl, SchemaField, SchemaRole, SchemaShape, SchemaVariant, SchemaVersion,
+    SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral, SequenceType, Stmt, StmtId,
+    SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind, TraitBound, TraitDecl,
+    TraitMethodSig, TuplePatternItem, Type, UnaryOp,
 };
 use crate::CompilePolicyView;
 use alloc::boxed::Box;
@@ -33,6 +34,146 @@ fn canonical_profile_admission(profile: &ParserProfile) -> Result<(), FrontendEr
     profile
         .validate_for_canonical_source()
         .map_err(|e| FrontendError::policy_violation(0, format!("profile: {e}")))
+}
+
+/// PB-03: classify one canonical `Num` token with the RustLike numeric
+/// literal rules (suffix family, unsuffixed integer = `i32`, unsuffixed
+/// decimal = `f64`). `None` for a token those rules reject.
+fn logos_numeric_literal(text: &str) -> Option<NumericLiteral> {
+    let (core, suffix) = split_numeric_suffix(text);
+    match suffix {
+        Some("i32") => parse_i32_literal(core, 0).ok().map(NumericLiteral::I32),
+        Some("u32") => parse_u32_literal(core, 0).ok().map(NumericLiteral::U32),
+        Some("f64") => parse_decimal_f64_literal(core, "f64", 0)
+            .ok()
+            .map(NumericLiteral::F64),
+        Some("fx") => parse_decimal_f64_literal(core, "fx", 0)
+            .ok()
+            .map(NumericLiteral::Fx),
+        Some(_) => None,
+        None if core.contains('.') => parse_decimal_f64_literal(core, "f64", 0)
+            .ok()
+            .map(NumericLiteral::F64),
+        None => parse_i32_literal(core, 0).ok().map(NumericLiteral::I32),
+    }
+}
+
+/// One atom starting at `tokens[i]`, with the index after it.
+fn logos_atom_at(tokens: &[Token], i: usize) -> Option<(LogosAtom, usize)> {
+    let tok = tokens.get(i)?;
+    let atom = match tok.kind {
+        TokenKind::KwTrue => LogosAtom::Bool(true),
+        TokenKind::KwFalse => LogosAtom::Bool(false),
+        TokenKind::QuadN => LogosAtom::Quad(QuadVal::N),
+        TokenKind::QuadF => LogosAtom::Quad(QuadVal::F),
+        TokenKind::QuadT => LogosAtom::Quad(QuadVal::T),
+        TokenKind::QuadS => LogosAtom::Quad(QuadVal::S),
+        TokenKind::Num => LogosAtom::Number(logos_numeric_literal(&tok.text)?),
+        TokenKind::String => LogosAtom::Text(tok.text.clone()),
+        TokenKind::Ident => {
+            let is_field = tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::Dot)
+                && tokens.get(i + 2).map(|t| t.kind) == Some(TokenKind::Ident);
+            if is_field {
+                return Some((
+                    LogosAtom::Field {
+                        entity: tok.text.clone(),
+                        field: tokens[i + 2].text.clone(),
+                    },
+                    i + 3,
+                ));
+            }
+            LogosAtom::Name(tok.text.clone())
+        }
+        _ => return None,
+    };
+    Some((atom, i + 1))
+}
+
+/// PB-03: every lexical atom of a `When` fragment, in source order.
+fn logos_atoms(tokens: &[Token]) -> Vec<LogosAtom> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        match logos_atom_at(tokens, i) {
+            Some((atom, next)) => {
+                out.push(atom);
+                i = next;
+            }
+            None => i += 1,
+        }
+    }
+    out
+}
+
+/// PB-03: project a `When` condition onto the modeled condition surface.
+/// Anything else is `Unsupported` (never guessed from text).
+fn logos_condition_structure(tokens: &[Token]) -> LogosCondition {
+    let atom_exact = |from: usize| match logos_atom_at(tokens, from) {
+        Some((atom, next)) if next == tokens.len() => Some(atom),
+        _ => None,
+    };
+    let Some(first) = tokens.first() else {
+        return LogosCondition::Unsupported;
+    };
+    if first.kind == TokenKind::Ident
+        && first.text == "Present"
+        && tokens.get(1).map(|t| t.kind) == Some(TokenKind::LParen)
+    {
+        return match logos_atom_at(tokens, 2) {
+            Some((atom @ (LogosAtom::Name(_) | LogosAtom::Field { .. }), next))
+                if next + 1 == tokens.len() && tokens[next].kind == TokenKind::RParen =>
+            {
+                LogosCondition::Present(atom)
+            }
+            _ => LogosCondition::Unsupported,
+        };
+    }
+    if first.kind == TokenKind::Bang {
+        return atom_exact(1).map_or(LogosCondition::Unsupported, LogosCondition::Not);
+    }
+    let Some((lhs, mut i)) = logos_atom_at(tokens, 0) else {
+        return LogosCondition::Unsupported;
+    };
+    if i == tokens.len() {
+        return LogosCondition::Atom(lhs);
+    }
+    let op_kind = tokens[i].kind;
+    match op_kind {
+        TokenKind::EqEq | TokenKind::Ne => {
+            let op = if op_kind == TokenKind::EqEq {
+                LogosCompareOp::Eq
+            } else {
+                LogosCompareOp::Ne
+            };
+            atom_exact(i + 1).map_or(LogosCondition::Unsupported, |rhs| LogosCondition::Compare {
+                lhs,
+                op,
+                rhs,
+            })
+        }
+        TokenKind::AndAnd | TokenKind::OrOr => {
+            let op = if op_kind == TokenKind::AndAnd {
+                LogosEvidenceOp::And
+            } else {
+                LogosEvidenceOp::Or
+            };
+            let mut operands = vec![lhs];
+            while i < tokens.len() {
+                if tokens[i].kind != op_kind {
+                    return LogosCondition::Unsupported;
+                }
+                match logos_atom_at(tokens, i + 1) {
+                    Some((atom, next)) => {
+                        operands.push(atom);
+                        i = next;
+                    }
+                    None => return LogosCondition::Unsupported,
+                }
+            }
+            LogosCondition::Evidence { op, operands }
+        }
+        _ => LogosCondition::Unsupported,
+    }
 }
 
 /// Which surface's qvec spelling [`Parser::parse_qvec_dimension`] admits.
@@ -3824,6 +3965,9 @@ impl<'a> Parser<'a> {
                 condition,
                 effect,
                 mark: when_tok.mark,
+                structure: logos_condition_structure(&condition_tokens),
+                condition_atoms: logos_atoms(&condition_tokens),
+                effect_atoms: logos_atoms(&effect_tokens),
             });
             self.eat_raw(TokenKind::Newline);
         }
