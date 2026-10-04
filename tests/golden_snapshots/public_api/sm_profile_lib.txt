@@ -1,10 +1,12 @@
 source: crates/sm-profile/src/lib.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "std", serde(deny_unknown_fields))]
 pub struct ProfileVersion {
 pub major: u16,
 pub minor: u16,
 pub const fn new(major: u16, minor: u16) -> Self {
+pub const SUPPORTED: Self = Self::new(1, 0);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub enum AbiProfile {
@@ -17,6 +19,7 @@ Strict,
 LegacySupport,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "std", serde(deny_unknown_fields))]
 pub struct FeaturePolicy {
 pub allow_debug_symbols: bool,
 pub allow_f64_math: bool,
@@ -24,8 +27,10 @@ pub allow_gate_surface: bool,
 pub allow_logos_surface: bool,
 pub allow_schema_surface: bool,
 pub const fn core() -> Self {
+pub const fn foundation() -> Self {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "std", serde(deny_unknown_fields))]
 pub struct CapabilityExpectations {
 pub require_debug_symbols: bool,
 pub require_f64_math: bool,
@@ -33,6 +38,7 @@ pub require_gate_surface: bool,
 pub const fn permissive() -> Self {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "std", serde(deny_unknown_fields))]
 pub struct ParserProfile {
 pub identity: String,
 pub version: ProfileVersion,
@@ -40,10 +46,26 @@ pub abi: AbiProfile,
 pub compatibility: CompatibilityMode,
 pub features: FeaturePolicy,
 pub capabilities: CapabilityExpectations,
+#[cfg_attr( feature = "std", serde(deserialize_with = "deserialize_unique_aliases") )]
 pub aliases: BTreeMap<String, String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AliasError {
+InvalidRaw { raw: String },
+InvalidCanonical { raw: String, canonical: String },
+Conflict { raw: String, existing: String, proposed: String },
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileError {
+EmptyIdentity,
+UnsupportedVersion(ProfileVersion),
+Alias(AliasError),
+AliasesNotCanonical,
+ReservedField(&'static str),
+pub fn validate_alias(raw: &str, canonical: &str) -> Result<(), AliasError> {
 pub fn foundation_default() -> Self {
-pub fn add_alias(&mut self, raw: impl Into<String>, canonical: impl Into<String>) {
-pub fn normalize(&self, input: &str) -> String {
+pub fn core() -> Self {
+pub fn add_alias( &mut self, raw: impl Into<String>, canonical: impl Into<String>, ) -> Result<(), AliasError> {
+pub fn validate(&self) -> Result<(), ProfileError> {
+pub fn validate_for_canonical_source(&self) -> Result<(), ProfileError> {
 #[cfg(feature = "std")]
 pub fn to_json(&self) -> Result<String, ProfileIoError> {
 #[cfg(feature = "std")]
@@ -57,9 +79,4 @@ pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ProfileIoError> {
 pub enum ProfileIoError {
 Io(std::io::Error),
 Json(serde_json::Error),
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TrainingSample<'a> {
-pub input: &'a str,
-pub target: &'a str,
-pub fn train_profile(samples: &[TrainingSample<'_>]) -> ParserProfile {
-pub fn train_profile_in_place(profile: &mut ParserProfile, samples: &[TrainingSample<'_>]) {
+Invalid(ProfileError),

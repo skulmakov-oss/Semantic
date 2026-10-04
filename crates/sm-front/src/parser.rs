@@ -24,10 +24,21 @@ use ton618_core::diagnostics::{
 };
 use ton618_core::SourceMap;
 
+/// PB-01: the single canonical-source profile gate. Every `parse_*` and
+/// `admit_*` entry runs it before lexing/parsing, so a profile carrying
+/// TON618 aliases or a non-baseline RESERVED field is rejected instead of
+/// being silently ignored. `sm-profile` owns the rule.
+fn canonical_profile_admission(profile: &ParserProfile) -> Result<(), FrontendError> {
+    profile
+        .validate_for_canonical_source()
+        .map_err(|e| FrontendError::policy_violation(0, format!("profile: {e}")))
+}
+
 pub fn parse_rustlike_with_profile(
     input: &str,
     profile: &ParserProfile,
 ) -> Result<Program, FrontendError> {
+    canonical_profile_admission(profile)?;
     let tokens = lex_tokens(input)?;
     let mut p = Parser {
         tokens,
@@ -48,6 +59,7 @@ pub fn parse_logos_with_profile(
     input: &str,
     profile: &ParserProfile,
 ) -> Result<LogosProgram, FrontendError> {
+    canonical_profile_admission(profile)?;
     let tokens = lex_tokens(input)?;
     let mut p = Parser {
         tokens,
@@ -84,6 +96,9 @@ pub fn admit_program_with_profile(
     tokens: &[Token],
     profile: &ParserProfile,
 ) -> GrammarAdmission<Program> {
+    if let Err(e) = canonical_profile_admission(profile) {
+        return GrammarAdmission::Exclusive(Err(e));
+    }
     let mut p = Parser {
         tokens: tokens.to_vec(),
         idx: 0,
@@ -106,6 +121,9 @@ pub fn admit_logos_program_with_profile(
     tokens: &[Token],
     profile: &ParserProfile,
 ) -> GrammarAdmission<LogosProgram> {
+    if let Err(e) = canonical_profile_admission(profile) {
+        return GrammarAdmission::Exclusive(Err(e));
+    }
     let mut p = Parser {
         tokens: tokens.to_vec(),
         idx: 0,
@@ -6184,7 +6202,7 @@ fn main() {
 }
 "#;
 
-        let err = parse_rustlike_with_profile(src, &ParserProfile::default())
+        let err = parse_rustlike_with_profile(src, &ParserProfile::core())
             .expect_err("strict profile must reject schema surface");
 
         assert_eq!(err.kind(), FrontendErrorKind::PolicyViolation);
@@ -7223,7 +7241,7 @@ Law "CheckSignal" [priority 10]:
 
     #[test]
     fn strict_profile_rejects_f64_surface() {
-        let profile = ParserProfile::default();
+        let profile = ParserProfile::core();
         let err = parse_rustlike_with_profile("fn main() -> f64 { return 1.5; }", &profile)
             .expect_err("strict profile must reject f64");
 
@@ -7233,7 +7251,7 @@ Law "CheckSignal" [priority 10]:
 
     #[test]
     fn strict_profile_rejects_logos_surface() {
-        let profile = ParserProfile::default();
+        let profile = ParserProfile::core();
         let src = r#"
 Law "L" [priority 1]:
     When true -> System.recovery()
@@ -8124,6 +8142,77 @@ mod grammar_admission_tests {
         }
     }
 
+    // --- PB-01 (#1624-#1628): canonical profile admission ---
+
+    fn pb01_rejected_profiles() -> [(ParserProfile, &'static str); 4] {
+        let mut aliased = ParserProfile::foundation_default();
+        aliased.add_alias("TRUE", "T").expect("valid TON618 alias");
+        let gate_denied = ParserProfile {
+            features: FeaturePolicy {
+                allow_gate_surface: false,
+                ..ParserProfile::foundation_default().features
+            },
+            ..ParserProfile::foundation_default()
+        };
+        let debug_denied = ParserProfile {
+            features: FeaturePolicy {
+                allow_debug_symbols: false,
+                ..ParserProfile::foundation_default().features
+            },
+            ..ParserProfile::foundation_default()
+        };
+        let mut caps = ParserProfile::foundation_default();
+        caps.capabilities.require_f64_math = true;
+        [
+            (aliased, "aliases"),
+            (gate_denied, "allow_gate_surface"),
+            (debug_denied, "allow_debug_symbols"),
+            (caps, "require_f64_math"),
+        ]
+    }
+
+    #[test]
+    fn pb01_canonical_parse_rejects_aliases_and_non_baseline_reserved_fields() {
+        let src = "fn main() {
+    let s = \"TRUE // # a   b\";
+    return;
+}
+";
+        parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("foundation baseline still admits");
+        for (profile, field) in pb01_rejected_profiles() {
+            for err in [
+                parse_rustlike_with_profile(src, &profile).expect_err(field),
+                parse_logos_with_profile(
+                    "System S():
+",
+                    &profile,
+                )
+                .expect_err(field),
+            ] {
+                assert_eq!(err.kind(), FrontendErrorKind::PolicyViolation, "{field}");
+                assert!(err.message.contains(field), "{field}: {}", err.message);
+            }
+        }
+    }
+
+    #[test]
+    fn pb01_canonical_admission_rejects_aliases_and_non_baseline_reserved_fields() {
+        let src = "fn main() { return; }
+";
+        let tokens = lex_tokens(src).expect("lex");
+        for (profile, field) in pb01_rejected_profiles() {
+            match admit_program_with_profile(src, &tokens, &profile) {
+                GrammarAdmission::Exclusive(Err(e)) => assert!(e.message.contains(field)),
+                _ => panic!("{field}: RustLike admission must fail closed"),
+            }
+            match admit_logos_program_with_profile(src, &tokens, &profile) {
+                GrammarAdmission::Exclusive(Err(e)) => assert!(e.message.contains(field)),
+                _ => panic!("{field}: Logos admission must fail closed"),
+            }
+        }
+    }
+
     // --- Reachability: every GrammarAdmission variant, both grammars ---
 
     #[test]
@@ -8979,7 +9068,7 @@ mod grammar_admission_tests {
         // The strict profile rejects the leading `schema` token itself, so
         // offset zero is a real token position here, not a placeholder.
         let src = "schema S { a: i32 }\nfn main() { return; }\n";
-        let err = parse_rustlike_with_profile(src, &ParserProfile::default())
+        let err = parse_rustlike_with_profile(src, &ParserProfile::core())
             .expect_err("strict profile must reject schema declarations");
         assert_eq!(err.pos, 0);
         assert_eq!(err.kind(), FrontendErrorKind::PolicyViolation);

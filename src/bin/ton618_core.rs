@@ -5,9 +5,10 @@
 //! This binary remains only as part of the retained compatibility perimeter for
 //! pre-v1 `ton618_core` workflows.
 
+use alias_compat::{train_profile_in_place, TrainingSample};
 pub use semantic_language::{QuadroReg, F, LSB_MASK, MSB_MASK, N, S, T};
 use serde::Deserialize;
-use sm_profile::{train_profile_in_place, ParserProfile, TrainingSample};
+use sm_profile::ParserProfile;
 use std::collections::HashMap;
 use std::env;
 use std::process::ExitCode;
@@ -20,6 +21,286 @@ use language::{
 struct JsonSample {
     input: String,
     target: String,
+}
+
+/// TON618 compatibility perimeter: legacy alias training and line
+/// normalization. Moved here from `sm-profile` by PB-01 (#1621/#1622/#1628):
+/// this tokenizer serves only the TON618 quad-logic line language
+/// (`z = T & ! a`), never canonical Semantic source. Alias validity and
+/// conflict rules stay owned by `sm-profile` (`validate_alias`,
+/// `ParserProfile::add_alias`).
+mod alias_compat {
+    use sm_profile::{AliasError, ParserProfile};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct TrainingSample<'a> {
+        pub input: &'a str,
+        pub target: &'a str,
+    }
+
+    /// Successful strict training: every supplied changed pair was learned
+    /// or was already present with the same target.
+    #[derive(Debug, Default, Clone, PartialEq, Eq)]
+    pub struct TrainingReport {
+        pub accepted_samples: usize,
+        pub learned: Vec<(String, String)>,
+        pub idempotent: usize,
+        pub already_canonical: usize,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum TrainingRejection {
+        TokenCountMismatch {
+            sample: usize,
+            input_tokens: usize,
+            target_tokens: usize,
+        },
+        Alias {
+            sample: usize,
+            error: AliasError,
+        },
+    }
+
+    /// Strict training failed: no alias was applied. Lists every rejected
+    /// piece of evidence.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct TrainingError {
+        pub rejections: Vec<TrainingRejection>,
+    }
+
+    impl std::fmt::Display for TrainingError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "training rejected {} item(s):", self.rejections.len())?;
+            for r in &self.rejections {
+                match r {
+                    TrainingRejection::TokenCountMismatch {
+                        sample,
+                        input_tokens,
+                        target_tokens,
+                    } => write!(
+                        f,
+                        "\n  sample {sample}: token count mismatch ({input_tokens} vs {target_tokens})"
+                    )?,
+                    TrainingRejection::Alias { sample, error } => {
+                        write!(f, "\n  sample {sample}: {error}")?
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Strict training from an explicit baseline profile.
+    #[cfg(test)]
+    pub fn train_profile(
+        base: ParserProfile,
+        samples: &[TrainingSample<'_>],
+    ) -> Result<(ParserProfile, TrainingReport), TrainingError> {
+        let mut profile = base;
+        let report = train_profile_in_place(&mut profile, samples)?;
+        Ok((profile, report))
+    }
+
+    /// Strict and atomic: on any rejected evidence `profile` is unchanged.
+    pub fn train_profile_in_place(
+        profile: &mut ParserProfile,
+        samples: &[TrainingSample<'_>],
+    ) -> Result<TrainingReport, TrainingError> {
+        let mut next = profile.clone();
+        let mut report = TrainingReport::default();
+        let mut rejections = Vec::new();
+        for (idx, sample) in samples.iter().enumerate() {
+            let raw_tokens = lex_tokens(sample.input);
+            let target_tokens = lex_tokens(sample.target);
+            if raw_tokens.len() != target_tokens.len() {
+                rejections.push(TrainingRejection::TokenCountMismatch {
+                    sample: idx,
+                    input_tokens: raw_tokens.len(),
+                    target_tokens: target_tokens.len(),
+                });
+                continue;
+            }
+            let mut sample_ok = true;
+            for (raw, canonical) in raw_tokens.iter().zip(target_tokens.iter()) {
+                if raw == canonical {
+                    report.already_canonical += 1;
+                    continue;
+                }
+                let existed = next.aliases.contains_key(*raw);
+                match next.add_alias(*raw, *canonical) {
+                    Ok(()) if existed => report.idempotent += 1,
+                    Ok(()) => report
+                        .learned
+                        .push(((*raw).to_string(), (*canonical).to_string())),
+                    Err(error) => {
+                        sample_ok = false;
+                        rejections.push(TrainingRejection::Alias { sample: idx, error });
+                    }
+                }
+            }
+            if sample_ok {
+                report.accepted_samples += 1;
+            }
+        }
+        if !rejections.is_empty() {
+            return Err(TrainingError { rejections });
+        }
+        *profile = next;
+        Ok(report)
+    }
+
+    /// Legacy TON618 line normalization (semantics unchanged from the former
+    /// `ParserProfile::normalize`). Not a Semantic source rewriter.
+    pub fn normalize(profile: &ParserProfile, input: &str) -> String {
+        let mut out = String::new();
+        for (i, tok) in lex_tokens(input).iter().enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            out.push_str(profile.aliases.get(*tok).map_or(*tok, String::as_str));
+        }
+        out
+    }
+
+    fn lex_tokens(input: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut i = 0usize;
+        let bytes = input.as_bytes();
+
+        while i < bytes.len() {
+            let ch = bytes[i];
+            if ch.is_ascii_whitespace() {
+                i += 1;
+                continue;
+            }
+
+            if i + 1 < bytes.len() && ch == b'/' && bytes[i + 1] == b'/' {
+                break;
+            }
+            if ch == b'#' {
+                break;
+            }
+
+            if is_single_char_token(ch) {
+                out.push(&input[i..i + 1]);
+                i += 1;
+                continue;
+            }
+
+            let start = i;
+            i += 1;
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c.is_ascii_whitespace() || is_single_char_token(c) || c == b'#' {
+                    break;
+                }
+                if i + 1 < bytes.len() && c == b'/' && bytes[i + 1] == b'/' {
+                    break;
+                }
+                i += 1;
+            }
+            out.push(&input[start..i]);
+        }
+
+        out
+    }
+
+    fn is_single_char_token(ch: u8) -> bool {
+        matches!(ch, b'(' | b')' | b'!' | b'&' | b'|' | b'^' | b'=')
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn s<'a>(input: &'a str, target: &'a str) -> TrainingSample<'a> {
+            TrainingSample { input, target }
+        }
+
+        // #1619
+        #[test]
+        fn token_count_mismatch_is_rejected_not_dropped() {
+            let mut p = ParserProfile::core();
+            let err =
+                train_profile_in_place(&mut p, &[s("x = A", "x = T"), s("x = TRUE TRUE", "x = T")])
+                    .unwrap_err();
+            assert_eq!(
+                err.rejections,
+                vec![TrainingRejection::TokenCountMismatch {
+                    sample: 1,
+                    input_tokens: 4,
+                    target_tokens: 3
+                }]
+            );
+            assert!(p.aliases.is_empty(), "strict training is atomic");
+        }
+
+        // #1620, both orders
+        #[test]
+        fn conflicting_evidence_is_explicit_in_any_order() {
+            for samples in [
+                [s("x = A", "x = T"), s("x = A", "x = F")],
+                [s("x = A", "x = F"), s("x = A", "x = T")],
+            ] {
+                let err = train_profile(ParserProfile::core(), &samples).unwrap_err();
+                assert!(matches!(
+                    err.rejections.as_slice(),
+                    [TrainingRejection::Alias {
+                        sample: 1,
+                        error: AliasError::Conflict { .. }
+                    }]
+                ));
+            }
+        }
+
+        #[test]
+        fn identical_duplicates_and_canonical_pairs_are_reported() {
+            let (p, r) = train_profile(
+                ParserProfile::core(),
+                &[s("x = A", "x = T"), s("x = A", "x = T")],
+            )
+            .unwrap();
+            assert_eq!(p.aliases.get("A").map(String::as_str), Some("T"));
+            assert_eq!(r.learned, vec![("A".to_string(), "T".to_string())]);
+            assert_eq!(
+                (r.accepted_samples, r.idempotent, r.already_canonical),
+                (2, 1, 4)
+            );
+        }
+
+        // #1630
+        #[test]
+        fn invalid_raw_and_target_candidates_are_observable() {
+            let err = train_profile(
+                ParserProfile::core(),
+                &[s("x = A", "x = q"), s("x = (", "x = T")],
+            )
+            .unwrap_err();
+            assert!(matches!(
+                err.rejections.as_slice(),
+                [
+                    TrainingRejection::Alias {
+                        sample: 0,
+                        error: AliasError::InvalidCanonical { .. }
+                    },
+                    TrainingRejection::Alias {
+                        sample: 1,
+                        error: AliasError::InvalidRaw { .. }
+                    },
+                ]
+            ));
+        }
+
+        #[test]
+        fn non_conflicting_evidence_is_order_independent() {
+            let a = [s("x = A", "x = T"), s("y = B", "y = &")];
+            let b = [a[1], a[0]];
+            assert_eq!(
+                train_profile(ParserProfile::core(), &a).unwrap().0,
+                train_profile(ParserProfile::core(), &b).unwrap().0
+            );
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -100,7 +381,7 @@ fn cmd_profile_train(args: &[String]) -> Result<(), String> {
     let samples_json: Vec<JsonSample> = serde_json::from_str(&raw)
         .map_err(|e| format!("invalid samples JSON '{}': {}", samples_path, e))?;
 
-    let mut profile = ParserProfile::default();
+    let mut profile = ParserProfile::core();
     let borrowed: Vec<TrainingSample<'_>> = samples_json
         .iter()
         .map(|s| TrainingSample {
@@ -108,7 +389,8 @@ fn cmd_profile_train(args: &[String]) -> Result<(), String> {
             target: &s.target,
         })
         .collect();
-    train_profile_in_place(&mut profile, &borrowed);
+    train_profile_in_place(&mut profile, &borrowed)
+        .map_err(|e| format!("profile training failed: {e}"))?;
     profile
         .save_to_file(out_path)
         .map_err(|e| format!("failed to save profile '{}': {}", out_path, e))?;
@@ -143,9 +425,11 @@ fn cmd_profile_save(args: &[String]) -> Result<(), String> {
     }
 
     let out_path = out_path.ok_or_else(save_usage)?;
-    let mut profile = ParserProfile::default();
+    let mut profile = ParserProfile::core();
     for (raw, canonical) in aliases {
-        profile.add_alias(raw, canonical);
+        profile
+            .add_alias(raw, canonical)
+            .map_err(|e| format!("invalid --alias: {e}"))?;
     }
 
     profile
@@ -489,10 +773,10 @@ mod parser {
 
     #![allow(dead_code)]
 
+    #[cfg(test)]
+    use crate::alias_compat::{train_profile, TrainingSample};
     use crate::{QuadroReg, F, N, S, T};
     use sm_profile::ParserProfile;
-    #[cfg(test)]
-    use sm_profile::{train_profile, TrainingSample};
     use std::collections::HashMap;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -688,7 +972,7 @@ mod parser {
                 continue;
             }
 
-            let normalized = profile.normalize(line);
+            let normalized = crate::alias_compat::normalize(profile, line);
             let assignment = parse_assignment(&normalized).map_err(|e| ProgramError {
                 line: line_no,
                 column: e.position + 1,
@@ -1106,7 +1390,9 @@ mod parser {
                     target: "y = T ^ x",
                 },
             ];
-            let profile = train_profile(&samples);
+            let profile = train_profile(ParserProfile::core(), &samples)
+                .expect("train")
+                .0;
 
             assert_eq!(profile.aliases.get("AND"), Some(&"&".to_string()));
             assert_eq!(profile.aliases.get("OR"), Some(&"|".to_string()));
@@ -1114,7 +1400,10 @@ mod parser {
             assert_eq!(profile.aliases.get("TRUE"), Some(&"T".to_string()));
             assert_eq!(profile.aliases.get("FALSE"), Some(&"F".to_string()));
             assert_eq!(profile.aliases.get("XOR"), Some(&"^".to_string()));
-            assert_eq!(profile.normalize("z = TRUE AND NOT a"), "z = T & ! a");
+            assert_eq!(
+                crate::alias_compat::normalize(&profile, "z = TRUE AND NOT a"),
+                "z = T & ! a"
+            );
         }
 
         #[test]
@@ -1137,7 +1426,9 @@ mod parser {
                     target: "y = T ^ x",
                 },
             ];
-            let profile = train_profile(&samples);
+            let profile = train_profile(ParserProfile::core(), &samples)
+                .expect("train")
+                .0;
 
             let mut env = HashMap::<String, QuadroReg>::new();
             env.insert("a".to_string(), QuadroReg::from_raw(crate::MSB_MASK));
@@ -1161,9 +1452,9 @@ mod parser {
 
         #[test]
         fn profile_json_roundtrip() {
-            let mut profile = ParserProfile::default();
-            profile.add_alias("AND", "&");
-            profile.add_alias("TRUE", "T");
+            let mut profile = ParserProfile::core();
+            profile.add_alias("AND", "&").unwrap();
+            profile.add_alias("TRUE", "T").unwrap();
 
             let json = profile.to_json().expect("serialize");
             let restored = ParserProfile::from_json(&json).expect("deserialize");
@@ -1172,9 +1463,9 @@ mod parser {
 
         #[test]
         fn profile_save_and_load_file() {
-            let mut profile = ParserProfile::default();
-            profile.add_alias("OR", "|");
-            profile.add_alias("NOT", "!");
+            let mut profile = ParserProfile::core();
+            profile.add_alias("OR", "|").unwrap();
+            profile.add_alias("NOT", "!").unwrap();
 
             let path = std::env::temp_dir().join("smcode_parser_profile_test.json");
             profile.save_to_file(&path).expect("save");
@@ -1308,7 +1599,7 @@ mod language {
                 continue;
             }
             let normalized = if let Some(p) = profile {
-                p.normalize(line)
+                crate::alias_compat::normalize(p, line)
             } else {
                 line.to_string()
             };
@@ -1975,28 +2266,32 @@ mod language {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use sm_profile::{train_profile, TrainingSample};
+        use crate::alias_compat::{train_profile, TrainingSample};
 
         #[test]
         fn compile_and_execute_human_program_with_profile() {
-            let profile = train_profile(&[
-                TrainingSample {
-                    input: "x = TRUE",
-                    target: "x = T",
-                },
-                TrainingSample {
-                    input: "y = FALSE",
-                    target: "y = F",
-                },
-                TrainingSample {
-                    input: "out = x AND y",
-                    target: "out = x & y",
-                },
-                TrainingSample {
-                    input: "z = NOT out",
-                    target: "z = ! out",
-                },
-            ]);
+            let (profile, _) = train_profile(
+                ParserProfile::core(),
+                &[
+                    TrainingSample {
+                        input: "x = TRUE",
+                        target: "x = T",
+                    },
+                    TrainingSample {
+                        input: "y = FALSE",
+                        target: "y = F",
+                    },
+                    TrainingSample {
+                        input: "out = x AND y",
+                        target: "out = x & y",
+                    },
+                    TrainingSample {
+                        input: "z = NOT out",
+                        target: "z = ! out",
+                    },
+                ],
+            )
+            .expect("train");
 
             let human = r#"
 			x = TRUE
@@ -2037,20 +2332,24 @@ mod language {
 
         #[test]
         fn optimizer_folds_constants_and_eliminates_temps() {
-            let profile = train_profile(&[
-                TrainingSample {
-                    input: "x = TRUE",
-                    target: "x = T",
-                },
-                TrainingSample {
-                    input: "y = FALSE",
-                    target: "y = F",
-                },
-                TrainingSample {
-                    input: "out = x AND y",
-                    target: "out = x & y",
-                },
-            ]);
+            let (profile, _) = train_profile(
+                ParserProfile::core(),
+                &[
+                    TrainingSample {
+                        input: "x = TRUE",
+                        target: "x = T",
+                    },
+                    TrainingSample {
+                        input: "y = FALSE",
+                        target: "y = F",
+                    },
+                    TrainingSample {
+                        input: "out = x AND y",
+                        target: "out = x & y",
+                    },
+                ],
+            )
+            .expect("train");
             let human = "x = TRUE\ny = FALSE\nout = x AND y\n";
             let program = compile_human_program(human, Some(&profile)).expect("compile");
 

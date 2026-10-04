@@ -116,8 +116,8 @@ pub mod prom_audit {
 #[cfg(feature = "std")]
 pub mod profile {
     pub use sm_profile::{
-        train_profile, train_profile_in_place, AbiProfile, CapabilityExpectations,
-        CompatibilityMode, FeaturePolicy, ParserProfile, ProfileVersion, TrainingSample,
+        validate_alias, AbiProfile, AliasError, CapabilityExpectations, CompatibilityMode,
+        FeaturePolicy, ParserProfile, ProfileError, ProfileVersion,
     };
 }
 #[cfg(feature = "std")]
