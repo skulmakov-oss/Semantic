@@ -100,6 +100,15 @@ Current rule:
 - empty `When` conditions are rejected
 - empty `When` effects are rejected
 - the current frontend stores condition and effect as structured text fragments
+  and, since PB-03, a structural projection built from canonical tokens:
+  `LogosWhen::structure` (`Atom`, `Compare` with `==`/`!=`, `Present(name |
+  Entity.field)`, `!atom`, a same-operator `&&`/`||` chain, or `Unsupported`)
+  plus the lexical atoms of the condition and effect
+- semantic analysis interprets only that projection: operands must resolve
+  (`Entity.field` only; there is no implicit Law owner and no unqualified
+  field shorthand), types are family-exact (`quad`, `i32`, `u32`, `f64`, `fx`
+  never coerce), `Unsupported` conditions are rejected, and Law names are
+  module-level (duplicates are `E0221`)
   at this surface, not as the Rust-like executable AST
 
 ## Ordering Rule

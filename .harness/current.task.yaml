@@ -1,50 +1,51 @@
 task:
-  id: PHASE-B-PB-02
-  title: "Frontend Admission Hardening"
-  type: phase_b_frontend_admission_hardening
-  target: "Phase-B PB-02 / Module 02 sm-front (#1636 #1640-#1645 #1652 #1654 #1655 #1666)"
+  id: PHASE-B-PB-03
+  title: "Semantic Core Integrity"
+  type: phase_b_semantic_core_integrity
+  target: "Phase-B PB-03 / sm-sema Logos semantic core (#1671-#1680 #1693-#1696 #1705)"
   mode: active
-  supersedes: PHASE-B-PB-01
+  supersedes: PHASE-B-PB-02
   umbrella: 1617
-  issues: [1636, 1640, 1641, 1642, 1643, 1644, 1645, 1652, 1654, 1655, 1666]
-  base_sha: 10d1eafaa8b8508120c60416ad1412a654f4260a
+  issues: [1671, 1672, 1673, 1674, 1675, 1676, 1677, 1678, 1679, 1680, 1693, 1694, 1695, 1696, 1705]
+  base_sha: 8305a8a1fe8fda66a3fa7648076ea0e5e73f167d
   authorized_by: >-
-    Repository owner direct instruction (2026-10-04, "GO — Phase B / PB-02 —
-    Frontend Admission Hardening") plus owner decision (2026-10-04) for #1645:
-    preserve Logos Import directives in LogosProgram and have sm-sema consume
-    them, without tightening SSF-09 Decision E outcomes. Implementation, spec
-    correction, tests, the sm-front alloc CI step and PR creation are
-    authorized. Merge, release, tag, manual issue closure and PB-03 are NOT
-    authorized. PB-01 (#1985) and SSF history stay untouched.
+    Repository owner direct instruction (2026-10-04, "GO — Phase B / PB-03 —
+    Semantic Core Integrity"). Forensics, decision record, implementation,
+    tests, commits, push and PR creation are authorized. Merge, release, tag,
+    manual issue closure, PB-04 work and #1987 are NOT authorized. PB-01/PB-02
+    and SSF history stay untouched.
 
 intent:
   summary: >-
-    Frontend admission fails closed for duplicate parameters, qvec dimensions,
-    Logos System/Import fidelity, discard expressions and the builtin
-    namespace; restore the documented sm-front alloc-only build.
-  decision_record: docs/roadmap/phase_b/pb02_frontend_admission_decision.md
+    sm-sema preserves exact source type families, interprets only the
+    sm-front structural Logos projection, never lets Unknown validate,
+    aligns W0240/W0241/W0252/W0253 with typed and four-state truth, removes
+    heuristic Law ownership, and makes TypeRegistry capacity-safe and
+    non-authoritative.
+  decision_record: docs/roadmap/phase_b/pb03_semantic_core_integrity_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .github/workflows/ci.yml
-    - crates/sm-front/**
     - crates/sm-sema/**
-    - crates/sm-ir/src/legacy_lowering.rs
-    - docs/spec/types.md
-    - docs/LOGOS_GRAMMAR_v0_1.md
-    - docs/NO_STD.md
+    - crates/sm-front/**
+    - crates/smc-cli/src/app.rs
+    - examples/canonical/quad_cycle_logos/README.md
+    - crates/ton618-core/src/diagnostics.rs
+    - docs/ERROR_CODES.md
+    - docs/spec/diagnostics.md
+    - docs/spec/logos.md
     - docs/roadmap/phase_b/**
     - tests/**
 
   forbidden_paths:
+    - .github/**
     - apps/**
     - reports/**
     - tools/**
     - scripts/**
     - Cargo.toml
     - Cargo.lock
-    - examples/**
     - experiments/**
     - third_party/**
     - ton618_legacy/**
@@ -56,7 +57,7 @@ authorization:
   documentation_addition: true
   documentation_correction: true
   test_addition: true
-  workflow_changes: true
+  workflow_changes: false
   dependency_changes: false
   github_issue_lifecycle: false
   git_commit_push_pr: true
@@ -65,7 +66,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 10d1eafaa8b8508120c60416ad1412a654f4260a
+  base_sha: 8305a8a1fe8fda66a3fa7648076ea0e5e73f167d
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true

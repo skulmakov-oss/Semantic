@@ -348,12 +348,17 @@ The Logos path also emits semantic warnings and errors.
 
 Current warning families include:
 
-- `W0240` dead law branch (a `When` condition that is always false)
-- `W0241` constant-folding candidate for a literal-only `fx.*` call
+- `W0240` dead law branch (a `When` condition proven `bool`-false: `false`, or a
+  literal comparison such as `T == F`; quad-valued conditions such as `N` are never
+  claimed dead)
+- `W0241` constant-folding candidate for a literal-only `fx.*` call (catalogued but
+  not emitted: no fixed-point evaluator is available to `sm-sema`, and host `f64`
+  is not `fx` semantics)
 - `W0250` non-idiomatic law naming
 - `W0251` large law
-- `W0252` unused entity field
-- `W0253` magic-number style warning
+- `W0252` unused entity field (only parsed, resolved `Entity.field` references count
+  as use)
+- `W0253` magic-number style warning (parsed numeric literals other than `0`/`1`)
 
 Current rule:
 

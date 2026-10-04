@@ -1,5 +1,5 @@
 Entity A:
     state x: quad
 Law "L" [priority 1]:
-    When N ->
+    When false ->
         Pulse.emit("x")

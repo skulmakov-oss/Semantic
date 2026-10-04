@@ -1,7 +1,7 @@
 warning[W0240]: dead law branch detected in 'L': condition is always false
   --> logos_warnings.sm:4:5
    |
- 4 |     When N ->
+ 4 |     When false ->
    |     ^^^^
 
 warning[W0252]: unused state 'A.x'
