@@ -1,17 +1,19 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-12
-  title: "SSF-12 C1 Full Requalification and Foundation Oracle Verdict"
-  type: ssf12_c1_full_requalification_and_foundation_oracle_verdict
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-12-Q02-REMEDIATION
+  title: "DEFECT-SSF12-005 Q-02 Qualification Harness Remediation"
+  type: ssf12_q02_semcode_smoke_contract_remediation
+  target: DEFECT-SSF12-005
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-11
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-12
   authorized_by: >-
-    Repository owner direct instruction (2026-10-03, #1583 under umbrella #1569)
-    authorizing fresh SSF-12 qualification campaign against candidate C1
-    (89641da8237f4fcefb50cf1958a50e4d4003aea7). Permitted task type:
-    ssf12_c1_full_requalification_and_foundation_oracle_verdict. Permitted writes:
-    .harness/current.task.yaml, reports/ssf12/**, reports/semantic_stable_foundation_final_verdict.md,
-    tests/ssf12_qualification_guards.rs. Strictly forbidden: crates/**, src/**,
-    tools/**, scripts/**, .github/**, Cargo.toml, Cargo.lock, examples/**, release promotion.
+    Repository owner direct instruction (2026-10-04, DEFECT-SSF12-005 Q-02 Qualification Harness Remediation)
+    authorizing narrow qualification-tooling remediation. Permitted task type:
+    ssf12_q02_semcode_smoke_contract_remediation. Base: feat/ssf12-requalification-c1 (b0a17d12427a1583587e810474ac323c57fae887).
+    Permitted writes: .harness/current.task.yaml, scripts/verify_release_assets.ps1,
+    tests/ssf12_qualification_guards.rs. Explicitly forbidden: crates/**, src/**,
+    tools/**, .github/**, Cargo.toml, Cargo.lock, examples/**, release assets, tag refs.
+    Candidate C1 (89641da8237f4fcefb50cf1958a50e4d4003aea7) remains immutable; release assets remain immutable;
+    qualification tooling only.
   prior_phase_authorization_history: >-
     RETIRED (historical record of SSF-11 and earlier envelopes; grants no
     authority to SSF-12).
@@ -144,17 +146,15 @@ task:
 
 intent:
   summary: >-
-    Full independent requalification of frozen Stable Foundation candidate C1
-    (89641da8237f4fcefb50cf1958a50e4d4003aea7); Foundation Oracle qualification
-    for Bootstrap reference; fresh 78-gate matrix evidence collection and dual
-    verdict; no feature development; no implementation repairs; no release;
-    no tag; no promotion without human owner decision.
+    Remediate DEFECT-SSF12-005 in Q-02 release-asset smoke verifier (scripts/verify_release_assets.ps1)
+    by binding expected SemCode format to downloaded release toolchain identity (smc version --json semcode_format)
+    instead of stale pre-SSF-08 hard-coded format headers. Candidate C1 (89641da8237f4fcefb50cf1958a50e4d4003aea7)
+    and public release v1.2.0 assets remain byte-identical and immutable; qualification tooling only.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - reports/semantic_stable_foundation_final_verdict.md
-    - reports/ssf12/**
+    - scripts/verify_release_assets.ps1
     - tests/ssf12_qualification_guards.rs
 
   forbidden_paths:
@@ -163,7 +163,6 @@ scope:
     - crates/**
     - src/**
     - tools/**
-    - scripts/**
     - Cargo.toml
     - Cargo.lock
     - examples/**
@@ -171,6 +170,8 @@ scope:
     - third_party/**
     - ton618_legacy/**
     - prom-ui*
+    - reports/**
+    - docs/**
 
 authorization:
   rust_implementation: false
@@ -191,10 +192,13 @@ constraints:
   issue: 1583
   umbrella_issue: 1569
   owner_authorized: true
+  defect_id: DEFECT-SSF12-005
   candidate_id: C1
   candidate_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   candidate_sha_frozen: true
   frozen_candidate_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
+  release_assets_immutable: true
+  qualification_tooling_only: true
   qualification_only: true
   mandatory_gate_skip_is_not_pass: true
   earlier_phase_defects_return_to_owner: true
@@ -204,8 +208,8 @@ constraints:
   human_promotion_decision_required: true
   oracle_verdict_required: true
   stable_publication_verdict_separate_from_oracle_verdict: true
-  base_branch: main
-  base_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
+  base_branch: feat/ssf12-requalification-c1
+  base_sha: b0a17d12427a1583587e810474ac323c57fae887
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
