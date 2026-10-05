@@ -170,6 +170,9 @@ fn denial_reason_from_capability(reason: HelloObservationCapabilityDenial) -> &'
         HelloObservationCapabilityDenial::MissingObservationCapability => {
             "missing_observation_capability"
         }
+        HelloObservationCapabilityDenial::InvalidCapabilityContract => {
+            "invalid_capability_contract"
+        }
         HelloObservationCapabilityDenial::SinkUnavailable => "sink_unavailable",
         HelloObservationCapabilityDenial::StdoutNotDefaultSink => "stdout_not_default_sink",
         HelloObservationCapabilityDenial::GenericIoNotAllowed => "generic_io_not_allowed",
