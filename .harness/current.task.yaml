@@ -1,38 +1,37 @@
 task:
-  id: PHASE-B-PB-05
-  title: "IR Safety & SemCode Producer Integrity"
-  type: phase_b_ir_safety_semcode_producer_integrity
-  target: "Phase-B PB-05 / sm-ir producer (#1708 #1711 #1713-#1716 #1721 #1723 #1727-#1729)"
+  id: PHASE-B-PB-06
+  title: "Runtime / VM Trust Boundary & Admission Freshness"
+  type: phase_b_runtime_vm_trust_boundary
+  target: "Phase-B PB-06 / runtime-core, sm-vm, smc-cli (#1764-#1767 #1769 #1776 #1777)"
   mode: active
-  supersedes: PHASE-B-PB-04
+  supersedes: PHASE-B-PB-05
   umbrella: 1617
-  issues: [1708, 1711, 1713, 1714, 1715, 1716, 1721, 1723, 1727, 1728, 1729]
-  base_sha: 4e37e4f577f3978c2b39347cc20a49351d26ae1f
+  issues: [1764, 1765, 1766, 1767, 1769, 1776, 1777]
+  base_sha: a36237f950634594934e80fe12377193113f5700
   authorized_by: >-
-    Repository owner direct instruction (2026-10-05, "GO — Phase B / PB-05 —
-    IR Safety & SemCode Producer Integrity"). SemCode format owner is
-    sm-format; numeric limits are not copied into sm-ir. Merge, release, tag,
-    manual issue closure, next-phase work, sm-vm/runtime-quota/PROMETHEUS
-    repairs and #1987 are NOT authorized.
+    Repository owner direct instruction (2026-10-05, "GO - Phase B / PB-06 -
+    Runtime / VM Trust Boundary & Admission Freshness"). Merge, release, tag,
+    manual issue closure, PB-07 (prom-* #1778-#1787) and #1987 are NOT
+    authorized.
 
 intent:
   summary: >-
-    Fail-closed IR identity allocation, injective generated helper names,
-    optimizer passes that preserve runtime rejection and an exhaustive
-    barrier set, producer output bounded by sm-format structural limits,
-    coherent ownership/header-family/capability documentation, and a guarded
-    sm-ir public surface.
-  decision_record: docs/roadmap/phase_b/pb05_ir_safety_semcode_producer_decision.md
+    Vocabulary-only runtime-core, verifier-bound and VM-sequenced controlled
+    observation, fail-closed no-host VM execution, operation-scoped package
+    admission freshness, and a watch signal covering the full package trust
+    surface.
+  decision_record: docs/roadmap/phase_b/pb06_runtime_vm_trust_boundary_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/sm-ir/**
-    - docs/spec/semcode.md
-    - docs/spec/ir.md
-    - docs/spec/runtime_ownership.md
+    - crates/sm-runtime-core/**
+    - crates/sm-vm/**
+    - crates/smc-cli/**
+    - docs/spec/vm.md
+    - docs/spec/cli.md
     - docs/architecture/module_ownership_map.md
-    - AGENTS.md
+    - docs/language/semantic_hello_vm_observation_execution_route.md
     - docs/roadmap/phase_b/**
     - tests/**
 
@@ -47,6 +46,7 @@ scope:
     - third_party/**
     - ton618_legacy/**
     - prom-ui*
+    - crates/prom-*/**
 
 authorization:
   rust_implementation: true
@@ -63,7 +63,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 4e37e4f577f3978c2b39347cc20a49351d26ae1f
+  base_sha: a36237f950634594934e80fe12377193113f5700
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true

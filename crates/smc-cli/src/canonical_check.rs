@@ -166,6 +166,8 @@ pub struct CheckRequest {
 
 /// Runs the canonical check.
 pub fn check_canonical(request: &CheckRequest) -> Result<CanonicalCheckReport, HostCheckFailure> {
+    // One check request is one package-admission pass (#1776).
+    let _pass = crate::package_manifest::AdmissionPass::begin();
     let root = if request.entry.is_dir() {
         resolve_project_root_check_entry_portable(&request.entry).map_err(HostCheckFailure::new)?
     } else {

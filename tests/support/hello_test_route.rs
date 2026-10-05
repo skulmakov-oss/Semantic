@@ -1,58 +1,53 @@
-use alloc::string::String;
+//! Test-only controlled-text delivery used by the isolated Hello harnesses
+//! (capability gate, audit decision, CLI smoke pipeline).
+//!
+//! This is NOT a canonical route. Since PB-06 (#1764/#1765) `sm-runtime-core`
+//! owns no routing, and canonical observation semantics live in `sm-vm`.
+//! There is deliberately no `admitted` input: each harness gates on its own
+//! verifier result before calling this helper. The Hello-only text rule below
+//! is a provisional harness restriction, not a language rule.
 
-use crate::hello_observation_sink::{
+use sm_runtime_core::hello_observation_sink::{
     HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
     HelloObservationSink,
 };
 
-#[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelloObservationRouteInput {
-    pub admitted: bool,
     pub text: String,
     pub sequence_index: HelloObservationSequenceIndex,
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelloObservationRouteResult {
     Routed,
     NotRouted(HelloObservationRouteError),
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelloObservationRouteError {
-    NotAdmitted,
     NonControlledText,
     ForbiddenHostOutput,
     SinkRejected,
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
 pub fn route_hello_observation_to_sink<S: HelloObservationSink>(
     input: HelloObservationRouteInput,
     sink: &mut S,
 ) -> HelloObservationRouteResult {
-    if !input.admitted {
-        return HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NotAdmitted);
-    }
-
-    let controlled_text = input
+    let text = input
         .text
         .strip_prefix('"')
         .and_then(|text| text.strip_suffix('"'))
         .unwrap_or(&input.text);
-
-    match controlled_text {
+    match text {
         "Hello, World!" => {
             let event = HelloObservationEvent {
                 operation_kind: "controlled_observation_text",
                 observation_class: HelloObservationClass::ControlledText,
-                text: controlled_text.into(),
+                text: text.into(),
                 sequence_index: input.sequence_index,
             };
-
             match sink.observe(event) {
                 Ok(()) => HelloObservationRouteResult::Routed,
                 Err(_) => {
@@ -64,41 +59,5 @@ pub fn route_hello_observation_to_sink<S: HelloObservationSink>(
             HelloObservationRouteResult::NotRouted(HelloObservationRouteError::ForbiddenHostOutput)
         }
         _ => HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NonControlledText),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::hello_observation_sink::HelloObservationSinkError;
-    use alloc::vec::Vec;
-
-    #[derive(Default)]
-    struct TestSink(Vec<HelloObservationEvent>);
-
-    impl HelloObservationSink for TestSink {
-        fn observe(
-            &mut self,
-            event: HelloObservationEvent,
-        ) -> Result<(), HelloObservationSinkError> {
-            self.0.push(event);
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn routes_verifier_admitted_quoted_text() {
-        let mut sink = TestSink::default();
-        let result = route_hello_observation_to_sink(
-            HelloObservationRouteInput {
-                admitted: true,
-                text: String::from("\"Hello, World!\""),
-                sequence_index: HelloObservationSequenceIndex(0),
-            },
-            &mut sink,
-        );
-
-        assert_eq!(result, HelloObservationRouteResult::Routed);
-        assert_eq!(sink.0[0].text, "Hello, World!");
     }
 }

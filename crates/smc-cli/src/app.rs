@@ -8,9 +8,8 @@ use crate::incremental::{
     update_cache_index, CacheEvent, CacheReason, ModuleGraphSnapshot,
 };
 use crate::package_manifest::{
-    admit_package_entry_module, inspect_local_package_graph, reset_declared_dependency_graph_cache,
-    reset_pinned_dependency_fingerprint_cache, resolve_package_import_path,
-    resolve_project_root_check_entry,
+    admit_package_entry_module, inspect_local_package_graph, package_trust_fingerprint,
+    resolve_package_import_path, resolve_project_root_check_entry, AdmissionPass,
 };
 use crate::source_access::{DiskSources, SourceAccess};
 use crate::{format_path, FormatterMode};
@@ -374,6 +373,9 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             reject_leading_unknown_flag(input)?;
         }
     }
+    // One CLI command is one package-admission pass (#1776). `watch` is
+    // long-lived and opens a fresh pass for every rebuild instead.
+    let _pass = (args[0] != "watch").then(AdmissionPass::begin);
     match args[0].as_str() {
         "version" => cmd_version(&args[1..]),
         "artifact" => cmd_artifact(&args[1..]),
@@ -1151,6 +1153,23 @@ fn cmd_lsp(args: &[String]) -> Result<(), String> {
     }
 }
 
+/// What `smc watch` compares between ticks (#1777). `source` is the imported
+/// module graph (sources, edges, governing manifests); `trust` is the full
+/// package admission surface, including declared dependencies the source does
+/// not import. A change to either starts a fresh rebuild.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WatchInputs {
+    pub(crate) source: u64,
+    pub(crate) trust: String,
+}
+
+pub(crate) fn watch_inputs(root: &Path) -> Result<WatchInputs, String> {
+    Ok(WatchInputs {
+        source: module_graph_fingerprint(root, CACHE_SCHEMA_VERSION)?,
+        trust: package_trust_fingerprint(root),
+    })
+}
+
 fn cmd_watch(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
@@ -1177,24 +1196,19 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
     }
     let color_enabled = resolve_color_mode(color);
     println!("watching '{}'", root.display());
-    let mut last_fp: Option<u64> = None;
+    let mut last_inputs: Option<WatchInputs> = None;
     let mut last_snapshot: Option<String> = None;
     loop {
-        match module_graph_fingerprint(&root, CACHE_SCHEMA_VERSION) {
-            Ok(fp) => {
-                if last_fp != Some(fp) {
+        match watch_inputs(&root) {
+            Ok(inputs) => {
+                if last_inputs.as_ref() != Some(&inputs) {
                     let t0 = Instant::now();
-                    // Reset only when the fingerprint actually changed, not on every idle
-                    // tick: `module_graph_fingerprint` now folds each module's governing
-                    // manifest content into its hash (see collect_module_graph in
-                    // incremental.rs), so a change to a declared dependency in that
-                    // manifest already changes `fp` and reaches this branch -- the
-                    // unconditional-every-tick reset DL-022 introduced was itself a real
-                    // regression (rehashing every declared package's full content on every
-                    // idle tick, not just real rebuilds). See DL-023.
-                    reset_pinned_dependency_fingerprint_cache();
-                    reset_declared_dependency_graph_cache();
-                    last_fp = Some(fp);
+                    let fp = inputs.source;
+                    // #1776/#1777: a rebuild is one fresh admission pass. Nothing
+                    // verified by an earlier pass can authorize this one, and no
+                    // caller reset ritual is involved.
+                    let _pass = AdmissionPass::begin();
+                    last_inputs = Some(inputs);
                     let parser_profile = cli_profile();
                     let (src, snapshot) = match prepare_source(&root) {
                         Ok((src, prepared)) => {
@@ -1268,7 +1282,12 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
                     }
                 }
             }
-            Err(e) => eprintln!("{e}"),
+            Err(e) => {
+                eprintln!("{e}");
+                // Recovery must re-run admission, never resume from the inputs
+                // validated before the failure (#1777).
+                last_inputs = None;
+            }
         }
         thread::sleep(Duration::from_millis(600));
     }
@@ -5437,5 +5456,84 @@ fn main() {
             qualification.audit_results[1],
             ControlledObservationAuditResult::Recorded(AuditEventId(1))
         ));
+    }
+
+    /// #1777: `smc watch` must observe the full package trust surface, not only
+    /// the imported module graph. `math` is declared by `app` but imported by no
+    /// source, so neither edit below touches the source fingerprint.
+    #[test]
+    fn watch_inputs_observe_declared_but_unimported_dependency_changes() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("pb06_watch_trust_{}_{nanos}", std::process::id()));
+        let app_src = dir.join("app").join("src");
+        let math_src = dir.join("math").join("src");
+        std::fs::create_dir_all(&app_src).expect("mkdir app src");
+        std::fs::create_dir_all(&math_src).expect("mkdir math src");
+        let math_manifest = dir.join("math").join("Semantic.package");
+        std::fs::write(
+            &math_manifest,
+            "format 1\npackage math\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write math manifest");
+        std::fs::write(math_src.join("core.sm"), "fn core() { return; }\n").expect("write math");
+        std::fs::write(
+            dir.join("app").join("Semantic.package"),
+            "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep math math ../math\n",
+        )
+        .expect("write app manifest");
+        let root = app_src.join("main.sm");
+        std::fs::write(&root, "fn main() { return; }\n").expect("write root");
+
+        let first = watch_inputs(&root).expect("inputs");
+        assert_eq!(
+            watch_inputs(&root).expect("idle"),
+            first,
+            "an idle tick is not a change"
+        );
+
+        // The unimported dependency's own manifest changes (its identity no
+        // longer matches the declaration, so admission is now invalid).
+        std::fs::write(
+            &math_manifest,
+            "format 1\npackage renamed\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("rename math");
+        // Admission now fails, and watch surfaces that failure: fresh admission
+        // (#1776) means the stale success cannot survive.
+        let err = watch_inputs(&root).expect_err("renamed dependency must fail admission");
+        assert!(err.contains("manifest declares 'renamed'"), "{err}");
+        assert_ne!(
+            package_trust_fingerprint(&root),
+            first.trust,
+            "the trust fingerprint itself must change too"
+        );
+
+        // Restore the manifest, then change only the dependency's content.
+        std::fs::write(
+            &math_manifest,
+            "format 1\npackage math\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("restore math");
+        assert_eq!(watch_inputs(&root).expect("restored"), first);
+        std::fs::write(
+            math_src.join("core.sm"),
+            "fn core() { return; } // edited\n",
+        )
+        .expect("edit math content");
+        let edited = watch_inputs(&root).expect("inputs");
+        assert_eq!(
+            edited.source, first.source,
+            "the imported graph did not change"
+        );
+        assert_ne!(
+            edited.trust, first.trust,
+            "dependency content change must be seen"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

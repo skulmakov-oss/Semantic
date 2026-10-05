@@ -287,6 +287,31 @@ Current core rule:
 Richer ABI and capability binding is outside this core contract PR and must not
 be smuggled into the VM execution contract by implication.
 
+## No-Host Execution
+
+A public execution entry point that takes no host (`run_semcode*`,
+`run_verified_semcode*`, `run_verified_entry_semcode*`,
+`run_verified_function_semcode_with_args*` and the controlled-observation
+collecting variants) has no host authority. Executing `GateRead`, `GateWrite`,
+`PulseEmit`, `StateQuery`, `StateUpdate`, `EventPost` or `ClockRead` on such a
+route fails with `RuntimeError::HostAbi` of kind `AbiFailureKind::Unavailable`
+and that operation's exact `HostCallId` (#1769). The VM never fabricates a
+read value, a state value, a clock value or a successful write.
+
+Host-free programs are unaffected: arithmetic, quad logic, collections, calls,
+deterministic PRNG and controlled `print` observation are VM-owned and run on
+every route. Raw routes skip the verifier by design; that grants no host
+authority.
+
+## Controlled Observation Sequencing
+
+`sm-vm` is the only authority for observation order. Each execution mints a
+contiguous `0, 1, 2, …` sequence in both collect and discard modes. When the
+next index cannot be represented, execution fails with
+`RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow)` before the event is
+delivered, so an index never wraps or repeats (#1766). Sinks consume
+VM-ordered events and are not a second sequence authority.
+
 ## Host ABI Boundary
 
 The host ABI is a trust boundary: a `PrometheusHostAbi` (or

@@ -173,6 +173,7 @@ impl CliPipeline {
     }
 
     pub fn semantic_check_file(path: &Path) -> Result<SemanticReport, String> {
+        let _pass = package_manifest::AdmissionPass::begin();
         let provider = CliFsProvider;
         let root = path
             .canonicalize()
