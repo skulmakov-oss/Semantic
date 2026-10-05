@@ -1,0 +1,2 @@
+source: crates/sm-ir/src/adt_descriptors.rs
+pub fn adt_descriptor_table(program: &Program) -> Result<AdtDescriptorTable, CompilePipelineError> {

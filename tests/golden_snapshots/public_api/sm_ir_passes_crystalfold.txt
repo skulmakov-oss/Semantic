@@ -1,0 +1,4 @@
+source: crates/sm-ir/src/passes/crystalfold.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CrystalFoldPass;
+pub(crate) fn is_crystalfold_barrier(instr: &IrInstr) -> bool {

@@ -1,0 +1,39 @@
+source: crates/sm-ir/src/hello_ir.rs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloIrModule {
+pub entry: HelloIrEntry,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloIrEntry {
+pub name: String,
+pub body: Vec<HelloIrStmt>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelloIrStmt {
+LocalQuad(HelloIrLocalQuad),
+RequireQuadEq(HelloIrRequireQuadEq),
+ObserveText(HelloIrObserveText),
+CompleteQuad(HelloIrCompleteQuad),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloIrLocalQuad {
+pub symbol: String,
+pub value: HelloIrQuadLit,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloIrRequireQuadEq {
+pub symbol: String,
+pub expected: HelloIrQuadLit,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloIrObserveText {
+pub text: String,
+pub observation_class: HelloIrObservationClass,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloIrCompleteQuad {
+pub value: HelloIrQuadLit,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelloIrObservationClass {
+Controlled,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelloIrQuadLit {
+T,
+F,
+N,
+S,
+pub fn lower_hello_checked_file( checked: &HelloCheckedFile, ) -> Result<HelloIrModule, FrontendError> {
