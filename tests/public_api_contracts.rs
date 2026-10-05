@@ -137,6 +137,10 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/sm_runtime_core_lib.txt",
     ),
     (
+        "crates/sm-runtime-core/src/hello_observation_sink.rs",
+        "tests/golden_snapshots/public_api/sm_runtime_core_hello_observation_sink.txt",
+    ),
+    (
         "crates/sm-verify/src/diagnostic_authority.rs",
         "tests/golden_snapshots/public_api/sm_verify_diagnostic_authority.txt",
     ),
