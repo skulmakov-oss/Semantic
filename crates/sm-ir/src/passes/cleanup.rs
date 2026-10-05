@@ -192,14 +192,8 @@ fn load_dst_and_payload(instr: &IrInstr) -> Option<(u16, u64)> {
         IrInstr::LoadI32 { dst, val } => Some((*dst, 0x3000 | (*val as i64 as u64))),
         IrInstr::LoadF64 { dst, val } => Some((*dst, 0x4000 | val.to_bits())),
         IrInstr::LoadFx { dst, val } => Some((*dst, 0x6000 | (*val as i64 as u64))),
-        IrInstr::LoadVar { dst, name } => {
-            let mut h = 0xcbf29ce484222325u64;
-            for b in name.as_bytes() {
-                h ^= *b as u64;
-                h = h.wrapping_mul(0x100000001b3);
-            }
-            Some((*dst, 0x5000 ^ h))
-        }
+        // FA-04-017 / #1723: `LoadVar` can trap (unknown variable), so it is
+        // never a removable pure load; dropping it could erase the trap.
         _ => None,
     }
 }
