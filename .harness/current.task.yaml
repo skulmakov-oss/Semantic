@@ -1,40 +1,38 @@
 task:
-  id: PHASE-B-PB-04
-  title: "Module Graph, Identity & Provenance Hardening"
-  type: phase_b_module_graph_identity_provenance
-  target: "Phase-B PB-04 / sm-sema module graph (#1681-#1692 #1701-#1703 #1706)"
+  id: PHASE-B-PB-05
+  title: "IR Safety & SemCode Producer Integrity"
+  type: phase_b_ir_safety_semcode_producer_integrity
+  target: "Phase-B PB-05 / sm-ir producer (#1708 #1711 #1713-#1716 #1721 #1723 #1727-#1729)"
   mode: active
-  supersedes: PHASE-B-PB-03
+  supersedes: PHASE-B-PB-04
   umbrella: 1617
-  issues: [1681, 1682, 1683, 1684, 1685, 1686, 1687, 1688, 1689, 1690, 1691, 1692, 1701, 1702, 1703, 1706]
-  base_sha: 3b12987ba59a985ff6726e3abd0e57d60b588b7e
+  issues: [1708, 1711, 1713, 1714, 1715, 1716, 1721, 1723, 1727, 1728, 1729]
+  base_sha: 4e37e4f577f3978c2b39347cc20a49351d26ae1f
   authorized_by: >-
-    Repository owner direct instruction (2026-10-05, "GO — Phase B / PB-04 —
-    Module Graph, Identity & Provenance Hardening") plus owner decisions:
-    flat export namespace (#1686), fail closed on non-UTF-8 with the String
-    provider API kept (#1690), and binding imports from the frozen graph while
-    preserving the namespace-qualified contract (#1684). Merge, release, tag,
-    manual issue closure, PB-05 and #1987 are NOT authorized.
+    Repository owner direct instruction (2026-10-05, "GO — Phase B / PB-05 —
+    IR Safety & SemCode Producer Integrity"). SemCode format owner is
+    sm-format; numeric limits are not copied into sm-ir. Merge, release, tag,
+    manual issue closure, next-phase work, sm-vm/runtime-quota/PROMETHEUS
+    repairs and #1987 are NOT authorized.
 
 intent:
   summary: >-
-    One frozen resolved module graph with provider-owned identity, one
-    resolution per edge, one selector and export-item authority, complete
-    provenance, enforced sm-sema alloc build and fail-closed fixture evidence.
-  decision_record: docs/roadmap/phase_b/pb04_module_graph_identity_decision.md
+    Fail-closed IR identity allocation, injective generated helper names,
+    optimizer passes that preserve runtime rejection and an exhaustive
+    barrier set, producer output bounded by sm-format structural limits,
+    coherent ownership/header-family/capability documentation, and a guarded
+    sm-ir public surface.
+  decision_record: docs/roadmap/phase_b/pb05_ir_safety_semcode_producer_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .github/workflows/ci.yml
-    - crates/sm-sema/**
-    - crates/sm-front/**
-    - crates/smc-cli/src/app.rs
-    - crates/smc-cli/src/lib.rs
-    - crates/smc-cli/src/canonical_check.rs
-    - docs/spec/modules.md
-    - docs/exports.md
-    - docs/NO_STD.md
+    - crates/sm-ir/**
+    - docs/spec/semcode.md
+    - docs/spec/ir.md
+    - docs/spec/runtime_ownership.md
+    - docs/architecture/module_ownership_map.md
+    - AGENTS.md
     - docs/roadmap/phase_b/**
     - tests/**
 
@@ -56,7 +54,7 @@ authorization:
   documentation_addition: true
   documentation_correction: true
   test_addition: true
-  workflow_changes: true
+  workflow_changes: false
   dependency_changes: false
   github_issue_lifecycle: false
   git_commit_push_pr: true
@@ -65,7 +63,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 3b12987ba59a985ff6726e3abd0e57d60b588b7e
+  base_sha: 4e37e4f577f3978c2b39347cc20a49351d26ae1f
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
