@@ -1,37 +1,37 @@
 task:
-  id: PHASE-B-PB-06
-  title: "Runtime / VM Trust Boundary & Admission Freshness"
-  type: phase_b_runtime_vm_trust_boundary
-  target: "Phase-B PB-06 / runtime-core, sm-vm, smc-cli (#1764-#1767 #1769 #1776 #1777)"
+  id: PHASE-B-PB-07
+  title: "PROMETHEUS Trust Hardening"
+  type: phase_b_prometheus_trust_hardening
+  target: "Phase-B PB-07 / PROMETHEUS trust boundaries (#1778-#1787)"
   mode: active
-  supersedes: PHASE-B-PB-05
+  supersedes: PHASE-B-PB-06
   umbrella: 1617
-  issues: [1764, 1765, 1766, 1767, 1769, 1776, 1777]
-  base_sha: a36237f950634594934e80fe12377193113f5700
+  issues: [1778, 1779, 1780, 1781, 1782, 1783, 1784, 1785, 1786, 1787]
+  base_sha: 9e79f5f2aba1e830795948da02669c09abe75e43
   authorized_by: >-
-    Repository owner direct instruction (2026-10-05, "GO - Phase B / PB-06 -
-    Runtime / VM Trust Boundary & Admission Freshness"). Merge, release, tag,
-    manual issue closure, PB-07 (prom-* #1778-#1787) and #1987 are NOT
-    authorized.
+    Repository owner direct instruction (2026-10-06, "GO - Phase B / PB-07 -
+    PROMETHEUS Trust Hardening"). Merge, auto-merge, release, tag, manual
+    issue closure, branch deletion and #1987 are NOT authorized.
 
 intent:
   summary: >-
-    Vocabulary-only runtime-core, verifier-bound and VM-sequenced controlled
-    observation, fail-closed no-host VM execution, operation-scoped package
-    admission freshness, and a watch signal covering the full package trust
-    surface.
-  decision_record: docs/roadmap/phase_b/pb06_runtime_vm_trust_boundary_decision.md
+    Closed ABI quad state space, non-overclaiming application host contract,
+    typed invalid capability contracts, validated state restore and epoch
+    exhaustion, zero-prefix rule effect admission, checker-owned capability
+    provenance, canonical audit evidence and bounded archive loading.
+  decision_record: docs/roadmap/phase_b/pb07_prometheus_trust_hardening_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/sm-runtime-core/**
+    - crates/prom-abi/**
+    - crates/prom-cap/**
+    - crates/prom-state/**
+    - crates/prom-runtime/**
+    - crates/prom-audit/**
+    - crates/prom-gates/**
     - crates/sm-vm/**
     - crates/smc-cli/**
-    - docs/spec/vm.md
-    - docs/spec/cli.md
-    - docs/architecture/module_ownership_map.md
-    - docs/language/semantic_hello_vm_observation_execution_route.md
     - docs/roadmap/phase_b/**
     - tests/**
 
@@ -46,7 +46,6 @@ scope:
     - third_party/**
     - ton618_legacy/**
     - prom-ui*
-    - crates/prom-*/**
 
 authorization:
   rust_implementation: true
@@ -63,7 +62,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: a36237f950634594934e80fe12377193113f5700
+  base_sha: 9e79f5f2aba1e830795948da02669c09abe75e43
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
