@@ -2,11 +2,12 @@
 //! runtime rejection of the raw IR (#1723, #1729), and user code cannot claim
 //! names reserved by the builtin namespace (#1721).
 
+use sm_front::QuadVal;
 use sm_ir::{
     compile_program_to_semcode, emit_ir_to_semcode, passes::run_default_opt_passes, IrFunction,
     IrInstr,
 };
-use sm_vm::run_semcode;
+use sm_vm::{run_semcode, RuntimeError};
 
 fn main_fn(instrs: Vec<IrInstr>) -> Vec<IrFunction> {
     vec![IrFunction {
@@ -17,48 +18,130 @@ fn main_fn(instrs: Vec<IrInstr>) -> Vec<IrFunction> {
     }]
 }
 
-/// Runs the raw (O0) and optimized (O1) program; both must be rejected.
-fn assert_o0_o1_both_trap(instrs: Vec<IrInstr>) {
+/// Runtime rejection class: the `RuntimeError` variant, ignoring payload text.
+fn rejection_class(err: &RuntimeError) -> core::mem::Discriminant<RuntimeError> {
+    core::mem::discriminant(err)
+}
+
+/// O0 and O1 must preserve the same runtime rejection class.
+fn assert_same_rejection_class(o0: &Result<(), RuntimeError>, o1: &Result<(), RuntimeError>) {
+    let (Err(e0), Err(e1)) = (o0, o1) else {
+        panic!("both levels must reject: O0={o0:?} O1={o1:?}");
+    };
+    assert_eq!(
+        rejection_class(e0),
+        rejection_class(e1),
+        "optimizer changed the rejection class: O0={e0:?} O1={e1:?}"
+    );
+}
+
+/// Runs the raw (O0) and optimized (O1) program and returns the O0 rejection
+/// after proving O1 rejects with the same class.
+fn o0_o1_rejection(instrs: Vec<IrInstr>) -> RuntimeError {
     let raw = main_fn(instrs);
     let mut optimized = raw.clone();
     run_default_opt_passes(&mut optimized).expect("opt");
     let o0 = run_semcode(&emit_ir_to_semcode(&raw, false).expect("emit O0"));
     let o1 = run_semcode(&emit_ir_to_semcode(&optimized, false).expect("emit O1"));
-    assert!(o0.is_err(), "raw program must trap");
-    assert!(
-        o1.is_err(),
-        "optimizer erased a runtime rejection: {:?}",
-        optimized[0].instrs
-    );
+    assert_same_rejection_class(&o0, &o1);
+    o0.expect_err("checked above")
 }
 
-#[test]
-fn one_sided_bool_annihilator_keeps_type_trap() {
-    assert_o0_o1_both_trap(vec![
-        IrInstr::LoadBool { dst: 1, val: false },
+fn type_invalid(op: IrInstr, lhs: IrInstr) -> Vec<IrInstr> {
+    vec![
+        lhs,
         IrInstr::LoadI32 { dst: 2, val: 1 },
-        IrInstr::BoolAnd {
-            dst: 3,
-            lhs: 1,
-            rhs: 2,
-        },
+        op,
         IrInstr::Ret { src: None },
-    ]);
+    ]
 }
 
 #[test]
-fn cleanup_keeps_trapping_loadvar() {
-    assert_o0_o1_both_trap(vec![
+fn one_sided_rewrites_keep_type_mismatch_class() {
+    let cases = [
+        type_invalid(
+            IrInstr::BoolAnd {
+                dst: 3,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::LoadBool { dst: 1, val: false },
+        ),
+        type_invalid(
+            IrInstr::BoolOr {
+                dst: 3,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::LoadBool { dst: 1, val: true },
+        ),
+        type_invalid(
+            IrInstr::QAnd {
+                dst: 3,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::LoadQ {
+                dst: 1,
+                val: QuadVal::N,
+            },
+        ),
+        type_invalid(
+            IrInstr::AddI32 {
+                dst: 3,
+                lhs: 2,
+                rhs: 1,
+            },
+            IrInstr::LoadBool { dst: 1, val: true },
+        ),
+    ];
+    for case in cases {
+        let err = o0_o1_rejection(case.clone());
+        assert!(
+            matches!(err, RuntimeError::TypeMismatchRuntime(_)),
+            "{case:?}: {err:?}"
+        );
+    }
+}
+
+#[test]
+fn cleanup_keeps_unknown_variable_class() {
+    // `valid` is defined, so erasing the `missing` load would make O1 succeed.
+    let err = o0_o1_rejection(vec![
+        IrInstr::LoadI32 { dst: 2, val: 7 },
+        IrInstr::StoreVar {
+            name: "valid".into(),
+            src: 2,
+            activation_site: None,
+            write_site: None,
+        },
         IrInstr::LoadVar {
             dst: 1,
             name: "missing".into(),
         },
         IrInstr::LoadVar {
             dst: 1,
-            name: "missing".into(),
+            name: "valid".into(),
         },
         IrInstr::Ret { src: None },
     ]);
+    assert!(matches!(err, RuntimeError::UnknownVariable(_)), "{err:?}");
+}
+
+/// The comparator itself: both `Err` is not enough.
+#[test]
+fn rejection_comparator_distinguishes_classes() {
+    let mismatch: Result<(), RuntimeError> = Err(RuntimeError::TypeMismatchRuntime("a".into()));
+    let reworded: Result<(), RuntimeError> = Err(RuntimeError::TypeMismatchRuntime("b".into()));
+    assert_same_rejection_class(&mismatch, &reworded);
+    for other in [
+        Err(RuntimeError::UnknownVariable("a".into())),
+        Err(RuntimeError::StackUnderflow),
+        Ok(()),
+    ] {
+        let caught = std::panic::catch_unwind(|| assert_same_rejection_class(&mismatch, &other));
+        assert!(caught.is_err(), "comparator accepted O1={other:?}");
+    }
 }
 
 /// Every bare name that `sm-ir` lowers as an intrinsic (instead of a call)
