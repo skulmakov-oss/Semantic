@@ -1,7 +1,7 @@
 use sm_sema::{check_file_with_provider, ModuleProvider};
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 struct FsProvider;
 
@@ -27,13 +27,34 @@ fn resolve_fixture_import(importer_module_id: &str, spec: &str) -> String {
     } else {
         base.join(spec_path)
     };
-    joined.to_string_lossy().replace('\\', "/")
+    // PB-04 (#1690, #1691): the provider owns canonical module ids. Lexical
+    // cleanup keeps an unresolved leading `..`, the id is lossless UTF-8, and
+    // `\` is folded only on Windows, where it is a path separator.
+    let mut parts: Vec<Component<'_>> = Vec::new();
+    for c in joined.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir if matches!(parts.last(), Some(Component::Normal(_))) => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    let normalized: PathBuf = parts.iter().collect();
+    let text = normalized.to_str().expect("fixture paths are UTF-8");
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.to_string()
+    }
 }
 
+/// Every directory entry must be readable (#1702): a discovery error fails the
+/// test instead of silently shrinking the corpus.
 fn fixture_dirs(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for e in fs::read_dir(root).expect("read fixture root").flatten() {
-        let p = e.path();
+    for entry in fs::read_dir(root).expect("read fixture root") {
+        let p = entry.expect("read fixture entry").path();
         if p.is_dir() {
             out.push(p);
         }

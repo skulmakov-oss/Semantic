@@ -360,7 +360,7 @@ pub fn infer_atom_type_core<FS, FF>(
 ) -> Result<SemanticType, ConditionInferError>
 where
     FS: Fn(&str) -> Option<SemanticType>,
-    FF: Fn(&str, &str) -> Option<SemanticType>,
+    FF: Fn(Option<&str>, &str, &str) -> Option<SemanticType>,
 {
     let resolved = |ty: Option<SemanticType>, what: String| match ty {
         Some(ty) if ty != SemanticType::Unknown => Ok(ty),
@@ -372,9 +372,18 @@ where
         LogosAtom::Number(lit) => Ok(numeric_literal_type(lit)),
         LogosAtom::Text(_) => Ok(SemanticType::Str),
         LogosAtom::Name(name) => resolved(resolve_symbol(name), name.clone()),
-        LogosAtom::Field { entity, field } => {
-            resolved(resolve_field(entity, field), format!("{entity}.{field}"))
-        }
+        LogosAtom::Field { entity, field } => resolved(
+            resolve_field(None, entity, field),
+            format!("{entity}.{field}"),
+        ),
+        LogosAtom::QualifiedField {
+            namespace,
+            entity,
+            field,
+        } => resolved(
+            resolve_field(Some(namespace), entity, field),
+            format!("{namespace}.{entity}.{field}"),
+        ),
     }
 }
 
@@ -388,7 +397,7 @@ pub fn infer_when_condition_type_core<FS, FF>(
 ) -> Result<SemanticType, ConditionInferError>
 where
     FS: Fn(&str) -> Option<SemanticType>,
-    FF: Fn(&str, &str) -> Option<SemanticType>,
+    FF: Fn(Option<&str>, &str, &str) -> Option<SemanticType>,
 {
     let atom = |a: &LogosAtom| infer_atom_type_core(a, &resolve_symbol, &resolve_field);
     match condition {
@@ -404,7 +413,7 @@ where
             Ok(SemanticType::Bool)
         }
         LogosCondition::Present(target) => match target {
-            LogosAtom::Name(_) | LogosAtom::Field { .. } => {
+            LogosAtom::Name(_) | LogosAtom::Field { .. } | LogosAtom::QualifiedField { .. } => {
                 atom(target).map(|_| SemanticType::Bool)
             }
             _ => Err(ConditionInferError::InvalidPresent),
@@ -528,23 +537,35 @@ pub fn insert_name_core(names: &mut BTreeSet<String>, name: &str) -> bool {
     names.insert(name.to_string())
 }
 
-#[derive(Debug, Clone)]
+/// PB-04 (#1683, #1685): one selected-import item, parsed exactly once.
+/// `{ Entity:Foo as Bar }` selects the single export named `Foo`, asserts it
+/// is an `Entity`, and binds it locally as `Bar`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedImport {
+    pub public_name: String,
+    pub expected_kind: Option<ExportKind>,
+    pub local_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportDirective {
     pub spec: String,
     pub alias: Option<String>,
     pub reexport: bool,
-    pub select_items: Vec<(String, Option<String>)>,
+    pub select_items: Vec<SelectedImport>,
     pub wildcard: bool,
     pub line: u32,
     pub col: u32,
     pub decl_order: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ImportResolutionPlan {
-    pub selected_bindings: Vec<String>,
-    pub namespace_aliases: Vec<String>,
-    pub wildcard_imports: Vec<String>,
+impl ImportDirective {
+    /// The namespace alias every `Import` binds: explicit `as X` or the file stem.
+    pub fn namespace_alias(&self) -> String {
+        self.alias
+            .clone()
+            .unwrap_or_else(|| default_import_alias(&self.spec))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -554,18 +575,26 @@ pub enum ExportKind {
     Law,
 }
 
+/// PB-04 (#1703, #1706): export provenance. `Local` is a declaration of the
+/// exporting module; `ReExport` carries the complete hop chain, ending with the
+/// symbol name in the declaring module. (A plain, non-`pub` import exports
+/// nothing, so there is no separate "imported" export state.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportOrigin {
     Local { module: String },
-    Imported { module: String, symbol: String },
     ReExport { chain: Vec<String> },
 }
 
+/// PB-04: the one export item authority. `source_module` / `source_name` name
+/// the declaration the item ultimately denotes (provider module id + declared
+/// name), preserved across every re-export hop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportItem {
     pub public_name: String,
     pub kind: ExportKind,
     pub origin: ExportOrigin,
+    pub source_module: String,
+    pub source_name: String,
     pub span: SourceMark,
     pub decl_order: u32,
 }
@@ -575,6 +604,15 @@ pub struct ExportSet {
     pub items: Vec<ExportItem>,
 }
 
+impl ExportSet {
+    /// Flat namespace (#1686): at most one item per public name.
+    pub fn get(&self, public_name: &str) -> Option<&ExportItem> {
+        self.items
+            .iter()
+            .find(|item| item.public_name == public_name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalExportDecl {
     pub public_name: String,
@@ -582,43 +620,69 @@ pub struct LocalExportDecl {
     pub span: SourceMark,
 }
 
-pub fn collect_local_exports_core(module_key: &str, locals: &[LocalExportDecl]) -> ExportSet {
-    let mut items = Vec::new();
-    for (idx, local) in locals.iter().enumerate() {
-        items.push(ExportItem {
-            public_name: local.public_name.clone(),
-            kind: local.kind,
-            origin: ExportOrigin::Local {
-                module: module_key.to_string(),
-            },
-            span: local.span,
-            decl_order: idx as u32,
-        });
-    }
-    ExportSet { items }
+/// A module-graph, export or selection failure, bound to the provider module
+/// id it was found in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleError {
+    pub code: &'static str,
+    pub message: String,
+    pub module_id: String,
+    pub line: u32,
+    pub col: u32,
 }
 
-pub fn parse_select_items(inside: &str) -> Vec<(String, Option<String>)> {
-    let mut out = Vec::new();
-    for raw in inside.split(',') {
-        let part = raw.trim();
-        if part.is_empty() {
-            continue;
-        }
-        if let Some((src, dst)) = part.split_once(" as ") {
-            let s = src.trim().trim_matches('"');
-            let d = dst.trim().trim_matches('"');
-            if !s.is_empty() && !d.is_empty() {
-                out.push((s.to_string(), Some(d.to_string())));
+pub fn collect_local_exports_core(
+    module_id: &str,
+    module_display: &str,
+    locals: &[LocalExportDecl],
+) -> Result<ExportSet, ModuleError> {
+    let mut set = ExportSet::default();
+    for (idx, local) in locals.iter().enumerate() {
+        // A same-kind duplicate is a declaration error with its own code
+        // (E0220 Entity/System, E0221 Law), exactly as analysis reports it;
+        // only a cross-kind clash is the flat-namespace E0242 (#1686).
+        if let Some(prev) = set.get(&local.public_name) {
+            if prev.kind == local.kind {
+                let (code, message) = match local.kind {
+                    ExportKind::Law => (
+                        "E0221",
+                        format!("duplicate Law '{}' in module", local.public_name),
+                    ),
+                    ExportKind::Entity => {
+                        ("E0220", format!("duplicate Entity '{}'", local.public_name))
+                    }
+                    ExportKind::System => {
+                        ("E0220", format!("duplicate System '{}'", local.public_name))
+                    }
+                };
+                return Err(ModuleError {
+                    code,
+                    message,
+                    module_id: module_id.to_string(),
+                    line: local.span.line,
+                    col: local.span.col,
+                });
             }
-            continue;
         }
-        let name = part.trim().trim_matches('"');
-        if !name.is_empty() {
-            out.push((name.to_string(), None));
-        }
+        push_export_item_core(
+            &mut set,
+            ExportItem {
+                public_name: local.public_name.clone(),
+                kind: local.kind,
+                origin: ExportOrigin::Local {
+                    module: module_display.to_string(),
+                },
+                source_module: module_id.to_string(),
+                source_name: local.public_name.clone(),
+                span: local.span,
+                decl_order: idx as u32,
+            },
+            module_id,
+            local.span.line,
+            local.span.col,
+        )?;
     }
-    out
+    Ok(set)
 }
 
 pub fn default_import_alias(spec: &str) -> String {
@@ -631,96 +695,80 @@ pub fn default_import_alias(spec: &str) -> String {
     last.to_string()
 }
 
-/// Line-scanning convenience over [`parse_import_directive`]. The module
-/// loader does not use it: it consumes the `Import` directives `sm-front`
-/// preserved in `LogosProgram::imports` (PB-02 / #1645).
-pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
-    let mut out = Vec::new();
-    let mut decl_order = 0u32;
-    for (idx, line) in source.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
-            continue;
-        }
-        if !trimmed.starts_with("Import") {
-            continue;
-        }
-        let ws = line.len().saturating_sub(trimmed.len());
-        if let Some(directive) =
-            parse_import_directive(trimmed, (idx + 1) as u32, (ws + 1) as u32, decl_order)
-        {
-            out.push(directive);
-            decl_order += 1;
-        }
-    }
-    out
-}
-
-/// The one Logos import-directive parser: interprets a single directive whose
-/// text starts at the `Import` keyword. `None` means the text carries no
-/// usable import spec.
+/// The one Logos import-directive parser (semantic owner of import syntax
+/// interpretation; `sm-front` preserves the directive text). Malformed text is
+/// rejected (#1682), never repaired; an unknown kind qualifier is `E0245`
+/// (#1683), never an unqualified selection.
 pub fn parse_import_directive(
     directive: &str,
     line: u32,
     col: u32,
     decl_order: u32,
-) -> Option<ImportDirective> {
-    let after_kw = directive.strip_prefix("Import")?;
+) -> Result<ImportDirective, ImportPolicyError> {
+    let malformed = |what: &str| ImportPolicyError {
+        code: "E0239",
+        message: format!(
+            "malformed Import directive ({what}): '{}'",
+            directive.trim()
+        ),
+        line,
+        col,
+    };
+    let after_kw = directive
+        .strip_prefix("Import")
+        .ok_or_else(|| malformed("missing Import keyword"))?;
     let mut rest = after_kw.trim();
     if rest.is_empty() {
-        return None;
+        return Err(malformed("missing import path"));
     }
     let mut reexport = false;
     if let Some(after_pub) = rest.strip_prefix("pub ") {
         reexport = true;
         rest = after_pub.trim_start();
     }
-
-    let spec = if let Some(stripped) = rest.strip_prefix('"') {
-        if let Some(end) = stripped.find('"') {
-            stripped[..end].to_string()
-        } else {
-            stripped.to_string()
-        }
+    let (spec, mut tail) = if let Some(quoted) = rest.strip_prefix('"') {
+        let end = quoted
+            .find('"')
+            .ok_or_else(|| malformed("unterminated import path"))?;
+        (&quoted[..end], quoted[end + 1..].trim_start())
     } else {
-        rest.split_whitespace().next().unwrap_or("").to_string()
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        (&rest[..end], rest[end..].trim_start())
     };
     if spec.is_empty() {
-        return None;
+        return Err(malformed("empty import path"));
     }
-
     let mut alias = None;
-    let mut tail = "";
-    if let Some(stripped) = rest.strip_prefix('"') {
-        if let Some(end) = stripped.find('"') {
-            tail = stripped[end + 1..].trim_start();
+    if let Some(after_as) = tail.strip_prefix("as ") {
+        let after_as = after_as.trim_start();
+        let end = after_as.find(char::is_whitespace).unwrap_or(after_as.len());
+        let name = after_as[..end].trim_matches('"');
+        if name.is_empty() {
+            return Err(malformed("missing alias after 'as'"));
         }
-    } else if let Some(pos) = rest.find(char::is_whitespace) {
-        tail = rest[pos..].trim_start();
+        alias = Some(name.to_string());
+        tail = after_as[end..].trim_start();
     }
     let mut wildcard = false;
-    let mut select_items: Vec<(String, Option<String>)> = Vec::new();
-    if let Some(after_as) = tail.strip_prefix("as ") {
-        let mut split = after_as.splitn(2, char::is_whitespace);
-        let head = split.next().unwrap_or("").trim_matches('"');
-        if !head.is_empty() {
-            alias = Some(head.to_string());
-        }
-        tail = split.next().unwrap_or("").trim_start();
-    }
     if let Some(after_star) = tail.strip_prefix('*') {
         wildcard = true;
         tail = after_star.trim_start();
     }
+    let mut select_items = Vec::new();
     if let Some(after_lbrace) = tail.strip_prefix('{') {
-        if let Some(end) = after_lbrace.find('}') {
-            let inside = &after_lbrace[..end];
-            select_items = parse_select_items(inside);
+        let end = after_lbrace
+            .find('}')
+            .ok_or_else(|| malformed("missing '}' closing the select list"))?;
+        for raw in after_lbrace[..end].split(',') {
+            select_items.push(parse_selected_import(raw.trim(), line, col, &malformed)?);
         }
+        tail = after_lbrace[end + 1..].trim_start();
     }
-
-    Some(ImportDirective {
-        spec,
+    if !(tail.is_empty() || tail.starts_with("//") || tail.starts_with('#')) {
+        return Err(malformed("unexpected trailing text"));
+    }
+    Ok(ImportDirective {
+        spec: spec.to_string(),
         alias,
         reexport,
         select_items,
@@ -728,6 +776,51 @@ pub fn parse_import_directive(
         line,
         col,
         decl_order,
+    })
+}
+
+fn parse_selected_import(
+    raw: &str,
+    line: u32,
+    col: u32,
+    malformed: &dyn Fn(&str) -> ImportPolicyError,
+) -> Result<SelectedImport, ImportPolicyError> {
+    let (selector, local) = match raw.split_once(" as ") {
+        Some((src, dst)) => (
+            src.trim().trim_matches('"'),
+            Some(dst.trim().trim_matches('"')),
+        ),
+        None => (raw.trim_matches('"'), None),
+    };
+    if selector.is_empty() || local == Some("") {
+        return Err(malformed("empty selected item"));
+    }
+    let (expected_kind, public_name) = match selector.split_once(':') {
+        Some((qualifier, name)) => {
+            let kind = match qualifier.trim() {
+                "System" => ExportKind::System,
+                "Entity" => ExportKind::Entity,
+                "Law" => ExportKind::Law,
+                other => {
+                    return Err(ImportPolicyError {
+                        code: "E0245",
+                        message: format!("unknown selected-import kind qualifier '{other}'"),
+                        line,
+                        col,
+                    })
+                }
+            };
+            (Some(kind), name.trim())
+        }
+        None => (None, selector),
+    };
+    if public_name.is_empty() {
+        return Err(malformed("empty selected item"));
+    }
+    Ok(SelectedImport {
+        public_name: public_name.to_string(),
+        expected_kind,
+        local_name: local.unwrap_or(public_name).to_string(),
     })
 }
 
@@ -744,10 +837,7 @@ pub fn validate_import_namespace_rules(
 ) -> Result<(), ImportPolicyError> {
     let mut aliases = BTreeSet::<String>::new();
     for import in imports {
-        let alias = import
-            .alias
-            .clone()
-            .unwrap_or_else(|| default_import_alias(&import.spec));
+        let alias = import.namespace_alias();
         if !aliases.insert(alias.clone()) {
             return Err(ImportPolicyError {
                 code: "E0241",
@@ -758,14 +848,13 @@ pub fn validate_import_namespace_rules(
         }
 
         let mut seen_select_alias = BTreeSet::<String>::new();
-        for (src, dst) in &import.select_items {
-            let local = dst.clone().unwrap_or_else(|| src.clone());
-            if !seen_select_alias.insert(local.clone()) {
+        for selected in &import.select_items {
+            if !seen_select_alias.insert(selected.local_name.clone()) {
                 return Err(ImportPolicyError {
                     code: "E0245",
                     message: format!(
                         "duplicate selected import alias '{}' in one Import statement",
-                        local
+                        selected.local_name
                     ),
                     line: import.line,
                     col: import.col,
@@ -793,10 +882,7 @@ pub fn validate_import_bindings_core(
 
     let mut bound = BTreeSet::<String>::new();
     for import in imports {
-        let alias = import
-            .alias
-            .clone()
-            .unwrap_or_else(|| default_import_alias(&import.spec));
+        let alias = import.namespace_alias();
         if local_names.contains(&alias) {
             return Err(ImportPolicyError {
                 code: "E0241",
@@ -813,9 +899,9 @@ pub fn validate_import_bindings_core(
                 col: import.col,
             });
         }
-        for (src, dst) in &import.select_items {
-            let local = dst.clone().unwrap_or_else(|| src.clone());
-            if local_names.contains(&local) {
+        for selected in &import.select_items {
+            let local = &selected.local_name;
+            if local_names.contains(local) {
                 return Err(ImportPolicyError {
                     code: "E0241",
                     message: format!("import alias '{}' conflicts with local symbol", local),
@@ -836,246 +922,183 @@ pub fn validate_import_bindings_core(
     Ok(())
 }
 
-pub fn build_import_resolution_plan_core(imports: &[ImportDirective]) -> ImportResolutionPlan {
-    let mut ordered: Vec<&ImportDirective> = imports.iter().collect();
-    ordered.sort_by_key(|import| import.decl_order);
-
-    let mut plan = ImportResolutionPlan::default();
-    for import in &ordered {
-        for (src, dst) in &import.select_items {
-            let (_, base_name) = parse_select_expected_kind(src);
-            plan.selected_bindings
-                .push(dst.clone().unwrap_or_else(|| base_name.to_string()));
-        }
-    }
-    for import in &ordered {
-        plan.namespace_aliases.push(
-            import
-                .alias
-                .clone()
-                .unwrap_or_else(|| default_import_alias(&import.spec)),
-        );
-        if import.wildcard {
-            plan.wildcard_imports.push(import.spec.clone());
-        }
-    }
-    plan
-}
-
-#[derive(Debug, Clone)]
-pub struct SelectImportModule {
-    pub module_key: String,
-    pub source: String,
-    pub imports: Vec<ImportDirective>,
-}
-
+/// PB-04 (#1692): one import declaration, resolved through the provider
+/// exactly once; `target` is the provider-owned module id.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SelectImportPolicyError {
-    pub code: &'static str,
-    pub message: String,
-    pub module_key: String,
-    pub line: u32,
-    pub col: u32,
+pub struct ResolvedImport {
+    pub directive: ImportDirective,
+    pub target: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct ExportBuildModule {
-    pub module_key: String,
-    pub source: String,
+/// One node of the frozen module graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleNode {
+    /// Provider-owned semantic identity.
+    pub module_id: String,
+    /// Provider presentation of `module_id` (diagnostics/provenance text only).
+    pub display: String,
     pub local_exports: ExportSet,
-    pub imports: Vec<ImportDirective>,
+    pub imports: Vec<ResolvedImport>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExportBuildError {
-    pub code: &'static str,
-    pub message: String,
-    pub module_key: String,
-    pub line: u32,
-    pub col: u32,
+/// PB-04: the one frozen, resolved module graph every module-semantic phase
+/// (exports, selection, name binding, provenance) consumes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleGraph {
+    nodes: BTreeMap<String, ModuleNode>,
 }
 
-pub fn validate_select_imports_core(
-    modules: &[SelectImportModule],
-    dep_lookup: &BTreeMap<(String, String), String>,
-    export_symbols: &BTreeMap<String, BTreeSet<String>>,
-    export_kinds: &BTreeMap<String, BTreeMap<String, ExportKind>>,
-) -> Result<(), SelectImportPolicyError> {
-    for m in modules {
-        for import in &m.imports {
-            if import.select_items.is_empty() {
-                continue;
+impl ModuleGraph {
+    /// Freezes `nodes`. A duplicate module id (#1688) or an edge whose target
+    /// is not a node is a deterministic error.
+    pub fn new(nodes: Vec<ModuleNode>) -> Result<Self, ModuleError> {
+        let mut map = BTreeMap::new();
+        for node in nodes {
+            if let Some(prev) = map.get(&node.module_id) {
+                let prev: &ModuleNode = prev;
+                return Err(ModuleError {
+                    code: "E0239",
+                    message: format!("duplicate module id '{}'", prev.display),
+                    module_id: node.module_id.clone(),
+                    line: 0,
+                    col: 0,
+                });
             }
-            let dep_key = dep_lookup
-                .get(&(m.module_key.clone(), import.spec.clone()))
-                .ok_or_else(|| SelectImportPolicyError {
-                    code: "E0239",
-                    message: format!("import module not loaded for select '{}'", import.spec),
-                    module_key: m.module_key.clone(),
-                    line: import.line,
-                    col: import.col,
-                })?;
-            let symbols = export_symbols
-                .get(dep_key)
-                .ok_or_else(|| SelectImportPolicyError {
-                    code: "E0239",
-                    message: format!("import module not loaded for select '{}'", import.spec),
-                    module_key: m.module_key.clone(),
-                    line: import.line,
-                    col: import.col,
-                })?;
-            let kinds = export_kinds.get(dep_key);
-            for (sym, _) in &import.select_items {
-                let (expected_kind, base_name) = parse_select_expected_kind(sym);
-                if !symbols.contains(base_name) {
-                    return Err(SelectImportPolicyError {
-                        code: "E0244",
+            map.insert(node.module_id.clone(), node);
+        }
+        for node in map.values() {
+            for import in &node.imports {
+                if !map.contains_key(&import.target) {
+                    return Err(ModuleError {
+                        code: "E0239",
                         message: format!(
-                            "selected import symbol '{}' not found in '{}'",
-                            base_name, dep_key
+                            "import '{}' resolved to module '{}' that is not in the module graph",
+                            import.directive.spec, import.target
                         ),
-                        module_key: m.module_key.clone(),
-                        line: import.line,
-                        col: import.col,
+                        module_id: node.module_id.clone(),
+                        line: import.directive.line,
+                        col: import.directive.col,
                     });
                 }
-                if let Some(expected) = expected_kind {
-                    if let Some(actual) = kinds.and_then(|k| k.get(base_name)).copied() {
-                        if actual != expected {
-                            return Err(SelectImportPolicyError {
-                                code: "E0245",
-                                message: format!(
-                                    "selected import symbol '{}' kind mismatch: expected {:?}, found {:?}",
-                                    base_name, expected, actual
-                                ),
-                                module_key: m.module_key.clone(),
-                                line: import.line,
-                                col: import.col,
-                            });
-                        }
-                    }
-                }
             }
         }
+        Ok(Self { nodes: map })
     }
-    Ok(())
+
+    pub fn node(&self, module_id: &str) -> Option<&ModuleNode> {
+        self.nodes.get(module_id)
+    }
+
+    /// Nodes in module-id order.
+    pub fn nodes(&self) -> impl Iterator<Item = &ModuleNode> {
+        self.nodes.values()
+    }
+
+    fn display_of(&self, module_id: &str) -> String {
+        self.nodes
+            .get(module_id)
+            .map_or_else(|| module_id.to_string(), |n| n.display.clone())
+    }
 }
 
-fn parse_select_expected_kind(sym: &str) -> (Option<ExportKind>, &str) {
-    if let Some((lhs, rhs)) = sym.split_once(':') {
-        let kind = match lhs.trim() {
-            "System" => Some(ExportKind::System),
-            "Entity" => Some(ExportKind::Entity),
-            "Law" => Some(ExportKind::Law),
-            _ => None,
-        };
-        return (kind, rhs.trim());
-    }
-    (None, sym)
-}
+/// Export sets of every node, keyed by provider module id.
+pub type ExportSets = BTreeMap<String, ExportSet>;
 
-pub fn build_export_sets_core(
-    modules: &[ExportBuildModule],
-    dep_lookup: &BTreeMap<(String, String), String>,
-) -> Result<BTreeMap<String, ExportSet>, ExportBuildError> {
-    let mut by_key = BTreeMap::<String, ExportBuildModule>::new();
-    for m in modules {
-        by_key.insert(m.module_key.clone(), m.clone());
-    }
-    let mut cache = BTreeMap::<String, ExportSet>::new();
+pub fn build_export_sets_core(graph: &ModuleGraph) -> Result<ExportSets, ModuleError> {
+    let mut cache = ExportSets::new();
     let mut stack = Vec::<String>::new();
-    let keys: Vec<String> = by_key.keys().cloned().collect();
-    for key in keys {
-        build_export_set_for_core(&key, &by_key, dep_lookup, &mut cache, &mut stack)?;
+    for node in graph.nodes() {
+        build_export_set_for_core(graph, &node.module_id, &mut cache, &mut stack)?;
     }
     Ok(cache)
 }
 
 fn build_export_set_for_core(
-    module_key: &str,
-    modules: &BTreeMap<String, ExportBuildModule>,
-    dep_lookup: &BTreeMap<(String, String), String>,
-    cache: &mut BTreeMap<String, ExportSet>,
+    graph: &ModuleGraph,
+    module_id: &str,
+    cache: &mut ExportSets,
     stack: &mut Vec<String>,
-) -> Result<(), ExportBuildError> {
-    if cache.contains_key(module_key) {
+) -> Result<(), ModuleError> {
+    if cache.contains_key(module_id) {
         return Ok(());
     }
-    if let Some(pos) = stack.iter().position(|m| m == module_key) {
-        let mut chain_parts: Vec<String> = stack[pos..].to_vec();
-        chain_parts.push(module_key.to_string());
-        return Err(ExportBuildError {
+    if let Some(pos) = stack.iter().position(|m| m == module_id) {
+        let mut chain_parts: Vec<String> =
+            stack[pos..].iter().map(|m| graph.display_of(m)).collect();
+        chain_parts.push(graph.display_of(module_id));
+        return Err(ModuleError {
             code: "E0243",
             message: format!(
                 "symbol re-export cycle detected: {}",
                 chain_parts.join(" -> ")
             ),
-            module_key: module_key.to_string(),
+            module_id: module_id.to_string(),
             line: 0,
             col: 0,
         });
     }
-    let module = modules.get(module_key).ok_or_else(|| ExportBuildError {
+    let node = graph.node(module_id).ok_or_else(|| ModuleError {
         code: "E0239",
-        message: format!("unknown module '{}'", module_key),
-        module_key: module_key.to_string(),
+        message: format!("unknown module '{}'", module_id),
+        module_id: module_id.to_string(),
         line: 0,
         col: 0,
     })?;
 
-    stack.push(module_key.to_string());
-    let mut set = module.local_exports.clone();
+    stack.push(module_id.to_string());
+    let mut set = node.local_exports.clone();
     let mut next_decl = set.items.len() as u32;
-    for import in &module.imports {
-        if !import.reexport {
+    for import in &node.imports {
+        let directive = &import.directive;
+        if !directive.reexport {
             continue;
         }
-        let dep = dep_lookup
-            .get(&(module_key.to_string(), import.spec.clone()))
-            .cloned()
-            .ok_or_else(|| ExportBuildError {
-                code: "E0239",
-                message: format!("unknown module '{}'", import.spec),
-                module_key: module_key.to_string(),
-                line: import.line,
-                col: import.col,
-            })?;
-        build_export_set_for_core(&dep, modules, dep_lookup, cache, stack)?;
-        let dep_set = cache.get(&dep).cloned().unwrap_or_default();
-        let selected: Vec<ExportItem> = if import.wildcard || import.select_items.is_empty() {
-            dep_set.items
-        } else {
-            let mut out = Vec::new();
-            for (src_name, alias) in &import.select_items {
-                if let Some(found) = dep_set.items.iter().find(|it| it.public_name == *src_name) {
-                    let mut f = found.clone();
-                    if let Some(a) = alias {
-                        f.public_name = a.clone();
-                    }
-                    out.push(f);
+        build_export_set_for_core(graph, &import.target, cache, stack)?;
+        // #1689: the dependency was just built; its absence is an internal
+        // invariant failure, never an empty export set.
+        let dep_set = cache.get(&import.target).ok_or_else(|| ModuleError {
+            code: "E0239",
+            message: format!(
+                "internal: export set for '{}' missing after construction",
+                graph.display_of(&import.target)
+            ),
+            module_id: module_id.to_string(),
+            line: directive.line,
+            col: directive.col,
+        })?;
+        let selected = select_export_items(graph, node, import, dep_set)?;
+        for (dep_item, public_name) in selected {
+            let chain = match &dep_item.origin {
+                // #1703: extend the existing chain, never truncate it.
+                ExportOrigin::ReExport { chain } => {
+                    let mut full = vec![node.display.clone()];
+                    full.extend(chain.iter().cloned());
+                    full
                 }
-            }
-            out
-        };
-        for item in selected {
+                ExportOrigin::Local { .. } => vec![
+                    node.display.clone(),
+                    graph.display_of(&import.target),
+                    dep_item.public_name.clone(),
+                ],
+            };
             push_export_item_core(
                 &mut set,
                 ExportItem {
-                    public_name: item.public_name.clone(),
-                    kind: item.kind,
-                    origin: ExportOrigin::ReExport {
-                        chain: vec![module_key.to_string(), dep.clone(), item.public_name],
-                    },
+                    public_name,
+                    kind: dep_item.kind,
+                    origin: ExportOrigin::ReExport { chain },
+                    source_module: dep_item.source_module.clone(),
+                    source_name: dep_item.source_name.clone(),
                     span: SourceMark {
-                        line: import.line,
-                        col: import.col,
+                        line: directive.line,
+                        col: directive.col,
                         file_id: 0,
                     },
-                    decl_order: next_decl.max(item.decl_order + import.decl_order + 1),
+                    decl_order: next_decl.max(dep_item.decl_order + directive.decl_order + 1),
                 },
-                module_key,
-                import.line,
-                import.col,
+                module_id,
+                directive.line,
+                directive.col,
             )?;
             next_decl += 1;
         }
@@ -1083,29 +1106,166 @@ fn build_export_set_for_core(
 
     set.items.sort_by(|a, b| a.decl_order.cmp(&b.decl_order));
     let _ = stack.pop();
-    cache.insert(module_key.to_string(), set);
+    cache.insert(module_id.to_string(), set);
     Ok(())
 }
 
+/// The items an import selects from its target's export set, with the public
+/// name each is bound under. Selected items must exist (E0244) and satisfy
+/// their kind assertion (E0245) on the unique export item (#1685, #1687).
+fn select_export_items(
+    graph: &ModuleGraph,
+    node: &ModuleNode,
+    import: &ResolvedImport,
+    dep_set: &ExportSet,
+) -> Result<Vec<(ExportItem, String)>, ModuleError> {
+    let directive = &import.directive;
+    if directive.select_items.is_empty() {
+        return Ok(dep_set
+            .items
+            .iter()
+            .map(|item| (item.clone(), item.public_name.clone()))
+            .collect());
+    }
+    let mut out = Vec::new();
+    for selected in &directive.select_items {
+        let item = selected_item(graph, node, import, dep_set, selected)?;
+        out.push((item.clone(), selected.local_name.clone()));
+    }
+    Ok(out)
+}
+
+fn selected_item<'a>(
+    graph: &ModuleGraph,
+    node: &ModuleNode,
+    import: &ResolvedImport,
+    dep_set: &'a ExportSet,
+    selected: &SelectedImport,
+) -> Result<&'a ExportItem, ModuleError> {
+    let directive = &import.directive;
+    let item = dep_set
+        .get(&selected.public_name)
+        .ok_or_else(|| ModuleError {
+            code: "E0244",
+            message: format!(
+                "selected import symbol '{}' not found in '{}'",
+                selected.public_name,
+                graph.display_of(&import.target)
+            ),
+            module_id: node.module_id.clone(),
+            line: directive.line,
+            col: directive.col,
+        })?;
+    if let Some(expected) = selected.expected_kind {
+        if item.kind != expected {
+            return Err(ModuleError {
+                code: "E0245",
+                message: format!(
+                    "selected import symbol '{}' kind mismatch: expected {:?}, found {:?}",
+                    selected.public_name, expected, item.kind
+                ),
+                module_id: node.module_id.clone(),
+                line: directive.line,
+                col: directive.col,
+            });
+        }
+    }
+    Ok(item)
+}
+
+/// Every selected import of every module names an existing export item of the
+/// declared kind. Consumes the frozen graph and export sets only.
+pub fn validate_select_imports_core(
+    graph: &ModuleGraph,
+    export_sets: &ExportSets,
+) -> Result<(), ModuleError> {
+    for node in graph.nodes() {
+        for import in &node.imports {
+            if import.directive.select_items.is_empty() {
+                continue;
+            }
+            let dep_set = export_sets.get(&import.target).ok_or_else(|| ModuleError {
+                code: "E0239",
+                message: format!(
+                    "internal: no export set for imported module '{}'",
+                    graph.display_of(&import.target)
+                ),
+                module_id: node.module_id.clone(),
+                line: import.directive.line,
+                col: import.directive.col,
+            })?;
+            for selected in &import.directive.select_items {
+                selected_item(graph, node, import, dep_set, selected)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// PB-04 (#1684): the documented lookup for an unqualified name that is not a
+/// local symbol: explicit selected imports first, then wildcard imports in
+/// declaration order (first match wins).
+pub fn resolve_unqualified_import<'a>(
+    node: &ModuleNode,
+    export_sets: &'a ExportSets,
+    name: &str,
+) -> Option<&'a ExportItem> {
+    let mut imports: Vec<&ResolvedImport> = node.imports.iter().collect();
+    imports.sort_by_key(|import| import.directive.decl_order);
+    for import in &imports {
+        for selected in &import.directive.select_items {
+            if selected.local_name == name {
+                return export_sets.get(&import.target)?.get(&selected.public_name);
+            }
+        }
+    }
+    imports
+        .iter()
+        .filter(|import| import.directive.wildcard)
+        .find_map(|import| export_sets.get(&import.target)?.get(name))
+}
+
+/// PB-04 (#1684): namespace-qualified access `X.Foo`: only through the import
+/// whose namespace alias is `X`; never a fallback for unqualified names.
+pub fn resolve_namespace_import<'a>(
+    node: &ModuleNode,
+    export_sets: &'a ExportSets,
+    alias: &str,
+    name: &str,
+) -> Option<&'a ExportItem> {
+    let import = node
+        .imports
+        .iter()
+        .find(|import| import.directive.namespace_alias() == alias)?;
+    export_sets.get(&import.target)?.get(name)
+}
+
+/// Flat export namespace (#1686): one public name, at most one item,
+/// regardless of kind.
 fn push_export_item_core(
     set: &mut ExportSet,
     item: ExportItem,
-    module_key: &str,
+    module_id: &str,
     line: u32,
     col: u32,
-) -> Result<(), ExportBuildError> {
-    if let Some(prev) = set
-        .items
-        .iter()
-        .find(|x| x.public_name == item.public_name && x.kind == item.kind)
-    {
-        return Err(ExportBuildError {
+) -> Result<(), ModuleError> {
+    if let Some(prev) = set.get(&item.public_name) {
+        return Err(ModuleError {
             code: "E0242",
             message: format!(
-                "re-export collision for '{}' between {:?} and {:?}",
-                item.public_name, prev.origin, item.origin
+                "{} collision for '{}' between {:?} {:?} and {:?} {:?}",
+                if matches!(item.origin, ExportOrigin::ReExport { .. }) {
+                    "re-export"
+                } else {
+                    "export"
+                },
+                item.public_name,
+                prev.kind,
+                prev.origin,
+                item.kind,
+                item.origin
             ),
-            module_key: module_key.to_string(),
+            module_id: module_id.to_string(),
             line,
             col,
         });
@@ -1148,188 +1308,6 @@ mod tests {
         assert_eq!(st.resolve("y").map(|s| s.ty), Some(SemanticType::Fx));
         st.pop();
         assert!(st.resolve("y").is_none());
-    }
-
-    #[test]
-    fn import_policy_rejects_duplicate_select_alias() {
-        let src = r#"
-Import "dep.sm" { A as X, B as X }
-"#;
-        let imports = parse_import_directives(src);
-        let err = validate_import_namespace_rules(&imports).expect_err("must fail");
-        assert_eq!(err.code, "E0245");
-    }
-
-    #[test]
-    fn import_bindings_reject_local_alias_collision() {
-        let src = r#"
-Import "dep.sm" as Foo
-"#;
-        let imports = parse_import_directives(src);
-        let mut locals = BTreeSet::new();
-        locals.insert("Foo".to_string());
-        let err = validate_import_bindings_core(&imports, &locals).expect_err("must fail");
-        assert_eq!(err.code, "E0241");
-    }
-
-    #[test]
-    fn select_import_core_reports_missing_symbol() {
-        let modules = vec![SelectImportModule {
-            module_key: "root.sm".to_string(),
-            source: "Import \"dep.sm\" { Missing }".to_string(),
-            imports: parse_import_directives("Import \"dep.sm\" { Missing }"),
-        }];
-        let mut dep_lookup = BTreeMap::new();
-        dep_lookup.insert(
-            ("root.sm".to_string(), "dep.sm".to_string()),
-            "dep.sm".to_string(),
-        );
-        let mut export_symbols = BTreeMap::new();
-        let mut syms = BTreeSet::new();
-        syms.insert("Present".to_string());
-        export_symbols.insert("dep.sm".to_string(), syms);
-        let mut export_kinds = BTreeMap::new();
-        let mut ks = BTreeMap::new();
-        ks.insert("Present".to_string(), ExportKind::Law);
-        export_kinds.insert("dep.sm".to_string(), ks);
-        let err =
-            validate_select_imports_core(&modules, &dep_lookup, &export_symbols, &export_kinds)
-                .expect_err("must fail");
-        assert_eq!(err.code, "E0244");
-    }
-
-    #[test]
-    fn select_import_kind_mismatch_reports_e0245() {
-        let modules = vec![SelectImportModule {
-            module_key: "root.sm".to_string(),
-            source: "Import \"dep.sm\" { Entity:A }".to_string(),
-            imports: parse_import_directives("Import \"dep.sm\" { Entity:A }"),
-        }];
-        let mut dep_lookup = BTreeMap::new();
-        dep_lookup.insert(
-            ("root.sm".to_string(), "dep.sm".to_string()),
-            "dep.sm".to_string(),
-        );
-        let mut export_symbols = BTreeMap::new();
-        let mut syms = BTreeSet::new();
-        syms.insert("A".to_string());
-        export_symbols.insert("dep.sm".to_string(), syms);
-        let mut export_kinds = BTreeMap::new();
-        let mut kinds = BTreeMap::new();
-        kinds.insert("A".to_string(), ExportKind::Law);
-        export_kinds.insert("dep.sm".to_string(), kinds);
-        let err =
-            validate_select_imports_core(&modules, &dep_lookup, &export_symbols, &export_kinds)
-                .expect_err("must fail");
-        assert_eq!(err.code, "E0245");
-    }
-
-    #[test]
-    fn import_resolution_plan_keeps_selected_before_namespace_and_wildcard() {
-        let src = r#"
-Import "dep/wild.sm" *
-Import "dep/select.sm" { Entity:Sensor, Law:Check as Guard }
-Import "dep/core.sm" as Core
-"#;
-        let plan = build_import_resolution_plan_core(&parse_import_directives(src));
-        assert_eq!(plan.selected_bindings, vec!["Sensor", "Guard"]);
-        assert_eq!(plan.namespace_aliases, vec!["wild", "select", "Core"]);
-        assert_eq!(plan.wildcard_imports, vec!["dep/wild.sm"]);
-    }
-
-    #[test]
-    fn import_resolution_plan_keeps_wildcard_fallbacks_in_declaration_order() {
-        let src = r#"
-Import "dep/first.sm" *
-Import "dep/second.sm" *
-Import "dep/third.sm" *
-"#;
-        let plan = build_import_resolution_plan_core(&parse_import_directives(src));
-        assert_eq!(
-            plan.wildcard_imports,
-            vec!["dep/first.sm", "dep/second.sm", "dep/third.sm"]
-        );
-    }
-
-    #[test]
-    fn export_set_keeps_locals_before_reexports_in_import_order() {
-        let modules = vec![
-            ExportBuildModule {
-                module_key: "root.sm".to_string(),
-                source: r#"
-Import pub "b.sm"
-Import pub "a.sm"
-Law "Root" [priority 1]:
-    When true -> System.recovery()
-"#
-                .to_string(),
-                local_exports: collect_local_exports_core(
-                    "root.sm",
-                    &[LocalExportDecl {
-                        public_name: "Root".to_string(),
-                        kind: ExportKind::Law,
-                        span: SourceMark::default(),
-                    }],
-                ),
-                imports: parse_import_directives(
-                    r#"
-Import pub "b.sm"
-Import pub "a.sm"
-"#,
-                ),
-            },
-            ExportBuildModule {
-                module_key: "a.sm".to_string(),
-                source: String::new(),
-                local_exports: collect_local_exports_core(
-                    "a.sm",
-                    &[
-                        LocalExportDecl {
-                            public_name: "A1".to_string(),
-                            kind: ExportKind::Law,
-                            span: SourceMark::default(),
-                        },
-                        LocalExportDecl {
-                            public_name: "A2".to_string(),
-                            kind: ExportKind::Law,
-                            span: SourceMark::default(),
-                        },
-                    ],
-                ),
-                imports: Vec::new(),
-            },
-            ExportBuildModule {
-                module_key: "b.sm".to_string(),
-                source: String::new(),
-                local_exports: collect_local_exports_core(
-                    "b.sm",
-                    &[LocalExportDecl {
-                        public_name: "B1".to_string(),
-                        kind: ExportKind::Law,
-                        span: SourceMark::default(),
-                    }],
-                ),
-                imports: Vec::new(),
-            },
-        ];
-        let mut dep_lookup = BTreeMap::new();
-        dep_lookup.insert(
-            ("root.sm".to_string(), "b.sm".to_string()),
-            "b.sm".to_string(),
-        );
-        dep_lookup.insert(
-            ("root.sm".to_string(), "a.sm".to_string()),
-            "a.sm".to_string(),
-        );
-
-        let export_sets = build_export_sets_core(&modules, &dep_lookup).expect("export sets");
-        let root = export_sets.get("root.sm").expect("root set");
-        let names: Vec<&str> = root
-            .items
-            .iter()
-            .map(|item| item.public_name.as_str())
-            .collect();
-        assert_eq!(names, vec!["Root", "B1", "A1", "A2"]);
     }
 
     #[test]
@@ -1377,7 +1355,7 @@ Import pub "a.sm"
                 rhs: LogosAtom::Text("\"s\"".to_string()),
             },
             |name| (name == "x").then_some(SemanticType::I32),
-            |_e, _f| None,
+            |_ns, _e, _f| None,
         )
         .expect_err("must fail");
         assert_eq!(

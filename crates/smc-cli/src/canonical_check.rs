@@ -435,16 +435,25 @@ impl ModuleProvider for OverlayModuleProvider<'_> {
 
     fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String> {
         resolve_package_import_path(Path::new(importer_module_id), spec)
-            .map(|path| {
+            .map_err(|e| self.access.describe_resolution_error(&e))
+            .and_then(|path| {
                 let path = crate::source_access::strip_verbatim_prefix(&path);
-                let text = path.to_string_lossy();
-                if cfg!(windows) {
+                // PB-04 (#1690): a module id is a lossless UTF-8 identifier;
+                // a non-UTF-8 path fails closed instead of being replaced.
+                let text = path.to_str().ok_or_else(|| {
+                    format!(
+                        "resolved module path '{}' is not valid UTF-8",
+                        path.display()
+                    )
+                })?;
+                // '\' is a separator only on Windows; on Unix it is an
+                // ordinary filename character and must not be folded.
+                Ok(if cfg!(windows) {
                     text.replace('\\', "/")
                 } else {
-                    text.into_owned()
-                }
+                    text.to_string()
+                })
             })
-            .map_err(|e| self.access.describe_resolution_error(&e))
     }
 
     fn display_module(&self, module_id: &str) -> String {

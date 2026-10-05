@@ -78,8 +78,8 @@ InvalidOperands(SemanticType),
 InvalidPresent,
 Unsupported,
 pub fn is_compatible_cmp(left: SemanticType, right: SemanticType) -> bool {
-pub fn infer_atom_type_core<FS, FF>( atom: &LogosAtom, resolve_symbol: FS, resolve_field: FF, ) -> Result<SemanticType, ConditionInferError> where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(&str, &str) -> Option<SemanticType>, {
-pub fn infer_when_condition_type_core<FS, FF>( condition: &LogosCondition, resolve_symbol: FS, resolve_field: FF, ) -> Result<SemanticType, ConditionInferError> where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(&str, &str) -> Option<SemanticType>, {
+pub fn infer_atom_type_core<FS, FF>( atom: &LogosAtom, resolve_symbol: FS, resolve_field: FF, ) -> Result<SemanticType, ConditionInferError> where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(Option<&str>, &str, &str) -> Option<SemanticType>, {
+pub fn infer_when_condition_type_core<FS, FF>( condition: &LogosCondition, resolve_symbol: FS, resolve_field: FF, ) -> Result<SemanticType, ConditionInferError> where FS: Fn(&str) -> Option<SemanticType>, FF: Fn(Option<&str>, &str, &str) -> Option<SemanticType>, {
 pub fn is_magic_number_atom(atom: &LogosAtom) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhenValidationError {
@@ -96,21 +96,22 @@ pub fn evaluate_law_header_policy_core(law_name: &str, when_count: usize) -> Law
 pub fn is_valid_when_result_type_core(ty: SemanticType) -> bool {
 pub fn insert_scoped_name_core( scopes: &mut BTreeMap<String, BTreeSet<String>>, scope: &str, name: &str, ) -> bool {
 pub fn insert_name_core(names: &mut BTreeSet<String>, name: &str) -> bool {
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedImport {
+pub public_name: String,
+pub expected_kind: Option<ExportKind>,
+pub local_name: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportDirective {
 pub spec: String,
 pub alias: Option<String>,
 pub reexport: bool,
-pub select_items: Vec<(String, Option<String>)>,
+pub select_items: Vec<SelectedImport>,
 pub wildcard: bool,
 pub line: u32,
 pub col: u32,
 pub decl_order: u32,
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ImportResolutionPlan {
-pub selected_bindings: Vec<String>,
-pub namespace_aliases: Vec<String>,
-pub wildcard_imports: Vec<String>,
+pub fn namespace_alias(&self) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportKind {
 System,
@@ -119,28 +120,35 @@ Law,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportOrigin {
 Local { module: String },
-Imported { module: String, symbol: String },
 ReExport { chain: Vec<String> },
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportItem {
 pub public_name: String,
 pub kind: ExportKind,
 pub origin: ExportOrigin,
+pub source_module: String,
+pub source_name: String,
 pub span: SourceMark,
 pub decl_order: u32,
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExportSet {
 pub items: Vec<ExportItem>,
+pub fn get(&self, public_name: &str) -> Option<&ExportItem> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalExportDecl {
 pub public_name: String,
 pub kind: ExportKind,
 pub span: SourceMark,
-pub fn collect_local_exports_core(module_key: &str, locals: &[LocalExportDecl]) -> ExportSet {
-pub fn parse_select_items(inside: &str) -> Vec<(String, Option<String>)> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleError {
+pub code: &'static str,
+pub message: String,
+pub module_id: String,
+pub line: u32,
+pub col: u32,
+pub fn collect_local_exports_core( module_id: &str, module_display: &str, locals: &[LocalExportDecl], ) -> Result<ExportSet, ModuleError> {
 pub fn default_import_alias(spec: &str) -> String {
-pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
-pub fn parse_import_directive( directive: &str, line: u32, col: u32, decl_order: u32, ) -> Option<ImportDirective> {
+pub fn parse_import_directive( directive: &str, line: u32, col: u32, decl_order: u32, ) -> Result<ImportDirective, ImportPolicyError> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportPolicyError {
 pub code: &'static str,
@@ -149,31 +157,23 @@ pub line: u32,
 pub col: u32,
 pub fn validate_import_namespace_rules( imports: &[ImportDirective], ) -> Result<(), ImportPolicyError> {
 pub fn validate_import_bindings_core( imports: &[ImportDirective], local_names: &BTreeSet<String>, ) -> Result<(), ImportPolicyError> {
-pub fn build_import_resolution_plan_core(imports: &[ImportDirective]) -> ImportResolutionPlan {
-#[derive(Debug, Clone)]
-pub struct SelectImportModule {
-pub module_key: String,
-pub source: String,
-pub imports: Vec<ImportDirective>,
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SelectImportPolicyError {
-pub code: &'static str,
-pub message: String,
-pub module_key: String,
-pub line: u32,
-pub col: u32,
-#[derive(Debug, Clone)]
-pub struct ExportBuildModule {
-pub module_key: String,
-pub source: String,
+pub struct ResolvedImport {
+pub directive: ImportDirective,
+pub target: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleNode {
+pub module_id: String,
+pub display: String,
 pub local_exports: ExportSet,
-pub imports: Vec<ImportDirective>,
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExportBuildError {
-pub code: &'static str,
-pub message: String,
-pub module_key: String,
-pub line: u32,
-pub col: u32,
-pub fn validate_select_imports_core( modules: &[SelectImportModule], dep_lookup: &BTreeMap<(String, String), String>, export_symbols: &BTreeMap<String, BTreeSet<String>>, export_kinds: &BTreeMap<String, BTreeMap<String, ExportKind>>, ) -> Result<(), SelectImportPolicyError> {
-pub fn build_export_sets_core( modules: &[ExportBuildModule], dep_lookup: &BTreeMap<(String, String), String>, ) -> Result<BTreeMap<String, ExportSet>, ExportBuildError> {
+pub imports: Vec<ResolvedImport>,
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleGraph {
+pub fn new(nodes: Vec<ModuleNode>) -> Result<Self, ModuleError> {
+pub fn node(&self, module_id: &str) -> Option<&ModuleNode> {
+pub fn nodes(&self) -> impl Iterator<Item = &ModuleNode> {
+pub type ExportSets = BTreeMap<String, ExportSet>;
+pub fn build_export_sets_core(graph: &ModuleGraph) -> Result<ExportSets, ModuleError> {
+pub fn validate_select_imports_core( graph: &ModuleGraph, export_sets: &ExportSets, ) -> Result<(), ModuleError> {
+pub fn resolve_unqualified_import<'a>( node: &ModuleNode, export_sets: &'a ExportSets, name: &str, ) -> Option<&'a ExportItem> {
+pub fn resolve_namespace_import<'a>( node: &ModuleNode, export_sets: &'a ExportSets, alias: &str, name: &str, ) -> Option<&'a ExportItem> {

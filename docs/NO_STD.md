@@ -44,7 +44,9 @@ cargo check -p sm-sema --no-default-features --features alloc --quiet
 
 `sm-front`'s alloc-only check is enforced in CI (`check-no-std` job). In that
 mode `sm-profile` is built with `alloc` only; `std` (and serde) are enabled
-only through `sm-front/std` (#1666).
+only through `sm-front/std` (#1666). The `sm-sema` alloc-only check is enforced
+in the same CI job (#1701); the frozen module graph lives in `alloc_core` and
+uses no `std::path`.
 
 ## Scope
 
