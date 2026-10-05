@@ -119,10 +119,18 @@ Contract rule:
 - structural cleanup and fold logic must live in `sm-ir::passes`
 - default pipeline must stay discoverable without hidden lowering-only behavior
 - `CrystalFold v1` keeps a frozen narrow contract:
-  - local instruction-stream constant / identity rewrites only
+  - local instruction-stream constant rewrites only, over operands whose
+    values are both known; one-sided identity/annihilator rewrites are not
+    performed because raw IR is untyped and such a rewrite can erase a
+    runtime type rejection (#1729)
   - linear deterministic rewrite order
-  - barrier clears at labels, jumps, asserts, calls, returns, and other
-    explicit control/effect instructions
+  - constant state is cleared at every barrier named by the exhaustive
+    `is_crystalfold_barrier` classifier: `Label`, `Jmp`, `JmpIf`, `Ret`,
+    `Assert`, `Call`, `ClosureCall`, `GateRead`, `GateWrite`, `PulseEmit`,
+    `StateQuery`, `StateUpdate`, `EventPost`, `ClockRead`, `RngSeed`,
+    `RngNextI32`; a new `IrInstr` variant does not compile until it is
+    classified (#1711)
+  - structural cleanup never removes `LoadVar`, which can trap (#1723)
   - no warning ownership and no source-span ownership
 
 ## Boundary Rule

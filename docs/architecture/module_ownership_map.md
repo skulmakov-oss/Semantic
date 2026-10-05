@@ -11,7 +11,7 @@ Core ownership:
 - compiler semantics: `sm-sema`
 - IR and lowering: `sm-ir`
 - optimization passes: `sm-ir`
-- SemCode binary contract: `sm-ir`
+- SemCode binary contract: `sm-format` (producer: `sm-ir`)
 - bytecode admission contract: `sm-verify`
 - runtime primitives: `sm-runtime-core`
 - VM execution mechanics: `sm-vm`
