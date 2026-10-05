@@ -1,45 +1,44 @@
 task:
-  id: PHASE-B-PB-03
-  title: "Semantic Core Integrity"
-  type: phase_b_semantic_core_integrity
-  target: "Phase-B PB-03 / sm-sema Logos semantic core (#1671-#1680 #1693-#1696 #1705)"
+  id: PHASE-B-PB-04
+  title: "Module Graph, Identity & Provenance Hardening"
+  type: phase_b_module_graph_identity_provenance
+  target: "Phase-B PB-04 / sm-sema module graph (#1681-#1692 #1701-#1703 #1706)"
   mode: active
-  supersedes: PHASE-B-PB-02
+  supersedes: PHASE-B-PB-03
   umbrella: 1617
-  issues: [1671, 1672, 1673, 1674, 1675, 1676, 1677, 1678, 1679, 1680, 1693, 1694, 1695, 1696, 1705]
-  base_sha: 8305a8a1fe8fda66a3fa7648076ea0e5e73f167d
+  issues: [1681, 1682, 1683, 1684, 1685, 1686, 1687, 1688, 1689, 1690, 1691, 1692, 1701, 1702, 1703, 1706]
+  base_sha: 3b12987ba59a985ff6726e3abd0e57d60b588b7e
   authorized_by: >-
-    Repository owner direct instruction (2026-10-04, "GO — Phase B / PB-03 —
-    Semantic Core Integrity"). Forensics, decision record, implementation,
-    tests, commits, push and PR creation are authorized. Merge, release, tag,
-    manual issue closure, PB-04 work and #1987 are NOT authorized. PB-01/PB-02
-    and SSF history stay untouched.
+    Repository owner direct instruction (2026-10-05, "GO — Phase B / PB-04 —
+    Module Graph, Identity & Provenance Hardening") plus owner decisions:
+    flat export namespace (#1686), fail closed on non-UTF-8 with the String
+    provider API kept (#1690), and binding imports from the frozen graph while
+    preserving the namespace-qualified contract (#1684). Merge, release, tag,
+    manual issue closure, PB-05 and #1987 are NOT authorized.
 
 intent:
   summary: >-
-    sm-sema preserves exact source type families, interprets only the
-    sm-front structural Logos projection, never lets Unknown validate,
-    aligns W0240/W0241/W0252/W0253 with typed and four-state truth, removes
-    heuristic Law ownership, and makes TypeRegistry capacity-safe and
-    non-authoritative.
-  decision_record: docs/roadmap/phase_b/pb03_semantic_core_integrity_decision.md
+    One frozen resolved module graph with provider-owned identity, one
+    resolution per edge, one selector and export-item authority, complete
+    provenance, enforced sm-sema alloc build and fail-closed fixture evidence.
+  decision_record: docs/roadmap/phase_b/pb04_module_graph_identity_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
+    - .github/workflows/ci.yml
     - crates/sm-sema/**
     - crates/sm-front/**
     - crates/smc-cli/src/app.rs
-    - examples/canonical/quad_cycle_logos/README.md
-    - crates/ton618-core/src/diagnostics.rs
-    - docs/ERROR_CODES.md
-    - docs/spec/diagnostics.md
-    - docs/spec/logos.md
+    - crates/smc-cli/src/lib.rs
+    - crates/smc-cli/src/canonical_check.rs
+    - docs/spec/modules.md
+    - docs/exports.md
+    - docs/NO_STD.md
     - docs/roadmap/phase_b/**
     - tests/**
 
   forbidden_paths:
-    - .github/**
     - apps/**
     - reports/**
     - tools/**
@@ -57,7 +56,7 @@ authorization:
   documentation_addition: true
   documentation_correction: true
   test_addition: true
-  workflow_changes: false
+  workflow_changes: true
   dependency_changes: false
   github_issue_lifecycle: false
   git_commit_push_pr: true
@@ -66,7 +65,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 8305a8a1fe8fda66a3fa7648076ea0e5e73f167d
+  base_sha: 3b12987ba59a985ff6726e3abd0e57d60b588b7e
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true

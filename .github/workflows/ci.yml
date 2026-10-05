@@ -139,3 +139,6 @@ jobs:
       # FA-02-034 / #1666: docs/NO_STD.md alloc-only contract for sm-front.
       - name: Check sm-front (alloc only)
         run: cargo check -p sm-front --no-default-features --features alloc --quiet
+      # FA-03-032 / #1701: docs/NO_STD.md alloc-only contract for sm-sema.
+      - name: Check sm-sema (alloc only)
+        run: cargo check -p sm-sema --no-default-features --features alloc --quiet

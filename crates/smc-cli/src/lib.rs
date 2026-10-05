@@ -127,19 +127,24 @@ impl ModuleProvider for CliFsProvider {
 
     fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String> {
         package_manifest::resolve_package_import_path(Path::new(importer_module_id), spec)
-            .map(|path| {
-                let text = path.to_string_lossy();
-                // Only fold '\' into '/' on Windows -- on Unix it is an ordinary filename
-                // character, and resolve_package_import_path already preserves it, so
-                // folding it here would make this module_id identify a different file
-                // than the one that was actually resolved (same class as DL-012/DL-016).
-                if cfg!(windows) {
+            .map_err(|e| e.to_string())
+            .and_then(|path| {
+                // PB-04 (#1690): a module id is a lossless UTF-8 identifier;
+                // a non-UTF-8 path fails closed instead of being replaced.
+                let text = path.to_str().ok_or_else(|| {
+                    format!(
+                        "resolved module path '{}' is not valid UTF-8",
+                        path.display()
+                    )
+                })?;
+                // '\' is a separator only on Windows; on Unix it is an
+                // ordinary filename character and must not be folded.
+                Ok(if cfg!(windows) {
                     text.replace('\\', "/")
                 } else {
-                    text.into_owned()
-                }
+                    text.to_string()
+                })
             })
-            .map_err(|e| e.to_string())
     }
 }
 

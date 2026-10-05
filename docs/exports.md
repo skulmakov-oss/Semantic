@@ -28,9 +28,14 @@ Re-export is supported through `Import pub ...`:
 
 Each exported item stores provenance:
 
-1. `Local { module }`
-2. `Imported { module, symbol }`
-3. `ReExport { chain }`
+1. `Local { module }` — declared in the exporting module
+2. `ReExport { chain }` — the complete hop chain (exporting module, every
+   intermediate re-exporting module, the declaring module, then the symbol);
+   a re-export of a re-export extends the chain and never truncates it
+
+A plain (non-`pub`) import exports nothing, so there is no separate
+"imported" export provenance state (PB-04, #1706). Every item also records
+the declaring module id and declared name it ultimately denotes.
 
 ## Deterministic Export Surface
 
@@ -45,6 +50,11 @@ Current clarification:
 ## Collision Policy
 
 If two exports in one module publish the same public name, compilation fails with `E0242`.
+
+The export namespace is flat (PB-04, #1686): the same public name across
+different kinds (`Entity A` with `Law "A"` or `System A`) is also an `E0242`
+collision. A kind qualifier in a selection (`{ Entity:A }`) asserts the kind of
+that single item; it does not create a `(name, kind)` namespace.
 
 ## Symbol-level Cycle Policy
 

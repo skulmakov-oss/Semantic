@@ -3,11 +3,12 @@ use crate::alloc_core::{
     build_export_sets_core, collect_local_exports_core, diagnostic_help_core,
     evaluate_law_header_policy_core, infer_when_condition_type_core, insert_name_core,
     is_dead_when_condition, is_magic_number_atom, is_valid_when_result_type_core,
-    parse_import_directive, parse_law_local_decl, validate_import_bindings_core,
+    parse_import_directive, parse_law_local_decl, resolve_namespace_import,
+    resolve_unqualified_import, validate_import_bindings_core,
     validate_import_namespace_rules as validate_import_namespace_rules_core,
-    validate_select_imports_core, validate_when_non_empty_core, ExportBuildModule, ExportKind,
-    ExportSet, ImportDirective, LawScheduler, LocalExportDecl, ScopeKind, SelectImportModule,
-    SemanticType, Symbol, SymbolTable,
+    validate_select_imports_core, validate_when_non_empty_core, ExportKind, ExportSet, ExportSets,
+    ImportDirective, LawScheduler, LocalExportDecl, ModuleError, ModuleGraph, ModuleNode,
+    ResolvedImport, ScopeKind, SemanticType, Symbol, SymbolTable,
 };
 use crate::frontend::{
     admit_logos_program_with_profile, admit_program_with_profile, lex,
@@ -25,7 +26,7 @@ use sm_front::diagnostic_authority::{
 };
 use sm_front::lexer::lex_tokens_with_authority;
 use sm_front::LogosAtom;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use ton618_core::diagnostics::{
@@ -376,36 +377,61 @@ pub fn check_file_with_provider_and_profile(
     provider: &dyn crate::alloc_core::ModuleProvider,
     profile: &ParserProfile,
 ) -> Result<SemanticReport, SemanticError> {
+    // PB-04: one load pass resolves every import edge exactly once and
+    // freezes the module graph; every later phase consumes only that graph.
+    let root_id = root_module_id(root)?;
     let mut visiting: Vec<VisitingImport> = Vec::new();
-    let mut loaded: HashMap<PathBuf, (String, LogosProgram)> = HashMap::new();
-    load_module_recursive(root, &mut visiting, &mut loaded, provider, profile, false)?;
-    let export_sets = build_export_sets(&loaded, provider)?;
-    validate_select_imports(&loaded, &export_sets, provider)?;
+    let mut loaded: BTreeMap<String, LoadedModule> = BTreeMap::new();
+    load_module_recursive(
+        &root_id,
+        &mut visiting,
+        &mut loaded,
+        provider,
+        profile,
+        false,
+    )?;
+
+    let mut nodes = Vec::new();
+    for (module_id, module) in &loaded {
+        let display = provider.display_module(module_id);
+        let local_exports = collect_local_exports(module_id, &display, &module.logos)
+            .map_err(|e| module_error(e, &loaded))?;
+        nodes.push(ModuleNode {
+            module_id: module_id.clone(),
+            display,
+            local_exports,
+            imports: module.imports.clone(),
+        });
+    }
+    let graph = ModuleGraph::new(nodes).map_err(|e| module_error(e, &loaded))?;
+    let export_sets = build_export_sets_core(&graph).map_err(|e| module_error(e, &loaded))?;
+    validate_select_imports_core(&graph, &export_sets).map_err(|e| module_error(e, &loaded))?;
 
     let mut warnings = Vec::new();
     let mut scheduled_laws = Vec::new();
     let mut arena_nodes = 0usize;
-    let mut module_paths: Vec<PathBuf> = loaded.keys().cloned().collect();
-    module_paths.sort();
-    for module_path in module_paths {
-        let (src, logos) = loaded
-            .get(&module_path)
-            .expect("module key from loaded.keys()");
-        let module_key = path_contract_key(&module_path);
-        let mut report = analyze_logos_program(logos, src).map_err(|mut e| {
-            // SSF-09 C2: the host-path prefix below is legacy presentation;
-            // the canonical message stays the analyzer's own text and the
-            // module is bound structurally through `provider_module_id`.
-            if e.diag.canonical.canonical_message.is_none() {
-                e.diag.canonical.canonical_message = Some(e.diag.message.clone());
-            }
-            e.diag.message = format!("{}: {}", module_path.display(), e.diag.message);
-            e.diag.rendered = format!("in module '{}'\n{}", module_path.display(), e.diag.rendered);
-            // SSF-09 C2: the failing module is known structurally; attach it
-            // as provenance instead of leaving file attribution to the text.
-            e.diag.provider_module_id = Some(module_key.clone());
-            e
-        })?;
+    for node in graph.nodes() {
+        let module_key = node.module_id.clone();
+        let module = &loaded[&module_key];
+        let shown = shown_module(provider, &module_key);
+        let imported_field = |namespace: Option<&str>, entity: &str, field: &str| {
+            imported_entity_field(node, &export_sets, &loaded, namespace, entity, field)
+        };
+        let mut report =
+            analyze_logos_program_in_scope(&module.logos, &module.source, &imported_field)
+                .map_err(|mut e| {
+                    // SSF-09 C2: the host-path prefix below is legacy
+                    // presentation; the canonical message stays the analyzer's
+                    // own text and the module is bound structurally through
+                    // `provider_module_id`.
+                    if e.diag.canonical.canonical_message.is_none() {
+                        e.diag.canonical.canonical_message = Some(e.diag.message.clone());
+                    }
+                    e.diag.message = format!("{}: {}", shown, e.diag.message);
+                    e.diag.rendered = format!("in module '{}'\n{}", shown, e.diag.rendered);
+                    e.diag.provider_module_id = Some(module_key.clone());
+                    e
+                })?;
         for warning in &mut report.warnings {
             warning.provider_module_id = Some(module_key.clone());
         }
@@ -422,74 +448,155 @@ pub fn check_file_with_provider_and_profile(
     })
 }
 
-fn normalize_lexical(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
+/// PB-04 (#1684): the field type of an imported Entity, through the
+/// documented lookup order on the frozen graph: `X.E.f` only via namespace
+/// alias `X`; unqualified `E.f` via selected imports, then wildcard imports in
+/// declaration order. The export item must be an `Entity`.
+fn imported_entity_field(
+    node: &ModuleNode,
+    export_sets: &ExportSets,
+    loaded: &BTreeMap<String, LoadedModule>,
+    namespace: Option<&str>,
+    entity: &str,
+    field: &str,
+) -> Option<SemanticType> {
+    let item = match namespace {
+        Some(alias) => resolve_namespace_import(node, export_sets, alias, entity)?,
+        None => resolve_unqualified_import(node, export_sets, entity)?,
+    };
+    if item.kind != ExportKind::Entity {
+        return None;
+    }
+    loaded
+        .get(&item.source_module)?
+        .logos
+        .entities
+        .iter()
+        .find(|e| e.name == item.source_name)?
+        .fields
+        .iter()
+        .find(|f| f.name == field)
+        .map(|f| SemanticType::from(f.ty.clone()))
+}
+
+/// One loaded module: its source, parsed program and imports, each resolved
+/// exactly once.
+struct LoadedModule {
+    source: String,
+    logos: LogosProgram,
+    imports: Vec<ResolvedImport>,
+}
+
+/// PB-04 (#1690, #1691): the module id of the root path, formed at the
+/// filesystem boundary. The conversion is lossless (non-UTF-8 fails closed,
+/// E0239), never drops an unresolved leading `..`, and folds `\` to `/` only
+/// on Windows, where it is a path separator. Provider-returned ids are
+/// consumed verbatim and never pass through here.
+fn root_module_id(path: &Path) -> Result<String, SemanticError> {
+    let mut parts: Vec<Component<'_>> = Vec::new();
     for c in path.components() {
         match c {
-            Component::Prefix(p) => out.push(p.as_os_str()),
-            Component::RootDir => out.push(Path::new(std::path::MAIN_SEPARATOR_STR)),
             Component::CurDir => {}
-            Component::ParentDir => {
-                let _ = out.pop();
-            }
-            Component::Normal(s) => out.push(s),
+            Component::ParentDir => match parts.last() {
+                Some(Component::Normal(_)) => {
+                    parts.pop();
+                }
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => parts.push(c),
+            },
+            other => parts.push(other),
         }
     }
-    out
+    let normalized: PathBuf = parts.iter().collect();
+    let text = normalized.to_str().ok_or_else(|| SemanticError {
+        diag: render_diag(
+            DiagLevel::Error,
+            "E0239",
+            format!(
+                "module path '{}' is not valid UTF-8 and has no lossless module id",
+                path.display()
+            ),
+            SourceMark::default(),
+            "",
+        ),
+    })?;
+    Ok(if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.to_string()
+    })
 }
 
-fn path_contract_key(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
-/// SSF-09 #1580: the provider-owned name of the module at `path` in
-/// diagnostic text. Legacy providers keep the id, and then the historical
-/// `Path::display` spelling is preserved byte for byte.
-fn shown_module(provider: &dyn crate::alloc_core::ModuleProvider, path: &Path) -> String {
-    let id = path_contract_key(path);
-    let display = provider.display_module(&id);
-    if display == id {
-        path.display().to_string()
+/// SSF-09 #1580: the provider-owned name of `module_id` in legacy diagnostic
+/// text. When the provider keeps the id, the host-native path spelling is
+/// shown (presentation only).
+fn shown_module(provider: &dyn crate::alloc_core::ModuleProvider, module_id: &str) -> String {
+    let display = provider.display_module(module_id);
+    if display == module_id {
+        Path::new(module_id)
+            .components()
+            .collect::<PathBuf>()
+            .display()
+            .to_string()
     } else {
         display
     }
 }
 
-/// SSF-09 #1580: the provider-owned module key used inside the select/export
-/// core checks (whose messages name modules by key).
-fn display_key(provider: &dyn crate::alloc_core::ModuleProvider, path: &Path) -> String {
-    provider.display_module(&path_contract_key(path))
+/// Renders a module-graph/export/selection failure against the source of the
+/// module it was found in.
+fn module_error(e: ModuleError, loaded: &BTreeMap<String, LoadedModule>) -> SemanticError {
+    let src = loaded
+        .get(&e.module_id)
+        .map(|m| m.source.as_str())
+        .unwrap_or_default();
+    let mut diag = render_diag(
+        DiagLevel::Error,
+        e.code,
+        e.message,
+        SourceMark {
+            line: e.line,
+            col: e.col,
+            file_id: 0,
+        },
+        src,
+    );
+    // SSF-09 C2: bind the failure to the module it was found in.
+    diag.provider_module_id = Some(e.module_id);
+    SemanticError { diag }
 }
 
 #[derive(Debug, Clone)]
 struct VisitingImport {
-    path: PathBuf,
+    module_id: String,
     via_reexport: bool,
 }
 
 fn load_module_recursive(
-    path: &Path,
+    module_id: &str,
     visiting: &mut Vec<VisitingImport>,
-    loaded: &mut HashMap<PathBuf, (String, LogosProgram)>,
+    loaded: &mut BTreeMap<String, LoadedModule>,
     provider: &dyn crate::alloc_core::ModuleProvider,
     profile: &ParserProfile,
     via_reexport: bool,
 ) -> Result<(), SemanticError> {
-    let key = normalize_lexical(path);
-    if loaded.contains_key(&key) {
+    if loaded.contains_key(module_id) {
         return Ok(());
     }
-    if let Some(pos) = visiting.iter().position(|entry| entry.path == key) {
+    if let Some(pos) = visiting
+        .iter()
+        .position(|entry| entry.module_id == module_id)
+    {
         let mut full_chain = visiting
             .iter()
-            .map(|entry| display_key(provider, &entry.path))
+            .map(|entry| provider.display_module(&entry.module_id))
             .collect::<Vec<_>>();
-        full_chain.push(display_key(provider, path));
+        full_chain.push(provider.display_module(module_id));
         let mut cycle_chain = visiting[pos..]
             .iter()
-            .map(|entry| display_key(provider, &entry.path))
+            .map(|entry| provider.display_module(&entry.module_id))
             .collect::<Vec<_>>();
-        cycle_chain.push(display_key(provider, path));
+        cycle_chain.push(provider.display_module(module_id));
         let reexport_only_cycle =
             via_reexport && visiting[(pos + 1)..].iter().all(|entry| entry.via_reexport);
         let (code, message) = if reexport_only_cycle {
@@ -511,7 +618,7 @@ fn load_module_recursive(
         });
     }
 
-    let module_id = path_contract_key(&key);
+    let module_id = module_id.to_string();
     let bytes = provider
         .read_module(&module_id)
         .map_err(|e| SemanticError {
@@ -520,7 +627,7 @@ fn load_module_recursive(
                 "E0239",
                 format!(
                     "failed to read import '{}': {}",
-                    shown_module(provider, path),
+                    shown_module(provider, &module_id),
                     e
                 ),
                 SourceMark::default(),
@@ -533,7 +640,7 @@ fn load_module_recursive(
             "E0239",
             format!(
                 "module '{}' is not valid utf-8",
-                shown_module(provider, path)
+                shown_module(provider, &module_id)
             ),
             SourceMark::default(),
             "",
@@ -545,7 +652,7 @@ fn load_module_recursive(
             "E0239",
             format!(
                 "failed to parse module '{}': {}",
-                shown_module(provider, path),
+                shown_module(provider, &module_id),
                 e.message
             ),
             source_mark_from_byte_offset(&source, e.pos),
@@ -566,10 +673,10 @@ fn load_module_recursive(
     })?;
 
     visiting.push(VisitingImport {
-        path: key.clone(),
+        module_id: module_id.clone(),
         via_reexport,
     });
-    let importer_module_id = path_contract_key(&key);
+    let importer_module_id = module_id.clone();
     // PB-02 / #1645: consume exactly the Import directives sm-front
     // preserved, never a second scan of the raw source.
     let imports = preserved_import_directives(&logos, &source).map_err(|mut e| {
@@ -580,8 +687,12 @@ fn load_module_recursive(
         e.diag.provider_module_id = Some(importer_module_id.clone());
         e
     })?;
+    // PB-04 (#1692): each import edge is resolved through the provider
+    // exactly once here; the result is frozen into the module graph and never
+    // re-queried. The provider-owned id is consumed verbatim (#1690, #1691).
+    let mut resolved_imports = Vec::with_capacity(imports.len());
     for import in imports {
-        let resolved = provider
+        let target = provider
             .resolve_import(&importer_module_id, &import.spec)
             .map_err(|e| {
                 let mut diag = render_diag(
@@ -594,18 +705,28 @@ fn load_module_recursive(
                 diag.provider_module_id = Some(importer_module_id.clone());
                 SemanticError { diag }
             })?;
-        let import_path = normalize_lexical(Path::new(&resolved));
         load_module_recursive(
-            &import_path,
+            &target,
             visiting,
             loaded,
             provider,
             profile,
             import.reexport,
         )?;
+        resolved_imports.push(ResolvedImport {
+            directive: import,
+            target,
+        });
     }
     let _ = visiting.pop();
-    loaded.insert(key, (source, logos));
+    loaded.insert(
+        module_id,
+        LoadedModule {
+            source,
+            logos,
+            imports: resolved_imports,
+        },
+    );
     Ok(())
 }
 
@@ -627,14 +748,8 @@ fn preserved_import_directives(
                 import.mark.col,
                 order as u32,
             )
-            .ok_or_else(|| SemanticError {
-                diag: render_diag(
-                    DiagLevel::Error,
-                    "E0239",
-                    format!("malformed Import directive '{}'", import.directive),
-                    import.mark,
-                    source,
-                ),
+            .map_err(|e| SemanticError {
+                diag: render_diag(DiagLevel::Error, e.code, e.message, import.mark, source),
             })
         })
         .collect()
@@ -683,178 +798,11 @@ fn validate_import_namespace_rules(
     })
 }
 
-fn validate_select_imports(
-    loaded: &HashMap<PathBuf, (String, LogosProgram)>,
-    export_sets: &HashMap<PathBuf, ExportSet>,
-    provider: &dyn crate::alloc_core::ModuleProvider,
-) -> Result<(), SemanticError> {
-    let mut modules: Vec<PathBuf> = loaded.keys().cloned().collect();
-    modules.sort();
-
-    let mut core_modules = Vec::<SelectImportModule>::new();
-    let mut dep_lookup = std::collections::BTreeMap::<(String, String), String>::new();
-    let mut export_symbols =
-        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
-    let mut export_kinds =
-        std::collections::BTreeMap::<String, std::collections::BTreeMap<String, ExportKind>>::new();
-    let mut src_by_key = std::collections::BTreeMap::<String, String>::new();
-
-    // SSF-09 #1580: the core check names modules by key in its messages,
-    // so it runs over provider display keys; `id_by_key` maps a key back to
-    // the module id for structural provenance.
-    let mut id_by_key = std::collections::BTreeMap::<String, String>::new();
-    for (k, set) in export_sets {
-        let key = display_key(provider, k);
-        let mut syms = std::collections::BTreeSet::<String>::new();
-        let mut kinds = std::collections::BTreeMap::<String, ExportKind>::new();
-        for item in &set.items {
-            syms.insert(item.public_name.clone());
-            kinds.entry(item.public_name.clone()).or_insert(item.kind);
-        }
-        export_symbols.insert(key.clone(), syms);
-        export_kinds.insert(key, kinds);
-    }
-
-    for module in modules {
-        let (src, logos) = loaded.get(&module).expect("module key from loaded.keys()");
-        let imports = preserved_import_directives(logos, src)?;
-        let module_id = path_contract_key(&module);
-        let module_key = display_key(provider, &module);
-        id_by_key.insert(module_key.clone(), module_id.clone());
-        src_by_key.insert(module_key.clone(), src.clone());
-        for import in &imports {
-            let dep = provider
-                .resolve_import(&module_id, &import.spec)
-                .map(PathBuf::from)
-                .map(|path| normalize_lexical(&path))
-                .map_err(|e| SemanticError {
-                    diag: render_diag(
-                        DiagLevel::Error,
-                        "E0239",
-                        format!("failed to resolve import '{}': {}", import.spec, e),
-                        SourceMark::default(),
-                        src,
-                    ),
-                })?;
-            dep_lookup.insert(
-                (module_key.clone(), import.spec.clone()),
-                display_key(provider, &dep),
-            );
-        }
-        core_modules.push(SelectImportModule {
-            module_key,
-            source: src.clone(),
-            imports,
-        });
-    }
-
-    validate_select_imports_core(&core_modules, &dep_lookup, &export_symbols, &export_kinds)
-        .map_err(|e| {
-            let src = src_by_key
-                .get(&e.module_key)
-                .map(|s| s.as_str())
-                .unwrap_or_default();
-            let mut diag = render_diag(
-                DiagLevel::Error,
-                e.code,
-                e.message,
-                SourceMark {
-                    line: e.line,
-                    col: e.col,
-                    file_id: 0,
-                },
-                src,
-            );
-            // SSF-09 C2: the failing import site is in this module.
-            diag.provider_module_id = id_by_key.get(&e.module_key).cloned();
-            SemanticError { diag }
-        })
-}
-
-fn build_export_sets(
-    loaded: &HashMap<PathBuf, (String, LogosProgram)>,
-    provider: &dyn crate::alloc_core::ModuleProvider,
-) -> Result<HashMap<PathBuf, ExportSet>, SemanticError> {
-    let mut modules = Vec::<ExportBuildModule>::new();
-    let mut dep_lookup = std::collections::BTreeMap::<(String, String), String>::new();
-    let mut keys: Vec<PathBuf> = loaded.keys().cloned().collect();
-    keys.sort();
-    // SSF-09 #1580: the core names modules by provider display key; this
-    // maps each key back to its module path.
-    let mut path_by_key = std::collections::BTreeMap::<String, PathBuf>::new();
-    for module in &keys {
-        let (source, logos) = loaded.get(module).ok_or_else(|| SemanticError {
-            diag: render_diag(
-                DiagLevel::Error,
-                "E0239",
-                format!("unknown module '{}'", shown_module(provider, module)),
-                SourceMark::default(),
-                "",
-            ),
-        })?;
-        let module_id = path_contract_key(module);
-        let module_key = display_key(provider, module);
-        path_by_key.insert(module_key.clone(), module.clone());
-        let imports = preserved_import_directives(logos, source)?;
-        for import in &imports {
-            let dep = provider
-                .resolve_import(&module_id, &import.spec)
-                .map(PathBuf::from)
-                .map(|path| normalize_lexical(&path))
-                .map_err(|e| SemanticError {
-                    diag: render_diag(
-                        DiagLevel::Error,
-                        "E0239",
-                        format!("failed to resolve import '{}': {}", import.spec, e),
-                        SourceMark::default(),
-                        source,
-                    ),
-                })?;
-            dep_lookup.insert(
-                (module_key.clone(), import.spec.clone()),
-                display_key(provider, &dep),
-            );
-        }
-        modules.push(ExportBuildModule {
-            local_exports: collect_local_exports(&shown_module(provider, module), logos),
-            module_key,
-            source: source.clone(),
-            imports,
-        });
-    }
-    let core_sets = build_export_sets_core(&modules, &dep_lookup).map_err(|e| {
-        let src = modules
-            .iter()
-            .find(|m| m.module_key == e.module_key)
-            .map(|m| m.source.as_str())
-            .unwrap_or_default();
-        let mut diag = render_diag(
-            DiagLevel::Error,
-            e.code,
-            e.message,
-            SourceMark {
-                line: e.line,
-                col: e.col,
-                file_id: 0,
-            },
-            src,
-        );
-        // SSF-09 C2: bind the failure to the module it was found in.
-        diag.provider_module_id = path_by_key.get(&e.module_key).map(|p| path_contract_key(p));
-        SemanticError { diag }
-    })?;
-    let mut out = HashMap::<PathBuf, ExportSet>::new();
-    for (key, set) in core_sets {
-        let path = path_by_key
-            .get(&key)
-            .cloned()
-            .unwrap_or_else(|| PathBuf::from(&key));
-        out.insert(path, set);
-    }
-    Ok(out)
-}
-
-fn collect_local_exports(module_origin: &str, logos: &LogosProgram) -> ExportSet {
+fn collect_local_exports(
+    module_id: &str,
+    module_display: &str,
+    logos: &LogosProgram,
+) -> Result<ExportSet, ModuleError> {
     let mut locals = Vec::<LocalExportDecl>::new();
     if let Some(system) = &logos.system {
         locals.push(LocalExportDecl {
@@ -877,12 +825,22 @@ fn collect_local_exports(module_origin: &str, logos: &LogosProgram) -> ExportSet
             span: law.mark,
         });
     }
-    collect_local_exports_core(module_origin, &locals)
+    collect_local_exports_core(module_id, module_display, &locals)
 }
 
 pub fn analyze_logos_program(
     program: &LogosProgram,
     source: &str,
+) -> Result<SemanticReport, SemanticError> {
+    analyze_logos_program_in_scope(program, source, &|_, _, _| None)
+}
+
+/// `imported_field` resolves Entity fields that are not local: `Some(ns)` for
+/// `ns.Entity.field`, `None` for an unqualified imported Entity (PB-04 #1684).
+fn analyze_logos_program_in_scope(
+    program: &LogosProgram,
+    source: &str,
+    imported_field: &dyn Fn(Option<&str>, &str, &str) -> Option<SemanticType>,
 ) -> Result<SemanticReport, SemanticError> {
     let mut symbols = SymbolTable::new();
     symbols.push(ScopeKind::Module);
@@ -948,14 +906,16 @@ pub fn analyze_logos_program(
         }
         entity_field_usage.insert(entity.name.clone(), fields);
     }
-    let resolve_field = |ent: &str, field: &str| {
-        entity_map.get(ent).and_then(|entity| {
-            entity
+    let resolve_field = |namespace: Option<&str>, ent: &str, field: &str| match namespace {
+        None => match entity_map.get(ent) {
+            Some(entity) => entity
                 .fields
                 .iter()
                 .find(|x| x.name == field)
-                .map(|f| SemanticType::from(f.ty.clone()))
-        })
+                .map(|f| SemanticType::from(f.ty.clone())),
+            None => imported_field(None, ent, field),
+        },
+        Some(ns) => imported_field(Some(ns), ent, field),
     };
 
     for law in &program.laws {
@@ -1021,7 +981,7 @@ pub fn analyze_logos_program(
             // count as a use; text inside string literals is never a field.
             for atom in when.condition_atoms.iter().chain(&when.effect_atoms) {
                 if let LogosAtom::Field { entity, field } = atom {
-                    if resolve_field(entity, field).is_some() {
+                    if resolve_field(None, entity, field).is_some() {
                         if let Some(rem) = entity_field_usage.get_mut(entity) {
                             rem.remove(field);
                         }
@@ -1250,7 +1210,7 @@ fn to_core_diag_level(level: DiagLevel) -> ton618_core::DiagLevel {
 mod tests {
     use super::*;
     use crate::frontend::{parse_logos_program, parse_program_with_profile};
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1573,10 +1533,13 @@ Law "L" [priority 1]:
 
         let err = check_file_with_provider(std::path::Path::new(root), &provider)
             .expect_err("malformed imported module must fail");
-        let expected_helper = normalize_lexical(std::path::Path::new(helper));
-        let expected_helper = expected_helper.to_string_lossy();
+        let expected_helper = std::path::Path::new(helper)
+            .components()
+            .collect::<PathBuf>()
+            .display()
+            .to_string();
         assert!(
-            err.diag.message.contains(expected_helper.as_ref()),
+            err.diag.message.contains(&expected_helper),
             "expected imported-module error to contain module path; got: {}",
             err.diag.message
         );
@@ -2043,40 +2006,26 @@ Law "A" [priority 1]:
 
     #[test]
     fn symbol_cycle_detect_via_reexport_graph() {
-        let a = PathBuf::from("/virtual/a.sm");
-        let b = PathBuf::from("/virtual/b.sm");
-        let mut loaded: HashMap<PathBuf, (String, LogosProgram)> = HashMap::new();
-        loaded.insert(
-            a.clone(),
-            (
-                "Import pub \"b.sm\"\nLaw \"A\" [priority 1]:\n    When true -> System.recovery()\n"
-                    .to_string(),
-                // PB-02 / #1645: parsed from the same source; imports are
-                // read only from the preserved LogosProgram nodes.
-                parse_logos_program(
-                    "Import pub \"b.sm\"\nLaw \"A\" [priority 1]:\n    When true -> System.recovery()\n",
-                )
-                .expect("logos a"),
-            ),
-        );
-        loaded.insert(
-            b.clone(),
-            (
-                "Import pub \"a.sm\"\nLaw \"B\" [priority 1]:\n    When true -> System.recovery()\n"
-                    .to_string(),
-                parse_logos_program(
-                    "Import pub \"a.sm\"\nLaw \"B\" [priority 1]:\n    When true -> System.recovery()\n",
-                )
-                .expect("logos b"),
-            ),
-        );
-        let provider = MapProvider {
-            modules: BTreeMap::new(),
+        // PB-04: re-export cycles are detected on the frozen module graph.
+        let node = |id: &str, dep: &str| ModuleNode {
+            module_id: id.to_string(),
+            display: id.to_string(),
+            local_exports: ExportSet::default(),
+            imports: vec![ResolvedImport {
+                directive: parse_import_directive(&format!("Import pub \"{dep}\""), 1, 1, 0)
+                    .expect("directive"),
+                target: dep.to_string(),
+            }],
         };
-        let err = build_export_sets(&loaded, &provider).expect_err("must fail cycle");
-        assert!(err.to_string().contains("E0243"));
+        let graph = ModuleGraph::new(vec![
+            node("/virtual/a.sm", "/virtual/b.sm"),
+            node("/virtual/b.sm", "/virtual/a.sm"),
+        ])
+        .expect("graph");
+        let err = build_export_sets_core(&graph).expect_err("must fail cycle");
+        assert_eq!(err.code, "E0243");
         assert!(err
-            .to_string()
+            .message
             .contains("/virtual/a.sm -> /virtual/b.sm -> /virtual/a.sm"));
     }
 
@@ -3119,5 +3068,445 @@ mod pb03_semantic_core_tests {
         let end = start + src[start..].find("\n}").unwrap();
         let body = &src[start..end];
         assert!(!body.contains("TypeRegistry") && !body.contains("equals_fast"));
+    }
+}
+
+#[cfg(test)]
+mod pb04_module_graph_tests {
+    use super::*;
+    use crate::alloc_core::{ExportOrigin, ModuleProvider, SelectedImport};
+    use std::cell::RefCell;
+
+    /// In-memory provider; ids are the map keys verbatim. `flip` makes
+    /// `resolve_import` answer differently on every call (adversarial).
+    struct Provider {
+        files: BTreeMap<String, String>,
+        calls: RefCell<BTreeMap<(String, String), usize>>,
+        flip: Option<(String, String)>,
+    }
+
+    impl Provider {
+        fn new(files: &[(&str, &str)]) -> Self {
+            Self {
+                files: files
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                calls: RefCell::new(BTreeMap::new()),
+                flip: None,
+            }
+        }
+    }
+
+    impl ModuleProvider for Provider {
+        fn read_module(&self, id: &str) -> Result<Vec<u8>, String> {
+            self.files
+                .get(id)
+                .map(|s| s.clone().into_bytes())
+                .ok_or_else(|| format!("no module '{id}'"))
+        }
+        fn resolve_import(&self, importer: &str, spec: &str) -> Result<String, String> {
+            let mut calls = self.calls.borrow_mut();
+            let n = calls
+                .entry((importer.to_string(), spec.to_string()))
+                .or_default();
+            *n += 1;
+            if let Some((first, second)) = &self.flip {
+                return Ok(if *n == 1 {
+                    first.clone()
+                } else {
+                    second.clone()
+                });
+            }
+            Ok(format!("/m/{spec}"))
+        }
+    }
+
+    fn check(p: &Provider) -> Result<SemanticReport, SemanticError> {
+        check_file_with_provider(Path::new("/m/root.sm"), p)
+    }
+
+    fn code(r: Result<SemanticReport, SemanticError>) -> String {
+        match r {
+            Ok(_) => "OK".to_string(),
+            Err(e) => format!("{} {}", e.diag.code, e.diag.message),
+        }
+    }
+
+    const DEP: &str = "Entity Sensor:\n    state val: quad\nLaw \"Check\" [priority 1]:\n    When Sensor.val == T -> System.recovery()\n";
+    const LAW_TAIL: &str = "Law \"Root\" [priority 1]:\n";
+
+    fn root(imports: &str, cond: &str) -> String {
+        format!("{imports}{LAW_TAIL}    When {cond} -> System.recovery()\n")
+    }
+
+    // #1682 / #1683: one strict directive parser; malformed text and unknown
+    // qualifiers reject instead of being repaired or weakened.
+    #[test]
+    fn directive_parser_rejects_malformed_text_and_unknown_qualifiers() {
+        let ok = |d: &str| parse_import_directive(d, 1, 1, 0).expect(d);
+        let d = ok("Import pub \"a.sm\" { Entity:A as B, C } // note");
+        assert!(d.reexport);
+        assert_eq!(
+            d.select_items,
+            vec![
+                SelectedImport {
+                    public_name: "A".into(),
+                    expected_kind: Some(ExportKind::Entity),
+                    local_name: "B".into()
+                },
+                SelectedImport {
+                    public_name: "C".into(),
+                    expected_kind: None,
+                    local_name: "C".into()
+                },
+            ]
+        );
+        assert_eq!(ok("Import \"a.sm\" as X *").namespace_alias(), "X");
+        assert_eq!(ok("Import a.sm").spec, "a.sm");
+        for bad in [
+            "Import",
+            "Import \"a.sm",
+            "Import \"\"",
+            "Import \"a.sm\" { A",
+            "Import \"a.sm\" { A, }",
+            "Import \"a.sm\" { }",
+            "Import \"a.sm\" as",
+            "Import \"a.sm\" garbage",
+            "Import \"a.sm\" { A } trailing",
+        ] {
+            let e = parse_import_directive(bad, 1, 1, 0).expect_err(bad);
+            assert_eq!(e.code, "E0239", "{bad}");
+        }
+        let e = parse_import_directive("Import \"a.sm\" { Bogus:A }", 1, 1, 0).expect_err("q");
+        assert_eq!(e.code, "E0245");
+        assert!(e
+            .message
+            .contains("unknown selected-import kind qualifier 'Bogus'"));
+    }
+
+    // #1681: no raw-source import scanner remains as module authority.
+    #[test]
+    fn no_raw_source_import_scanner_remains() {
+        let core = include_str!("alloc_core.rs");
+        assert!(!core.contains(&["fn parse_import_", "directives("].concat()));
+        assert!(!core.contains(&["fn parse_select_", "items("].concat()));
+    }
+
+    // #1684: selected, wildcard and namespace-qualified bindings come from the
+    // frozen graph in the documented order.
+    #[test]
+    fn imported_entity_fields_follow_documented_lookup_order() {
+        let cases: [(&str, &str, &str); 12] = [
+            ("Import \"dep.sm\" { Sensor }\n", "Sensor.val == T", "OK"),
+            (
+                "Import \"dep.sm\" { Entity:Sensor as Sn }\n",
+                "Sn.val == T",
+                "OK",
+            ),
+            ("Import \"dep.sm\" *\n", "Sensor.val == T", "OK"),
+            ("Import \"dep.sm\" as D\n", "D.Sensor.val == T", "OK"),
+            ("Import \"dep.sm\"\n", "dep.Sensor.val == T", "OK"),
+            ("Import \"dep.sm\" as D\n", "Sensor.val == T", "E0201"),
+            ("Import \"dep.sm\" as D\n", "X.Sensor.val == T", "E0201"),
+            ("Import \"dep.sm\" as D\n", "D.Unknown.val == T", "E0201"),
+            ("Import \"dep.sm\" as D\n", "D.Sensor.missing == T", "E0201"),
+            ("Import \"dep.sm\" as D\n", "D.Check.val == T", "E0201"),
+            (
+                "Import \"dep.sm\" { Sensor }\n",
+                "Sensor.val == true",
+                "E0201",
+            ),
+            (
+                "Import \"dep.sm\" as D\nImport \"dep2.sm\" as D\n",
+                "D.Sensor.val == T",
+                "E0241",
+            ),
+        ];
+        for (imports, cond, want) in cases {
+            let src = root(imports, cond);
+            let p = Provider::new(&[
+                ("/m/root.sm", &src),
+                ("/m/dep.sm", DEP),
+                ("/m/dep2.sm", DEP),
+            ]);
+            let got = code(check(&p));
+            assert!(got.starts_with(want), "{imports}{cond}: {got}");
+        }
+    }
+
+    #[test]
+    fn first_matching_wildcard_by_declaration_order_wins() {
+        let a = "Entity Sensor:\n    state val: quad\n";
+        let b = "Entity Sensor:\n    state val: bool\n";
+        let imports = "Import \"a.sm\" *\nImport \"b.sm\" *\n";
+        let p = Provider::new(&[
+            ("/m/root.sm", &root(imports, "Sensor.val == T")),
+            ("/m/a.sm", a),
+            ("/m/b.sm", b),
+        ]);
+        assert_eq!(code(check(&p)), "OK");
+        let p = Provider::new(&[
+            ("/m/root.sm", &root(imports, "Sensor.val == true")),
+            ("/m/a.sm", a),
+            ("/m/b.sm", b),
+        ]);
+        assert!(code(check(&p)).starts_with("E0201"));
+    }
+
+    #[test]
+    fn selected_import_cannot_shadow_a_local_symbol() {
+        let src = format!(
+            "Import \"dep.sm\" {{ Sensor }}\nEntity Sensor:\n    state val: quad\n{}",
+            root("", "Sensor.val == T")
+        );
+        let p = Provider::new(&[("/m/root.sm", &src), ("/m/dep.sm", DEP)]);
+        assert!(code(check(&p)).starts_with("E0241"));
+    }
+
+    // #1685 / #1686 / #1687: one flat export namespace; kind assertions act on
+    // the unique export item.
+    #[test]
+    fn flat_export_namespace_and_kind_assertions() {
+        let law = |name: &str| {
+            format!("Law \"{name}\" [priority 1]:\n    When true -> System.recovery()\n")
+        };
+        for (dep, want) in [
+            (
+                format!("Entity A:\n    state v: quad\n{}", law("A")),
+                "E0242",
+            ),
+            (format!("System A():\n{}", law("A")), "E0242"),
+            (
+                format!("System A():\nEntity A:\n    state v: quad\n"),
+                "E0242",
+            ),
+            (format!("Entity A:\n    state v: quad\n{}", law("B")), "OK"),
+        ] {
+            let p = Provider::new(&[
+                ("/m/root.sm", &root("Import \"dep.sm\"\n", "true")),
+                ("/m/dep.sm", &dep),
+            ]);
+            assert!(code(check(&p)).starts_with(want), "{dep}");
+        }
+        let dep = "Entity A:\n    state v: quad\n";
+        for (sel, want) in [
+            ("{ A }", "OK"),
+            ("{ Entity:A }", "OK"),
+            ("{ Law:A }", "E0245"),
+            ("{ System:A }", "E0245"),
+            ("{ Missing }", "E0244"),
+            ("{ Bogus:A }", "E0245"),
+        ] {
+            for pub_ in ["", "pub "] {
+                let imports = format!("Import {pub_}\"dep.sm\" {sel}\n");
+                let p =
+                    Provider::new(&[("/m/root.sm", &root(&imports, "true")), ("/m/dep.sm", dep)]);
+                assert!(code(check(&p)).starts_with(want), "{imports}");
+            }
+        }
+        // #1685: a kind-qualified selected re-export really exports the item.
+        let p = Provider::new(&[
+            ("/m/root.sm", &root("Import \"mid.sm\" { A }\n", "A.v == T")),
+            ("/m/mid.sm", "Import pub \"dep.sm\" { Entity:A }\n"),
+            ("/m/dep.sm", dep),
+        ]);
+        assert_eq!(code(check(&p)), "OK");
+    }
+
+    // #1692: every edge is resolved exactly once and the frozen answer is the
+    // only one any later phase sees, even from an unstable provider.
+    #[test]
+    fn provider_resolves_each_edge_once_and_graph_is_frozen() {
+        let p = Provider::new(&[
+            (
+                "/m/root.sm",
+                &root(
+                    "Import pub \"dep.sm\" { Sensor }\nImport \"mid.sm\" *\n",
+                    "Sensor.val == T",
+                ),
+            ),
+            ("/m/mid.sm", "Import pub \"dep.sm\" *\n"),
+            ("/m/dep.sm", DEP),
+        ]);
+        assert_eq!(code(check(&p)), "OK");
+        assert!(
+            p.calls.borrow().values().all(|n| *n == 1),
+            "{:?}",
+            p.calls.borrow()
+        );
+
+        let mut flip = Provider::new(&[
+            (
+                "/m/root.sm",
+                &root("Import pub \"dep.sm\" { Sensor }\n", "Sensor.val == T"),
+            ),
+            ("/m/A.sm", DEP),
+            (
+                "/m/B.sm",
+                "Law \"Other\" [priority 1]:\n    When true -> System.recovery()\n",
+            ),
+        ]);
+        flip.flip = Some(("/m/A.sm".to_string(), "/m/B.sm".to_string()));
+        assert_eq!(
+            code(check(&flip)),
+            "OK",
+            "graph must stay on the first answer"
+        );
+        assert_eq!(
+            flip.calls.borrow().values().copied().collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    // #1690 / #1691: lossless, platform-correct root identity; provider ids
+    // verbatim.
+    #[test]
+    fn root_identity_is_lossless_and_keeps_unresolved_parents() {
+        assert_eq!(root_module_id(Path::new("../a.sm")).unwrap(), "../a.sm");
+        assert_eq!(
+            root_module_id(Path::new("../../a.sm")).unwrap(),
+            "../../a.sm"
+        );
+        assert_eq!(root_module_id(Path::new("x/../a.sm")).unwrap(), "a.sm");
+        assert_eq!(root_module_id(Path::new("./x/./a.sm")).unwrap(), "x/a.sm");
+        assert_ne!(
+            root_module_id(Path::new("../a.sm")).unwrap(),
+            root_module_id(Path::new("a.sm")).unwrap()
+        );
+        if cfg!(windows) {
+            assert_eq!(
+                root_module_id(Path::new(r"C:\p\a.sm")).unwrap(),
+                "C:/p/a.sm"
+            );
+        } else {
+            assert_eq!(
+                root_module_id(Path::new("dir\\name.sm")).unwrap(),
+                "dir\\name.sm"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_root_fails_closed() {
+        use std::os::unix::ffi::OsStrExt;
+        let a = std::ffi::OsStr::from_bytes(b"/m/\xff.sm");
+        let b = std::ffi::OsStr::from_bytes(b"/m/\xfe.sm");
+        for raw in [a, b] {
+            let err = root_module_id(Path::new(raw)).expect_err("non-utf8");
+            assert_eq!(err.diag.code, "E0239");
+            assert!(
+                !err.diag.message.contains('\u{FFFD}')
+                    || err.diag.message.contains("not valid UTF-8")
+            );
+        }
+    }
+
+    #[test]
+    fn provider_ids_are_consumed_verbatim() {
+        struct Verbatim;
+        impl ModuleProvider for Verbatim {
+            fn read_module(&self, id: &str) -> Result<Vec<u8>, String> {
+                Ok(match id {
+                    "/m/root.sm" => "Import \"dep\"\nLaw \"R\" [priority 1]:\n    When true -> System.recovery()\n",
+                    "pkg::dep\\v1" => "Law \"D\" [priority 1]:\n    When true -> System.recovery()\n",
+                    other => return Err(format!("no module '{other}'")),
+                }
+                .as_bytes()
+                .to_vec())
+            }
+            fn resolve_import(&self, _importer: &str, _spec: &str) -> Result<String, String> {
+                Ok("pkg::dep\\v1".to_string())
+            }
+        }
+        let report = check_file_with_provider(Path::new("/m/root.sm"), &Verbatim).expect("ok");
+        assert!(
+            report.scheduled_laws.iter().any(|l| l == "pkg::dep\\v1::D"),
+            "{:?}",
+            report.scheduled_laws
+        );
+    }
+
+    // #1688 / #1689: graph invariants fail closed.
+    #[test]
+    fn module_graph_rejects_duplicate_ids_and_dangling_edges() {
+        let node = |id: &str, imports: Vec<ResolvedImport>| ModuleNode {
+            module_id: id.to_string(),
+            display: id.to_string(),
+            local_exports: ExportSet::default(),
+            imports,
+        };
+        let err = ModuleGraph::new(vec![node("a", vec![]), node("a", vec![])]).expect_err("dup");
+        assert!(err.message.contains("duplicate module id"));
+        let edge = ResolvedImport {
+            directive: parse_import_directive("Import pub \"b\"", 1, 1, 0).unwrap(),
+            target: "b".to_string(),
+        };
+        let err = ModuleGraph::new(vec![node("a", vec![edge])]).expect_err("dangling");
+        assert_eq!(err.code, "E0239");
+    }
+
+    // #1703 / #1706: complete provenance; every ExportOrigin variant reachable.
+    #[test]
+    fn re_export_provenance_keeps_every_hop() {
+        let law = "Law \"X\" [priority 1]:\n    When true -> System.recovery()\n";
+        let local = |id: &str| ModuleNode {
+            module_id: id.to_string(),
+            display: id.to_string(),
+            local_exports: collect_local_exports_core(
+                id,
+                id,
+                &[LocalExportDecl {
+                    public_name: "X".into(),
+                    kind: ExportKind::Law,
+                    span: SourceMark::default(),
+                }],
+            )
+            .unwrap(),
+            imports: vec![],
+        };
+        let hop = |id: &str, dep: &str| ModuleNode {
+            module_id: id.to_string(),
+            display: id.to_string(),
+            local_exports: ExportSet::default(),
+            imports: vec![ResolvedImport {
+                directive: parse_import_directive(&format!("Import pub \"{dep}\""), 1, 1, 0)
+                    .unwrap(),
+                target: dep.to_string(),
+            }],
+        };
+        let graph = ModuleGraph::new(vec![
+            hop("a", "b"),
+            hop("b", "c"),
+            hop("c", "d"),
+            local("d"),
+        ])
+        .unwrap();
+        let sets = build_export_sets_core(&graph).unwrap();
+        assert_eq!(
+            sets["d"].items[0].origin,
+            ExportOrigin::Local { module: "d".into() }
+        );
+        assert_eq!(
+            sets["c"].items[0].origin,
+            ExportOrigin::ReExport {
+                chain: vec!["c".into(), "d".into(), "X".into()]
+            }
+        );
+        assert_eq!(
+            sets["a"].items[0].origin,
+            ExportOrigin::ReExport {
+                chain: vec!["a".into(), "b".into(), "c".into(), "d".into(), "X".into()]
+            }
+        );
+        assert_eq!(
+            (
+                sets["a"].items[0].source_module.as_str(),
+                sets["a"].items[0].source_name.as_str()
+            ),
+            ("d", "X")
+        );
+        let _ = law;
     }
 }

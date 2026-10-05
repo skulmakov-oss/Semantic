@@ -1231,6 +1231,13 @@ pub enum LogosAtom {
         entity: String,
         field: String,
     },
+    /// PB-04 (#1684): namespace-qualified field `X.Entity.field` (import
+    /// namespace alias `X`), the documented `X.Foo` lookup form.
+    QualifiedField {
+        namespace: String,
+        entity: String,
+        field: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

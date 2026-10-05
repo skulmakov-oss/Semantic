@@ -105,6 +105,10 @@ Clarifications:
 - wildcard imports do not remove namespace-qualified access to the same module
 - if multiple wildcard imports can satisfy one unresolved name, the first
   matching wildcard import by declaration order wins
+- in Logos `When` conditions, `Entity.field` resolves `Entity` through local
+  symbols, then selected imports, then wildcard imports; the namespace-qualified
+  form `X.Entity.field` resolves only through the import whose namespace alias is
+  `X` and is never a fallback for an unqualified name
 - wildcard overlap does not produce a separate ambiguity diagnostic in v0.2
 
 ## Export Surface
@@ -119,9 +123,31 @@ Re-export is supported through `Import pub ...`.
 
 Current export provenance model distinguishes:
 
-- local declarations
-- imported declarations
-- re-exported declarations
+- local declarations (`Local`)
+- re-exported declarations (`ReExport`, with the complete hop chain)
+
+A plain import binds names for lookup but exports nothing. The export
+namespace is flat: one public name maps to at most one export item per module,
+regardless of kind (`E0242`).
+
+## Module Graph and Identity (PB-04)
+
+- every import declaration is resolved through the module provider exactly
+  once; the results are frozen into one module graph, and export construction,
+  selected-import validation, name binding and provenance all consume that
+  graph (the provider is never re-queried)
+- a module id is the provider-owned UTF-8 string, consumed verbatim; it is not
+  re-derived from a host path
+- the filesystem root entry is converted to a module id losslessly: non-UTF-8
+  paths fail with `E0239`, an unresolved leading `..` is preserved, and `\` is a
+  separator (folded to `/`) only on Windows
+- module ids, display names, `provider_module_id` and package-relative
+  presentation identities are distinct roles: diagnostics carry the module id
+  as `provider_module_id` and name modules through the provider's display
+- a duplicate module id or an import edge to a module outside the graph is an
+  `E0239` error
+- selected imports are parsed once; an unknown kind qualifier is `E0245`, and
+  malformed `Import` directives are `E0239` (never repaired)
 
 ## Determinism Rules
 

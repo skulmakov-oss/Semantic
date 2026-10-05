@@ -71,6 +71,21 @@ fn logos_atom_at(tokens: &[Token], i: usize) -> Option<(LogosAtom, usize)> {
         TokenKind::Num => LogosAtom::Number(logos_numeric_literal(&tok.text)?),
         TokenKind::String => LogosAtom::Text(tok.text.clone()),
         TokenKind::Ident => {
+            let kind_at = |k: usize| tokens.get(k).map(|t| t.kind);
+            let is_qualified = kind_at(i + 1) == Some(TokenKind::Dot)
+                && kind_at(i + 2) == Some(TokenKind::Ident)
+                && kind_at(i + 3) == Some(TokenKind::Dot)
+                && kind_at(i + 4) == Some(TokenKind::Ident);
+            if is_qualified {
+                return Some((
+                    LogosAtom::QualifiedField {
+                        namespace: tok.text.clone(),
+                        entity: tokens[i + 2].text.clone(),
+                        field: tokens[i + 4].text.clone(),
+                    },
+                    i + 5,
+                ));
+            }
             let is_field = tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::Dot)
                 && tokens.get(i + 2).map(|t| t.kind) == Some(TokenKind::Ident);
             if is_field {
@@ -120,9 +135,12 @@ fn logos_condition_structure(tokens: &[Token]) -> LogosCondition {
         && tokens.get(1).map(|t| t.kind) == Some(TokenKind::LParen)
     {
         return match logos_atom_at(tokens, 2) {
-            Some((atom @ (LogosAtom::Name(_) | LogosAtom::Field { .. }), next))
-                if next + 1 == tokens.len() && tokens[next].kind == TokenKind::RParen =>
-            {
+            Some((
+                atom @ (LogosAtom::Name(_)
+                | LogosAtom::Field { .. }
+                | LogosAtom::QualifiedField { .. }),
+                next,
+            )) if next + 1 == tokens.len() && tokens[next].kind == TokenKind::RParen => {
                 LogosCondition::Present(atom)
             }
             _ => LogosCondition::Unsupported,
