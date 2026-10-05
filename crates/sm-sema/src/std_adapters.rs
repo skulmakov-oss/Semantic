@@ -837,10 +837,13 @@ pub fn analyze_logos_program(
 
 /// `imported_field` resolves Entity fields that are not local: `Some(ns)` for
 /// `ns.Entity.field`, `None` for an unqualified imported Entity (PB-04 #1684).
+/// Resolves an imported Entity field: `(namespace alias, entity, field)`.
+type ImportedFieldResolver<'a> = dyn Fn(Option<&str>, &str, &str) -> Option<SemanticType> + 'a;
+
 fn analyze_logos_program_in_scope(
     program: &LogosProgram,
     source: &str,
-    imported_field: &dyn Fn(Option<&str>, &str, &str) -> Option<SemanticType>,
+    imported_field: &ImportedFieldResolver<'_>,
 ) -> Result<SemanticReport, SemanticError> {
     let mut symbols = SymbolTable::new();
     symbols.push(ScopeKind::Module);
@@ -3278,7 +3281,7 @@ mod pb04_module_graph_tests {
             ),
             (format!("System A():\n{}", law("A")), "E0242"),
             (
-                format!("System A():\nEntity A:\n    state v: quad\n"),
+                "System A():\nEntity A:\n    state v: quad\n".to_string(),
                 "E0242",
             ),
             (format!("Entity A:\n    state v: quad\n{}", law("B")), "OK"),
