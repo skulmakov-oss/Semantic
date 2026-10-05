@@ -3,7 +3,7 @@
 //! This module models future capability admission for controlled Hello
 //! observation without wiring into production capability handling.
 
-use super::{CapabilityChecker, CapabilityKind};
+use super::{CapabilityChecker, CapabilityDeniedCode, CapabilityKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelloObservationCapability {
@@ -29,6 +29,9 @@ pub enum HelloObservationCapabilityDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelloObservationCapabilityDenial {
     MissingObservationCapability,
+    /// The checker's capability contract is itself invalid (#1780); this is
+    /// not an ordinary missing `ControlledObservationSink` grant.
+    InvalidCapabilityContract,
     SinkUnavailable,
     StdoutNotDefaultSink,
     GenericIoNotAllowed,
@@ -108,9 +111,14 @@ pub fn require_hello_observation_sink_capability<C: CapabilityChecker>(
 
     match checker.require(CapabilityKind::ControlledObservationSink) {
         Ok(()) => HelloObservationCapabilityDecision::Allow,
-        Err(_) => HelloObservationCapabilityDecision::Deny(
-            HelloObservationCapabilityDenial::MissingObservationCapability,
-        ),
+        Err(denied) => HelloObservationCapabilityDecision::Deny(match denied.code {
+            CapabilityDeniedCode::MissingCapability => {
+                HelloObservationCapabilityDenial::MissingObservationCapability
+            }
+            CapabilityDeniedCode::InvalidManifestContract(_) => {
+                HelloObservationCapabilityDenial::InvalidCapabilityContract
+            }
+        }),
     }
 }
 
@@ -140,6 +148,78 @@ mod tests {
             require_hello_observation_sink_capability(&manifest, &context),
             HelloObservationCapabilityDecision::Deny(
                 HelloObservationCapabilityDenial::GenericIoNotAllowed
+            )
+        );
+    }
+
+    // #1781 (resolved by PR #1973): every unknown channel is denied by both
+    // evaluators, and `None` proceeds to the ordinary controlled-sink checks.
+    #[test]
+    fn pb07_unknown_host_channels_fail_closed_and_none_reaches_sink_checks() {
+        let mut manifest = CapabilityManifest::new();
+        manifest.allow(CapabilityKind::ControlledObservationSink);
+        for channel in ["socket", "udp", "stderr2", "pb07-arbitrary-future-channel"] {
+            let context = HelloObservationCapabilityContext {
+                observation_sink_present: true,
+                sink_available: true,
+                requested_host_channel: Some(channel),
+            };
+            let denied = HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::GenericIoNotAllowed,
+            );
+            assert_eq!(
+                evaluate_hello_observation_capability(&context),
+                denied,
+                "{channel}"
+            );
+            assert_eq!(
+                require_hello_observation_sink_capability(&manifest, &context),
+                denied,
+                "{channel}"
+            );
+        }
+        let none = HelloObservationCapabilityContext {
+            observation_sink_present: true,
+            sink_available: true,
+            requested_host_channel: None,
+        };
+        assert_eq!(
+            require_hello_observation_sink_capability(&manifest, &none),
+            HelloObservationCapabilityDecision::Allow
+        );
+        let unavailable = HelloObservationCapabilityContext {
+            sink_available: false,
+            ..none
+        };
+        assert_eq!(
+            require_hello_observation_sink_capability(&manifest, &unavailable),
+            HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::SinkUnavailable
+            )
+        );
+    }
+
+    // #1780: an invalid checker contract is not a missing observation grant.
+    #[test]
+    fn pb07_invalid_checker_contract_is_distinct_from_missing_sink_capability() {
+        let context = HelloObservationCapabilityContext {
+            observation_sink_present: true,
+            sink_available: true,
+            requested_host_channel: None,
+        };
+        let mut invalid =
+            CapabilityManifest::with_contract("other.schema", crate::CapabilityManifestVersion::V1);
+        invalid.allow(CapabilityKind::ControlledObservationSink);
+        assert_eq!(
+            require_hello_observation_sink_capability(&invalid, &context),
+            HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::InvalidCapabilityContract
+            )
+        );
+        assert_eq!(
+            require_hello_observation_sink_capability(&CapabilityManifest::new(), &context),
+            HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::MissingObservationCapability
             )
         );
     }

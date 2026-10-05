@@ -241,7 +241,11 @@ pub struct CapabilityManifestMetadata {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityDeniedCode {
+    /// A valid capability contract that does not grant the capability.
     MissingCapability,
+    /// The capability contract itself is invalid, so no grant can be read
+    /// from it (#1780). Distinct from an ordinary missing grant.
+    InvalidManifestContract(ManifestValidationCode),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -302,6 +306,11 @@ impl std::error::Error for CapabilityDenied {}
 
 pub trait CapabilityChecker {
     fn require(&self, capability: CapabilityKind) -> Result<(), CapabilityDenied>;
+
+    /// Provenance of this authority object (#1785). Sessions record exactly
+    /// this value, so recorded provenance cannot diverge from the checker
+    /// that actually authorizes calls. Deliberately has no default.
+    fn manifest_metadata(&self) -> CapabilityManifestMetadata;
 
     fn require_call(&self, call: HostCallId) -> Result<(), CapabilityDenied> {
         self.require(required_capability_for_call(call))
@@ -449,7 +458,7 @@ impl CapabilityChecker for CapabilityManifest {
             CapabilityDenied::new(
                 capability,
                 None,
-                CapabilityDeniedCode::MissingCapability,
+                CapabilityDeniedCode::InvalidManifestContract(report.code),
                 self.metadata(),
                 report.message,
             )
@@ -465,6 +474,10 @@ impl CapabilityChecker for CapabilityManifest {
                 "manifest does not grant this capability",
             ))
         }
+    }
+
+    fn manifest_metadata(&self) -> CapabilityManifestMetadata {
+        self.metadata()
     }
 }
 
@@ -590,5 +603,52 @@ mod tests {
         );
         assert!(transform.allows(CapabilityKind::FsRead));
         assert!(transform.allows(CapabilityKind::FsWrite));
+    }
+
+    // #1780: an invalid contract and a missing grant are distinct typed states.
+    #[test]
+    fn invalid_manifest_contract_is_typed_and_distinct_from_missing_grant() {
+        let bad_schema =
+            CapabilityManifest::with_contract("other.schema", CapabilityManifestVersion::V1);
+        let denied = bad_schema
+            .require(CapabilityKind::GateRead)
+            .expect_err("invalid contract");
+        assert_eq!(
+            denied.code,
+            CapabilityDeniedCode::InvalidManifestContract(
+                ManifestValidationCode::UnsupportedSchema
+            )
+        );
+        let denied_call = bad_schema
+            .require_call(HostCallId::GateRead)
+            .expect_err("invalid contract via call");
+        assert_eq!(denied_call.call, Some(HostCallId::GateRead));
+        assert_eq!(
+            denied_call.code,
+            CapabilityDeniedCode::InvalidManifestContract(
+                ManifestValidationCode::UnsupportedSchema
+            )
+        );
+
+        let valid = CapabilityManifest::new();
+        assert_eq!(
+            valid
+                .require(CapabilityKind::GateRead)
+                .expect_err("no grant")
+                .code,
+            CapabilityDeniedCode::MissingCapability
+        );
+        let mut granted = CapabilityManifest::new();
+        granted.allow(CapabilityKind::GateRead);
+        granted.require(CapabilityKind::GateRead).expect("granted");
+    }
+
+    // #1785: the checker reports its own provenance.
+    #[test]
+    fn checker_reports_its_own_manifest_metadata() {
+        let manifest =
+            CapabilityManifest::with_contract("other.schema", CapabilityManifestVersion::V1);
+        assert_eq!(manifest.manifest_metadata(), manifest.metadata());
+        assert_eq!(manifest.manifest_metadata().schema, "other.schema");
     }
 }
