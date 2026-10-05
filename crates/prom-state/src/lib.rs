@@ -122,6 +122,9 @@ pub enum StateRollbackCode {
     NonMonotonicTransitionCount,
     SnapshotEpochMismatch,
     TransitionCountOutOfRange,
+    /// The selected checkpoint snapshot violates `StateSnapshot::validate`
+    /// (#1782); rollback is not a bypass around snapshot admission.
+    InvalidCheckpointSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +150,12 @@ pub enum StateValidationCode {
     EmptyAlternatives,
     DuplicateAlternatives,
     NotEnoughAlternatives,
+    /// A snapshot record is stored under a different key than its own (#1782).
+    KeyMismatch,
+    /// A snapshot record claims an epoch later than the snapshot (#1782).
+    RecordEpochAfterSnapshot,
+    /// No further epoch can be issued (#1783).
+    EpochExhausted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,7 +258,9 @@ impl SemanticStateStore {
     ) -> Result<TransitionMetadata, StateValidationError> {
         validate_update(&update)?;
         let from_epoch = self.epoch;
-        let to_epoch = StateEpoch(self.epoch.0 + 1);
+        // #1783: checked, not saturating — saturating would report an accepted
+        // update without advancing identity. Fails before any mutation.
+        let to_epoch = StateEpoch(self.epoch.0.checked_add(1).ok_or_else(epoch_exhausted)?);
         let record = StateRecord {
             key: update.key.clone(),
             resolution: update.resolution,
@@ -268,9 +279,13 @@ impl SemanticStateStore {
         Ok(transition)
     }
 
-    pub fn restore(&mut self, snapshot: StateSnapshot) {
+    /// Installs a snapshot only if it is valid (#1782). An invalid snapshot
+    /// returns `Err` and leaves the store unchanged.
+    pub fn restore(&mut self, snapshot: StateSnapshot) -> Result<(), StateValidationError> {
+        snapshot.validate()?;
         self.epoch = snapshot.epoch;
         self.records = snapshot.records;
+        Ok(())
     }
 
     pub fn apply_rollback(
@@ -371,6 +386,16 @@ impl SemanticStateStore {
             )
         })?;
 
+        checkpoint.snapshot.snapshot.validate().map_err(|err| {
+            StateRollbackError::new(
+                StateRollbackCode::InvalidCheckpointSnapshot,
+                format!(
+                    "rollback checkpoint {} carries an invalid snapshot: {}",
+                    checkpoint.checkpoint_ordinal, err
+                ),
+            )
+        })?;
+
         let from_epoch = self.epoch;
         let to_epoch = checkpoint.snapshot.snapshot.epoch;
         let retained_transition_count = checkpoint.applied_transition_count;
@@ -390,27 +415,47 @@ impl SemanticStateStore {
     }
 }
 
-fn validate_update(update: &StateUpdate) -> Result<(), StateValidationError> {
-    if update.key.trim().is_empty() {
+fn epoch_exhausted() -> StateValidationError {
+    StateValidationError::new(
+        StateValidationCode::EpochExhausted,
+        "state epoch space is exhausted; no further update can be accepted",
+    )
+}
+
+fn validate_key(key: &str) -> Result<(), StateValidationError> {
+    if key.trim().is_empty() {
         return Err(StateValidationError::new(
             StateValidationCode::EmptyKey,
             "state key must not be empty",
         ));
     }
-    if update.context.name.trim().is_empty() {
+    Ok(())
+}
+
+fn validate_context(context: &ContextWindow) -> Result<(), StateValidationError> {
+    if context.name.trim().is_empty() {
         return Err(StateValidationError::new(
             StateValidationCode::EmptyContext,
             "context window must not be empty",
         ));
     }
+    Ok(())
+}
+
+fn validate_update(update: &StateUpdate) -> Result<(), StateValidationError> {
+    validate_key(&update.key)?;
+    validate_context(&update.context)?;
     if update.reason.trim().is_empty() {
         return Err(StateValidationError::new(
             StateValidationCode::EmptyReason,
             "transition reason must not be empty",
         ));
     }
+    validate_resolution(&update.resolution)
+}
 
-    match &update.resolution {
+fn validate_resolution(resolution: &FactResolution) -> Result<(), StateValidationError> {
+    match resolution {
         FactResolution::Certain(_) => Ok(()),
         FactResolution::Uncertain(values) | FactResolution::Conflicted(values) => {
             if values.is_empty() {
@@ -447,6 +492,42 @@ impl StateSnapshot {
     pub fn archive(&self) -> StateSnapshotArchive {
         StateSnapshotArchive::new(self.clone())
     }
+
+    /// The single semantic admission rule for snapshots (#1782, #1783), shared
+    /// by restore, archive load, canonical archive write and rollback. It
+    /// reuses the update validators, so a snapshot can only hold records an
+    /// update could have produced.
+    pub fn validate(&self) -> Result<(), StateValidationError> {
+        // The store has no frozen mode: a snapshot from which no update could
+        // ever be accepted is not admissible (terminal epoch policy).
+        if self.epoch.0 == u64::MAX {
+            return Err(epoch_exhausted());
+        }
+        for (key, record) in &self.records {
+            validate_key(key)?;
+            if record.key != *key {
+                return Err(StateValidationError::new(
+                    StateValidationCode::KeyMismatch,
+                    format!(
+                        "snapshot record stored under '{}' carries key '{}'",
+                        key, record.key
+                    ),
+                ));
+            }
+            validate_context(&record.context)?;
+            validate_resolution(&record.resolution)?;
+            if record.epoch > self.epoch {
+                return Err(StateValidationError::new(
+                    StateValidationCode::RecordEpochAfterSnapshot,
+                    format!(
+                        "snapshot record '{}' has epoch {} after snapshot epoch {}",
+                        key, record.epoch.0, self.epoch.0
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl StateSnapshotArchive {
@@ -457,7 +538,19 @@ impl StateSnapshotArchive {
         }
     }
 
-    pub fn to_canonical_text(&self) -> String {
+    /// Serializes a valid archive (#1782). Invalid evidence is rejected rather
+    /// than written as text the same owner's reader would refuse; valid
+    /// archives serialize byte-for-byte as before.
+    pub fn to_canonical_text(&self) -> Result<String, StateSnapshotArchiveFormatError> {
+        if self.format_version != STATE_SNAPSHOT_ARCHIVE_FORMAT_VERSION {
+            return Err(StateSnapshotArchiveFormatError::new(format!(
+                "unsupported archive format version {}; expected {}",
+                self.format_version, STATE_SNAPSHOT_ARCHIVE_FORMAT_VERSION
+            )));
+        }
+        self.snapshot
+            .validate()
+            .map_err(|err| StateSnapshotArchiveFormatError::new(err.to_string()))?;
         let mut out = String::new();
         out.push_str(STATE_SNAPSHOT_ARCHIVE_MAGIC);
         out.push('\t');
@@ -481,7 +574,7 @@ impl StateSnapshotArchive {
             out.push('\n');
         }
 
-        out
+        Ok(out)
     }
 
     pub fn from_canonical_text(src: &str) -> Result<Self, StateSnapshotArchiveFormatError> {
@@ -566,9 +659,14 @@ impl StateSnapshotArchive {
             )));
         }
 
+        let snapshot = StateSnapshot { epoch, records };
+        // #1782: structural decode alone is not admission.
+        snapshot
+            .validate()
+            .map_err(|err| StateSnapshotArchiveFormatError::new(err.to_string()))?;
         Ok(Self {
             format_version,
-            snapshot: StateSnapshot { epoch, records },
+            snapshot,
         })
     }
 }
@@ -646,7 +744,9 @@ fn decode_resolution(parts: &[&str]) -> Result<FactResolution, StateSnapshotArch
         ));
     }
     let count = parse_usize_field(parts[1], "resolution value count")?;
-    if parts.len() != count + 2 {
+    // Checked: a persisted count of usize::MAX must not overflow. Once this
+    // holds, `count` is bounded by the structurally present payload.
+    if parts.len().checked_sub(2) != Some(count) {
         return Err(StateSnapshotArchiveFormatError::new(
             "resolution value count does not match payload length",
         ));
@@ -830,7 +930,7 @@ mod tests {
                 "mutate after snapshot",
             ))
             .expect("apply");
-        store.restore(snapshot);
+        store.restore(snapshot).expect("valid snapshot");
 
         assert_eq!(store.epoch(), StateEpoch(1));
         assert!(store.get("fact.alpha").is_some());
@@ -883,7 +983,7 @@ mod tests {
             .expect("apply");
         let archive = store.snapshot().archive();
 
-        let text = archive.to_canonical_text();
+        let text = archive.to_canonical_text().expect("valid archive");
         let parsed = StateSnapshotArchive::from_canonical_text(&text).expect("parse");
 
         assert_eq!(parsed, archive);
@@ -1081,18 +1181,207 @@ records\t0\n";
             .expect("apply");
         let artifact = StateRollbackArtifact::new(store.epoch(), vec![checkpoint0]);
 
-        store.restore(StateSnapshot {
-            epoch: StateEpoch(1),
-            records: store
-                .snapshot()
-                .records
-                .into_iter()
-                .filter(|(key, _)| key == "fact.alpha")
-                .collect(),
-        });
+        store
+            .restore(StateSnapshot {
+                epoch: StateEpoch(1),
+                records: store
+                    .snapshot()
+                    .records
+                    .into_iter()
+                    .filter(|(key, _)| key == "fact.alpha")
+                    .collect(),
+            })
+            .expect("valid snapshot");
 
         let err = store.apply_rollback(&artifact, 0).expect_err("must reject");
 
         assert_eq!(err.code, StateRollbackCode::StoreHistoryMismatch);
+    }
+
+    fn pb07_record(key: &str, resolution: FactResolution, epoch: u64) -> StateRecord {
+        StateRecord {
+            key: key.to_string(),
+            resolution,
+            context: ContextWindow::new("root"),
+            epoch: StateEpoch(epoch),
+        }
+    }
+
+    fn pb07_snapshot(epoch: u64, records: Vec<(&str, StateRecord)>) -> StateSnapshot {
+        StateSnapshot {
+            epoch: StateEpoch(epoch),
+            records: records
+                .into_iter()
+                .map(|(key, record)| (key.to_string(), record))
+                .collect(),
+        }
+    }
+
+    fn pb07_seeded_store() -> SemanticStateStore {
+        let mut store = SemanticStateStore::new();
+        store
+            .apply(StateUpdate::new(
+                "fact.alpha",
+                FactResolution::Certain(FactValue::Bool(true)),
+                ContextWindow::new("root"),
+                "seed",
+            ))
+            .expect("seed");
+        store
+    }
+
+    fn pb07_invalid_snapshots() -> Vec<(StateValidationCode, StateSnapshot)> {
+        let certain = || FactResolution::Certain(FactValue::Bool(true));
+        vec![
+            (
+                StateValidationCode::KeyMismatch,
+                pb07_snapshot(1, vec![("fact.a", pb07_record("fact.b", certain(), 1))]),
+            ),
+            (
+                StateValidationCode::EmptyKey,
+                pb07_snapshot(1, vec![(" ", pb07_record(" ", certain(), 1))]),
+            ),
+            (
+                StateValidationCode::NotEnoughAlternatives,
+                pb07_snapshot(
+                    1,
+                    vec![(
+                        "fact.a",
+                        pb07_record(
+                            "fact.a",
+                            FactResolution::Uncertain(vec![FactValue::I32(1)]),
+                            1,
+                        ),
+                    )],
+                ),
+            ),
+            (
+                StateValidationCode::DuplicateAlternatives,
+                pb07_snapshot(
+                    1,
+                    vec![(
+                        "fact.a",
+                        pb07_record(
+                            "fact.a",
+                            FactResolution::Conflicted(vec![FactValue::I32(1), FactValue::I32(1)]),
+                            1,
+                        ),
+                    )],
+                ),
+            ),
+            (
+                StateValidationCode::RecordEpochAfterSnapshot,
+                pb07_snapshot(1, vec![("fact.a", pb07_record("fact.a", certain(), 2))]),
+            ),
+            (
+                StateValidationCode::EmptyContext,
+                pb07_snapshot(
+                    1,
+                    vec![(
+                        "fact.a",
+                        StateRecord {
+                            context: ContextWindow::new(""),
+                            ..pb07_record("fact.a", certain(), 1)
+                        },
+                    )],
+                ),
+            ),
+            (
+                StateValidationCode::EpochExhausted,
+                pb07_snapshot(u64::MAX, Vec::new()),
+            ),
+        ]
+    }
+
+    // #1782/#1783: restore validates fully before mutation.
+    #[test]
+    fn pb07_restore_rejects_invalid_snapshots_and_leaves_store_unchanged() {
+        for (code, snapshot) in pb07_invalid_snapshots() {
+            let mut store = pb07_seeded_store();
+            let before = store.clone();
+            let err = store.restore(snapshot).expect_err("invalid snapshot");
+            assert_eq!(err.code, code);
+            assert_eq!(store, before, "{code:?}: store must be unchanged");
+        }
+    }
+
+    // #1782: archive reader and canonical writer share the snapshot rule.
+    #[test]
+    fn pb07_archive_writer_and_reader_reject_invalid_snapshots() {
+        for (code, snapshot) in pb07_invalid_snapshots() {
+            let archive = StateSnapshotArchive::new(snapshot);
+            assert!(archive.to_canonical_text().is_err(), "{code:?}: writer");
+        }
+        let valid = pb07_seeded_store().snapshot().archive();
+        let text = valid.to_canonical_text().expect("valid archive");
+        assert_eq!(
+            StateSnapshotArchive::from_canonical_text(&text).expect("valid"),
+            valid
+        );
+        for (needle, replacement) in [
+            ("\tcertain\t1\tbool:true", "\tuncertain\t1\tbool:true"),
+            ("epoch\t1\n", "epoch\t18446744073709551615\n"),
+            ("record\tfact.alpha\t1\t", "record\tfact.alpha\t9\t"),
+        ] {
+            assert!(text.contains(needle), "fixture drift: {needle:?}");
+            let bad = text.replace(needle, replacement);
+            assert!(
+                StateSnapshotArchive::from_canonical_text(&bad).is_err(),
+                "reader must reject {replacement:?}"
+            );
+        }
+    }
+
+    // #1783: defense in depth even if a future ingress bypassed restore.
+    #[test]
+    fn pb07_apply_at_max_epoch_fails_closed_without_mutation() {
+        let mut store = pb07_seeded_store();
+        store.epoch = StateEpoch(u64::MAX);
+        let before = store.clone();
+        let err = store
+            .apply(StateUpdate::new(
+                "fact.beta",
+                FactResolution::Certain(FactValue::I32(1)),
+                ContextWindow::new("root"),
+                "would wrap",
+            ))
+            .expect_err("epoch exhausted");
+        assert_eq!(err.code, StateValidationCode::EpochExhausted);
+        assert_eq!(store, before, "no mutation, no wrap");
+    }
+
+    // #1782: rollback is not a bypass around snapshot admission.
+    #[test]
+    fn pb07_rollback_rejects_invalid_checkpoint_snapshot() {
+        let mut store = pb07_seeded_store();
+        let bad = pb07_snapshot(
+            1,
+            vec![(
+                "fact.a",
+                pb07_record("fact.b", FactResolution::Certain(FactValue::I32(1)), 1),
+            )],
+        );
+        let artifact = StateRollbackArtifact::new(
+            store.epoch(),
+            vec![StateRollbackCheckpoint::new(
+                0,
+                StateSnapshotArchive::new(bad),
+                1,
+            )],
+        );
+        let before = store.clone();
+        let err = store
+            .apply_rollback(&artifact, 0)
+            .expect_err("invalid checkpoint");
+        assert_eq!(err.code, StateRollbackCode::InvalidCheckpointSnapshot);
+        assert_eq!(store, before);
+    }
+
+    // Same-root (#1782): a hostile resolution count is a typed error.
+    #[test]
+    fn pb07_resolution_count_overflow_is_a_typed_error() {
+        let max = usize::MAX.to_string();
+        let parts = ["uncertain", max.as_str(), "i32:1", "i32:2"];
+        assert!(decode_resolution(&parts).is_err());
     }
 }
