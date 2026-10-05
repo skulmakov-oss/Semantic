@@ -177,6 +177,10 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/prom_cap_lib.txt",
     ),
     (
+        "crates/prom-cap/src/hello_observation_capability.rs",
+        "tests/golden_snapshots/public_api/prom_cap_hello_observation_capability.txt",
+    ),
+    (
         "crates/prom-audit/src/lib.rs",
         "tests/golden_snapshots/public_api/prom_audit_lib.txt",
     ),

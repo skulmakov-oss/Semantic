@@ -59,6 +59,7 @@ pub version: CapabilityManifestVersion,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityDeniedCode {
 MissingCapability,
+InvalidManifestContract(ManifestValidationCode),
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityDenied {
 pub capability: CapabilityKind,
@@ -69,6 +70,7 @@ pub message: String,
 pub fn new( capability: CapabilityKind, call: Option<HostCallId>, code: CapabilityDeniedCode, manifest: CapabilityManifestMetadata, message: impl Into<String>, ) -> Self {
 pub trait CapabilityChecker {
 fn require(&self, capability: CapabilityKind) -> Result<(), CapabilityDenied>;
+fn manifest_metadata(&self) -> CapabilityManifestMetadata;
 fn require_call(&self, call: HostCallId) -> Result<(), CapabilityDenied> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestValidationCode {

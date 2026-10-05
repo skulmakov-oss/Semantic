@@ -38,9 +38,19 @@ pub determinism: DeterminismClass,
 pub returns_value: bool,
 pub stability: HostCallStability,
 pub const fn descriptor_for_call(id: HostCallId) -> HostCallDescriptor {
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AbiQuad {
+N = 0,
+F = 1,
+T = 2,
+S = 3,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidAbiQuad(pub u8);
+pub const fn as_u8(self) -> u8 {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AbiValue {
-Quad(u8),
+Quad(AbiQuad),
 Bool(bool),
 I32(i32),
 U32(u32),
