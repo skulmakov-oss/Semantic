@@ -34,8 +34,8 @@ Ground all changes in the canonical ownership boundaries of the repository:
 - **Deterministic Core Libraries**:
   - **`sm-front`**: Frontend / parser / AST / source surface and syntax errors.
   - **`sm-sema`**: Semantic analysis / type checking / compile-time diagnostics.
-  - **`sm-ir`**: Intermediate Representation (IR) and lowering passes (baseline format owner in historical `docs/spec/*`).
-  - **`sm-format`**: Crate containing SemCode binary format definitions, opcode tables, and decoding implementation (spec synchronization tracked for #1846).
+  - **`sm-ir`**: Intermediate Representation (IR) and lowering passes (SemCode producer; not the format owner).
+  - **`sm-format`**: Crate containing SemCode binary format owner: definitions, opcode tables, capability envelopes, structural limits, and decoding.
   - **`sm-emit`**: Emission / producer-facing facade over the SemCode format.
   - **`sm-verify`**: Verifier admission gate (structure, layout, and bytecode rules).
   - **`sm-runtime-core`**: Shared runtime vocabulary, common execution types, and quotas.

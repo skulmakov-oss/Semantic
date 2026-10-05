@@ -1,0 +1,6 @@
+source: crates/sm-ir/src/hello_semcode.rs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloConceptualSemCode {
+pub lines: Vec<String>,
+pub fn emit_hello_conceptual_semcode( module: &HelloIrModule, ) -> Result<HelloConceptualSemCode, IrError> {
+pub fn render_hello_conceptual_semcode(module: &HelloIrModule) -> Result<Vec<String>, IrError> {

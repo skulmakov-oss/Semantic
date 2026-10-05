@@ -1,0 +1,146 @@
+source: crates/sm-ir/src/legacy_lowering.rs
+#[derive(Debug, Clone, PartialEq)]
+pub enum IrInstr {
+Label { name: String },
+LoadQ { dst: u16, val: QuadVal },
+LoadBool { dst: u16, val: bool },
+LoadI32 { dst: u16, val: i32 },
+LoadU32 { dst: u16, val: u32 },
+LoadF64 { dst: u16, val: f64 },
+LoadFx { dst: u16, val: i32 },
+LoadText { dst: u16, val: String },
+ConcatText { dst: u16, lhs: u16, rhs: u16 },
+MakeSequence { dst: u16, items: Vec<u16> },
+SequenceLen { dst: u16, src: u16 },
+SequenceIsEmpty { dst: u16, src: u16 },
+SequenceContains { dst: u16, seq: u16, val: u16 },
+SequencePush { dst: u16, seq: u16, val: u16 },
+SequencePrepend { dst: u16, seq: u16, val: u16 },
+SequencePop { dst: u16, src: u16 },
+MapEmpty { dst: u16 },
+MapContains { dst: u16, map: u16, key: u16 },
+MapGet { dst: u16, map: u16, key: u16, default_val: u16 },
+MapSet { dst: u16, map: u16, key: u16, val: u16 },
+RngSeed { dst: u16, seed: u16 },
+RngNextI32 { dst: u16, lo: u16, hi: u16 },
+MakeClosure { dst: u16, name: String, captures: Vec<u16> },
+SequenceGet { dst: u16, src: u16, index: u16 },
+ClosureCall { dst: Option<u16>, closure: u16, arg: u16 },
+AddFx { dst: u16, lhs: u16, rhs: u16 },
+SubFx { dst: u16, lhs: u16, rhs: u16 },
+MulFx { dst: u16, lhs: u16, rhs: u16 },
+DivFx { dst: u16, lhs: u16, rhs: u16 },
+MakeTuple { dst: u16, items: Vec<u16> },
+MakeRecord { dst: u16, name: String, items: Vec<u16>, write_site: Option<WriteSiteId> },
+MakeAdt { dst: u16, adt_name: String, variant_name: String, tag: u16, items: Vec<u16> },
+AdtTag { dst: u16, src: u16, adt_name: String },
+AdtGet { dst: u16, src: u16, adt_name: String, index: u16 },
+RecordGet { dst: u16, src: u16, record_name: String, index: u16 },
+TupleGet { dst: u16, src: u16, index: u16 },
+LoadVar { dst: u16, name: String },
+StoreVar { name: String, src: u16, activation_site: Option<ActivationSiteId>, write_site: Option<WriteSiteId> },
+QAnd { dst: u16, lhs: u16, rhs: u16 },
+QOr { dst: u16, lhs: u16, rhs: u16 },
+QNot { dst: u16, src: u16 },
+QImpl { dst: u16, lhs: u16, rhs: u16 },
+QTruthAnd { dst: u16, lhs: u16, rhs: u16 },
+QTruthOr { dst: u16, lhs: u16, rhs: u16 },
+QTruthNot { dst: u16, src: u16 },
+QTruthImpl { dst: u16, lhs: u16, rhs: u16 },
+BoolAnd { dst: u16, lhs: u16, rhs: u16 },
+BoolOr { dst: u16, lhs: u16, rhs: u16 },
+BoolNot { dst: u16, src: u16 },
+CmpEq { dst: u16, lhs: u16, rhs: u16 },
+CmpNe { dst: u16, lhs: u16, rhs: u16 },
+CmpI32Lt { dst: u16, lhs: u16, rhs: u16 },
+CmpI32Le { dst: u16, lhs: u16, rhs: u16 },
+AddI32 { dst: u16, lhs: u16, rhs: u16 },
+SubI32 { dst: u16, lhs: u16, rhs: u16 },
+MulI32 { dst: u16, lhs: u16, rhs: u16 },
+DivI32 { dst: u16, lhs: u16, rhs: u16 },
+ModI32 { dst: u16, lhs: u16, rhs: u16 },
+AddF64 { dst: u16, lhs: u16, rhs: u16 },
+SubF64 { dst: u16, lhs: u16, rhs: u16 },
+MulF64 { dst: u16, lhs: u16, rhs: u16 },
+DivF64 { dst: u16, lhs: u16, rhs: u16 },
+Jmp { label: String },
+JmpIf { cond: u16, label: String },
+Assert { cond: u16 },
+Call { dst: Option<u16>, name: String, args: Vec<u16> },
+GateRead { dst: u16, device_id: u16, port: u16 },
+GateWrite { device_id: u16, port: u16, src: u16 },
+PulseEmit { signal: String },
+StateQuery { dst: u16, key: String },
+StateUpdate { key: String, src: u16 },
+EventPost { signal: String },
+ClockRead { dst: u16 },
+Ret { src: Option<u16> },
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessPath {
+pub root: String,
+pub components: Vec<PathComponent>,
+pub fn new(root: String) -> Self {
+pub fn tuple_index(&self, index: u16) -> Self {
+pub fn sequence_index_static(&self, index: u32) -> Self {
+pub fn field(&self, name: SymbolId) -> Self {
+pub fn adt_payload(&self, variant: SymbolId, index: u16) -> Self {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathComponent {
+TupleIndex(u16),
+SequenceIndexStatic(u32),
+Field(SymbolId),
+AdtPayload { variant: SymbolId, index: u16 },
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnershipPathEventKind {
+Borrow,
+Write,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ActivationSiteId(pub u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WriteSiteId(pub u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ExecutableAnchor(pub u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorrowActivationResolved {
+FrameEntry,
+StoreVarSite(ExecutableAnchor),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteExecutionResolved {
+StoreVarSite(ExecutableAnchor),
+MakeRecordSite(ExecutableAnchor),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnershipPathEvent {
+pub kind: OwnershipPathEventKind,
+pub path: AccessPath,
+pub activation_site: Option<ActivationSiteId>,
+pub write_site: Option<WriteSiteId>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct IrFunction {
+pub name: String,
+pub instrs: Vec<IrInstr>,
+pub ownership_events: Vec<OwnershipPathEvent>,
+pub params: Vec<CallableValueFamily>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImmutableIrProgram {
+pub fn from_vec(funcs: Vec<IrFunction>) -> Self {
+pub fn functions(&self) -> &[IrFunction] {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogosIrLaw {
+pub name: String,
+pub priority: u32,
+pub when_count: usize,
+pub fn lower_logos_laws_to_ir(program: &LogosProgram) -> Vec<LogosIrLaw> {
+pub fn lower_expr_to_ir( expr: ExprId, arena: &AstArena, var_types: &HashMap<SymbolId, Type>, fn_table: &FnTable, ) -> Result<Vec<IrInstr>, CompilePipelineError> {
+pub fn lower_function_to_ir( func: &Function, arena: &AstArena, fn_table: &FnTable, ) -> Result<IrFunction, CompilePipelineError> {
+pub fn compile_program_to_ir(input: &str) -> Result<Vec<IrFunction>, CompilePipelineError> {
+pub fn compile_program_to_immutable_ir( input: &str, profile: CompileProfile, opt: OptLevel, ) -> Result<ImmutableIrProgram, CompilePipelineError> {
+pub fn compile_program_to_ir_with_options( input: &str, profile: CompileProfile, opt: OptLevel, ) -> Result<Vec<IrFunction>, CompilePipelineError> {
+pub fn compile_program_to_ir_with_profile( input: &str, parser_profile: &ParserProfile, ) -> Result<Vec<IrFunction>, CompilePipelineError> {
+pub fn compile_program_to_ir_with_options_and_profile( input: &str, profile: CompileProfile, opt: OptLevel, parser_profile: &ParserProfile, ) -> Result<Vec<IrFunction>, CompilePipelineError> {
+pub fn compile_program_to_ir_optimized( input: &str, ) -> Result<Vec<IrFunction>, CompilePipelineError> {
+pub fn validate_ir(f: &IrFunction) -> Result<(), IrError> {
+pub fn compile_program_to_semcode(input: &str) -> Result<Vec<u8>, CompilePipelineError> {
+pub fn compile_program_to_semcode_with_options( input: &str, profile: CompileProfile, opt: OptLevel, ) -> Result<Vec<u8>, CompilePipelineError> {
+pub fn compile_program_to_semcode_with_options_debug( input: &str, profile: CompileProfile, opt: OptLevel, debug_symbols: bool, ) -> Result<Vec<u8>, CompilePipelineError> {
+pub fn emit_ir_to_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, IrError> {
+pub fn emit_ir_to_semcode_with_adt_descriptors( funcs: &[IrFunction], adt_descriptors: &AdtDescriptorTable, debug_symbols: bool, ) -> Result<Vec<u8>, IrError> {

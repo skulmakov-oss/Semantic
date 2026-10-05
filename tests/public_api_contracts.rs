@@ -101,6 +101,34 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/sm_ir_error.txt",
     ),
     (
+        "crates/sm-ir/src/legacy_lowering.rs",
+        "tests/golden_snapshots/public_api/sm_ir_legacy_lowering.txt",
+    ),
+    (
+        "crates/sm-ir/src/adt_descriptors.rs",
+        "tests/golden_snapshots/public_api/sm_ir_adt_descriptors.txt",
+    ),
+    (
+        "crates/sm-ir/src/hello_ir.rs",
+        "tests/golden_snapshots/public_api/sm_ir_hello_ir.txt",
+    ),
+    (
+        "crates/sm-ir/src/hello_semcode.rs",
+        "tests/golden_snapshots/public_api/sm_ir_hello_semcode.txt",
+    ),
+    (
+        "crates/sm-ir/src/passes/mod.rs",
+        "tests/golden_snapshots/public_api/sm_ir_passes_mod.txt",
+    ),
+    (
+        "crates/sm-ir/src/passes/crystalfold.rs",
+        "tests/golden_snapshots/public_api/sm_ir_passes_crystalfold.txt",
+    ),
+    (
+        "crates/sm-ir/src/passes/cleanup.rs",
+        "tests/golden_snapshots/public_api/sm_ir_passes_cleanup.txt",
+    ),
+    (
         "crates/sm-profile/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_profile_lib.txt",
     ),

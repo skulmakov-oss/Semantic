@@ -1,7 +1,8 @@
 # SemCode Specification
 
 Status: draft v0
-Current format owner: `sm-ir`
+Format owner: `sm-format`
+Producer: `sm-ir` (lowering and emission over the `sm-format` contract)
 Current producer facade: `sm-emit`
 Admission owner: `sm-verify`
 Execution consumer: `sm-vm`
@@ -13,9 +14,15 @@ Semantic VM.
 
 Ownership rule:
 
-- `sm-ir` owns the SemCode header, opcode, and capability contract in the current `v1` baseline
+- `sm-format` owns the SemCode header, opcode, capability, and structural-limit contract
+  (`local_format`, `semcode_format`, `semcode_decode`); dependency direction is
+  `sm-ir -> sm-format`, never the reverse (#1715)
+- `sm-ir` is a producer: it selects a header from emitted usage, re-exports the
+  `sm-format` surface for compatibility, and must not emit an artifact the
+  `sm-format` decoder rejects; structural maximums are read from
+  `sm_format::semcode_decode`, never copied (#1728)
 - `sm-emit` exposes producer-facing entrypoints over that contract and is not a second format owner
-- `sm-emit` must re-export the canonical format surface from `sm-ir` rather than maintain a forked local copy
+- `sm-emit` must re-export the canonical format surface rather than maintain a forked local copy
 
 Standard execution rule:
 
@@ -148,10 +155,14 @@ Current supported header family:
 - `SEMCOD21`
 - `SEMCOD22`
 
-`SEMCOD15`, `SEMCOD16`, `SEMCOD17`, and `SEMCOD20` are also currently
-emitted/admitted by the toolchain but are not yet documented in this
-section; that is a pre-existing documentation gap, not part of the #1732 or
-#1718 repairs.
+- `SEMCOD15`
+- `SEMCOD16`
+- `SEMCOD17`
+- `SEMCOD20`
+
+(The four entries above were emitted and admitted before they were listed
+here; PB-05 #1714 closes that documentation gap. Their semantics are under
+`## Current Header Semantics`.)
 
 Observed runtime support in the current toolchain:
 
@@ -179,7 +190,9 @@ Header responsibilities:
 
 - identify the format family
 - identify the supported epoch and revision
-- carry the emitted capability bitset for the produced artifact
+- select, through the 8-byte magic alone, the fixed capability envelope of
+  that revision (`header_spec_from_magic` in `sm-format`); no capability
+  bitset is serialized in the artifact (#1727)
 
 ## Version Policy
 
@@ -200,7 +213,9 @@ Discipline rules:
 - release-facing documents must distinguish the published stable line from the
   wider admitted line on current `main`
 - SemCode header selection remains derived from actual emitted usage, not from
-  policy permission alone
+  policy permission alone: the producer picks the lowest revision whose
+  envelope covers what was emitted, and the envelope may be wider than the
+  exact set of capabilities used (envelope model, #1727)
 
 ## Current Header Semantics
 
@@ -337,6 +352,29 @@ Discipline rules:
 - does not claim mutable in-place map update, iteration, or non-frame-local
   map state beyond the admitted functional empty/get/set/contains contour
 
+`SEMCOD15`
+
+- epoch `0`, revision `16`
+- promoted contract used when emitted program usage requires the deterministic
+  PRNG family (`RngSeed`, `RngNextI32`)
+- envelope: the `SEMCOD14` set plus `CAP_PRNG`
+
+`SEMCOD16`
+
+- epoch `0`, revision `17`
+- promoted contract used when emitted program usage calls `print`
+- envelope: the `SEMCOD15` set plus `CAP_STDOUT`
+
+`SEMCOD17`
+
+- epoch `0`, revision `18`
+- promoted contract used when emitted program usage calls an application
+  builtin (args, stdin, stdout/stderr write, path inspection, filesystem
+  read/write, duration time)
+- envelope: the `SEMCOD16` set plus `CAP_ARGS_READ`, `CAP_STDIN_READ_TEXT`,
+  `CAP_STDOUT_WRITE`, `CAP_STDERR_WRITE`, `CAP_PATH_INSPECT`, `CAP_FS_READ`,
+  `CAP_FS_WRITE`, `CAP_TIME_DURATION`
+
 `SEMCOD18`
 
 - promoted contract used when emitted program usage requires the `QTruth`
@@ -403,6 +441,15 @@ survives unchanged through IR and SemCode emission - see
 [`verifier.md`](verifier.md#callable-arity-enforcement) /
 [`vm.md`](vm.md#callable-runtime-family-enforcement) for how it is enforced
 at a callee before execution.
+
+`SEMCOD20`
+
+- epoch `0`, revision `21` (`SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION`)
+- promoted contract used when any ownership `Borrow` event carries an
+  activation site or any `Write` event carries a write site
+- carries forward the `SEMCOD19` envelope unchanged; adds the `OWN0`
+  activation-mode (Borrow) and execution-mode (Write) tag bytes, whose
+  unknown values are hard structural rejections
 
 `SEMCOD21`
 
@@ -503,8 +550,11 @@ That means:
 
 ## Capability Contract
 
-The current capability contract is carried by the SemCode header and verified
-against actual opcode usage.
+The current capability contract is an envelope selected by the SemCode header
+magic and verified against actual opcode usage: every opcode must be covered
+by the envelope of the artifact's revision. The artifact does not serialize a
+capability bitset, and the envelope is not required to equal the exact set of
+capabilities used (#1727).
 
 Current canonical capability families:
 
@@ -530,7 +580,8 @@ Current canonical capability families:
 Contract rule:
 
 - profile policy constrains what may be produced
-- SemCode header records what was actually produced
+- SemCode header records the revision, and therefore the envelope, chosen for
+  what was actually produced
 - verifier proves that opcode usage matches the emitted capability contract
 
 ## Structural Contract

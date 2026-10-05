@@ -3,7 +3,8 @@
 Status: frozen tuple+record+sequence+(ADT Borrow-only) v1 (#1718)
 Source ownership owner: `sm-front`
 IR ownership owner: `sm-ir`
-SemCode transport owner: `sm-ir`
+SemCode format owner: `sm-format`
+SemCode producer: `sm-ir`
 Admission owner: `sm-verify`
 Execution consumer: `sm-vm`
 Shared runtime vocabulary owner: `sm-runtime-core`

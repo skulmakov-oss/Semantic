@@ -95,31 +95,113 @@ enum ConstVal {
     Fx(i32),
 }
 
+/// FA-04-005 / #1711: CrystalFold v1's frozen barrier set (labels, jumps,
+/// asserts, calls, returns and every explicit effect instruction). The match
+/// is exhaustive on purpose: a new `IrInstr` must be classified here.
+pub(crate) fn is_crystalfold_barrier(instr: &IrInstr) -> bool {
+    match instr {
+        IrInstr::Assert { .. }
+        | IrInstr::Call { .. }
+        | IrInstr::ClockRead { .. }
+        | IrInstr::ClosureCall { .. }
+        | IrInstr::EventPost { .. }
+        | IrInstr::GateRead { .. }
+        | IrInstr::GateWrite { .. }
+        | IrInstr::Jmp { .. }
+        | IrInstr::JmpIf { .. }
+        | IrInstr::Label { .. }
+        | IrInstr::PulseEmit { .. }
+        | IrInstr::Ret { .. }
+        | IrInstr::RngNextI32 { .. }
+        | IrInstr::RngSeed { .. }
+        | IrInstr::StateQuery { .. }
+        | IrInstr::StateUpdate { .. } => true,
+        IrInstr::AddF64 { .. }
+        | IrInstr::AddFx { .. }
+        | IrInstr::AddI32 { .. }
+        | IrInstr::AdtGet { .. }
+        | IrInstr::AdtTag { .. }
+        | IrInstr::BoolAnd { .. }
+        | IrInstr::BoolNot { .. }
+        | IrInstr::BoolOr { .. }
+        | IrInstr::CmpEq { .. }
+        | IrInstr::CmpI32Le { .. }
+        | IrInstr::CmpI32Lt { .. }
+        | IrInstr::CmpNe { .. }
+        | IrInstr::ConcatText { .. }
+        | IrInstr::DivF64 { .. }
+        | IrInstr::DivFx { .. }
+        | IrInstr::DivI32 { .. }
+        | IrInstr::LoadBool { .. }
+        | IrInstr::LoadF64 { .. }
+        | IrInstr::LoadFx { .. }
+        | IrInstr::LoadI32 { .. }
+        | IrInstr::LoadQ { .. }
+        | IrInstr::LoadText { .. }
+        | IrInstr::LoadU32 { .. }
+        | IrInstr::LoadVar { .. }
+        | IrInstr::MakeAdt { .. }
+        | IrInstr::MakeClosure { .. }
+        | IrInstr::MakeRecord { .. }
+        | IrInstr::MakeSequence { .. }
+        | IrInstr::MakeTuple { .. }
+        | IrInstr::MapContains { .. }
+        | IrInstr::MapEmpty { .. }
+        | IrInstr::MapGet { .. }
+        | IrInstr::MapSet { .. }
+        | IrInstr::ModI32 { .. }
+        | IrInstr::MulF64 { .. }
+        | IrInstr::MulFx { .. }
+        | IrInstr::MulI32 { .. }
+        | IrInstr::QAnd { .. }
+        | IrInstr::QImpl { .. }
+        | IrInstr::QNot { .. }
+        | IrInstr::QOr { .. }
+        | IrInstr::QTruthAnd { .. }
+        | IrInstr::QTruthImpl { .. }
+        | IrInstr::QTruthNot { .. }
+        | IrInstr::QTruthOr { .. }
+        | IrInstr::RecordGet { .. }
+        | IrInstr::SequenceContains { .. }
+        | IrInstr::SequenceGet { .. }
+        | IrInstr::SequenceIsEmpty { .. }
+        | IrInstr::SequenceLen { .. }
+        | IrInstr::SequencePop { .. }
+        | IrInstr::SequencePrepend { .. }
+        | IrInstr::SequencePush { .. }
+        | IrInstr::StoreVar { .. }
+        | IrInstr::SubF64 { .. }
+        | IrInstr::SubFx { .. }
+        | IrInstr::SubI32 { .. }
+        | IrInstr::TupleGet { .. } => false,
+    }
+}
+
 fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
     let mut rewrites = 0u32;
     let mut out = Vec::with_capacity(instrs.len());
     let mut cst: HashMap<u16, ConstVal> = HashMap::new();
 
     for instr in instrs.drain(..) {
+        // FA-04-005 / #1711: the one barrier authority; constant state never
+        // survives a control, call or effect instruction.
+        if is_crystalfold_barrier(&instr) {
+            cst.clear();
+        }
         match instr {
             IrInstr::Label { name } => {
-                cst.clear();
                 out.push(IrInstr::Label { name });
             }
             IrInstr::Jmp { label } => {
-                cst.clear();
                 out.push(IrInstr::Jmp { label });
             }
             IrInstr::JmpIf { cond, label } => {
-                cst.clear();
                 out.push(IrInstr::JmpIf { cond, label });
             }
             IrInstr::Assert { cond } => {
-                cst.clear();
                 out.push(IrInstr::Assert { cond });
             }
             IrInstr::Call { dst, name, args } => {
-                cst.clear();
                 out.push(IrInstr::Call { dst, name, args });
             }
             IrInstr::MakeClosure {
@@ -177,7 +259,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                 out.push(IrInstr::ClockRead { dst });
             }
             IrInstr::Ret { src } => {
-                cst.clear();
                 out.push(IrInstr::Ret { src });
             }
             IrInstr::LoadQ { dst, val } => {
@@ -393,19 +474,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                         cst.insert(dst, ConstVal::Bool(a && b));
                         out.push(IrInstr::LoadBool { dst, val: a && b });
                     }
-                    _ if dst == lhs && matches!(cst.get(&rhs), Some(ConstVal::Bool(true))) => {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs && matches!(cst.get(&lhs), Some(ConstVal::Bool(true))) => {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if matches!(cst.get(&lhs), Some(ConstVal::Bool(false)))
-                        || matches!(cst.get(&rhs), Some(ConstVal::Bool(false))) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                        cst.insert(dst, ConstVal::Bool(false));
-                        out.push(IrInstr::LoadBool { dst, val: false });
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::BoolAnd { dst, lhs, rhs });
@@ -418,19 +486,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                         rewrites = rewrites.saturating_add(1);
                         cst.insert(dst, ConstVal::Bool(a || b));
                         out.push(IrInstr::LoadBool { dst, val: a || b });
-                    }
-                    _ if dst == lhs && matches!(cst.get(&rhs), Some(ConstVal::Bool(false))) => {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs && matches!(cst.get(&lhs), Some(ConstVal::Bool(false))) => {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if matches!(cst.get(&lhs), Some(ConstVal::Bool(true)))
-                        || matches!(cst.get(&rhs), Some(ConstVal::Bool(true))) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                        cst.insert(dst, ConstVal::Bool(true));
-                        out.push(IrInstr::LoadBool { dst, val: true });
                     }
                     _ => {
                         cst.remove(&dst);
@@ -446,26 +501,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                         cst.insert(dst, ConstVal::Quad(v));
                         out.push(IrInstr::LoadQ { dst, val: v });
                     }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::Quad(QuadVal::S))) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::Quad(QuadVal::S))) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if matches!(cst.get(&lhs), Some(ConstVal::Quad(QuadVal::N)))
-                        || matches!(cst.get(&rhs), Some(ConstVal::Quad(QuadVal::N))) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                        cst.insert(dst, ConstVal::Quad(QuadVal::N));
-                        out.push(IrInstr::LoadQ {
-                            dst,
-                            val: QuadVal::N,
-                        });
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::QAnd { dst, lhs, rhs });
@@ -479,26 +514,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                         let v = quad_or_const(a, b);
                         cst.insert(dst, ConstVal::Quad(v));
                         out.push(IrInstr::LoadQ { dst, val: v });
-                    }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::Quad(QuadVal::N))) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::Quad(QuadVal::N))) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if matches!(cst.get(&lhs), Some(ConstVal::Quad(QuadVal::S)))
-                        || matches!(cst.get(&rhs), Some(ConstVal::Quad(QuadVal::S))) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                        cst.insert(dst, ConstVal::Quad(QuadVal::S));
-                        out.push(IrInstr::LoadQ {
-                            dst,
-                            val: QuadVal::S,
-                        });
                     }
                     _ => {
                         cst.remove(&dst);
@@ -600,16 +615,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             val: a.wrapping_add(b),
                         });
                     }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::I32(v)) if *v == 0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::I32(v)) if *v == 0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::AddI32 { dst, lhs, rhs });
@@ -626,11 +631,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             val: a.wrapping_sub(b),
                         });
                     }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::I32(v)) if *v == 0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::SubI32 { dst, lhs, rhs });
@@ -646,16 +646,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             dst,
                             val: a.wrapping_mul(b),
                         });
-                    }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::I32(v)) if *v == 1) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::I32(v)) if *v == 1) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
                     }
                     _ => {
                         cst.remove(&dst);
@@ -711,16 +701,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                     // if the untracked x happens to be -0.0 at runtime,
                     // (-0.0) + (+0.0) == +0.0 per IEEE 754, a sign change this
                     // rewrite would silently miss. See FA-04-004 / #1710.
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::F64(v)) if *v == 0.0 && v.is_sign_negative()) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::F64(v)) if *v == 0.0 && v.is_sign_negative()) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::AddF64 { dst, lhs, rhs });
@@ -739,11 +719,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                     // untracked x happens to be -0.0 at runtime, that would
                     // silently miss the (-0.0) + (+0.0) == +0.0 sign change.
                     // See FA-04-004 / #1710.
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::F64(v)) if *v == 0.0 && v.is_sign_positive()) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::SubF64 { dst, lhs, rhs });
@@ -757,16 +732,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                         cst.insert(dst, ConstVal::F64(a * b));
                         out.push(IrInstr::LoadF64 { dst, val: a * b });
                     }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::F64(v)) if *v == 1.0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::F64(v)) if *v == 1.0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::MulF64 { dst, lhs, rhs });
@@ -779,11 +744,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                         rewrites = rewrites.saturating_add(1);
                         cst.insert(dst, ConstVal::F64(a / b));
                         out.push(IrInstr::LoadF64 { dst, val: a / b });
-                    }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::F64(v)) if *v == 1.0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
                     }
                     _ => {
                         cst.remove(&dst);
@@ -803,16 +763,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             out.push(IrInstr::AddFx { dst, lhs, rhs });
                         }
                     }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::Fx(v)) if *v == 0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::Fx(v)) if *v == 0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::AddFx { dst, lhs, rhs });
@@ -830,11 +780,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             cst.remove(&dst);
                             out.push(IrInstr::SubFx { dst, lhs, rhs });
                         }
-                    }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::Fx(v)) if *v == 0) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
                     }
                     _ => {
                         cst.remove(&dst);
@@ -854,16 +799,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             out.push(IrInstr::MulFx { dst, lhs, rhs });
                         }
                     }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::Fx(v)) if *v == FX_SCALE) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
-                    _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::Fx(v)) if *v == FX_SCALE) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
-                    }
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::MulFx { dst, lhs, rhs });
@@ -881,11 +816,6 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             cst.remove(&dst);
                             out.push(IrInstr::DivFx { dst, lhs, rhs });
                         }
-                    }
-                    _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::Fx(v)) if *v == FX_SCALE) =>
-                    {
-                        rewrites = rewrites.saturating_add(1);
                     }
                     _ => {
                         cst.remove(&dst);
@@ -1361,11 +1291,12 @@ mod tests {
         );
     }
 
-    /// `x + (-0.0) == x` for every x, including x == +/-0.0, so this identity
-    /// remains sound and CrystalFold should keep folding it away — proves the
-    /// #1710 fix narrows admission rather than disabling the optimization.
+    /// `x + (-0.0) == x` holds for every f64 x, but over raw IR the pass has
+    /// no proof that x *is* an f64, and `AddF64` traps when it is not. PB-05
+    /// (#1729) therefore keeps the instruction: a one-sided identity may not
+    /// erase the runtime type check.
     #[test]
-    fn crystalfold_still_elides_add_f64_negative_zero_when_lhs_is_untracked() {
+    fn crystalfold_keeps_add_f64_negative_zero_when_lhs_is_untracked() {
         let mut module = IrModule {
             functions: vec![IrFunction {
                 name: "main".to_string(),
@@ -1386,12 +1317,15 @@ mod tests {
             .run(&mut module)
             .expect("valid fixture, no activation sites");
 
+        // FA-04-023 / #1729: with an untracked lhs the operand's runtime
+        // family is unproven, so the one-sided identity must not remove the
+        // instruction (and with it the runtime type check).
         assert!(
-            !module.functions[0]
+            module.functions[0]
                 .instrs
                 .iter()
                 .any(|i| matches!(i, IrInstr::AddF64 { .. })),
-            "x + (-0.0) is sound to elide and must still be folded away, got {:?}",
+            "one-sided AddF64 identity must not be elided over raw IR, got {:?}",
             module.functions[0].instrs
         );
     }
@@ -1434,9 +1368,10 @@ mod tests {
         );
     }
 
-    /// `x - (+0.0) == x` for every x, so this identity remains sound.
+    /// `x - (+0.0) == x` holds for every f64 x, but the one-sided rewrite would
+    /// erase `SubF64`'s runtime type check over raw IR (PB-05 #1729).
     #[test]
-    fn crystalfold_still_elides_sub_f64_positive_zero_when_lhs_is_untracked() {
+    fn crystalfold_keeps_sub_f64_positive_zero_when_lhs_is_untracked() {
         let mut module = IrModule {
             functions: vec![IrFunction {
                 name: "main".to_string(),
@@ -1457,12 +1392,15 @@ mod tests {
             .run(&mut module)
             .expect("valid fixture, no activation sites");
 
+        // FA-04-023 / #1729: with an untracked lhs the operand's runtime
+        // family is unproven, so the one-sided identity must not remove the
+        // instruction (and with it the runtime type check).
         assert!(
-            !module.functions[0]
+            module.functions[0]
                 .instrs
                 .iter()
                 .any(|i| matches!(i, IrInstr::SubF64 { .. })),
-            "x - (+0.0) is sound to elide and must still be folded away, got {:?}",
+            "one-sided SubF64 identity must not be elided over raw IR, got {:?}",
             module.functions[0].instrs
         );
     }

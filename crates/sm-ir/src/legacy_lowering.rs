@@ -1715,11 +1715,54 @@ pub fn emit_ir_to_semcode_with_adt_descriptors(
     emit_semcode(funcs, adt_descriptors, debug_symbols)
 }
 
+/// FA-04-022 / #1728 (and FA-04-007 / #1713 defense in depth): producer
+/// success must not yield an artifact the canonical decoder rejects for
+/// exceeding the same structural maxima. The bounds are `sm-format`'s own
+/// decoder constants, imported, never copied. Per-function string and debug
+/// symbol counts are checked where they are produced
+/// (`emit_semcode_function`).
+fn validate_producer_module_limits(funcs: &[IrFunction]) -> Result<(), IrError> {
+    // (The callable-signature parameter maximum is already enforced where
+    // SIG0 is produced.)
+    use sm_format::semcode_decode::{MAX_FUNCTIONS, MAX_STRING_LEN};
+    if funcs.len() > MAX_FUNCTIONS {
+        return Err(IrError {
+            message: format!(
+                "SemCode producer limit: {} functions exceed the format maximum of {}",
+                funcs.len(),
+                MAX_FUNCTIONS
+            ),
+        });
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for f in funcs {
+        if f.name.len() > MAX_STRING_LEN {
+            return Err(IrError {
+                message: format!(
+                    "SemCode producer limit: function name of {} bytes exceeds the format maximum of {}",
+                    f.name.len(),
+                    MAX_STRING_LEN
+                ),
+            });
+        }
+        if !names.insert(f.name.as_str()) {
+            return Err(IrError {
+                message: format!(
+                    "SemCode producer: duplicate function name '{}' in one artifact",
+                    f.name
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn emit_semcode(
     funcs: &[IrFunction],
     adt_descriptors: &AdtDescriptorTable,
     debug_symbols: bool,
 ) -> Result<Vec<u8>, IrError> {
+    validate_producer_module_limits(funcs)?;
     // #1718: fail closed at the single producer boundary every public
     // emission entrypoint converges on (`compile_program_to_semcode_*` and
     // `emit_ir_to_semcode` both call this function) - before any header is
@@ -2173,6 +2216,18 @@ fn emit_semcode_function(
     let mut code = Vec::new();
     interner.emit_table(&mut code)?;
     if debug_symbols {
+        // #1728: the decoder's per-function debug-symbol maximum.
+        let max_dbg = sm_format::semcode_decode::MAX_DEBUG_SYMBOLS_PER_FUNCTION;
+        if dbg.len() > max_dbg {
+            return Err(IrError {
+                message: format!(
+                    "SemCode producer limit: function '{}' has {} debug symbols, exceeding the format maximum of {}",
+                    f.name,
+                    dbg.len(),
+                    max_dbg
+                ),
+            });
+        }
         code.extend_from_slice(b"DBG0");
         write_u16_le(
             &mut code,
@@ -3192,6 +3247,26 @@ impl StringInterner {
     }
 
     fn emit_table(&self, out: &mut Vec<u8>) -> Result<(), IrError> {
+        // #1728: the decoder's per-function string-table maxima.
+        use sm_format::semcode_decode::{MAX_STRINGS_PER_FUNCTION, MAX_STRING_LEN};
+        if self.by_id.len() > MAX_STRINGS_PER_FUNCTION {
+            return Err(IrError {
+                message: format!(
+                    "SemCode producer limit: {} strings in one function exceed the format maximum of {}",
+                    self.by_id.len(),
+                    MAX_STRINGS_PER_FUNCTION
+                ),
+            });
+        }
+        if let Some(s) = self.by_id.iter().find(|s| s.len() > MAX_STRING_LEN) {
+            return Err(IrError {
+                message: format!(
+                    "SemCode producer limit: a string of {} bytes exceeds the format maximum of {}",
+                    s.len(),
+                    MAX_STRING_LEN
+                ),
+            });
+        }
         write_u16_le(
             out,
             u16::try_from(self.by_id.len()).map_err(|_| IrError {
@@ -3212,12 +3287,26 @@ impl StringInterner {
     }
 }
 
+/// FA-04-007 / #1713: an injective, deterministic encoding of a closure's
+/// parent function identity. Each `::`-separated segment is length-prefixed
+/// (`<len>s<segment>`), so `__impl::A::B_C::D` and `__impl::A_B::C::D` can
+/// never encode to the same text (unlike `replace("::", "_")`).
+fn injective_parent_segment(parent: &str) -> String {
+    let mut out = String::new();
+    for segment in parent.split("::") {
+        out.push_str(&segment.len().to_string());
+        out.push('s');
+        out.push_str(segment);
+    }
+    out
+}
+
 fn next_closure_function_name(closure_state: &mut ClosureLoweringState) -> String {
     let id = closure_state.next_closure_id;
     closure_state.next_closure_id += 1;
     format!(
         "__closure_{}_{}",
-        closure_state.parent_fn_name.replace("::", "_"),
+        injective_parent_segment(&closure_state.parent_fn_name),
         id
     )
 }
@@ -3380,14 +3469,14 @@ fn lower_closure_literal_expr(
 
     let mut capture_regs = Vec::with_capacity(closure.captures.len());
     for capture in &closure.captures {
-        let capture_reg = alloc(next);
+        let capture_reg = alloc(next)?;
         out.push(IrInstr::LoadVar {
             dst: capture_reg,
             name: lowered_locals.resolve(arena, *capture)?,
         });
         capture_regs.push(capture_reg);
     }
-    let dst = alloc(next);
+    let dst = alloc(next)?;
     out.push(IrInstr::MakeClosure {
         dst,
         name: helper_name,
@@ -3444,7 +3533,7 @@ fn lower_direct_closure_call_expr(
         });
     }
 
-    let closure_reg = alloc(next);
+    let closure_reg = alloc(next)?;
     out.push(IrInstr::LoadVar {
         dst: closure_reg,
         name: lowered_locals.resolve(arena, name)?,
@@ -3477,7 +3566,7 @@ fn lower_direct_closure_call_expr(
             ),
         });
     }
-    let dst = alloc(next);
+    let dst = alloc(next)?;
     out.push(IrInstr::ClosureCall {
         dst: Some(dst),
         closure: closure_reg,
@@ -3523,7 +3612,7 @@ fn lower_direct_closure_call_stmt(
                     .to_string(),
         });
     }
-    let closure_reg = alloc(next);
+    let closure_reg = alloc(next)?;
     out.push(IrInstr::LoadVar {
         dst: closure_reg,
         name: lowered_locals.resolve(arena, name)?,
@@ -3559,7 +3648,7 @@ fn lower_direct_closure_call_stmt(
     let dst = if closure_ty.ret.as_ref() == &Type::Unit {
         None
     } else {
-        Some(alloc(next))
+        Some(alloc(next)?)
     };
     out.push(IrInstr::ClosureCall {
         dst,
@@ -3620,17 +3709,17 @@ fn lower_expr_with_expected(
 ) -> Result<(u16, Type), FrontendError> {
     match arena.expr(expr_id) {
         Expr::QuadLiteral(v) => {
-            let r = alloc(next);
+            let r = alloc(next)?;
             out.push(IrInstr::LoadQ { dst: r, val: *v });
             Ok((r, Type::Quad))
         }
         Expr::BoolLiteral(v) => {
-            let r = alloc(next);
+            let r = alloc(next)?;
             out.push(IrInstr::LoadBool { dst: r, val: *v });
             Ok((r, Type::Bool))
         }
         Expr::TextLiteral(lit) => {
-            let r = alloc(next);
+            let r = alloc(next)?;
             out.push(IrInstr::LoadText {
                 dst: r,
                 val: lit.spelling.clone(),
@@ -3691,7 +3780,7 @@ fn lower_expr_with_expected(
                 pos: 0,
                 message: "ordered sequence literal lowering requires at least one item or contextual Sequence(type)".to_string(),
             })?;
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::MakeSequence {
                 dst,
                 items: item_regs,
@@ -3770,12 +3859,12 @@ fn lower_expr_with_expected(
                     ),
                 });
             }
-            let inclusive_reg = alloc(next);
+            let inclusive_reg = alloc(next)?;
             out.push(IrInstr::LoadBool {
                 dst: inclusive_reg,
                 val: range_expr.inclusive,
             });
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::MakeTuple {
                 dst,
                 items: vec![start_reg, end_reg, inclusive_reg],
@@ -3823,7 +3912,7 @@ fn lower_expr_with_expected(
                 regs.push(reg);
                 tys.push(ty);
             }
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::MakeTuple { dst, items: regs });
             Ok((dst, Type::Tuple(tys)))
         }
@@ -3888,7 +3977,7 @@ fn lower_expr_with_expected(
                     })?;
                 ordered_regs.push(reg);
             }
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::MakeRecord {
                 dst,
                 name: resolve_symbol_name(arena, record_literal.name)?.to_string(),
@@ -3946,7 +4035,7 @@ fn lower_expr_with_expected(
                         resolve_symbol_name(arena, field_expr.field)?
                     ),
                 })?;
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::RecordGet {
                 dst,
                 src,
@@ -4011,7 +4100,7 @@ fn lower_expr_with_expected(
                     ),
                 });
             }
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::SequenceGet {
                 dst,
                 src,
@@ -4111,7 +4200,7 @@ fn lower_expr_with_expected(
                     ordered_regs.push(override_reg);
                     continue;
                 }
-                let reg = alloc(next);
+                let reg = alloc(next)?;
                 out.push(IrInstr::RecordGet {
                     dst: reg,
                     src: base_reg,
@@ -4153,7 +4242,7 @@ fn lower_expr_with_expected(
             } else {
                 None
             };
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::MakeRecord {
                 dst,
                 name: resolve_symbol_name(arena, record_name)?.to_string(),
@@ -4179,7 +4268,7 @@ fn lower_expr_with_expected(
             lowered_locals,
         ),
         Expr::NumericLiteral(NumericLiteral::I32(n)) => {
-            let r = alloc(next);
+            let r = alloc(next)?;
             let expected_erased = erased_expected(expected.as_ref());
             if expected_erased == Some(Type::Fx) {
                 let val = try_encode_fx_literal_expr(expr_id, arena)?.ok_or(FrontendError {
@@ -4206,7 +4295,7 @@ fn lower_expr_with_expected(
             }
         }
         Expr::NumericLiteral(NumericLiteral::U32(n)) => {
-            let r = alloc(next);
+            let r = alloc(next)?;
             let expected_erased = erased_expected(expected.as_ref());
             if expected_erased == Some(Type::Fx) {
                 let val = try_encode_fx_literal_expr(expr_id, arena)?.ok_or(FrontendError {
@@ -4228,7 +4317,7 @@ fn lower_expr_with_expected(
             }
         }
         Expr::NumericLiteral(NumericLiteral::F64(n)) => {
-            let r = alloc(next);
+            let r = alloc(next)?;
             let expected_erased = erased_expected(expected.as_ref());
             if expected_erased == Some(Type::Fx) {
                 out.push(IrInstr::LoadFx {
@@ -4248,7 +4337,7 @@ fn lower_expr_with_expected(
             }
         }
         Expr::NumericLiteral(NumericLiteral::Fx(n)) => {
-            let r = alloc(next);
+            let r = alloc(next)?;
             out.push(IrInstr::LoadFx {
                 dst: r,
                 val: encode_fx_literal(*n)?,
@@ -4264,7 +4353,7 @@ fn lower_expr_with_expected(
                 pos: 0,
                 message: format!("unknown variable '{}'", resolve_symbol_name(arena, *name)?),
             })?;
-            let r = alloc(next);
+            let r = alloc(next)?;
             out.push(IrInstr::LoadVar {
                 dst: r,
                 name: lowered_locals.resolve(arena, *name)?,
@@ -4390,7 +4479,7 @@ fn lower_expr_with_expected(
             });
 
             out.push(IrInstr::Label { name: end_label });
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::LoadVar {
                 dst,
                 name: result_name,
@@ -4466,7 +4555,7 @@ fn lower_expr_with_expected(
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
-                        let dst = alloc(next);
+                        let dst = alloc(next)?;
                         out.push(IrInstr::SequenceLen { dst, src });
                         Ok((dst, Type::I32))
                     }
@@ -4508,7 +4597,7 @@ fn lower_expr_with_expected(
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
-                        let dst = alloc(next);
+                        let dst = alloc(next)?;
                         out.push(IrInstr::SequenceIsEmpty { dst, src });
                         Ok((dst, Type::Bool))
                     }
@@ -4588,7 +4677,7 @@ fn lower_expr_with_expected(
                         ),
                     });
                 }
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 if name_str == "push" {
                     out.push(IrInstr::SequencePush { dst, seq, val });
                 } else {
@@ -4659,7 +4748,7 @@ fn lower_expr_with_expected(
                         ),
                     });
                 }
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::SequenceContains { dst, seq, val });
                 return Ok((dst, Type::Bool));
             }
@@ -4690,7 +4779,7 @@ fn lower_expr_with_expected(
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
-                        let dst = alloc(next);
+                        let dst = alloc(next)?;
                         let seq_ty = arg_ty.clone();
                         out.push(IrInstr::SequencePop { dst, src });
                         Ok((dst, seq_ty))
@@ -4739,7 +4828,7 @@ fn lower_expr_with_expected(
                         })
                     }
                 };
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::MapEmpty { dst });
                 return Ok((dst, map_ty));
             }
@@ -4796,7 +4885,7 @@ fn lower_expr_with_expected(
                     ownership_events,
                     lowered_locals,
                 )?;
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::MapContains {
                     dst,
                     map: map_reg,
@@ -4874,7 +4963,7 @@ fn lower_expr_with_expected(
                     ownership_events,
                     lowered_locals,
                 )?;
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::MapGet {
                     dst,
                     map: map_reg,
@@ -4953,7 +5042,7 @@ fn lower_expr_with_expected(
                     ownership_events,
                     lowered_locals,
                 )?;
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 let ret_map_ty = map_ty.clone();
                 out.push(IrInstr::MapSet {
                     dst,
@@ -4991,7 +5080,7 @@ fn lower_expr_with_expected(
                     ownership_events,
                     lowered_locals,
                 )?;
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::Call {
                     dst: Some(dst),
                     name: "print".to_string(),
@@ -5023,7 +5112,7 @@ fn lower_expr_with_expected(
                     ownership_events,
                     lowered_locals,
                 )?;
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::Call {
                     dst: Some(dst),
                     name: "to_text".to_string(),
@@ -5077,7 +5166,7 @@ fn lower_expr_with_expected(
                     }
                     regs.push(reg);
                 }
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 match name_str {
                     "qtruth_and" => out.push(IrInstr::QTruthAnd {
                         dst,
@@ -5124,7 +5213,7 @@ fn lower_expr_with_expected(
                     ownership_events,
                     lowered_locals,
                 )?;
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::RngSeed {
                     dst,
                     seed: seed_reg,
@@ -5174,7 +5263,7 @@ fn lower_expr_with_expected(
                     ownership_events,
                     lowered_locals,
                 )?;
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::RngNextI32 {
                     dst,
                     lo: lo_reg,
@@ -5257,7 +5346,7 @@ fn lower_expr_with_expected(
             // whatever its type; a `unit` result is the runtime `Value::Unit`
             // written by the callee's `Ret`. (Statement calls are lowered with
             // `dst: None` by `lower_expr_stmt_with_parts`.)
-            let r = alloc(next);
+            let r = alloc(next)?;
             out.push(IrInstr::Call {
                 dst: Some(r),
                 name: resolve_symbol_name(arena, *name)?.to_string(),
@@ -5269,7 +5358,7 @@ fn lower_expr_with_expected(
             let expected_erased = erased_expected(expected.as_ref());
             if expected_erased == Some(Type::Fx) {
                 if let Some(value) = try_encode_fx_literal_expr(expr_id, arena)? {
-                    let dst = alloc(next);
+                    let dst = alloc(next)?;
                     out.push(IrInstr::LoadFx { dst, val: value });
                     return Ok((
                         dst,
@@ -5295,7 +5384,7 @@ fn lower_expr_with_expected(
             )?;
             match op {
                 UnaryOp::Not => {
-                    let dst = alloc(next);
+                    let dst = alloc(next)?;
                     match ty {
                         Type::Quad => out.push(IrInstr::QNot { dst, src }),
                         Type::Bool => out.push(IrInstr::BoolNot { dst, src }),
@@ -5342,7 +5431,7 @@ fn lower_expr_with_expected(
                             message: format!("operator - unsupported for {:?}", ty),
                         });
                     };
-                    let zero = alloc(next);
+                    let zero = alloc(next)?;
                     if ty == Type::I32 {
                         out.push(IrInstr::LoadI32 { dst: zero, val: 0 });
                     } else if ty == Type::Fx {
@@ -5353,7 +5442,7 @@ fn lower_expr_with_expected(
                             val: 0.0,
                         });
                     }
-                    let dst = alloc(next);
+                    let dst = alloc(next)?;
                     if ty == Type::I32 {
                         out.push(IrInstr::SubI32 {
                             dst,
@@ -5417,7 +5506,7 @@ fn lower_expr_with_expected(
                     message: format!("operator type mismatch: {:?} vs {:?}", lt, rt),
                 });
             }
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             let erased_lt = lt.erase_units();
             match op {
                 BinaryOp::AndAnd => match lt {
@@ -5767,7 +5856,7 @@ fn bind_tuple_items(
                 })
             }
         };
-        let reg = alloc(next);
+        let reg = alloc(next)?;
         let index = u16::try_from(index).map_err(|_| FrontendError {
             detail: None,
             pos: 0,
@@ -5868,7 +5957,7 @@ fn bind_record_items(
                     resolve_symbol_name(arena, item.field)?
                 ),
             })?;
-        let reg = alloc(next);
+        let reg = alloc(next)?;
         let index = u16::try_from(index).map_err(|_| FrontendError {
             detail: None,
             pos: 0,
@@ -5985,7 +6074,7 @@ fn bind_let_else_record_items(
                     resolve_symbol_name(arena, item.field)?
                 ),
             })?;
-        let reg = alloc(next);
+        let reg = alloc(next)?;
         let index = u16::try_from(index).map_err(|_| FrontendError {
             detail: None,
             pos: 0,
@@ -6033,12 +6122,12 @@ fn bind_let_else_record_items(
                         ),
                     });
                 }
-                let lit_reg = alloc(next);
+                let lit_reg = alloc(next)?;
                 out.push(IrInstr::LoadQ {
                     dst: lit_reg,
                     val: pat,
                 });
-                let cmp_reg = alloc(next);
+                let cmp_reg = alloc(next)?;
                 out.push(IrInstr::CmpEq {
                     dst: cmp_reg,
                     lhs: reg,
@@ -6157,7 +6246,7 @@ fn assign_tuple_items(
                 ),
             });
         }
-        let reg = alloc(next);
+        let reg = alloc(next)?;
         let index = u16::try_from(index).map_err(|_| FrontendError {
             detail: None,
             pos: 0,
@@ -6205,13 +6294,13 @@ fn lower_for_range_stmt_from_reg(
 ) -> Result<(), FrontendError> {
     let id = ctx.next_if_id();
     let current_name = format!("__for_range_{}_current", id);
-    let start_reg = alloc(&mut ctx.next_reg);
-    let end_reg = alloc(&mut ctx.next_reg);
-    let inclusive_reg = alloc(&mut ctx.next_reg);
-    let one_reg = alloc(&mut ctx.next_reg);
-    let cmp_reg = alloc(&mut ctx.next_reg);
-    let stop_cmp_reg = alloc(&mut ctx.next_reg);
-    let stop_reg = alloc(&mut ctx.next_reg);
+    let start_reg = alloc(&mut ctx.next_reg)?;
+    let end_reg = alloc(&mut ctx.next_reg)?;
+    let inclusive_reg = alloc(&mut ctx.next_reg)?;
+    let one_reg = alloc(&mut ctx.next_reg)?;
+    let cmp_reg = alloc(&mut ctx.next_reg)?;
+    let stop_cmp_reg = alloc(&mut ctx.next_reg)?;
+    let stop_reg = alloc(&mut ctx.next_reg)?;
 
     ctx.instrs.push(IrInstr::TupleGet {
         dst: start_reg,
@@ -6248,7 +6337,7 @@ fn lower_for_range_stmt_from_reg(
     ctx.instrs.push(IrInstr::Label {
         name: test_label.clone(),
     });
-    let current_reg = alloc(&mut ctx.next_reg);
+    let current_reg = alloc(&mut ctx.next_reg)?;
     ctx.instrs.push(IrInstr::LoadVar {
         dst: current_reg,
         name: current_name.clone(),
@@ -6320,8 +6409,8 @@ fn lower_for_range_stmt_from_reg(
     body_env.pop_scope();
     ctx.lowered_locals.pop_scope();
 
-    let reload_reg = alloc(&mut ctx.next_reg);
-    let next_reg = alloc(&mut ctx.next_reg);
+    let reload_reg = alloc(&mut ctx.next_reg)?;
+    let next_reg = alloc(&mut ctx.next_reg)?;
     ctx.instrs.push(IrInstr::LoadVar {
         dst: reload_reg,
         name: current_name.clone(),
@@ -6643,13 +6732,13 @@ fn lower_for_sequence_stmt_from_reg(
     let id = ctx.next_if_id();
     let index_name = format!("__for_each_seq_{}_index", id);
 
-    let zero_reg = alloc(&mut ctx.next_reg);
-    let one_reg = alloc(&mut ctx.next_reg);
-    let len_reg = alloc(&mut ctx.next_reg);
-    let index_reg = alloc(&mut ctx.next_reg);
-    let cmp_reg = alloc(&mut ctx.next_reg);
-    let item_reg = alloc(&mut ctx.next_reg);
-    let next_reg = alloc(&mut ctx.next_reg);
+    let zero_reg = alloc(&mut ctx.next_reg)?;
+    let one_reg = alloc(&mut ctx.next_reg)?;
+    let len_reg = alloc(&mut ctx.next_reg)?;
+    let index_reg = alloc(&mut ctx.next_reg)?;
+    let cmp_reg = alloc(&mut ctx.next_reg)?;
+    let item_reg = alloc(&mut ctx.next_reg)?;
+    let next_reg = alloc(&mut ctx.next_reg)?;
 
     ctx.instrs.push(IrInstr::LoadI32 {
         dst: zero_reg,
@@ -6763,14 +6852,14 @@ fn lower_for_explicit_iterable_stmt_from_reg(
     let id = ctx.next_if_id();
     let index_name = format!("__for_each_iter_{}_index", id);
 
-    let zero_reg = alloc(&mut ctx.next_reg);
-    let one_reg = alloc(&mut ctx.next_reg);
-    let index_reg = alloc(&mut ctx.next_reg);
-    let next_opt_reg = alloc(&mut ctx.next_reg);
-    let tag_reg = alloc(&mut ctx.next_reg);
-    let has_item_reg = alloc(&mut ctx.next_reg);
-    let item_reg = alloc(&mut ctx.next_reg);
-    let next_index_reg = alloc(&mut ctx.next_reg);
+    let zero_reg = alloc(&mut ctx.next_reg)?;
+    let one_reg = alloc(&mut ctx.next_reg)?;
+    let index_reg = alloc(&mut ctx.next_reg)?;
+    let next_opt_reg = alloc(&mut ctx.next_reg)?;
+    let tag_reg = alloc(&mut ctx.next_reg)?;
+    let has_item_reg = alloc(&mut ctx.next_reg)?;
+    let item_reg = alloc(&mut ctx.next_reg)?;
+    let next_index_reg = alloc(&mut ctx.next_reg)?;
 
     ctx.instrs.push(IrInstr::LoadI32 {
         dst: zero_reg,
@@ -6920,7 +7009,7 @@ fn bind_let_else_tuple_items(
     let mut deferred_binds = Vec::new();
     let mut emitted_dynamic_root = false;
     for (index, (item, item_ty)) in items.iter().zip(item_tys.iter()).enumerate() {
-        let reg = alloc(next);
+        let reg = alloc(next)?;
         let index = u16::try_from(index).map_err(|_| FrontendError {
             detail: None,
             pos: 0,
@@ -6968,12 +7057,12 @@ fn bind_let_else_tuple_items(
                         ),
                     });
                 }
-                let lit_reg = alloc(next);
+                let lit_reg = alloc(next)?;
                 out.push(IrInstr::LoadQ {
                     dst: lit_reg,
                     val: *pat,
                 });
-                let cmp_reg = alloc(next);
+                let cmp_reg = alloc(next)?;
                 out.push(IrInstr::CmpEq {
                     dst: cmp_reg,
                     lhs: reg,
@@ -7899,12 +7988,12 @@ fn lower_stmt(
             match scr_ty {
                 Type::Quad if arms.iter().all(|arm| arm.guard.is_none()) => {
                     for (i, arm) in arms.iter().enumerate() {
-                        let lit_reg = alloc(&mut ctx.next_reg);
+                        let lit_reg = alloc(&mut ctx.next_reg)?;
                         ctx.instrs.push(IrInstr::LoadQ {
                             dst: lit_reg,
                             val: expect_quad_match_pattern(&arm.pat)?,
                         });
-                        let cmp_reg = alloc(&mut ctx.next_reg);
+                        let cmp_reg = alloc(&mut ctx.next_reg)?;
                         ctx.instrs.push(IrInstr::CmpEq {
                             dst: cmp_reg,
                             lhs: scr_reg,
@@ -7958,12 +8047,12 @@ fn lower_stmt(
                             default_label.clone()
                         };
 
-                        let lit_reg = alloc(&mut ctx.next_reg);
+                        let lit_reg = alloc(&mut ctx.next_reg)?;
                         ctx.instrs.push(IrInstr::LoadQ {
                             dst: lit_reg,
                             val: expect_quad_match_pattern(&arm.pat)?,
                         });
-                        let cmp_reg = alloc(&mut ctx.next_reg);
+                        let cmp_reg = alloc(&mut ctx.next_reg)?;
                         ctx.instrs.push(IrInstr::CmpEq {
                             dst: cmp_reg,
                             lhs: scr_reg,
@@ -8040,7 +8129,7 @@ fn lower_stmt(
                             default_label.clone()
                         };
 
-                        let lit_reg = alloc(&mut ctx.next_reg);
+                        let lit_reg = alloc(&mut ctx.next_reg)?;
                         match expect_int_match_pattern(&arm.pat, &scr_ty)? {
                             IntMatchLiteral::I32(val) => {
                                 ctx.instrs.push(IrInstr::LoadI32 { dst: lit_reg, val })
@@ -8049,7 +8138,7 @@ fn lower_stmt(
                                 ctx.instrs.push(IrInstr::LoadU32 { dst: lit_reg, val })
                             }
                         }
-                        let cmp_reg = alloc(&mut ctx.next_reg);
+                        let cmp_reg = alloc(&mut ctx.next_reg)?;
                         ctx.instrs.push(IrInstr::CmpEq {
                             dst: cmp_reg,
                             lhs: scr_reg,
@@ -8116,7 +8205,7 @@ fn lower_stmt(
                 Type::Adt(_) | Type::Option(_) | Type::Result(_, _) => {
                     let family = resolve_match_family_for_lowering(&scr_ty, arena, adt_table)?
                         .expect("sum scrutinee family should resolve");
-                    let scr_tag_reg = alloc(&mut ctx.next_reg);
+                    let scr_tag_reg = alloc(&mut ctx.next_reg)?;
                     ctx.instrs.push(IrInstr::AdtTag {
                         dst: scr_tag_reg,
                         src: scr_reg,
@@ -8146,12 +8235,12 @@ fn lower_stmt(
                         } else {
                             default_label.clone()
                         };
-                        let expected_tag_reg = alloc(&mut ctx.next_reg);
+                        let expected_tag_reg = alloc(&mut ctx.next_reg)?;
                         ctx.instrs.push(IrInstr::LoadI32 {
                             dst: expected_tag_reg,
                             val: resolved_patterns[i].tag,
                         });
-                        let cmp_reg = alloc(&mut ctx.next_reg);
+                        let cmp_reg = alloc(&mut ctx.next_reg)?;
                         ctx.instrs.push(IrInstr::CmpEq {
                             dst: cmp_reg,
                             lhs: scr_tag_reg,
@@ -8231,7 +8320,7 @@ fn lower_stmt(
                 name: default_label,
             });
             if exhaustive_without_default {
-                let cond = alloc(&mut ctx.next_reg);
+                let cond = alloc(&mut ctx.next_reg)?;
                 ctx.instrs.push(IrInstr::LoadBool {
                     dst: cond,
                     val: false,
@@ -8660,7 +8749,7 @@ fn lower_adt_ctor_expr(
         regs.push(reg);
     }
 
-    let dst = alloc(next);
+    let dst = alloc(next)?;
     out.push(IrInstr::MakeAdt {
         dst,
         adt_name: resolve_symbol_name(arena, ctor_expr.adt_name)?.to_string(),
@@ -8737,7 +8826,7 @@ fn lower_std_form_ctor_expr(
                         });
                     }
                 }
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::MakeAdt {
                     dst,
                     adt_name: "Option".to_string(),
@@ -8765,7 +8854,7 @@ fn lower_std_form_ctor_expr(
                                 .to_string(),
                     });
                 };
-                let dst = alloc(next);
+                let dst = alloc(next)?;
                 out.push(IrInstr::MakeAdt {
                     dst,
                     adt_name: "Option".to_string(),
@@ -8843,7 +8932,7 @@ fn lower_std_form_ctor_expr(
                 ),
             });
         }
-        let dst = alloc(next);
+        let dst = alloc(next)?;
         out.push(IrInstr::MakeAdt {
             dst,
             adt_name: "Result".to_string(),
@@ -9128,7 +9217,7 @@ fn lower_adt_match_bindings(
     lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(), FrontendError> {
     for binding in &pattern.bindings {
-        let reg = alloc(next);
+        let reg = alloc(next)?;
         out.push(IrInstr::AdtGet {
             dst: reg,
             src: scr_reg,
@@ -9196,14 +9285,19 @@ fn non_exhaustive_match_error(
     })
 }
 
-fn lower_impossible_match_trap(label: String, next: &mut u16, out: &mut Vec<IrInstr>) {
+fn lower_impossible_match_trap(
+    label: String,
+    next: &mut u16,
+    out: &mut Vec<IrInstr>,
+) -> Result<(), FrontendError> {
     out.push(IrInstr::Label { name: label });
-    let cond = alloc(next);
+    let cond = alloc(next)?;
     out.push(IrInstr::LoadBool {
         dst: cond,
         val: false,
     });
     out.push(IrInstr::Assert { cond });
+    Ok(())
 }
 
 fn lower_match_guard(
@@ -9633,7 +9727,7 @@ fn lower_loop_expr(
             });
         }
     }
-    let dst = alloc(next);
+    let dst = alloc(next)?;
     out.push(IrInstr::LoadVar {
         dst,
         name: result_name,
@@ -9888,12 +9982,12 @@ fn lower_loop_expr_stmt(
                             default_label.clone()
                         };
 
-                        let lit_reg = alloc(next);
+                        let lit_reg = alloc(next)?;
                         out.push(IrInstr::LoadQ {
                             dst: lit_reg,
                             val: expect_quad_match_pattern(&arm.pat)?,
                         });
-                        let cmp_reg = alloc(next);
+                        let cmp_reg = alloc(next)?;
                         out.push(IrInstr::CmpEq {
                             dst: cmp_reg,
                             lhs: scr_reg,
@@ -9975,7 +10069,7 @@ fn lower_loop_expr_stmt(
                             default_label.clone()
                         };
 
-                        let lit_reg = alloc(next);
+                        let lit_reg = alloc(next)?;
                         match expect_int_match_pattern(&arm.pat, &scr_ty)? {
                             IntMatchLiteral::I32(val) => {
                                 out.push(IrInstr::LoadI32 { dst: lit_reg, val })
@@ -9984,7 +10078,7 @@ fn lower_loop_expr_stmt(
                                 out.push(IrInstr::LoadU32 { dst: lit_reg, val })
                             }
                         }
-                        let cmp_reg = alloc(next);
+                        let cmp_reg = alloc(next)?;
                         out.push(IrInstr::CmpEq {
                             dst: cmp_reg,
                             lhs: scr_reg,
@@ -10056,7 +10150,7 @@ fn lower_loop_expr_stmt(
                 Type::Adt(_) | Type::Option(_) | Type::Result(_, _) => {
                     let family = resolve_match_family_for_lowering(&scr_ty, arena, adt_table)?
                         .expect("sum scrutinee family should resolve");
-                    let scr_tag_reg = alloc(next);
+                    let scr_tag_reg = alloc(next)?;
                     out.push(IrInstr::AdtTag {
                         dst: scr_tag_reg,
                         src: scr_reg,
@@ -10087,12 +10181,12 @@ fn lower_loop_expr_stmt(
                             default_label.clone()
                         };
 
-                        let expected_tag_reg = alloc(next);
+                        let expected_tag_reg = alloc(next)?;
                         out.push(IrInstr::LoadI32 {
                             dst: expected_tag_reg,
                             val: resolved_patterns[i].tag,
                         });
-                        let cmp_reg = alloc(next);
+                        let cmp_reg = alloc(next)?;
                         out.push(IrInstr::CmpEq {
                             dst: cmp_reg,
                             lhs: scr_tag_reg,
@@ -10177,7 +10271,7 @@ fn lower_loop_expr_stmt(
                 name: default_label,
             });
             if exhaustive_without_default {
-                let cond = alloc(next);
+                let cond = alloc(next)?;
                 out.push(IrInstr::LoadBool {
                     dst: cond,
                     val: false,
@@ -10359,12 +10453,12 @@ fn lower_match_expr(
                     default_label.clone()
                 };
 
-                let lit_reg = alloc(next);
+                let lit_reg = alloc(next)?;
                 out.push(IrInstr::LoadQ {
                     dst: lit_reg,
                     val: expect_quad_match_pattern(&arm.pat)?,
                 });
-                let cmp_reg = alloc(next);
+                let cmp_reg = alloc(next)?;
                 out.push(IrInstr::CmpEq {
                     dst: cmp_reg,
                     lhs: scr_reg,
@@ -10465,12 +10559,12 @@ fn lower_match_expr(
                     default_label.clone()
                 };
 
-                let lit_reg = alloc(next);
+                let lit_reg = alloc(next)?;
                 match expect_int_match_pattern(&arm.pat, &scr_ty)? {
                     IntMatchLiteral::I32(val) => out.push(IrInstr::LoadI32 { dst: lit_reg, val }),
                     IntMatchLiteral::U32(val) => out.push(IrInstr::LoadU32 { dst: lit_reg, val }),
                 }
-                let cmp_reg = alloc(next);
+                let cmp_reg = alloc(next)?;
                 out.push(IrInstr::CmpEq {
                     dst: cmp_reg,
                     lhs: scr_reg,
@@ -10561,7 +10655,7 @@ fn lower_match_expr(
         Type::Adt(_) | Type::Option(_) | Type::Result(_, _) => {
             let family = resolve_match_family_for_lowering(&scr_ty, arena, adt_table)?
                 .expect("sum scrutinee family should resolve");
-            let scr_tag_reg = alloc(next);
+            let scr_tag_reg = alloc(next)?;
             out.push(IrInstr::AdtTag {
                 dst: scr_tag_reg,
                 src: scr_reg,
@@ -10593,12 +10687,12 @@ fn lower_match_expr(
                     default_label.clone()
                 };
 
-                let expected_tag_reg = alloc(next);
+                let expected_tag_reg = alloc(next)?;
                 out.push(IrInstr::LoadI32 {
                     dst: expected_tag_reg,
                     val: resolved_patterns[i].tag,
                 });
-                let cmp_reg = alloc(next);
+                let cmp_reg = alloc(next)?;
                 out.push(IrInstr::CmpEq {
                     dst: cmp_reg,
                     lhs: scr_tag_reg,
@@ -10699,7 +10793,7 @@ fn lower_match_expr(
     }
 
     if exhaustive_without_default {
-        lower_impossible_match_trap(default_label, next, out);
+        lower_impossible_match_trap(default_label, next, out)?;
     } else {
         let default = match_expr
             .default
@@ -10750,7 +10844,7 @@ fn lower_match_expr(
     }
 
     out.push(IrInstr::Label { name: end_label });
-    let dst = alloc(next);
+    let dst = alloc(next)?;
     out.push(IrInstr::LoadVar {
         dst,
         name: result_name,
@@ -10891,7 +10985,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
-                    let dst = alloc(next);
+                    let dst = alloc(next)?;
                     out.push(IrInstr::SequenceLen { dst, src });
                     Ok(())
                 }
@@ -10932,7 +11026,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
-                    let dst = alloc(next);
+                    let dst = alloc(next)?;
                     out.push(IrInstr::SequenceIsEmpty { dst, src });
                     Ok(())
                 }
@@ -11012,7 +11106,7 @@ fn lower_expr_stmt_with_parts(
                     ),
                 });
             }
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             if name_str_stmt == "push" {
                 out.push(IrInstr::SequencePush { dst, seq, val });
             } else {
@@ -11083,7 +11177,7 @@ fn lower_expr_stmt_with_parts(
                     ),
                 });
             }
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::SequenceContains { dst, seq, val });
             return Ok(());
         }
@@ -11114,7 +11208,7 @@ fn lower_expr_stmt_with_parts(
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
-                    let dst = alloc(next);
+                    let dst = alloc(next)?;
                     out.push(IrInstr::SequencePop { dst, src });
                     Ok(())
                 }
@@ -11191,7 +11285,7 @@ fn lower_expr_stmt_with_parts(
                 ownership_events,
                 lowered_locals,
             )?;
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::MapContains {
                 dst,
                 map: map_reg,
@@ -11269,7 +11363,7 @@ fn lower_expr_stmt_with_parts(
                 ownership_events,
                 lowered_locals,
             )?;
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::MapGet {
                 dst,
                 map: map_reg,
@@ -11348,7 +11442,7 @@ fn lower_expr_stmt_with_parts(
                 ownership_events,
                 lowered_locals,
             )?;
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::MapSet {
                 dst,
                 map: map_reg,
@@ -11416,7 +11510,7 @@ fn lower_expr_stmt_with_parts(
                 ownership_events,
                 lowered_locals,
             )?;
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::RngSeed {
                 dst,
                 seed: seed_reg,
@@ -11466,7 +11560,7 @@ fn lower_expr_stmt_with_parts(
                 ownership_events,
                 lowered_locals,
             )?;
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             out.push(IrInstr::RngNextI32 {
                 dst,
                 lo: lo_reg,
@@ -11520,7 +11614,7 @@ fn lower_expr_stmt_with_parts(
                 }
                 regs.push(reg);
             }
-            let dst = alloc(next);
+            let dst = alloc(next)?;
             match name_str {
                 "qtruth_and" => out.push(IrInstr::QTruthAnd {
                     dst,
@@ -11610,7 +11704,7 @@ fn lower_expr_stmt_with_parts(
         let dst = if sig.ret == Type::Unit {
             None
         } else {
-            Some(alloc(next))
+            Some(alloc(next)?)
         };
         out.push(IrInstr::Call {
             dst,
@@ -12286,10 +12380,21 @@ fn append_record_update_write_events_from_expr(
 }
 
 #[inline]
-fn alloc(next: &mut u16) -> u16 {
+/// FA-04-002 / #1708: IR register identities are `u16`. Allocation is
+/// checked: once the next identity would not be representable, lowering fails
+/// deterministically instead of panicking (debug) or wrapping onto a live
+/// register (release). Identities `0..=u16::MAX - 1` are allocatable.
+fn alloc(next: &mut u16) -> Result<u16, FrontendError> {
     let out = *next;
-    *next += 1;
-    out
+    *next = out.checked_add(1).ok_or_else(|| FrontendError {
+        detail: None,
+        pos: 0,
+        message: format!(
+            "IR register allocation exhausted: a function needs more than {} registers",
+            u16::MAX
+        ),
+    })?;
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -14740,7 +14845,7 @@ mod opt_tests {
             .expect("closure capturing a const binding should lower successfully");
         assert!(ir
             .iter()
-            .any(|func| func.name.starts_with("__closure_main_")));
+            .any(|func| func.name.starts_with("__closure_4smain_")));
     }
 
     #[test]
@@ -14898,7 +15003,7 @@ mod opt_tests {
             .any(|instr| matches!(instr, IrInstr::ClosureCall { .. })));
         let helper = ir
             .iter()
-            .find(|func| func.name.starts_with("__closure_main_"))
+            .find(|func| func.name.starts_with("__closure_4smain_"))
             .expect("lifted closure helper");
         assert!(helper
             .instrs
@@ -18257,7 +18362,7 @@ mod opt_tests {
         let lifted = lowered
             .lifted
             .iter()
-            .find(|func| func.name.starts_with("__closure_main_"))
+            .find(|func| func.name.starts_with("__closure_4smain_"))
             .expect("closure lowering should produce a lifted helper");
         assert_borrow_event_shapes(
             lifted,
@@ -18514,7 +18619,7 @@ mod opt_tests {
         let lifted = lowered
             .lifted
             .iter()
-            .find(|func| func.name.starts_with("__closure_main_"))
+            .find(|func| func.name.starts_with("__closure_4smain_"))
             .expect("closure lowering should produce a lifted helper");
         // #1891 Checkpoint W2A: the event now fires from
         // `lower_expr_with_expected` itself while lowering the closure
@@ -19489,5 +19594,299 @@ mod opt_tests {
             .instrs
             .iter()
             .any(|i| matches!(i, IrInstr::Call { name, .. } if name.starts_with("qtruth_"))));
+    }
+}
+
+#[cfg(test)]
+mod pb05_ir_safety_tests {
+    use super::*;
+    use crate::passes::run_default_opt_passes;
+    use sm_format::semcode_decode::{
+        decode_semcode_envelope, MAX_DEBUG_SYMBOLS_PER_FUNCTION, MAX_FUNCTIONS,
+        MAX_STRINGS_PER_FUNCTION, MAX_STRING_LEN,
+    };
+
+    fn func(name: &str, instrs: Vec<IrInstr>) -> IrFunction {
+        IrFunction {
+            name: name.to_string(),
+            instrs,
+            ownership_events: Vec::new(),
+            params: Vec::new(),
+        }
+    }
+
+    fn ret() -> IrInstr {
+        IrInstr::Ret { src: None }
+    }
+
+    // #1708: checked allocation; same behaviour in every build profile.
+    #[test]
+    fn register_allocation_fails_closed_at_identity_exhaustion() {
+        let mut next = u16::MAX - 1;
+        assert_eq!(alloc(&mut next).expect("last identity"), u16::MAX - 1);
+        let err = alloc(&mut next).expect_err("exhausted");
+        assert!(err.message.contains("IR register allocation exhausted"));
+        assert_eq!(
+            next,
+            u16::MAX,
+            "a failed allocation does not wrap the counter"
+        );
+        assert!(alloc(&mut next).is_err(), "stays exhausted, never reuses 0");
+        // A real lowering helper propagates the failure.
+        let mut next = u16::MAX;
+        let mut out = Vec::new();
+        let err = lower_impossible_match_trap("L".to_string(), &mut next, &mut out)
+            .expect_err("lowering must fail closed");
+        assert!(err.message.contains("exhausted"));
+    }
+
+    // #1713: closure helper names are injective over parent identities.
+    #[test]
+    fn closure_helper_names_are_injective() {
+        let name = |parent: &str| {
+            let mut state = ClosureLoweringState {
+                parent_fn_name: parent.to_string(),
+                next_closure_id: 0,
+                lifted_funcs: Vec::new(),
+            };
+            next_closure_function_name(&mut state)
+        };
+        let parents = [
+            "__impl::A::B_C::D",
+            "__impl::A_B::C::D",
+            "__impl::A::B::C_D",
+            "a::b",
+            "a_b",
+            "a__b",
+            "main",
+        ];
+        let names: std::collections::BTreeSet<String> = parents.iter().map(|p| name(p)).collect();
+        assert_eq!(names.len(), parents.len(), "{names:?}");
+        assert_eq!(name("main"), "__closure_4smain_0");
+        assert_eq!(
+            name("__impl::A::B_C::D"),
+            name("__impl::A::B_C::D"),
+            "deterministic"
+        );
+    }
+
+    // #1713 defense in depth: no duplicate function names in one artifact.
+    #[test]
+    fn duplicate_function_names_are_a_producer_error() {
+        let err = emit_ir_to_semcode(&[func("f", vec![ret()]), func("f", vec![ret()])], false)
+            .expect_err("duplicate");
+        assert!(err.message.contains("duplicate function name 'f'"));
+    }
+
+    // #1728: producer success implies decoder acceptance for every
+    // producer-controlled structural maximum (constants from sm-format).
+    #[test]
+    fn producer_honours_format_owned_structural_limits() {
+        let emit_ok = |funcs: &[IrFunction], dbg: bool| {
+            let bytes = emit_ir_to_semcode(funcs, dbg).expect("at limit emits");
+            decode_semcode_envelope(&bytes).expect("at limit decodes");
+        };
+        let fns = |n: usize| -> Vec<IrFunction> {
+            (0..n)
+                .map(|i| func(&format!("f{i}"), vec![ret()]))
+                .collect()
+        };
+        emit_ok(&fns(MAX_FUNCTIONS), false);
+        assert!(emit_ir_to_semcode(&fns(MAX_FUNCTIONS + 1), false).is_err());
+
+        emit_ok(&[func(&"n".repeat(MAX_STRING_LEN), vec![ret()])], false);
+        assert!(
+            emit_ir_to_semcode(&[func(&"n".repeat(MAX_STRING_LEN + 1), vec![ret()])], false)
+                .is_err()
+        );
+
+        let texts = |n: usize, len: usize| -> IrFunction {
+            let mut instrs: Vec<IrInstr> = (0..n)
+                .map(|i| IrInstr::LoadText {
+                    dst: 0,
+                    val: format!("{i:0>width$}", width = len),
+                })
+                .collect();
+            instrs.push(ret());
+            func("main", instrs)
+        };
+        emit_ok(&[texts(MAX_STRINGS_PER_FUNCTION, 4)], false);
+        assert!(emit_ir_to_semcode(&[texts(MAX_STRINGS_PER_FUNCTION + 1, 4)], false).is_err());
+        emit_ok(&[texts(1, MAX_STRING_LEN)], false);
+        assert!(emit_ir_to_semcode(&[texts(1, MAX_STRING_LEN + 1)], false).is_err());
+
+        let instrs = |n: usize| -> IrFunction {
+            let mut v: Vec<IrInstr> = (0..n - 1)
+                .map(|_| IrInstr::LoadBool { dst: 0, val: true })
+                .collect();
+            v.push(ret());
+            func("main", v)
+        };
+        emit_ok(&[instrs(MAX_DEBUG_SYMBOLS_PER_FUNCTION)], true);
+        assert!(emit_ir_to_semcode(&[instrs(MAX_DEBUG_SYMBOLS_PER_FUNCTION + 1)], true).is_err());
+    }
+
+    fn opt(instrs: Vec<IrInstr>) -> Vec<IrInstr> {
+        let mut fs = vec![func("main", instrs)];
+        run_default_opt_passes(&mut fs).expect("opt");
+        fs.remove(0).instrs
+    }
+
+    // #1711: one exhaustive barrier classifier; constant state never crosses
+    // a barrier.
+    #[test]
+    fn crystalfold_clears_constant_state_at_every_barrier() {
+        use crate::passes::crystalfold::is_crystalfold_barrier;
+        let barriers = [
+            IrInstr::GateWrite {
+                device_id: 0,
+                port: 0,
+                src: 9,
+            },
+            IrInstr::PulseEmit { signal: "s".into() },
+            IrInstr::StateUpdate {
+                key: "k".into(),
+                src: 9,
+            },
+            IrInstr::EventPost { signal: "s".into() },
+            IrInstr::GateRead {
+                dst: 9,
+                device_id: 0,
+                port: 0,
+            },
+            IrInstr::StateQuery {
+                dst: 9,
+                key: "k".into(),
+            },
+            IrInstr::ClockRead { dst: 9 },
+            IrInstr::Assert { cond: 9 },
+        ];
+        for barrier in barriers {
+            assert!(is_crystalfold_barrier(&barrier), "{barrier:?}");
+            let out = opt(vec![
+                IrInstr::LoadI32 { dst: 1, val: 5 },
+                barrier.clone(),
+                IrInstr::AddI32 {
+                    dst: 2,
+                    lhs: 1,
+                    rhs: 1,
+                },
+                IrInstr::Ret { src: Some(2) },
+            ]);
+            assert!(
+                out.iter().any(|i| matches!(i, IrInstr::AddI32 { .. })),
+                "constant folded across {barrier:?}: {out:?}"
+            );
+        }
+        assert!(!is_crystalfold_barrier(&IrInstr::LoadI32 {
+            dst: 0,
+            val: 1
+        }));
+    }
+
+    // #1729: one-sided identities/annihilators never erase a runtime check;
+    // fully known, well-typed operands still fold.
+    #[test]
+    fn crystalfold_never_folds_away_an_unproven_operand() {
+        let keeps = |op: IrInstr, a: IrInstr, b: IrInstr| {
+            let out = opt(vec![a, b, op.clone(), IrInstr::Ret { src: Some(3) }]);
+            assert!(
+                out.iter()
+                    .any(|i| core::mem::discriminant(i) == core::mem::discriminant(&op)),
+                "{op:?}: {out:?}"
+            );
+        };
+        let b_false = IrInstr::LoadBool { dst: 1, val: false };
+        let b_true = IrInstr::LoadBool { dst: 1, val: true };
+        let i32_ = IrInstr::LoadI32 { dst: 2, val: 1 };
+        keeps(
+            IrInstr::BoolAnd {
+                dst: 3,
+                lhs: 1,
+                rhs: 2,
+            },
+            b_false.clone(),
+            i32_.clone(),
+        );
+        keeps(
+            IrInstr::BoolOr {
+                dst: 3,
+                lhs: 1,
+                rhs: 2,
+            },
+            b_true.clone(),
+            i32_.clone(),
+        );
+        keeps(
+            IrInstr::QAnd {
+                dst: 3,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::LoadQ {
+                dst: 1,
+                val: QuadVal::N,
+            },
+            i32_.clone(),
+        );
+        keeps(
+            IrInstr::QOr {
+                dst: 3,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::LoadQ {
+                dst: 1,
+                val: QuadVal::S,
+            },
+            i32_.clone(),
+        );
+        keeps(
+            IrInstr::AddI32 {
+                dst: 3,
+                lhs: 2,
+                rhs: 1,
+            },
+            IrInstr::LoadI32 { dst: 1, val: 0 },
+            IrInstr::LoadBool { dst: 2, val: true },
+        );
+        // Two-sided, well-typed folds remain.
+        let out = opt(vec![
+            b_false,
+            IrInstr::LoadBool { dst: 2, val: true },
+            IrInstr::BoolAnd {
+                dst: 3,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::Ret { src: Some(3) },
+        ]);
+        assert!(
+            out.contains(&IrInstr::LoadBool { dst: 3, val: false }),
+            "{out:?}"
+        );
+    }
+
+    // #1723: StructuralCleanup never drops a LoadVar.
+    #[test]
+    fn structural_cleanup_keeps_every_loadvar() {
+        let out = opt(vec![
+            IrInstr::LoadVar {
+                dst: 1,
+                name: "missing".into(),
+            },
+            IrInstr::LoadVar {
+                dst: 1,
+                name: "valid".into(),
+            },
+            IrInstr::Ret { src: Some(1) },
+        ]);
+        assert_eq!(
+            out.iter()
+                .filter(|i| matches!(i, IrInstr::LoadVar { .. }))
+                .count(),
+            2,
+            "{out:?}"
+        );
     }
 }

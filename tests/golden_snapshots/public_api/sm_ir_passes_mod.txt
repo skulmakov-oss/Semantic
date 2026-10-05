@@ -1,0 +1,20 @@
+source: crates/sm-ir/src/passes/mod.rs
+pub mod cleanup;
+pub mod crystalfold;
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OptReport {
+pub changed: bool,
+pub num_rewrites: u32,
+pub fn merge(&mut self, other: OptReport) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptError(pub String);
+#[derive(Debug, Clone, PartialEq)]
+pub struct IrModule {
+pub functions: Vec<IrFunction>,
+pub trait OptPass {
+fn name(&self) -> &'static str;
+fn version(&self) -> u32;
+fn run(&self, ir: &mut IrModule) -> Result<OptReport, OptError>;
+pub fn validate_activation_sites(func: &IrFunction) -> Result<(), OptError> {
+pub fn validate_write_sites(func: &IrFunction) -> Result<(), OptError> {
+pub fn run_default_opt_passes(functions: &mut Vec<IrFunction>) -> Result<OptReport, OptError> {
