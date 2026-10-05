@@ -9569,7 +9569,10 @@ mod tests {
                 .record_controlled_text_observation("x".to_string())
                 .expect("record");
         }
-        assert_eq!(discard.sequence_index, 5, "discard mode follows the same sequence");
+        assert_eq!(
+            discard.sequence_index, 5,
+            "discard mode follows the same sequence"
+        );
         let indexes: Vec<u64> = events.iter().map(|e| e.sequence_index.0).collect();
         assert_eq!(indexes, vec![0, 1, 2, 3, 4]);
     }
@@ -9588,6 +9591,10 @@ mod tests {
         assert_eq!(err, RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow));
         assert_eq!(runtime.sequence_index, u64::MAX, "no wrap to 0");
         let indexes: Vec<u64> = events.iter().map(|e| e.sequence_index.0).collect();
-        assert_eq!(indexes, vec![u64::MAX - 1], "the failed observation was not delivered");
+        assert_eq!(
+            indexes,
+            vec![u64::MAX - 1],
+            "the failed observation was not delivered"
+        );
     }
 }
