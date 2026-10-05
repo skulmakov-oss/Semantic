@@ -638,6 +638,32 @@ pub fn collect_local_exports_core(
 ) -> Result<ExportSet, ModuleError> {
     let mut set = ExportSet::default();
     for (idx, local) in locals.iter().enumerate() {
+        // A same-kind duplicate is a declaration error with its own code
+        // (E0220 Entity/System, E0221 Law), exactly as analysis reports it;
+        // only a cross-kind clash is the flat-namespace E0242 (#1686).
+        if let Some(prev) = set.get(&local.public_name) {
+            if prev.kind == local.kind {
+                let (code, message) = match local.kind {
+                    ExportKind::Law => (
+                        "E0221",
+                        format!("duplicate Law '{}' in module", local.public_name),
+                    ),
+                    ExportKind::Entity => {
+                        ("E0220", format!("duplicate Entity '{}'", local.public_name))
+                    }
+                    ExportKind::System => {
+                        ("E0220", format!("duplicate System '{}'", local.public_name))
+                    }
+                };
+                return Err(ModuleError {
+                    code,
+                    message,
+                    module_id: module_id.to_string(),
+                    line: local.span.line,
+                    col: local.span.col,
+                });
+            }
+        }
         push_export_item_core(
             &mut set,
             ExportItem {
