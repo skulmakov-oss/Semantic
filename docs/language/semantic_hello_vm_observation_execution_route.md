@@ -71,7 +71,8 @@ not general host output.
 ControlledObservationEvent
   class: ControlledText
   text_ref: admitted text constant reference
-  sequence_index: deterministic observation order
+  sequence_index: deterministic observation order, minted by sm-vm
+                  (contiguous from 0; exhaustion traps, never wraps)
   policy_ref: v0 policy descriptor or 0
 ```
 
