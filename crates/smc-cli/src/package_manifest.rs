@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
@@ -11,27 +11,47 @@ pub const SEMANTIC_TOML_FILE_NAME: &str = "semantic.toml";
 pub const PACKAGE_IMPORT_SEPARATOR: &str = "::";
 
 thread_local! {
+    /// Nesting depth of the current package-admission pass on this thread (#1776).
+    static ADMISSION_PASS_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+/// One package-admission pass (#1776). Every public package-aware operation
+/// owns a fresh pass: entering at depth 0 discards all cached trust evidence,
+/// so nothing verified by an earlier operation can authorize this one. Nested
+/// operations reuse the enclosing pass, which is the only scope in which the
+/// caches below may be reused. The guard keeps the depth correct on unwind.
+pub(crate) struct AdmissionPass(());
+
+impl AdmissionPass {
+    pub(crate) fn begin() -> Self {
+        ADMISSION_PASS_DEPTH.with(|depth| {
+            if depth.get() == 0 {
+                PINNED_DEPENDENCY_CONTENT_VERIFIED.with(|cache| cache.borrow_mut().clear());
+                DECLARED_DEPENDENCY_GRAPH_VALIDATED.with(|cache| cache.borrow_mut().clear());
+            }
+            depth.set(depth.get() + 1);
+        });
+        AdmissionPass(())
+    }
+}
+
+impl Drop for AdmissionPass {
+    fn drop(&mut self) {
+        ADMISSION_PASS_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
+thread_local! {
     /// Memoizes which pinned dependency manifests have already had their content
     /// fingerprint verified, so a dependency imported through many package-qualified
-    /// modules is hashed once per bundle pass instead of once per import (DL-020).
-    /// `smc watch` (a long-lived process) must clear this via
-    /// `reset_pinned_dependency_fingerprint_cache` before each rebuild pass, since the
-    /// filesystem can change between passes; one-shot commands (check/compile/run) never
-    /// need to, since a fresh process already starts empty (same reasoning as DL-017's
-    /// nested-manifest admission cache, which was a `static` and unsafe for exactly this
-    /// reason -- this one is explicitly resettable instead).
+    /// modules is hashed once per admission pass instead of once per import (DL-020).
+    /// Valid only inside one `AdmissionPass` (#1776).
     static PINNED_DEPENDENCY_CONTENT_VERIFIED: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
 }
 
-/// Clears the pinned-dependency content-fingerprint cache. `smc watch` (see `cmd_watch` in
-/// `app.rs`) calls this at the top of every loop iteration, unconditionally, since a change
-/// to a declared-but-unimported dependency does not affect `module_graph_fingerprint` (see
-/// DL-022) and so cannot be relied on to gate the reset. Public so any long-lived library
-/// consumer that calls `admit_package_entry_module` or `CliPipeline::semantic_check_file`
-/// (or the `compile`/`run` equivalents) more than once on the same thread can invalidate
-/// this cache between calls too -- it was `pub(crate)` and reachable only from `cmd_watch`
-/// until DL-022 fixed that gap. One-shot commands never need to call this, since a fresh
-/// process already starts empty.
+/// Clears the pinned-dependency content-fingerprint cache. Kept for compatibility only:
+/// since #1776 every public package-aware operation starts a fresh admission pass, so
+/// no caller needs this for correctness.
 pub fn reset_pinned_dependency_fingerprint_cache() {
     PINNED_DEPENDENCY_CONTENT_VERIFIED.with(|cache| cache.borrow_mut().clear());
 }
@@ -39,15 +59,14 @@ pub fn reset_pinned_dependency_fingerprint_cache() {
 thread_local! {
     /// Memoizes which manifests have already had their full DECLARED dependency graph
     /// validated (missing/cyclic/name-mismatched/stale-pinned), so admitting many modules
-    /// from the same manifest only walks that graph once per bundle pass (DL-021). Same
-    /// reset discipline as `PINNED_DEPENDENCY_CONTENT_VERIFIED` above: `smc watch` must
-    /// clear it before each rebuild pass via `reset_declared_dependency_graph_cache`.
+    /// from the same manifest only walks that graph once per admission pass (DL-021).
+    /// Valid only inside one `AdmissionPass` (#1776).
     static DECLARED_DEPENDENCY_GRAPH_VALIDATED: RefCell<HashSet<PathBuf>> =
         RefCell::new(HashSet::new());
 }
 
-/// Clears the declared-dependency-graph validation cache. Same reset discipline and same
-/// visibility reasoning as `reset_pinned_dependency_fingerprint_cache` above (DL-022).
+/// Clears the declared-dependency-graph validation cache. Kept for compatibility only;
+/// see `reset_pinned_dependency_fingerprint_cache` (#1776).
 pub fn reset_declared_dependency_graph_cache() {
     DECLARED_DEPENDENCY_GRAPH_VALIDATED.with(|cache| cache.borrow_mut().clear());
 }
@@ -627,6 +646,7 @@ fn is_valid_package_fingerprint(value: &str) -> bool {
 pub fn admit_package_entry_module(
     entry: &Path,
 ) -> Result<Option<PackageModuleAdmission>, PackageModuleAdmissionError> {
+    let _pass = AdmissionPass::begin();
     reject_reparse_path(entry).map_err(|message| PackageModuleAdmissionError {
         code: PackageModuleAdmissionCode::EntryResolutionFailed,
         message,
@@ -863,6 +883,7 @@ pub fn resolve_package_import_path(
     importer_module: &Path,
     spec: &str,
 ) -> Result<PathBuf, PackageImportResolutionError> {
+    let _pass = AdmissionPass::begin();
     let importer_canonical =
         importer_module
             .canonicalize()
@@ -2019,6 +2040,49 @@ impl PackageGraphBuilder {
     }
 }
 
+/// #1777: the watch-side package trust fingerprint. It covers every input that can
+/// change package admission for `root_module`, independently of which modules the
+/// source currently imports: the full declared dependency graph reachable from the
+/// governing manifest (each manifest's bytes, identity, declared edges and pins) and
+/// each package's module-root content. Nodes are visited in sorted order and hashed
+/// by content; modification times are never consulted. An invalid graph has its own
+/// fingerprint, so a valid/invalid transition is always a change.
+pub(crate) fn package_trust_fingerprint(root_module: &Path) -> String {
+    let Some(manifest) = root_module
+        .canonicalize()
+        .ok()
+        .and_then(|root| find_nearest_manifest(&root))
+    else {
+        return "no-manifest".to_string();
+    };
+    let mut builder = PackageGraphBuilder::default();
+    let root_name = match builder.visit(&manifest) {
+        Ok(name) => name,
+        Err(message) => return fingerprint(format!("invalid\0{message}").as_bytes()),
+    };
+    let mut material = format!("root\0{root_name}\n");
+    for node in builder.nodes.values() {
+        material.push_str(&format!(
+            "node\0{}\0{}\0{}\0{}\n",
+            node.name,
+            node.manifest_fingerprint,
+            node.content_fingerprint,
+            node.capability_requests.join(",")
+        ));
+        for dep in &node.dependencies {
+            material.push_str(&format!(
+                "dep\0{}\0{}\0{}\0{:?}\0{:?}\n",
+                dep.alias,
+                dep.package_name,
+                dep.local_path,
+                dep.expected_manifest_fingerprint,
+                dep.expected_content_fingerprint
+            ));
+        }
+    }
+    fingerprint(material.as_bytes())
+}
+
 fn manifest_fingerprint(path: &Path) -> Result<String, String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read '{}': {error}", path.display()))?;
@@ -2958,7 +3022,7 @@ dep math math ../math
     // reset_declared_dependency_graph_cache correctly re-enables detection, mirroring
     // DL-020's proof for the sibling pinned-content cache.
     #[test]
-    fn admit_package_entry_module_declared_dependency_graph_cache_is_resettable() {
+    fn admit_package_entry_module_revalidates_declared_graph_each_public_operation() {
         let dir = mk_temp_dir("pkg_admit_dep_graph_cache");
         let app_src = dir.join("app").join("src");
         let math_src = dir.join("math").join("src");
@@ -2986,13 +3050,10 @@ dep math math ../math
 
         let _ = std::fs::remove_dir_all(dir.join("math"));
 
-        admit_package_entry_module(&second_entry)
-            .expect("second admission must succeed from the cache despite the removed dependency")
-            .expect("manifest must exist");
-
-        reset_declared_dependency_graph_cache();
+        // #1776: a second public admission is a new operation; its trust
+        // evidence must be fresh without any caller reset ritual.
         let err = admit_package_entry_module(&second_entry)
-            .expect_err("after reset, the missing dependency must be re-detected");
+            .expect_err("a later public admission must re-detect the removed dependency");
         assert_eq!(
             err.code,
             PackageModuleAdmissionCode::DeclaredDependencyGraphInvalid
@@ -3261,7 +3322,7 @@ module_root src
     // is NOT caught by a second resolution against the same cache), and reset correctly
     // re-enables detection (DL-020).
     #[test]
-    fn resolve_package_import_path_caches_pinned_dependency_content_verification() {
+    fn resolve_package_import_path_revalidates_pins_each_public_operation() {
         let dir = mk_temp_dir("pkg_import_pinned_cache");
         let app_src = dir.join("app").join("src");
         let math_src = dir.join("math").join("src");
@@ -3303,20 +3364,71 @@ module_root src
         )
         .expect("tamper dep content without updating the pin");
 
-        resolve_package_import_path(&importer, "math::core.sm").expect(
-            "second resolution must succeed from the cache despite the tampered content \
-             -- this is the caching behavior under test, not a security hole: the pin was \
-             already verified once this pass",
-        );
-
-        reset_pinned_dependency_fingerprint_cache();
+        // #1776: a second public resolution is a new operation; its pin
+        // evidence must be fresh without any caller reset ritual.
         let err = resolve_package_import_path(&importer, "math::core.sm")
-            .expect_err("after an explicit reset, the tampered content must be re-detected");
+            .expect_err("a later public resolution must re-detect the tampered content");
         assert_eq!(
             err.code,
             PackageImportResolutionCode::DependencyContentFingerprintMismatch
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn admission_pass_reuses_pin_evidence_only_inside_one_pass() {
+        let dir = mk_temp_dir("pkg_import_pinned_pass");
+        let app_src = dir.join("app").join("src");
+        let math_src = dir.join("math").join("src");
+        std::fs::create_dir_all(&app_src).expect("mkdir app src");
+        std::fs::create_dir_all(&math_src).expect("mkdir math src");
+        let math_manifest_path = dir.join("math").join(PACKAGE_MANIFEST_FILE_NAME);
+        std::fs::write(
+            &math_manifest_path,
+            "format 1\npackage math\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write math manifest");
+        std::fs::write(math_src.join("core.sm"), "fn core() { return; }\n")
+            .expect("write dep content");
+
+        let manifest_fp = manifest_fingerprint(&math_manifest_path).expect("manifest fp");
+        let content_fp =
+            package_content_fingerprint(&math_src, &math_manifest_path).expect("content fp");
+        std::fs::write(
+            dir.join("app").join(PACKAGE_MANIFEST_FILE_NAME),
+            format!(
+                "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep math math ../math {manifest_fp} {content_fp}\n"
+            ),
+        )
+        .expect("write app manifest");
+        let importer = app_src.join("main.sm");
+        std::fs::write(
+            &importer,
+            "Import \"math::core.sm\"\nfn main() { return; }\n",
+        )
+        .expect("write importer");
+
+        {
+            // One operation: nested public calls share the enclosing pass, so
+            // the pin is hashed once and reused (DL-020 performance property).
+            let _pass = AdmissionPass::begin();
+            resolve_package_import_path(&importer, "math::core.sm").expect("first in pass");
+            std::fs::write(
+                math_src.join("core.sm"),
+                "fn core() { return; } // tampered\n",
+            )
+            .expect("tamper dep content");
+            resolve_package_import_path(&importer, "math::core.sm")
+                .expect("same pass reuses the evidence it already verified");
+        }
+        // The pass has ended: the next operation must not inherit its evidence.
+        let err = resolve_package_import_path(&importer, "math::core.sm")
+            .expect_err("a new operation re-verifies the pin");
+        assert_eq!(
+            err.code,
+            PackageImportResolutionCode::DependencyContentFingerprintMismatch
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
