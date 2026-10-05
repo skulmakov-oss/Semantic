@@ -562,7 +562,13 @@ impl<'a> HelloObservationRuntime<'a> {
             text,
             sequence_index: HelloObservationSequenceIndex(self.sequence_index),
         };
-        self.sequence_index += 1;
+        // #1766: the VM is the only sequence authority. Progression is checked
+        // so an exhausted index space fails closed before the event is
+        // delivered, never wrapping to 0 or reusing an index.
+        self.sequence_index = self
+            .sequence_index
+            .checked_add(1)
+            .ok_or(RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))?;
         if let HelloObservationMode::Collect(events) = &mut self.mode {
             events.push(event);
         }
@@ -1002,7 +1008,7 @@ pub fn run_verified_function_semcode_with_args_and_config(
     // Argument validation happens inside `push_frame` itself (#1773 /
     // FA-09-005) - see `validate_call_arguments`'s doc comment.
     push_frame(&mut vm, func_name, args, None)?;
-    let mut host = LegacyVmHost;
+    let mut host = UnavailableVmHost;
     let mut observation = HelloObservationRuntime::discard();
     exec_loop(&mut vm, &mut host, &mut observation)
 }
@@ -1095,7 +1101,7 @@ fn run_vm_program_view_with_entry_and_config_with_observation_runtime<'a>(
         prng_state: 0,
     };
     push_frame(&mut vm, entry, Vec::new(), None)?;
-    let mut host = LegacyVmHost;
+    let mut host = UnavailableVmHost;
     exec_loop(&mut vm, &mut host, &mut observation)?;
     match observation.mode {
         HelloObservationMode::Discard => Ok(Vec::new()),
@@ -1769,11 +1775,15 @@ fn unavailable_host_call(call: HostCallId) -> RuntimeError {
     ))
 }
 
-struct LegacyVmHost;
+/// #1769 (FA-09-001): the host of every public no-host execution route. A
+/// caller that supplied no host boundary gave the VM no authority to invent
+/// host semantics, so each host/effect operation fails closed with its exact
+/// `HostCallId` instead of returning a synthetic value or a no-op success.
+struct UnavailableVmHost;
 
-impl VmHostBridge for LegacyVmHost {
-    fn gate_read(&mut self, device_id: u16, port: u16) -> Result<Value, RuntimeError> {
-        Ok(Value::I32(((device_id as i32) << 16) | (port as i32)))
+impl VmHostBridge for UnavailableVmHost {
+    fn gate_read(&mut self, _device_id: u16, _port: u16) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::GateRead))
     }
 
     fn gate_write(
@@ -1782,27 +1792,27 @@ impl VmHostBridge for LegacyVmHost {
         _port: u16,
         _value: Value,
     ) -> Result<(), RuntimeError> {
-        Ok(())
+        Err(unavailable_host_call(HostCallId::GateWrite))
     }
 
     fn pulse_emit(&mut self, _signal: &str) -> Result<(), RuntimeError> {
-        Ok(())
+        Err(unavailable_host_call(HostCallId::PulseEmit))
     }
 
-    fn state_query(&mut self, key: &str) -> Result<Value, RuntimeError> {
-        Ok(Value::I32(stable_state_query_fallback(key)))
+    fn state_query(&mut self, _key: &str) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::StateQuery))
     }
 
     fn state_update(&mut self, _key: &str, _value: Value) -> Result<(), RuntimeError> {
-        Ok(())
+        Err(unavailable_host_call(HostCallId::StateUpdate))
     }
 
     fn event_post(&mut self, _signal: &str) -> Result<(), RuntimeError> {
-        Ok(())
+        Err(unavailable_host_call(HostCallId::EventPost))
     }
 
     fn clock_read(&mut self) -> Result<Value, RuntimeError> {
-        Ok(Value::U32(0))
+        Err(unavailable_host_call(HostCallId::ClockRead))
     }
 }
 
@@ -3017,12 +3027,6 @@ fn value_from_abi(value: AbiValue, call: HostCallId) -> Result<Value, RuntimeErr
         AbiValue::Fx(v) => Ok(Value::Fx(v)),
         AbiValue::Unit => Ok(Value::Unit),
     }
-}
-
-fn stable_state_query_fallback(key: &str) -> i32 {
-    key.bytes().fold(0i32, |acc, byte| {
-        acc.wrapping_mul(31).wrapping_add(i32::from(byte))
-    })
 }
 
 /// The executable runtime family a `Value` actually belongs to (#1773 /
@@ -6425,7 +6429,7 @@ mod tests {
             prng_state: 0,
         };
         let result = push_frame(&mut vm, "main", Vec::new(), None).and_then(|()| {
-            let mut host = LegacyVmHost;
+            let mut host = UnavailableVmHost;
             let mut observation = HelloObservationRuntime::discard();
             exec_loop(&mut vm, &mut host, &mut observation).map(|_| ())
         });
@@ -7251,7 +7255,7 @@ mod tests {
             prng_state: 0,
         };
         push_frame(&mut vm, entry, args, None)?;
-        let mut host = LegacyVmHost;
+        let mut host = UnavailableVmHost;
         let mut observation = HelloObservationRuntime::discard();
         exec_loop(&mut vm, &mut host, &mut observation)
     }
@@ -8260,7 +8264,7 @@ mod tests {
     fn vm_builtin_print_rejects_non_text_values_without_implicit_conversion() {
         let mut observation = HelloObservationRuntime::discard();
 
-        let mut host = LegacyVmHost;
+        let mut host = UnavailableVmHost;
         let err = try_eval_builtin_call(&mut host, &mut observation, "print", &[Value::I32(10)])
             .expect_err("i32 must fail");
         assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
@@ -9547,5 +9551,43 @@ mod tests {
             }
             other => panic!("expected RuntimeError::HostAbi, got {other:?}"),
         }
+    }
+
+    // #1766: the VM is the only observation sequence authority.
+    #[test]
+    fn pb06_observation_indexes_are_contiguous_in_collect_and_discard_modes() {
+        let mut events = Vec::new();
+        let mut collect = HelloObservationRuntime::collect(&mut events);
+        for i in 0..5 {
+            collect
+                .record_controlled_text_observation(format!("event {i}"))
+                .expect("record");
+        }
+        let mut discard = HelloObservationRuntime::discard();
+        for _ in 0..5 {
+            discard
+                .record_controlled_text_observation("x".to_string())
+                .expect("record");
+        }
+        assert_eq!(discard.sequence_index, 5, "discard mode follows the same sequence");
+        let indexes: Vec<u64> = events.iter().map(|e| e.sequence_index.0).collect();
+        assert_eq!(indexes, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn pb06_observation_sequence_exhaustion_fails_closed_without_wrap() {
+        let mut events = Vec::new();
+        let mut runtime = HelloObservationRuntime::collect(&mut events);
+        runtime.sequence_index = u64::MAX - 1;
+        runtime
+            .record_controlled_text_observation("last".to_string())
+            .expect("index u64::MAX - 1 is still representable");
+        let err = runtime
+            .record_controlled_text_observation("overflow".to_string())
+            .expect_err("index space exhausted");
+        assert_eq!(err, RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow));
+        assert_eq!(runtime.sequence_index, u64::MAX, "no wrap to 0");
+        let indexes: Vec<u64> = events.iter().map(|e| e.sequence_index.0).collect();
+        assert_eq!(indexes, vec![u64::MAX - 1], "the failed observation was not delivered");
     }
 }
