@@ -18,7 +18,9 @@ use sm_emit::hello_real_semcode::{
 use sm_front::hello_parser::parse_hello_file;
 use sm_front::hello_sema::validate_hello_file;
 use sm_ir::hello_ir::lower_hello_checked_file;
-use sm_runtime_core::hello_observation_route::{
+#[path = "support/hello_test_route.rs"]
+mod hello_test_route;
+use hello_test_route::{
     route_hello_observation_to_sink, HelloObservationRouteInput, HelloObservationRouteResult,
 };
 use sm_runtime_core::hello_observation_sink::{
@@ -223,7 +225,6 @@ fn canonical_cli_smoke_pipeline() -> HelloCliSmokeAcceptedDetails {
     let mut sink = InMemorySink::default();
     let route_result = route_hello_observation_to_sink(
         HelloObservationRouteInput {
-            admitted: true,
             text: route_text.clone(),
             sequence_index: HelloObservationSequenceIndex(0),
         },
@@ -313,7 +314,6 @@ fn classify_cli_smoke_fixture(rel: &str) -> HelloCliSmokeHarnessResult {
     let mut sink = InMemorySink::default();
     let route_result = route_hello_observation_to_sink(
         HelloObservationRouteInput {
-            admitted: true,
             text: runtime_text_from_literal(canonical_observation_literal(&semcode)),
             sequence_index: HelloObservationSequenceIndex(0),
         },

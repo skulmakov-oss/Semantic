@@ -5,7 +5,9 @@ use prom_audit::hello_observation_audit::{
     HelloObservationAuditEventKind, HelloObservationAuditLinkage, HelloObservationAuditPayloadRef,
     HelloObservationAuditPolicyClass,
 };
-use sm_runtime_core::hello_observation_route::{
+#[path = "support/hello_test_route.rs"]
+mod hello_test_route;
+use hello_test_route::{
     route_hello_observation_to_sink, HelloObservationRouteError, HelloObservationRouteInput,
     HelloObservationRouteResult,
 };
@@ -47,14 +49,12 @@ fn deterministic_text_hash(text: &str, sequence_index: u64) -> u64 {
 }
 
 fn route_with_sink(
-    admitted: bool,
     text: &str,
     sequence_index: u64,
     sink: &mut InMemorySink,
 ) -> HelloObservationRouteResult {
     route_hello_observation_to_sink(
         HelloObservationRouteInput {
-            admitted,
             text: text.to_string(),
             sequence_index: HelloObservationSequenceIndex(sequence_index),
         },
@@ -90,7 +90,7 @@ fn audit_after_route(
 #[test]
 fn hello_observation_audit_decision_records_required_routed_observation() {
     let mut sink = InMemorySink::default();
-    let route_result = route_with_sink(true, "Hello, World!", 0, &mut sink);
+    let route_result = route_with_sink("Hello, World!", 0, &mut sink);
     assert_eq!(route_result, HelloObservationRouteResult::Routed);
     assert_eq!(sink.events.len(), 1);
     let event = &sink.events[0];
@@ -153,7 +153,7 @@ fn hello_observation_audit_decision_records_required_routed_observation() {
 #[test]
 fn hello_observation_audit_decision_deferred_stays_local() {
     let mut sink = InMemorySink::default();
-    let route_result = route_with_sink(true, "Hello, World!", 0, &mut sink);
+    let route_result = route_with_sink("Hello, World!", 0, &mut sink);
     assert_eq!(route_result, HelloObservationRouteResult::Routed);
 
     let decision = audit_after_route(
@@ -176,28 +176,8 @@ fn hello_observation_audit_decision_deferred_stays_local() {
 fn hello_observation_audit_decision_does_not_record_for_not_routed_variants() {
     let mut sink = InMemorySink::default();
 
-    let not_admitted = route_with_sink(false, "Hello, World!", 0, &mut sink);
-    assert_eq!(
-        not_admitted,
-        HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NotAdmitted)
-    );
-    assert_eq!(
-        audit_after_route(
-            not_admitted,
-            "Hello, World!",
-            0,
-            HelloObservationAuditPolicyClass::Required,
-            HelloObservationAuditLinkage {
-                verifier_admission_ref: None,
-                capability_policy_ref: None,
-                sink_policy_ref: None,
-            },
-        ),
-        HelloObservationAuditDecision::NotRecorded("route_not_routed")
-    );
-
     for forbidden in ["stdout", "print", "io.write", "file", "network", "stdin"] {
-        let route_result = route_with_sink(true, forbidden, 1, &mut sink);
+        let route_result = route_with_sink(forbidden, 1, &mut sink);
         assert_eq!(
             route_result,
             HelloObservationRouteResult::NotRouted(HelloObservationRouteError::ForbiddenHostOutput)
@@ -219,7 +199,6 @@ fn hello_observation_audit_decision_does_not_record_for_not_routed_variants() {
     }
 
     let sink_rejected = route_with_sink(
-        true,
         "Hello, World!",
         2,
         &mut InMemorySink {
@@ -246,7 +225,7 @@ fn hello_observation_audit_decision_does_not_record_for_not_routed_variants() {
         HelloObservationAuditDecision::NotRecorded("route_not_routed")
     );
 
-    let non_controlled = route_with_sink(true, "Not Hello", 3, &mut sink);
+    let non_controlled = route_with_sink("Not Hello", 3, &mut sink);
     assert_eq!(
         non_controlled,
         HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NonControlledText)

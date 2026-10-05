@@ -38,10 +38,13 @@ struct InMemoryHelloObservationSink {
 
 impl HelloObservationSink for InMemoryHelloObservationSink {
     fn observe(&mut self, event: HelloObservationEvent) -> Result<(), HelloObservationSinkError> {
-        let expected_index = self.events.len() as u64;
-        if event.sequence_index.0 != expected_index {
-            return Err(HelloObservationSinkError::NondeterministicOrder);
-        }
+        // The VM is the sequence authority (#1766); this harness only checks
+        // that it received the contiguous order it was given.
+        assert_eq!(
+            event.sequence_index.0,
+            self.events.len() as u64,
+            "harness events must arrive in VM sequence order"
+        );
         self.events.push(event);
         Ok(())
     }

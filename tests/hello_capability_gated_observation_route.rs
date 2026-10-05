@@ -4,7 +4,9 @@ use prom_cap::hello_observation_capability::{
     evaluate_hello_observation_capability, HelloObservationCapabilityContext,
     HelloObservationCapabilityDecision, HelloObservationCapabilityDenial,
 };
-use sm_runtime_core::hello_observation_route::{
+#[path = "support/hello_test_route.rs"]
+mod hello_test_route;
+use hello_test_route::{
     route_hello_observation_to_sink, HelloObservationRouteError, HelloObservationRouteInput,
     HelloObservationRouteResult,
 };
@@ -64,22 +66,18 @@ fn allowed_capability_context() -> HelloObservationCapabilityContext {
     }
 }
 
-fn admitted_route_input() -> HelloObservationRouteInput {
+fn hello_route_input() -> HelloObservationRouteInput {
     HelloObservationRouteInput {
-        admitted: true,
         text: "Hello, World!".to_string(),
         sequence_index: HelloObservationSequenceIndex(0),
     }
 }
 
 #[test]
-fn hello_capability_gated_route_routes_admitted_hello_only_after_allow() {
+fn hello_capability_gated_route_routes_hello_only_after_allow() {
     let mut sink = InMemorySink::default();
-    let result = capability_gate_then_route(
-        allowed_capability_context(),
-        admitted_route_input(),
-        &mut sink,
-    );
+    let result =
+        capability_gate_then_route(allowed_capability_context(), hello_route_input(), &mut sink);
 
     assert!(matches!(result, CapabilityGatedRouteResult::Routed));
     assert_eq!(sink.events.len(), 1);
@@ -162,7 +160,7 @@ fn hello_capability_gated_route_denies_before_route_when_capability_denied() {
         ),
     ] {
         let mut sink = InMemorySink::default();
-        let result = capability_gate_then_route(context, admitted_route_input(), &mut sink);
+        let result = capability_gate_then_route(context, hello_route_input(), &mut sink);
         assert_eq!(
             result,
             CapabilityGatedRouteResult::CapabilityDenied(expected_reason)
@@ -172,26 +170,13 @@ fn hello_capability_gated_route_denies_before_route_when_capability_denied() {
 }
 
 #[test]
-fn hello_capability_gated_route_respects_route_rejection_and_non_admitted_inputs() {
+fn hello_capability_gated_route_respects_route_rejection() {
     let mut sink = InMemorySink::default();
-
-    let not_admitted = HelloObservationRouteInput {
-        admitted: false,
-        text: "Hello, World!".to_string(),
-        sequence_index: HelloObservationSequenceIndex(1),
-    };
-    let result = capability_gate_then_route(allowed_capability_context(), not_admitted, &mut sink);
-    assert!(matches!(
-        result,
-        CapabilityGatedRouteResult::RouteDenied(HelloObservationRouteError::NotAdmitted)
-    ));
-    assert!(sink.events.is_empty());
 
     for forbidden in ["stdout", "print", "io.write", "file", "network", "stdin"] {
         let result = capability_gate_then_route(
             allowed_capability_context(),
             HelloObservationRouteInput {
-                admitted: true,
                 text: forbidden.to_string(),
                 sequence_index: HelloObservationSequenceIndex(2),
             },
@@ -208,7 +193,6 @@ fn hello_capability_gated_route_respects_route_rejection_and_non_admitted_inputs
     let non_controlled = capability_gate_then_route(
         allowed_capability_context(),
         HelloObservationRouteInput {
-            admitted: true,
             text: "Not Hello".to_string(),
             sequence_index: HelloObservationSequenceIndex(3),
         },
