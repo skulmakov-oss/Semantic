@@ -48,8 +48,7 @@ fn runtime_validation_matrix_core_flow_is_deterministic_and_owner_clean() {
     let mut binding = DeterministicGateMock::new();
     binding.seed_read(GateId::new(7, 3), AbiValue::I32(41));
 
-    let mut session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata.clone());
+    let mut session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
     assert_eq!(session.descriptor().context, ExecutionContext::KernelBound);
     assert!(session.descriptor().gate_registry_bound);
     assert_eq!(session.descriptor().capability_manifest, metadata);

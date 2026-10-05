@@ -126,12 +126,7 @@ fn render_gate_write_denial_baseline() -> String {
     let manifest = CapabilityManifest::gate_surface();
 
     let err = {
-        let mut session = GateExecutionSession::kernel_bound(
-            &registry,
-            &mut binding,
-            &manifest,
-            manifest.metadata(),
-        );
+        let mut session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
         session
             .run_verified_semcode(&bytes)
             .expect_err("read-only gate write must fail")
@@ -159,8 +154,7 @@ fn render_state_validation_rejection_baseline() -> String {
     let mut binding = DeterministicGateMock::new();
     binding.seed_read(GateId::new(7, 4), AbiValue::I32(1));
 
-    let session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata.clone());
+    let session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
     let mut state = SemanticStateStore::new();
     let mut rules = RuleEngine::new();
     rules

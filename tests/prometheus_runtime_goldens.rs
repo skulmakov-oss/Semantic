@@ -71,12 +71,10 @@ fn render_runtime_baseline() -> String {
         .expect("register write gate");
 
     let manifest = CapabilityManifest::gate_surface();
-    let metadata = manifest.metadata();
     let mut binding = DeterministicGateMock::new();
     binding.seed_read(GateId::new(7, 3), AbiValue::I32(41));
 
-    let mut session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata.clone());
+    let mut session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
 
     let mut state = SemanticStateStore::new();
     let mut rules = RuleEngine::new();
