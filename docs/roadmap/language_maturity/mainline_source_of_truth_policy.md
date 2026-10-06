@@ -13,7 +13,8 @@ second source of truth.
 
 ## Canonical Working Rule
 
-For current post-`v1.1.1` development, the only active source of truth is:
+For current development (post-C1, after the `v1.2.0` Stable Foundation
+release), the only active source of truth is:
 
 - clean `main`
 - in the canonical working repository
@@ -21,7 +22,7 @@ For current post-`v1.1.1` development, the only active source of truth is:
 
 In the current setup, that means:
 
-- repository: `EXOcode_schema_clean`
+- repository: `skulmakov-oss/Semantic`
 - branch: `main`
 
 ## What This Means In Practice
@@ -50,6 +51,7 @@ This policy does not:
 
 - delete historical branches
 - forbid temporary worktrees for verification
-- claim that published `v1.1.1` and current `main` are the same contract
+- claim that the published `v1.2.0` release (C1) and current `main` are the
+  same contract
 
 It only fixes the active engineering baseline for new work.

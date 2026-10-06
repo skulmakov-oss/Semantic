@@ -193,10 +193,29 @@ Semantic uses four explicit status families. These must not be blurred together.
 | **Landed on current `main`, not yet promised** | Implemented or benchmark-qualified, but not promoted into the stable or qualified release promise. |
 | **Out of scope** | Deliberately excluded from the current release contour. |
 
-There is no currently evidenced published stable line. The `v1.1.1` git tag
-remains an unresolved stable-tag checkpoint: its own version-cut decision left
-exact-tag downloaded-asset smoke blocking, and no corresponding GitHub Release
-exists.
+`v1.2.0` is the published stable release: **Semantic v1.2.0 — Stable
+Foundation Release**, published on 2026-10-04 from qualified candidate C1
+`89641da8237f4fcefb50cf1958a50e4d4003aea7` (`v1.2.0^{}` dereferences to C1).
+
+- Foundation Oracle Verdict: `ORACLE QUALIFIED WITH EXPLICIT LIMITS`
+- Stable Foundation Promotion Decision: `PROMOTE WITH EXPLICIT LIMITS`
+- release contour: the Stable Foundation contour in `reports/semantic_stable_foundation_final_verdict.md` (section 6)
+- platform: Windows x64 (`x86_64-pc-windows-msvc`) only; Linux and macOS
+  release binaries are outside the v1.2.0 contour
+- artifact trust: assets are explicitly unsigned; trust is bound to the
+  published SHA-256 digests
+- explicit limits: R1 (Quad helper predicates `known`/`unknown`/`conflict`
+  are rejected), R2 (string literals do not process escapes), R3 (generic
+  rejection has no stable diagnostic code), R4 (host paths appear in
+  diagnostics), and `std.serde` (G-08) is not applicable / excluded
+
+Current `main` is development beyond C1 (including the later Phase-B and
+residual hardening). It is not the v1.2.0 release and is not qualified as any
+new release; nothing landed after C1 widens the v1.2.0 promise.
+
+History: the earlier `v1.1.1` tag remains an unresolved stable-tag checkpoint
+(no GitHub Release), and `v1.2.0-beta.1` was the prerelease that preceded the
+Stable Foundation release.
 
 The key rule is:
 

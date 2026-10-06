@@ -572,15 +572,16 @@ Semantic uses four explicit status classes:
 
 Current repository posture:
 
-- there is no currently evidenced Published Stable feature line;
+- `v1.2.0` is the published Stable Foundation release (qualified candidate C1, Windows x64 only, with explicit limits);
+- current `main` is development beyond C1 and is not itself a release;
 - a bounded practical programming contour is Qualified Limited Release;
 - current `main` contains substantially more implementation than that qualified contour;
 - those additional features remain landed on `main`, not yet promised until explicitly promoted;
 - Semantic is not presented as production-ready or as a complete general-purpose ecosystem.
 
-Current prerelease:
+Published stable release:
 
-`v1.2.0-beta.1`
+`v1.2.0` — Semantic v1.2.0, Stable Foundation Release (C1 `89641da8237f4fcefb50cf1958a50e4d4003aea7`). See [`reports/semantic_stable_foundation_final_verdict.md`](reports/semantic_stable_foundation_final_verdict.md) for its contour and explicit limits.
 
 For exact status, do not infer from this README alone.
 
@@ -595,11 +596,11 @@ Read:
 
 ## Current Engineering Direction
 
-The active program is the Semantic Stable Foundation.
+The Semantic Stable Foundation program is complete: it was qualified and promoted at C1 and published as `v1.2.0`. Work on current `main` after C1 (including the Phase-B trust hardening) is post-C1 development history and does not widen the `v1.2.0` promise.
 
-Its purpose is not to rapidly add syntax.
+The Foundation's purpose was not to rapidly add syntax.
 
-Its purpose is to reconcile and harden the contracts already present across:
+Its purpose was to reconcile and harden the contracts already present across:
 
 ```text
 source
@@ -614,7 +615,7 @@ source
 → qualification
 ```
 
-Current work is focused on closing inconsistencies before later compatibility, migration, self-hosting, and wider ecosystem work build on top of them.
+That foundation-first work is what later compatibility, migration, self-hosting, and wider ecosystem work build on.
 
 The roadmap is intentionally sequential: foundation first, widening later.
 

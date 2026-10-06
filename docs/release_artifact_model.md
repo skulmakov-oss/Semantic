@@ -23,18 +23,46 @@ This document answers four release-facing questions explicitly:
 - what is promised by those artifacts
 - what is not yet promised even if it exists on current `main`
 
-## Stable-Tag Checkpoint Artifact Set
+## Published Stable Artifact Set (`v1.2.0`)
 
-There is no currently evidenced published stable line. The `v1.1.1` git tag
-remains an unresolved stable-tag checkpoint: its own version-cut decision left
-exact-tag downloaded-asset smoke blocking, and no corresponding GitHub Release
-exists. It must not be described as a published stable release.
+`v1.2.0` is the published stable release: **Semantic v1.2.0 — Stable
+Foundation Release**, published on 2026-10-04 from qualified candidate C1
+`89641da8237f4fcefb50cf1958a50e4d4003aea7` (`v1.2.0^{}` dereferences to C1).
 
-The new prerelease candidate is:
+- Foundation Oracle Verdict: `ORACLE QUALIFIED WITH EXPLICIT LIMITS`
+- Stable Foundation Promotion Decision: `PROMOTE WITH EXPLICIT LIMITS`
+- release contour: the Stable Foundation contour in `reports/semantic_stable_foundation_final_verdict.md` (section 6)
+- platform: Windows x64 (`x86_64-pc-windows-msvc`) only; Linux and macOS
+  release binaries are outside the v1.2.0 contour
+- artifact trust: assets are explicitly unsigned; trust is bound to the
+  published SHA-256 digests
+- explicit limits: R1 (Quad helper predicates `known`/`unknown`/`conflict`
+  are rejected), R2 (string literals do not process escapes), R3 (generic
+  rejection has no stable diagnostic code), R4 (host paths appear in
+  diagnostics), and `std.serde` (G-08) is not applicable / excluded
 
-- `v1.2.0-beta.1`
+Current `main` is development beyond C1 (including the later Phase-B and
+residual hardening). It is not the v1.2.0 release and is not qualified as any
+new release; nothing landed after C1 widens the v1.2.0 promise.
 
-The downloadable artifacts prepared for the `v1.1.1` checkpoint are:
+History: the earlier `v1.1.1` tag remains an unresolved stable-tag checkpoint
+(no GitHub Release), and `v1.2.0-beta.1` was the prerelease that preceded the
+Stable Foundation release.
+
+The published `v1.2.0` assets are (digests from `reports/semantic_stable_foundation_final_verdict.md`, sections 26-27):
+
+| Artifact | Kind | Platform scope | SHA-256 |
+| --- | --- | --- | --- |
+| `smc.exe` | standalone executable (compiler / CLI) | Windows x64 | `e2e81709b5b050d06b81bf88d26d6472f6228f0ab1d26e82afdea3a25b82c75a` |
+| `svm.exe` | standalone executable (SemCode VM / disassembler) | Windows x64 | `9d871a6ff2654d00fe8b5102c9aad426d2ffbd1beeea44e7cbf9fa982e12b4bf` |
+| `semantic-language-windows-x64-v1.2.0.zip` | packaged archive of the tool pair | Windows x64 | `97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17` |
+| `semantic-language-windows-x64-v1.2.0-candidate.zip` | qualification-candidate archive (same digest) | Windows x64 | `97c964c9665343cf0378fd672accca99eae38a7adbb1df0333447781871e4a17` |
+
+## Historical `v1.1.1` Checkpoint Artifact Set
+
+The following describes the earlier `v1.1.1` stable-tag checkpoint, kept as
+history. It was never a published stable release. The downloadable artifacts
+prepared for that checkpoint were:
 
 | Artifact | Kind | Platform scope | Role | Validation basis |
 | --- | --- | --- | --- | --- |
@@ -44,10 +72,9 @@ The downloadable artifacts prepared for the `v1.1.1` checkpoint are:
 
 ## Supported Platform Scope
 
-If and when a stable line is published, the downloadable artifact promise is
-scoped to:
+The published `v1.2.0` downloadable artifact promise is scoped to:
 
-- Windows x64 only
+- Windows x64 only (`x86_64-pc-windows-msvc`)
 
 This document does not promise:
 
@@ -60,7 +87,11 @@ the same thing as a published binary-artifact promise.
 
 ## What A User Downloads
 
-For the `v1.1.1` stable-tag checkpoint today (not published stable):
+For the published `v1.2.0` release, download the assets listed in the
+published stable artifact set above and verify them against their SHA-256
+digests.
+
+For the historical `v1.1.1` stable-tag checkpoint (not published stable):
 
 - download `smc.exe` when the standalone compiler / CLI entrypoint is needed
 - download `svm.exe` when the standalone VM / disassembler is needed
@@ -120,10 +151,11 @@ Release artifacts (`smc.exe`, `svm.exe`, and release zip archives) follow an exp
 
 ## What Is Not Yet Promised
 
-The following must not be inferred from the current `v1.1.1` checkpoint
-artifacts:
+The following must not be inferred from the published `v1.2.0` artifacts or
+the historical `v1.1.1` checkpoint artifacts:
 
-- a published stable line (none currently evidenced)
+- any promise beyond the `v1.2.0` Stable Foundation contour and its explicit
+  limits
 - landed-on-`main` widenings that are not explicitly promoted
 - broader practical-programming scope beyond the current qualified contour
 - broader executable-module authoring beyond the currently qualified slice

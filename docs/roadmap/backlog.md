@@ -12,9 +12,10 @@ reading, and current-`main` reality aligned without silent scope widening.
 
 ## Current Release-Control Wave
 
-- keep the stable-line reading honest: there is no currently evidenced
-  published stable line, and the `v1.1.1` tag remains an unresolved
-  stable-tag checkpoint (`docs/roadmap/v1_readiness.md`)
+- keep the stable-line reading honest: `v1.2.0` is the published Stable
+  Foundation release at C1 with explicit limits, current `main` is development
+  beyond C1, and the historical `v1.1.1` tag remains an unresolved stable-tag
+  checkpoint (`docs/roadmap/v1_readiness.md`)
 - keep the current practical-programming verdict honest:
   `qualified limited release`, not `public release`
 - keep current-`main` landed widenings described as landed, not silently

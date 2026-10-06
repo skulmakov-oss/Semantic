@@ -36,9 +36,13 @@ spelling.
 
 ## Current top-level posture
 
-- No feature currently meets the matrix's **Published stable** evidence test:
-  `v1.1.1` is a git tag whose own checkpoint left exact-tag asset smoke
-  blocking, and no corresponding GitHub Release exists.
+- **Published stable** is `v1.2.0`, the Stable Foundation release at
+  qualified candidate C1 (`89641da8237f4fcefb50cf1958a50e4d4003aea7`), Windows
+  x64 only, within its explicit limits (R1-R4; `std.serde` excluded). Its
+  contour is section 6 of `reports/semantic_stable_foundation_final_verdict.md`;
+  this matrix's per-feature rows are not re-graded by this note. The earlier
+  `v1.1.1` tag remains a historical unresolved checkpoint.
+- Current `main` is development beyond C1 and is not itself a release.
 - The bounded Gate 1 contour remains **Qualified limited release**.
 - Current `main` contains wider qualified and unqualified implementation that
   remains unpromoted.

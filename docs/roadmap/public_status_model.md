@@ -247,7 +247,7 @@ Qualification reports should:
 
 When in doubt, prefer explicit wording such as:
 
-- `published stable v1.1.1`
+- `published stable v1.2.0`
 - `qualified for limited release`
 - `landed on current main, not yet promised`
 - `explicitly out of scope`

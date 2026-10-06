@@ -19,8 +19,9 @@ Milestones:
 Current post-stable focus:
 
 - keep the stable-line reading honest while current `main` moves forward
-  (`v1.1.1` is an unresolved stable-tag checkpoint, not an evidenced published
-  stable line; see `docs/roadmap/v1_readiness.md`)
+  (`v1.2.0` is the published Stable Foundation release at C1; current `main` is
+  development beyond C1; the historical `v1.1.1` tag is an unresolved
+  stable-tag checkpoint; see `docs/roadmap/v1_readiness.md`)
 - treat post-stable widening as explicit tracked streams rather than silent drift
 - keep roadmap/spec/release-facing docs aligned with actual owner layers on `main`
 
