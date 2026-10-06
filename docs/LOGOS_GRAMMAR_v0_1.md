@@ -39,6 +39,10 @@ LogosDecl    = SystemDecl | EntityDecl | LawDecl | ImportDecl | PulseDecl | Prof
 ImportDecl   = "Import" [ "pub" ] ImportSpec [ "as" Ident ] Newline? ;
 ImportSpec   = String | Ident ;
 
+PulseDecl    = "Pulse" OpaqueLine ;
+ProfileDecl  = "Profile" OpaqueLine ;
+OpaqueLine   = { token_except(Newline) } Newline? ;
+
 SystemDecl   = "System" Ident [ "(" ParamList ")" ] [":" ] Newline? ;
 ParamList    = Param { "," Param } ;
 Param        = Ident ("=" | ":=") (Ident | Num | String) ;
@@ -68,6 +72,14 @@ Admission rules (PB-02):
   `LogosProgram::imports` (directive text, byte span and source mark). The
   parser applies no further import grammar; `sm-sema` is the sole owner of
   import semantics and consumes exactly those preserved directives (#1645).
+- `PulseDecl` and `ProfileDecl` are legacy-compatibility-gated,
+  Logos-exclusive directives. Every accepted one is preserved verbatim, in
+  source order, in `LogosProgram::legacy_directives` as an opaque
+  `LogosLegacyDirective` (typed kind, exact text from the keyword to the end
+  of the line excluding the line ending, byte span, source mark). Their
+  payload has no current semantic interpretation, and they take no part in
+  SemCode generation or VM execution (#1987). With legacy compatibility
+  disabled they remain a policy violation.
 
 ## Import v0.1 Policy
 

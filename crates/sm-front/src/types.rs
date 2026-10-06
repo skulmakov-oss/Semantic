@@ -1294,12 +1294,35 @@ pub struct LogosImport {
     pub mark: SourceMark,
 }
 
+/// The family of an opaque legacy Logos directive (FA-02-042 / #1987).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogosLegacyDirectiveKind {
+    Pulse,
+    Profile,
+}
+
+/// FA-02-042 / #1987: an accepted, legacy-compatibility-gated `Pulse` or
+/// `Profile` directive, preserved for inspection instead of being skipped.
+/// It is deliberately opaque: `directive` is the exact source text from the
+/// keyword to the end of its line, and no layer assigns it semantic meaning
+/// or lowers it toward SemCode. Unlike [`LogosImport`], it has no semantic
+/// owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogosLegacyDirective {
+    pub kind: LogosLegacyDirectiveKind,
+    pub directive: String,
+    pub span: core::ops::Range<usize>,
+    pub mark: SourceMark,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LogosProgram {
     pub system: Option<LogosSystem>,
     pub entities: Vec<LogosEntity>,
     pub laws: Vec<LogosLaw>,
     pub imports: Vec<LogosImport>,
+    /// `Pulse`/`Profile` directives in source order (FA-02-042 / #1987).
+    pub legacy_directives: Vec<LogosLegacyDirective>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

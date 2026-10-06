@@ -91,6 +91,15 @@ fn golden_ast_logos() {
     assert_snapshot("tests/golden_snapshots/parser/entity_law.ast", &got);
 }
 
+/// FA-02-042 / #1987: accepted Pulse/Profile lines are visible in the Logos
+/// AST inspection projection next to the shared `Import` directive.
+#[test]
+fn golden_ast_logos_legacy_directives() {
+    let src = read_text("tests/golden_snapshots/parser/legacy_directives.sm");
+    let got = ast_snapshot(&src);
+    assert_snapshot("tests/golden_snapshots/parser/legacy_directives.ast", &got);
+}
+
 #[test]
 fn golden_ir_logos() {
     let src = read_text("tests/golden_snapshots/lowering/priorities.sm");

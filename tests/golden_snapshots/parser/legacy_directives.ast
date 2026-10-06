@@ -9,24 +9,14 @@ LogosProgram {
                     name: "val",
                     ty: Quad,
                     mark: SourceMark {
-                        line: 2,
-                        col: 5,
-                        file_id: 0,
-                    },
-                },
-                LogosEntityField {
-                    kind: Prop,
-                    name: "active",
-                    ty: Bool,
-                    mark: SourceMark {
-                        line: 3,
+                        line: 4,
                         col: 5,
                         file_id: 0,
                     },
                 },
             ],
             mark: SourceMark {
-                line: 1,
+                line: 3,
                 col: 1,
                 file_id: 0,
             },
@@ -41,7 +31,7 @@ LogosProgram {
                     condition: "Sensor . val == T",
                     effect: "Log . emit ( \"Signal OK\" )",
                     mark: SourceMark {
-                        line: 6,
+                        line: 8,
                         col: 5,
                         file_id: 0,
                     },
@@ -74,47 +64,45 @@ LogosProgram {
                         ),
                     ],
                 },
-                LogosWhen {
-                    condition: "Sensor . val == S",
-                    effect: "System . recovery ( )",
-                    mark: SourceMark {
-                        line: 8,
-                        col: 5,
-                        file_id: 0,
-                    },
-                    structure: Compare {
-                        lhs: Field {
-                            entity: "Sensor",
-                            field: "val",
-                        },
-                        op: Eq,
-                        rhs: Quad(
-                            S,
-                        ),
-                    },
-                    condition_atoms: [
-                        Field {
-                            entity: "Sensor",
-                            field: "val",
-                        },
-                        Quad(
-                            S,
-                        ),
-                    ],
-                    effect_atoms: [
-                        Name(
-                            "recovery",
-                        ),
-                    ],
-                },
             ],
             mark: SourceMark {
-                line: 5,
+                line: 7,
                 col: 1,
                 file_id: 0,
             },
         },
     ],
-    imports: [],
-    legacy_directives: [],
+    imports: [
+        LogosImport {
+            directive: "Import \"shared.sm\"",
+            span: 0..18,
+            mark: SourceMark {
+                line: 1,
+                col: 1,
+                file_id: 0,
+            },
+        },
+    ],
+    legacy_directives: [
+        LogosLegacyDirective {
+            kind: Pulse,
+            directive: "Pulse emit = sensor.edge",
+            span: 19..43,
+            mark: SourceMark {
+                line: 2,
+                col: 1,
+                file_id: 0,
+            },
+        },
+        LogosLegacyDirective {
+            kind: Profile,
+            directive: "Profile fast mode",
+            span: 80..97,
+            mark: SourceMark {
+                line: 6,
+                col: 1,
+                file_id: 0,
+            },
+        },
+    ],
 }

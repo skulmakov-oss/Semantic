@@ -5,14 +5,14 @@ use crate::types::{
     ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, FrontendErrorDetail,
     FrontendErrorItem, Function, GrammarAdmission, IfExpr, IfLetExpr, ImplDecl, IntRangePattern,
     IterableLoopDesugaring, LogosAtom, LogosCompareOp, LogosCondition, LogosEntity,
-    LogosEntityField, LogosEntityFieldKind, LogosEvidenceOp, LogosImport, LogosLaw, LogosProgram,
-    LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm, MatchPattern,
-    NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl, RecordField, RecordFieldExpr,
-    RecordInitField, RecordLiteralExpr, RecordPatternItem, RecordPatternTarget, RecordUpdateExpr,
-    SchemaDecl, SchemaField, SchemaRole, SchemaShape, SchemaVariant, SchemaVersion,
-    SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral, SequenceType, Stmt, StmtId,
-    SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind, TraitBound, TraitDecl,
-    TraitMethodSig, TuplePatternItem, Type, UnaryOp,
+    LogosEntityField, LogosEntityFieldKind, LogosEvidenceOp, LogosImport, LogosLaw,
+    LogosLegacyDirective, LogosLegacyDirectiveKind, LogosProgram, LogosSystem, LogosWhen, LoopExpr,
+    MapType, MatchArm, MatchExpr, MatchExprArm, MatchPattern, NumericLiteral, Program, QuadVal,
+    RangeExpr, RecordDecl, RecordField, RecordFieldExpr, RecordInitField, RecordLiteralExpr,
+    RecordPatternItem, RecordPatternTarget, RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole,
+    SchemaShape, SchemaVariant, SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr,
+    SequenceLiteral, SequenceType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token,
+    TokenKind, TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
 };
 use crate::CompilePolicyView;
 use alloc::boxed::Box;
@@ -3502,6 +3502,9 @@ impl<'a> Parser<'a> {
                 )?;
                 if self.check_raw(TokenKind::KwImport) {
                     out.imports.push(self.preserve_logos_import());
+                } else {
+                    out.legacy_directives
+                        .push(self.preserve_logos_legacy_directive());
                 }
                 while !self.check_raw(TokenKind::Newline) && self.idx < self.tokens.len() {
                     self.idx += 1;
@@ -3665,6 +3668,8 @@ impl<'a> Parser<'a> {
                     self.recover_logos_anchor();
                     continue;
                 }
+                out.legacy_directives
+                    .push(self.preserve_logos_legacy_directive());
                 while !self.check_raw(TokenKind::Newline) && self.idx < self.tokens.len() {
                     self.idx += 1;
                 }
@@ -4109,9 +4114,13 @@ impl<'a> Parser<'a> {
     /// FA-02-012 / #1644: a Logos program declares at most one `System`
     /// (`LogosProgram::system` is an `Option`). A second declaration is a
     /// deterministic error, never a last-write-wins replacement.
-    /// FA-02-013 / #1645: called at a `KwImport` token; captures the exact
-    /// directive text (keyword to end of line) without interpreting it.
-    fn preserve_logos_import(&self) -> LogosImport {
+    /// Captures the exact source line of the directive starting at the
+    /// current token: keyword to end of line, excluding the line ending.
+    /// Shared by every preserved Logos directive so all of them keep
+    /// identical text/span semantics.
+    fn capture_logos_directive_line(
+        &self,
+    ) -> (String, core::ops::Range<usize>, ton618_core::SourceMark) {
         let tok = &self.tokens[self.idx];
         let start = tok.pos;
         let mut end = self.source[start..]
@@ -4120,10 +4129,35 @@ impl<'a> Parser<'a> {
         if self.source[..end].ends_with('\r') {
             end -= 1;
         }
+        (self.source[start..end].to_string(), start..end, tok.mark)
+    }
+
+    /// FA-02-013 / #1645: called at a `KwImport` token; captures the exact
+    /// directive text (keyword to end of line) without interpreting it.
+    fn preserve_logos_import(&self) -> LogosImport {
+        let (directive, span, mark) = self.capture_logos_directive_line();
         LogosImport {
-            directive: self.source[start..end].to_string(),
-            span: start..end,
-            mark: tok.mark,
+            directive,
+            span,
+            mark,
+        }
+    }
+
+    /// FA-02-042 / #1987: called at a `KwPulse`/`KwProfile` token. The line
+    /// is preserved verbatim as an opaque inspection node; nothing about it
+    /// is interpreted.
+    fn preserve_logos_legacy_directive(&self) -> LogosLegacyDirective {
+        let kind = if self.check_raw(TokenKind::KwPulse) {
+            LogosLegacyDirectiveKind::Pulse
+        } else {
+            LogosLegacyDirectiveKind::Profile
+        };
+        let (directive, span, mark) = self.capture_logos_directive_line();
+        LogosLegacyDirective {
+            kind,
+            directive,
+            span,
+            mark,
         }
     }
 
@@ -8397,6 +8431,115 @@ mod grammar_admission_tests {
 
     fn admit_logos(src: &str, profile: &ParserProfile) -> GrammarAdmission<LogosProgram> {
         admit_logos_program_with_profile(src, &toks(src), profile)
+    }
+
+    // --- FA-02-042 / #1987: Pulse/Profile are preserved, never dropped ---
+
+    /// Both Logos parse paths must yield the same preserved program.
+    fn fa042_both_paths(src: &str) -> LogosProgram {
+        let profile = ParserProfile::foundation_default();
+        let direct = parse_logos_with_profile(src, &profile).expect("direct parse");
+        match admit_logos(src, &profile) {
+            GrammarAdmission::Exclusive(Ok(admitted)) => {
+                assert_eq!(
+                    admitted, direct,
+                    "admission scan diverged from direct parse"
+                );
+            }
+            other => panic!("expected Exclusive(Ok), got {other:?}"),
+        }
+        direct
+    }
+
+    fn fa042_directive(
+        kind: LogosLegacyDirectiveKind,
+        src: &str,
+        text: &str,
+        line: u32,
+    ) -> LogosLegacyDirective {
+        let start = src.find(text).expect("directive text present");
+        LogosLegacyDirective {
+            kind,
+            directive: text.to_string(),
+            span: start..start + text.len(),
+            mark: ton618_core::SourceMark {
+                line,
+                col: 1,
+                file_id: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn fa042_pulse_and_profile_are_preserved_exactly_and_in_order() {
+        let src = "Pulse emit =  sensor.edge  \nProfile fast mode\nPulse c\n";
+        let program = fa042_both_paths(src);
+        use LogosLegacyDirectiveKind::{Profile, Pulse};
+        assert_eq!(
+            program.legacy_directives,
+            vec![
+                fa042_directive(Pulse, src, "Pulse emit =  sensor.edge  ", 1),
+                fa042_directive(Profile, src, "Profile fast mode", 2),
+                fa042_directive(Pulse, src, "Pulse c", 3),
+            ]
+        );
+        assert!(program.imports.is_empty());
+    }
+
+    #[test]
+    fn fa042_head_only_crlf_and_eof_directives_are_preserved() {
+        let src = "Pulse\r\nProfile b\r\nPulse tail";
+        let program = fa042_both_paths(src);
+        use LogosLegacyDirectiveKind::{Profile, Pulse};
+        assert_eq!(
+            program.legacy_directives,
+            vec![
+                fa042_directive(Pulse, src, "Pulse", 1),
+                fa042_directive(Profile, src, "Profile b", 2),
+                fa042_directive(Pulse, src, "Pulse tail", 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn fa042_directives_coexist_with_declarations_and_imports_stay_separate() {
+        let src = "System Plant(sample_count = 4, state_period = 2):\n\
+                   Import \"a.sm\"\n\
+                   Pulse p\n\
+                   Entity Sensor:\n    state val: quad\n\
+                   Profile q\n\
+                   Law \"L\" [priority 1]:\n    When Sensor.val == T -> System.recovery()\n";
+        let program = fa042_both_paths(src);
+        assert!(program.system.is_some());
+        assert_eq!(program.entities.len(), 1);
+        assert_eq!(program.laws.len(), 1);
+        assert_eq!(program.imports.len(), 1);
+        assert_eq!(program.imports[0].directive, "Import \"a.sm\"");
+        let kinds: Vec<_> = program.legacy_directives.iter().map(|d| d.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                LogosLegacyDirectiveKind::Pulse,
+                LogosLegacyDirectiveKind::Profile
+            ]
+        );
+        assert_eq!(program.legacy_directives[0].directive, "Pulse p");
+        assert_eq!(program.legacy_directives[1].directive, "Profile q");
+    }
+
+    #[test]
+    fn fa042_policy_disabled_directives_still_fail_closed() {
+        let profile = legacy_compatibility_disabled();
+        for src in ["Pulse p\n", "Profile q\n"] {
+            let err = parse_logos_with_profile(src, &profile).expect_err("policy");
+            assert_eq!(err.kind(), FrontendErrorKind::PolicyViolation, "{src}");
+            match admit_logos(src, &profile) {
+                GrammarAdmission::Exclusive(Err(e)) => {
+                    assert_eq!(e.kind(), FrontendErrorKind::PolicyViolation, "{src}");
+                }
+                other => panic!("{src}: expected Exclusive(Err(PolicyViolation)), got {other:?}"),
+            }
+        }
     }
 
     fn admit_logos_with_recovery_visits(
