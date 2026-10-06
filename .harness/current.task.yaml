@@ -1,36 +1,33 @@
 task:
-  id: NATIVE-AUDIT-00
-  title: "Semantic-native readiness audit charter and inventory"
-  type: forensic_audit_charter
-  target: "Freeze the Semantic-native audit perimeter, evidence model and exact inventory before findings or repairs begin."
+  id: NATIVE-AUDIT-01
+  title: "Adjudicate native readiness candidates C-01 through C-06"
+  type: forensic_candidate_adjudication
+  target: "Turn the six Slice 0 native readiness candidates into evidence-backed verdicts without repairs."
   mode: active
-  supersedes: RELEASE-POSTURE-RECONCILIATION
+  supersedes: NATIVE-AUDIT-00
   predecessor_audit: 1617
   issues: []
-  base_sha: d95bee488d26208f4a3a4215ae4dd34e04d429ee
+  base_sha: ce1cbd9f7bdd55f932ef9a268a61b00443cf7b0c
   authorized_by: >-
     Repository owner direct instruction (2026-10-06, "GO - Semantic-native
-    Readiness Audit, Slice 0 - Charter & Inventory"). Charter/inventory only:
-    no repairs, no findings creation, no Bootstrap implementation, no UI
-    implementation, no release/tag, no merge without owner GO.
+    Readiness Audit, NATIVE-AUDIT-01 - Candidate Adjudication C-01...C-06").
+    Forensic audit only: no repairs, no .sm/test/gate/workflow changes, no
+    Bootstrap or UI implementation, no release/tag, no merge without owner GO.
 
 intent:
   summary: >-
-    Define the Semantic-native readiness audit perimeter (N1-N8), evidence
-    ladder, claim vocabulary, taxonomy, severity definitions and an exact
-    machine-derived inventory of tracked .sm sources. #1617 remains the
-    historical predecessor and is not closed or rewritten.
-  decision_record: docs/roadmap/native_audit/charter.md
+    Adjudicate C-01..C-06 against the native audit charter evidence ladder,
+    record verdicts and any confirmed NA-* findings, and update the inventory
+    only where Slice 1 proved evidence.
+  decision_record: docs/roadmap/native_audit/slice_01_candidate_adjudication.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
     - docs/roadmap/native_audit/**
-    # Minimal guard recognition of the new audit directory: both docs name the
-    # TON618 legacy perimeter, which legacy_guards requires to be inventoried.
-    - tests/legacy_guards.rs
 
   forbidden_paths:
+    - tests/**
     - examples/**
     - "**/*.sm"
     - src/**
@@ -61,7 +58,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: d95bee488d26208f4a3a4215ae4dd34e04d429ee
+  base_sha: ce1cbd9f7bdd55f932ef9a268a61b00443cf7b0c
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true

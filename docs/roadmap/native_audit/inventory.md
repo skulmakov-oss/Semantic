@@ -1,6 +1,6 @@
 # Semantic-native Readiness Audit — Inventory
 
-Status: INVENTORIED — NOT AUDITED (NATIVE-AUDIT-00, Slice 0)
+Status: INVENTORIED — NOT AUDITED (NATIVE-AUDIT-00, Slice 0); Slice 1 adjudication overrides in §9
 Audit base SHA: `d95bee488d26208f4a3a4215ae4dd34e04d429ee`
 Charter: [`charter.md`](charter.md)
 Per-file rows (550): [`inventory.tsv`](inventory.tsv)
@@ -242,30 +242,45 @@ else:
         if r[4] != "CI_REFERENCED": print("NONCI", r[4], r[0])
 ```
 
-## 8. Candidates observed — NOT ADJUDICATED
+## 8. Candidates observed in Slice 0 — outcomes
 
-Recorded only so Slice 1 starts from them. None is a finding; none is rated or
-repaired.
+C-01 … C-06 were recorded in Slice 0 as `CANDIDATE — NOT ADJUDICATED`. They
+were adjudicated in NATIVE-AUDIT-01; full evidence is in
+[`slice_01_candidate_adjudication.md`](slice_01_candidate_adjudication.md).
 
-- **CANDIDATE — NOT ADJUDICATED (C-01).** Retired Workbench sources
-  `examples/workbench_semantic/src/*.sm` are `CI_REFERENCED` only through a doc
-  comment in `crates/prom-ui-iced-adapter/src/lib.rs`; the retired `prom-ui*`
-  crates remain Cargo workspace members whose tests `ci.yml` runs. Question:
-  does CI signal from a retired contour read as current readiness?
-- **CANDIDATE — NOT ADJUDICATED (C-02).** `artifacts/workbench/native-launch-smoke/smoke-project/main.sm`
-  is referenced only by `scripts/check_repository_hygiene.py` (a path policy
-  check) and the non-CI `scripts/workbench_native_launch_smoke.ps1`.
-- **CANDIDATE — NOT ADJUDICATED (C-03).** `examples/quad_logic_calculator` is a
-  workspace member, but its `.sm` sources are named only by the tracked,
-  non-workspace `proj_test/src/main.rs`.
-- **CANDIDATE — NOT ADJUDICATED (C-04).** `examples/readiness_draft_canonical/README.md`
-  places some packs in the `qualified limited release` contour, while five of
-  its module sources have no CI reference (§4).
-- **CANDIDATE — NOT ADJUDICATED (C-05).** Bootstrap/self-hosting is stated as
-  "the active strategic direction" in README, backlog, WBS and the feature
-  maturity matrix (README adds "not a release promise"), with zero Semantic
-  compiler source in either repository.
-- **CANDIDATE — NOT ADJUDICATED (C-06).** 37 `crates/sm-vm` profiling fixtures
-  are referenced only from `crates/sm-vm/tests/vm_opcode_profile_workloads.rs`,
-  which has 24 `#[test]` and 1 `#[ignore]`; whether any fixture is reachable
-  only through the ignored test is unknown.
+| Candidate (Slice 0 origin) | Outcome |
+|---|---|
+| C-01 retired Workbench `.sm` / `prom-ui*` in workspace CI | KEEP — retirement decision scopes crate CI to repository integrity |
+| C-02 Workbench native-launch smoke `.sm` | DISPROVED — path allowlist + historical manual script (#1862) |
+| C-03 `quad_logic_calculator` `.sm` | DEFER-SCOPE to retired UI contour — embedded at build time only, 0 tests, no current claim |
+| C-04 readiness_draft qualified-limited packs | DISPROVED — qualified packs are byte-identical to CI-executed qualification copies (E5–E7, E9); other packs are declared out of scope |
+| C-05 self-hosting direction | DISPROVED — every current statement says "not a release promise/status" |
+| C-06 `sm-vm` profiling fixtures / `#[ignore]` | KEEP — documented `vm-profile` local measurement; exactly 1 fixture is ignored-only |
+
+Confirmed findings: 0 (no `NA-*` IDs assigned).
+
+## 9. Slice 1 adjudicated evidence (overrides)
+
+`inventory.tsv` and §1–§7 remain the reproducible Slice 0 heuristic output.
+The rows below were adjudicated in Slice 1; their evidence here supersedes the
+heuristic value. Each override cites the trace in
+`slice_01_candidate_adjudication.md`.
+
+| Rows | Slice 0 evidence | Adjudicated evidence | Proven level | Trace |
+|---:|---|---|---|---|
+| 6 `crates/sm-vm/tests/fixtures/profiling/**/scalar_helper_boundary_*` (helper/inline, single-call, call-chain) | CI_REFERENCED | **CI_EXECUTED** | E7 + E9 | C-06: `semcode_vm.rs` `helper_boundary_pair_equivalence_harness_matches_terminal_observations` |
+| 31 other `crates/sm-vm/tests/fixtures/profiling/**` | CI_REFERENCED | MANUAL_ONLY | E7 local (`--features vm-profile`; 1 also `--ignored`) | C-06, method correction M-02 |
+| 6 `examples/readiness_draft_canonical/*/src/main.sm` | CI_REFERENCED | INSPECTION_ONLY | E0 (byte-identical content E7+E9 for 4 packs) | C-04, M-01 |
+| 2 `examples/pcc_candidates/*/src/main.sm` | CI_REFERENCED | INSPECTION_ONLY | E0 | M-01 |
+| 2 `examples/quad_logic_calculator/src/{calculator,quad_calc.proj}.sm` | MANUAL_ONLY | CI_REFERENCED (build-time `include_str!`) | E0 | C-03, M-03 |
+| `examples/readiness_draft_canonical/wave2_local_helper_import/src/helper.sm` | UNKNOWN | NOT_EXECUTED (byte-identical content executed) | E0 (content E7+E9) | C-04 |
+| `examples/readiness_draft_canonical/module_selected_import_settlement/src/{rendering,rules}.sm` | UNKNOWN | NOT_EXECUTED (pack declared out of scope) | E0 | C-04 |
+
+Adjudicated totals (550 files): CI_EXECUTED 6, CI_REFERENCED 497,
+MANUAL_ONLY 31, INSPECTION_ONLY 10, NOT_EXECUTED 3, UNKNOWN 3.
+
+Remaining UNKNOWN (3): `assets/legacy_cli/human.sm`, `examples/calculator.sm`,
+`examples/semantic_policy_overdrive.sm`.
+
+The 497 remaining `CI_REFERENCED` rows are still E0 + a CI-run referrer; they
+are not adjudicated and are not upgraded by proximity.
