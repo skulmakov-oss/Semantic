@@ -1,6 +1,6 @@
 # Semantic-native Readiness Audit — Inventory
 
-Status: INVENTORIED — NOT AUDITED; current evidence reflects NATIVE-AUDIT-01 adjudication
+Status: N2 and N7 AUDITED (NATIVE-AUDIT-02); other groups INVENTORIED — NOT AUDITED; current evidence reflects NATIVE-AUDIT-01 and NATIVE-AUDIT-02 adjudication
 Slice 0 audit base SHA: `d95bee488d26208f4a3a4215ae4dd34e04d429ee`
 Charter: [`charter.md`](charter.md)
 
@@ -15,7 +15,8 @@ Charter: [`charter.md`](charter.md)
   reproducible by the query in §7.1. On its own it is never the current
   per-file evidence.
 - [`inventory_overrides.tsv`](inventory_overrides.tsv) holds exactly the paths
-  whose evidence a later slice proved (50 rows from NATIVE-AUDIT-01). Each row
+  whose evidence a later slice proved (56 rows: 50 from NATIVE-AUDIT-01, 6 from
+  NATIVE-AUDIT-02). Each row
   records `slice0_evidence`, `current_evidence`, `proven_level` and
   `adjudication_source`. A path appears at most once.
 - Composition rule: for each of the 550 raw rows,
@@ -66,23 +67,24 @@ Current authoritative totals (raw + overrides, §0):
 
 | Evidence | Files |
 |---|---:|
-| CI_EXECUTED | 6 |
-| CI_REFERENCED | 497 |
+| CI_EXECUTED | 9 |
+| CI_REFERENCED | 494 |
 | MANUAL_ONLY | 31 |
-| INSPECTION_ONLY | 10 |
-| NOT_EXECUTED | 3 |
-| UNKNOWN | 3 |
+| INSPECTION_ONLY | 12 |
+| NOT_EXECUTED | 4 |
+| UNKNOWN | 0 |
 | **Total** | **550** |
 
 | Group | CI_EXECUTED | CI_REFERENCED | MANUAL_ONLY | INSPECTION_ONLY | NOT_EXECUTED | UNKNOWN |
 |---|---:|---:|---:|---:|---:|---:|
 | N1 | 0 | 216 | 0 | 10 | 3 | 0 |
-| N2 | 0 | 5 | 0 | 0 | 0 | 2 |
+| N2 | 3 | 2 | 0 | 1 | 1 | 0 |
 | N6 | 0 | 3 | 0 | 0 | 0 | 0 |
-| N7 | 0 | 0 | 0 | 0 | 0 | 1 |
+| N7 | 0 | 0 | 0 | 1 | 0 | 0 |
 | N8 | 6 | 273 | 31 | 0 | 0 | 0 |
 
-The 497 `CI_REFERENCED` rows are unadjudicated: E0 plus a CI-run referrer.
+The 494 `CI_REFERENCED` rows are unadjudicated except the 2 `examples/quad_logic_calculator`
+rows (C-03, build-time embed): E0 plus a CI-run referrer.
 
 ### 2.1 Historical: Slice-0 raw heuristic totals (superseded where adjudicated)
 
@@ -145,13 +147,15 @@ a conclusion. The tested-shape of each referrer is Slice-1 work.
 
 ## 4. Current non-CI and unresolved entries
 
-Current `UNKNOWN` (3, unresolved):
+Current `UNKNOWN`: **0**. The three Slice-0/Slice-1 UNKNOWN rows were resolved
+in NATIVE-AUDIT-02 (`slice_02_n2_n7_audit.md`, UNKNOWN resolution):
+`assets/legacy_cli/human.sm` → INSPECTION_ONLY, `examples/calculator.sm` →
+INSPECTION_ONLY, `examples/semantic_policy_overdrive.sm` → NOT_EXECUTED.
 
-| Path | Group |
-|---|---|
-| `assets/legacy_cli/human.sm` | N7 |
-| `examples/calculator.sm` | N2 |
-| `examples/semantic_policy_overdrive.sm` | N2 |
+Current non-CI entries in N2 (2): `examples/calculator.sm` (INSPECTION_ONLY)
+and `examples/semantic_policy_overdrive.sm` (NOT_EXECUTED); neither carries a
+current claim. Current non-CI entry in N7 (1): `assets/legacy_cli/human.sm`
+(INSPECTION_ONLY).
 
 Current resolved non-CI entries in N1 (13): 10 `INSPECTION_ONLY` — the 6
 `examples/readiness_draft_canonical/*/src/main.sm`, the 2
@@ -165,8 +169,10 @@ Current non-CI entries in N8 (31 `MANUAL_ONLY`): the `vm-profile`-gated
 `crates/sm-vm/tests/fixtures/profiling/**` fixtures listed in
 `inventory_overrides.tsv` (C-06).
 
-Unresolved ownership: N2 top-level `examples/*.sm` and N7
-`assets/legacy_cli/human.sm`. `examples/quad_logic_calculator` ownership was
+Ownership: N2 and N7 owners resolved in NATIVE-AUDIT-02 (`examples/calculator.sm`
+and `examples/semantic_policy_overdrive.sm` have no current owner and no
+current claim, recorded explicitly; `assets/legacy_cli/human.sm` is N7).
+`examples/quad_logic_calculator` ownership was
 resolved to the retired N6 UI contour (C-03, DEFER-SCOPE); its raw group label
 in `inventory.tsv` is unchanged.
 
@@ -196,12 +202,12 @@ current state above.
 | Group | Artifacts | Owner | Execution evidence | Public claim | Audit status |
 |---|---:|---|---|---|---|
 | N1 Canonical/qualification | 229 `.sm` | qualification contour | 216 CI_REFERENCED, 10 INSPECTION_ONLY, 3 NOT_EXECUTED | QUALIFIED_LIMITED (canonical 17) | INVENTORIED — NOT AUDITED |
-| N2 Examples/demos | 7 `.sm` | unresolved (calculator → N6, C-03) | 5 CI_REFERENCED, 2 UNKNOWN | ILLUSTRATIVE / UNKNOWN | INVENTORIED — NOT AUDITED |
+| N2 Examples/demos | 7 `.sm` | resolved (calculator → N6, C-03; 2 unowned/unclaimed) | 3 CI_EXECUTED, 2 CI_REFERENCED, 1 INSPECTION_ONLY, 1 NOT_EXECUTED | QUALIFIED_LIMITED (snake_core, overdrive_trace) / ILLUSTRATIVE / HISTORICAL | **AUDITED** (NATIVE-AUDIT-02; NA-N2-001 open) |
 | N3 Product | 0 | — | — | none | INVENTORIED — EMPTY |
 | N4 Bootstrap | 0 (`#1910` direction; external docs-only repo) | #1910 | none in CI | EXPERIMENTAL direction, "not a release promise" (README) | INVENTORIED — NOT AUDITED |
 | N5 Support/composition crates | 11 crates | respective crates | workspace tests in CI | UNKNOWN | INVENTORIED — NOT AUDITED |
 | N6 UI (retired) | 3 `.sm` + 5 crates + `examples/workbench_semantic` | retirement decision | 3 CI_REFERENCED (reference only) | HISTORICAL | INVENTORIED — NOT AUDITED |
-| N7 Legacy | 1 `.sm` + `ton618_legacy/**` | legacy perimeter | 1 UNKNOWN | UNKNOWN | INVENTORIED — NOT AUDITED |
+| N7 Legacy | 1 `.sm` + `ton618_legacy/**` | legacy perimeter | 1 INSPECTION_ONLY | HISTORICAL | **AUDITED** (NATIVE-AUDIT-02; 0 findings) |
 | N8 Test fixtures | 310 `.sm` | owning platform tests | 6 CI_EXECUTED, 273 CI_REFERENCED, 31 MANUAL_ONLY | INTERNAL_CONTRACT | INVENTORIED — NOT AUDITED |
 
 ## 7. Reproduction queries
@@ -323,9 +329,9 @@ cur.update({o[0]: o[2] for o in ovr})
 print(len(ovr), "overrides;", dict(sorted(collections.Counter(cur.values()).items())), "total", len(cur))
 ```
 
-Expected output at this revision: `50 overrides; {'CI_EXECUTED': 6,
-'CI_REFERENCED': 497, 'INSPECTION_ONLY': 10, 'MANUAL_ONLY': 31, 'NOT_EXECUTED': 3,
-'UNKNOWN': 3} total 550`.
+Expected output at this revision: `56 overrides; {'CI_EXECUTED': 9,
+'CI_REFERENCED': 494, 'INSPECTION_ONLY': 12, 'MANUAL_ONLY': 31, 'NOT_EXECUTED': 4}
+total 550` (no `UNKNOWN` key: zero rows).
 
 ## 8. Candidates observed in Slice 0 — outcomes
 
@@ -361,3 +367,20 @@ summarizes it. Traces are in `slice_01_candidate_adjudication.md`.
 | `examples/readiness_draft_canonical/module_selected_import_settlement/src/{rendering,rules}.sm` | UNKNOWN | NOT_EXECUTED (pack declared out of scope) | E0 | C-04 |
 
 Current totals are stated once, in §2.
+
+## 10. Slice 2 adjudicated overrides (summary)
+
+Six rows from NATIVE-AUDIT-02 (`adjudication_source` = `NATIVE-AUDIT-02 / N2|N7`);
+traces in [`slice_02_n2_n7_audit.md`](slice_02_n2_n7_audit.md). No Slice 1
+override was changed.
+
+| Path | Slice 0 evidence | Adjudicated evidence | Proven level |
+|---|---|---|---|
+| `assets/legacy_cli/human.sm` | UNKNOWN | INSPECTION_ONLY | E0 (same program E7+E9 via legacy CLI unit test) |
+| `examples/calculator.sm` | UNKNOWN | INSPECTION_ONLY | E0 (identical content E4+E9 via `golden_v1_calculator`) |
+| `examples/semantic_policy_overdrive.sm` | UNKNOWN | NOT_EXECUTED | E0 (local E6 only) |
+| `examples/benchmarks/snake_core.sm` | CI_REFERENCED | CI_EXECUTED | E7+E9 |
+| `examples/benchmarks/snake_learning.sm` | CI_REFERENCED | CI_EXECUTED | E7+E9 (explicit envelope) |
+| `examples/semantic_policy_overdrive_trace.sm` | CI_REFERENCED | CI_EXECUTED | E7+E9+E10 |
+
+Findings registry: [`findings.md`](findings.md) (NA-N2-001, P3, DEFER-SCOPE).

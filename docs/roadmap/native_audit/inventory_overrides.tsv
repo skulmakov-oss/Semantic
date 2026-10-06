@@ -49,3 +49,9 @@ examples/readiness_draft_canonical/module_selected_import_settlement/src/rules.s
 examples/readiness_draft_canonical/rule_state_decision/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / C-04 / M-01
 examples/readiness_draft_canonical/wave2_local_helper_import/src/helper.sm	UNKNOWN	NOT_EXECUTED	E0	NATIVE-AUDIT-01 / C-04
 examples/readiness_draft_canonical/wave2_local_helper_import/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / C-04 / M-01
+assets/legacy_cli/human.sm	UNKNOWN	INSPECTION_ONLY	E0 (same program E7+E9 via legacy CLI unit test)	NATIVE-AUDIT-02 / N7
+examples/benchmarks/snake_core.sm	CI_REFERENCED	CI_EXECUTED	E7+E9	NATIVE-AUDIT-02 / N2
+examples/benchmarks/snake_learning.sm	CI_REFERENCED	CI_EXECUTED	E7+E9 (explicit envelope)	NATIVE-AUDIT-02 / N2
+examples/calculator.sm	UNKNOWN	INSPECTION_ONLY	E0 (identical content E4+E9 via golden_v1)	NATIVE-AUDIT-02 / N2
+examples/semantic_policy_overdrive.sm	UNKNOWN	NOT_EXECUTED	E0 (local E6 only)	NATIVE-AUDIT-02 / N2
+examples/semantic_policy_overdrive_trace.sm	CI_REFERENCED	CI_EXECUTED	E7+E9+E10	NATIVE-AUDIT-02 / N2

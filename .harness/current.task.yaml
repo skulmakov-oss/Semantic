@@ -1,25 +1,26 @@
 task:
-  id: NATIVE-AUDIT-01
-  title: "Adjudicate native readiness candidates C-01 through C-06"
-  type: forensic_candidate_adjudication
-  target: "Turn the six Slice 0 native readiness candidates into evidence-backed verdicts without repairs."
+  id: NATIVE-AUDIT-02
+  title: "Resolve remaining UNKNOWN and audit N2/N7"
+  type: forensic_group_audit
+  target: "Resolve the three remaining UNKNOWN native rows and complete the N2 (examples) and N7 (legacy) group audits without repairs."
   mode: active
-  supersedes: NATIVE-AUDIT-00
+  supersedes: NATIVE-AUDIT-01
   predecessor_audit: 1617
   issues: []
-  base_sha: ce1cbd9f7bdd55f932ef9a268a61b00443cf7b0c
+  base_sha: 7d3020d4246c006e3e4c1dcb2d719652827942c5
   authorized_by: >-
     Repository owner direct instruction (2026-10-06, "GO - Semantic-native
-    Readiness Audit, NATIVE-AUDIT-01 - Candidate Adjudication C-01...C-06").
-    Forensic audit only: no repairs, no .sm/test/gate/workflow changes, no
-    Bootstrap or UI implementation, no release/tag, no merge without owner GO.
+    Readiness Audit, NATIVE-AUDIT-02 - Resolve Remaining UNKNOWN + Complete
+    N2/N7 Audit"). Forensic audit only: no repairs, no .sm/test/gate/workflow
+    changes, no legacy cleanup, no Bootstrap or UI work, no release/tag, no
+    issue closure, no merge without owner GO.
 
 intent:
   summary: >-
-    Adjudicate C-01..C-06 against the native audit charter evidence ladder,
-    record verdicts and any confirmed NA-* findings, and update the inventory
-    only where Slice 1 proved evidence.
-  decision_record: docs/roadmap/native_audit/slice_01_candidate_adjudication.md
+    Adjudicate all N2 and N7 artifacts against the native audit charter,
+    resolve UNKNOWN rows through explicit overrides, record findings and
+    negative findings, and mark groups AUDITED only when charter criteria hold.
+  decision_record: docs/roadmap/native_audit/slice_02_n2_n7_audit.md
 
 scope:
   allowed_paths:
@@ -58,7 +59,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: ce1cbd9f7bdd55f932ef9a268a61b00443cf7b0c
+  base_sha: 7d3020d4246c006e3e4c1dcb2d719652827942c5
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
