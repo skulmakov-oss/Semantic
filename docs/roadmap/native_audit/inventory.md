@@ -1,13 +1,33 @@
 # Semantic-native Readiness Audit — Inventory
 
-Status: INVENTORIED — NOT AUDITED (NATIVE-AUDIT-00, Slice 0)
-Audit base SHA: `d95bee488d26208f4a3a4215ae4dd34e04d429ee`
+Status: INVENTORIED — NOT AUDITED; current evidence reflects NATIVE-AUDIT-01 adjudication
+Slice 0 audit base SHA: `d95bee488d26208f4a3a4215ae4dd34e04d429ee`
 Charter: [`charter.md`](charter.md)
-Per-file rows (550): [`inventory.tsv`](inventory.tsv)
 
-Every number below is machine-derived from `git ls-files` at the audit SHA by
-the query in §7. Nothing is estimated. A row's execution evidence records a
-**reference**, never proven execution depth (charter §5, §8).
+## 0. Authority model
+
+**Current authoritative per-file evidence** = Slice-0 raw row in
+[`inventory.tsv`](inventory.tsv) **+** the adjudicated override for that path in
+[`inventory_overrides.tsv`](inventory_overrides.tsv), when one exists.
+
+- [`inventory.tsv`](inventory.tsv) is the **Slice-0 raw heuristic snapshot —
+  historical derivation, superseded where adjudicated**. It is immutable and
+  reproducible by the query in §7.1. On its own it is never the current
+  per-file evidence.
+- [`inventory_overrides.tsv`](inventory_overrides.tsv) holds exactly the paths
+  whose evidence a later slice proved (50 rows from NATIVE-AUDIT-01). Each row
+  records `slice0_evidence`, `current_evidence`, `proven_level` and
+  `adjudication_source`. A path appears at most once.
+- Composition rule: for each of the 550 raw rows,
+  `current_evidence = override.current_evidence` if the path is in the
+  override table, else `raw.execution_evidence`. Group, role and claim level
+  always come from the raw row. The composition query is §7.2.
+- Rows not in the override table keep their Slice-0 value unchanged; they are
+  not reclassified by proximity.
+
+Raw values are machine-derived from `git ls-files` at the Slice 0 SHA. Unless a
+row's override says otherwise, its execution evidence records a **reference**,
+never proven execution depth (charter §5, §8).
 
 ## 1. Totals
 
@@ -40,7 +60,31 @@ states "probe samples … intentionally not canonical" (`EXPERIMENTAL`);
 Workbench is retired (`HISTORICAL`). Where no authority states a claim, the
 value is `UNKNOWN`.
 
-## 2. Execution evidence
+## 2. Execution evidence (current)
+
+Current authoritative totals (raw + overrides, §0):
+
+| Evidence | Files |
+|---|---:|
+| CI_EXECUTED | 6 |
+| CI_REFERENCED | 497 |
+| MANUAL_ONLY | 31 |
+| INSPECTION_ONLY | 10 |
+| NOT_EXECUTED | 3 |
+| UNKNOWN | 3 |
+| **Total** | **550** |
+
+| Group | CI_EXECUTED | CI_REFERENCED | MANUAL_ONLY | INSPECTION_ONLY | NOT_EXECUTED | UNKNOWN |
+|---|---:|---:|---:|---:|---:|---:|
+| N1 | 0 | 216 | 0 | 10 | 3 | 0 |
+| N2 | 0 | 5 | 0 | 0 | 0 | 2 |
+| N6 | 0 | 3 | 0 | 0 | 0 | 0 |
+| N7 | 0 | 0 | 0 | 0 | 0 | 1 |
+| N8 | 6 | 273 | 31 | 0 | 0 | 0 |
+
+The 497 `CI_REFERENCED` rows are unadjudicated: E0 plus a CI-run referrer.
+
+### 2.1 Historical: Slice-0 raw heuristic totals (superseded where adjudicated)
 
 | Evidence | Files |
 |---|---:|
@@ -50,15 +94,12 @@ value is `UNKNOWN`.
 | UNKNOWN | 6 |
 | NOT_EXECUTED | 0 |
 
-| Group | CI_REFERENCED | MANUAL_ONLY | INSPECTION_ONLY | UNKNOWN |
-|---|---:|---:|---:|---:|
-| N1 | 224 | 0 | 2 | 3 |
-| N2 | 3 | 2 | 0 | 2 |
-| N6 | 3 | 0 | 0 | 0 |
-| N7 | 0 | 0 | 0 | 1 |
-| N8 | 310 | 0 | 0 | 0 |
+### 2.2 Slice-0 heuristic derivation rules (historical, see §7.1)
 
-Derivation rules (exact, see §7):
+Known defects of these rules (M-01 over-broad `parent/name.sm` suffix, M-02
+feature-gated referrers counted as CI, M-03 bare-name `include_str!` missed) are
+recorded in `slice_01_candidate_adjudication.md`; they are corrected only
+through adjudicated overrides, not by redesigning the rules.
 
 - A file is *referenced* when its full path, its `parent/name.sm` suffix, or an
   ancestor directory of depth ≥ 2 (excluding the over-broad `examples`,
@@ -102,23 +143,41 @@ a conclusion. The tested-shape of each referrer is Slice-1 work.
 | `assets/legacy_cli` | 1 |
 | `artifacts/workbench` | 1 |
 
-## 4. Non-CI-referenced and unresolved entries (10)
+## 4. Current non-CI and unresolved entries
 
-| Path | Group | Evidence |
-|---|---|---|
-| `assets/legacy_cli/human.sm` | N7 | UNKNOWN |
-| `examples/calculator.sm` | N2 | UNKNOWN |
-| `examples/semantic_policy_overdrive.sm` | N2 | UNKNOWN |
-| `examples/quad_logic_calculator/src/calculator.sm` | N2 | MANUAL_ONLY (`proj_test/src/main.rs`) |
-| `examples/quad_logic_calculator/src/quad_calc.proj.sm` | N2 | MANUAL_ONLY (`proj_test/src/main.rs`) |
-| `examples/readiness_draft_canonical/module_selected_import_audit_report/src/risk_policy.sm` | N1 | INSPECTION_ONLY |
-| `examples/readiness_draft_canonical/module_selected_import_audit_report/src/text_format.sm` | N1 | INSPECTION_ONLY |
-| `examples/readiness_draft_canonical/module_selected_import_settlement/src/rendering.sm` | N1 | UNKNOWN |
-| `examples/readiness_draft_canonical/module_selected_import_settlement/src/rules.sm` | N1 | UNKNOWN |
-| `examples/readiness_draft_canonical/wave2_local_helper_import/src/helper.sm` | N1 | UNKNOWN |
+Current `UNKNOWN` (3, unresolved):
 
-Unresolved ownership: N2 top-level `examples/*.sm` and `examples/quad_logic_calculator`
-(no current-authority document owns them) and N7 `assets/legacy_cli/human.sm`.
+| Path | Group |
+|---|---|
+| `assets/legacy_cli/human.sm` | N7 |
+| `examples/calculator.sm` | N2 |
+| `examples/semantic_policy_overdrive.sm` | N2 |
+
+Current resolved non-CI entries in N1 (13): 10 `INSPECTION_ONLY` — the 6
+`examples/readiness_draft_canonical/*/src/main.sm`, the 2
+`examples/pcc_candidates/*/src/main.sm`, and
+`module_selected_import_audit_report/src/{risk_policy,text_format}.sm`; 3
+`NOT_EXECUTED` — `wave2_local_helper_import/src/helper.sm` and
+`module_selected_import_settlement/src/{rendering,rules}.sm` (see
+`inventory_overrides.tsv` and C-04).
+
+Current non-CI entries in N8 (31 `MANUAL_ONLY`): the `vm-profile`-gated
+`crates/sm-vm/tests/fixtures/profiling/**` fixtures listed in
+`inventory_overrides.tsv` (C-06).
+
+Unresolved ownership: N2 top-level `examples/*.sm` and N7
+`assets/legacy_cli/human.sm`. `examples/quad_logic_calculator` ownership was
+resolved to the retired N6 UI contour (C-03, DEFER-SCOPE); its raw group label
+in `inventory.tsv` is unchanged.
+
+### 4.1 Historical: Slice-0 non-CI-referenced and unresolved entries (10)
+
+Slice 0 listed 10 entries: the 3 current UNKNOWN above,
+`examples/quad_logic_calculator/src/{calculator,quad_calc.proj}.sm` (MANUAL_ONLY
+via `proj_test`), `module_selected_import_audit_report/src/{risk_policy,text_format}.sm`
+(INSPECTION_ONLY), and `module_selected_import_settlement/src/{rendering,rules}.sm`
+plus `wave2_local_helper_import/src/helper.sm` (UNKNOWN). Superseded by the
+current state above.
 
 ## 5. Crate-level perimeter (N5, N6)
 
@@ -136,16 +195,18 @@ Unresolved ownership: N2 top-level `examples/*.sm` and `examples/quad_logic_calc
 
 | Group | Artifacts | Owner | Execution evidence | Public claim | Audit status |
 |---|---:|---|---|---|---|
-| N1 Canonical/qualification | 229 `.sm` | qualification contour | 224 CI_REFERENCED, 5 unresolved | QUALIFIED_LIMITED (canonical 17) | INVENTORIED — NOT AUDITED |
-| N2 Examples/demos | 7 `.sm` | unresolved | 3 CI_REFERENCED, 4 non-CI | ILLUSTRATIVE / UNKNOWN | INVENTORIED — NOT AUDITED |
+| N1 Canonical/qualification | 229 `.sm` | qualification contour | 216 CI_REFERENCED, 10 INSPECTION_ONLY, 3 NOT_EXECUTED | QUALIFIED_LIMITED (canonical 17) | INVENTORIED — NOT AUDITED |
+| N2 Examples/demos | 7 `.sm` | unresolved (calculator → N6, C-03) | 5 CI_REFERENCED, 2 UNKNOWN | ILLUSTRATIVE / UNKNOWN | INVENTORIED — NOT AUDITED |
 | N3 Product | 0 | — | — | none | INVENTORIED — EMPTY |
 | N4 Bootstrap | 0 (`#1910` direction; external docs-only repo) | #1910 | none in CI | EXPERIMENTAL direction, "not a release promise" (README) | INVENTORIED — NOT AUDITED |
 | N5 Support/composition crates | 11 crates | respective crates | workspace tests in CI | UNKNOWN | INVENTORIED — NOT AUDITED |
 | N6 UI (retired) | 3 `.sm` + 5 crates + `examples/workbench_semantic` | retirement decision | 3 CI_REFERENCED (reference only) | HISTORICAL | INVENTORIED — NOT AUDITED |
 | N7 Legacy | 1 `.sm` + `ton618_legacy/**` | legacy perimeter | 1 UNKNOWN | UNKNOWN | INVENTORIED — NOT AUDITED |
-| N8 Test fixtures | 310 `.sm` | owning platform tests | 310 CI_REFERENCED | INTERNAL_CONTRACT | INVENTORIED — NOT AUDITED |
+| N8 Test fixtures | 310 `.sm` | owning platform tests | 6 CI_EXECUTED, 273 CI_REFERENCED, 31 MANUAL_ONLY | INTERNAL_CONTRACT | INVENTORIED — NOT AUDITED |
 
-## 7. Reproduction query
+## 7. Reproduction queries
+
+### 7.1 Slice-0 raw heuristic query (historical derivation)
 
 Save the block below to a file outside the repository (for example
 `$TMP/inventory_query.py`) and run it from the repository root at the audit SHA
@@ -242,30 +303,61 @@ else:
         if r[4] != "CI_REFERENCED": print("NONCI", r[4], r[0])
 ```
 
-## 8. Candidates observed — NOT ADJUDICATED
+### 7.2 Current-state composition and validation query
 
-Recorded only so Slice 1 starts from them. None is a finding; none is rated or
-repaired.
+Run from the repository root (Python 3). It composes the raw snapshot with the
+override table under the §0 rule and asserts the invariants.
 
-- **CANDIDATE — NOT ADJUDICATED (C-01).** Retired Workbench sources
-  `examples/workbench_semantic/src/*.sm` are `CI_REFERENCED` only through a doc
-  comment in `crates/prom-ui-iced-adapter/src/lib.rs`; the retired `prom-ui*`
-  crates remain Cargo workspace members whose tests `ci.yml` runs. Question:
-  does CI signal from a retired contour read as current readiness?
-- **CANDIDATE — NOT ADJUDICATED (C-02).** `artifacts/workbench/native-launch-smoke/smoke-project/main.sm`
-  is referenced only by `scripts/check_repository_hygiene.py` (a path policy
-  check) and the non-CI `scripts/workbench_native_launch_smoke.ps1`.
-- **CANDIDATE — NOT ADJUDICATED (C-03).** `examples/quad_logic_calculator` is a
-  workspace member, but its `.sm` sources are named only by the tracked,
-  non-workspace `proj_test/src/main.rs`.
-- **CANDIDATE — NOT ADJUDICATED (C-04).** `examples/readiness_draft_canonical/README.md`
-  places some packs in the `qualified limited release` contour, while five of
-  its module sources have no CI reference (§4).
-- **CANDIDATE — NOT ADJUDICATED (C-05).** Bootstrap/self-hosting is stated as
-  "the active strategic direction" in README, backlog, WBS and the feature
-  maturity matrix (README adds "not a release promise"), with zero Semantic
-  compiler source in either repository.
-- **CANDIDATE — NOT ADJUDICATED (C-06).** 37 `crates/sm-vm` profiling fixtures
-  are referenced only from `crates/sm-vm/tests/vm_opcode_profile_workloads.rs`,
-  which has 24 `#[test]` and 1 `#[ignore]`; whether any fixture is reachable
-  only through the ignored test is unknown.
+```python
+import collections
+D = "docs/roadmap/native_audit/"
+raw = [l.split("\t") for l in open(D + "inventory.tsv").read().splitlines()[1:]]
+ovr = [l.split("\t") for l in open(D + "inventory_overrides.tsv").read().splitlines()[1:]]
+paths = [r[0] for r in raw]
+assert len(raw) == 550 and len(set(paths)) == 550                  # one raw row per path
+assert len({o[0] for o in ovr}) == len(ovr)                        # one override per path
+raw_ev = {r[0]: r[4] for r in raw}
+assert all(o[0] in raw_ev and o[1] == raw_ev[o[0]] for o in ovr)   # overrides cite the true raw value
+cur = dict(raw_ev)
+cur.update({o[0]: o[2] for o in ovr})
+print(len(ovr), "overrides;", dict(sorted(collections.Counter(cur.values()).items())), "total", len(cur))
+```
+
+Expected output at this revision: `50 overrides; {'CI_EXECUTED': 6,
+'CI_REFERENCED': 497, 'INSPECTION_ONLY': 10, 'MANUAL_ONLY': 31, 'NOT_EXECUTED': 3,
+'UNKNOWN': 3} total 550`.
+
+## 8. Candidates observed in Slice 0 — outcomes
+
+C-01 … C-06 were recorded in Slice 0 as `CANDIDATE — NOT ADJUDICATED`. They
+were adjudicated in NATIVE-AUDIT-01; full evidence is in
+[`slice_01_candidate_adjudication.md`](slice_01_candidate_adjudication.md).
+
+| Candidate (Slice 0 origin) | Outcome |
+|---|---|
+| C-01 retired Workbench `.sm` / `prom-ui*` in workspace CI | KEEP — retirement decision scopes crate CI to repository integrity |
+| C-02 Workbench native-launch smoke `.sm` | DISPROVED — path allowlist + historical manual script (#1862) |
+| C-03 `quad_logic_calculator` `.sm` | DEFER-SCOPE to retired UI contour — embedded at build time only, 0 tests, no current claim |
+| C-04 readiness_draft qualified-limited packs | DISPROVED — qualified packs are byte-identical to CI-executed qualification copies (E5–E7, E9); other packs are declared out of scope |
+| C-05 self-hosting direction | DISPROVED — every current statement says "not a release promise/status" |
+| C-06 `sm-vm` profiling fixtures / `#[ignore]` | KEEP — documented `vm-profile` local measurement; exactly 1 fixture is ignored-only |
+
+Confirmed findings: 0 (no `NA-*` IDs assigned).
+
+## 9. Slice 1 adjudicated overrides (summary)
+
+The authoritative per-path data is [`inventory_overrides.tsv`](inventory_overrides.tsv)
+(50 rows, `adjudication_source` = `NATIVE-AUDIT-01 / C-xx / M-xx`); this table
+summarizes it. Traces are in `slice_01_candidate_adjudication.md`.
+
+| Rows | Slice 0 evidence | Adjudicated evidence | Proven level | Source |
+|---:|---|---|---|---|
+| 6 `crates/sm-vm/tests/fixtures/profiling/**/scalar_helper_boundary_*` (helper/inline, single-call, call-chain) | CI_REFERENCED | **CI_EXECUTED** | E7 + E9 | C-06 |
+| 31 other `crates/sm-vm/tests/fixtures/profiling/**` | CI_REFERENCED | MANUAL_ONLY | E7 local (`--features vm-profile`; 1 also `--ignored`) | C-06, M-02 |
+| 6 `examples/readiness_draft_canonical/*/src/main.sm` | CI_REFERENCED | INSPECTION_ONLY | E0 (byte-identical content E7+E9 for 4 packs) | C-04, M-01 |
+| 2 `examples/pcc_candidates/*/src/main.sm` | CI_REFERENCED | INSPECTION_ONLY | E0 | M-01 |
+| 2 `examples/quad_logic_calculator/src/{calculator,quad_calc.proj}.sm` | MANUAL_ONLY | CI_REFERENCED (build-time `include_str!`) | E0 | C-03, M-03 |
+| `examples/readiness_draft_canonical/wave2_local_helper_import/src/helper.sm` | UNKNOWN | NOT_EXECUTED (byte-identical content executed) | E0 (content E7+E9) | C-04 |
+| `examples/readiness_draft_canonical/module_selected_import_settlement/src/{rendering,rules}.sm` | UNKNOWN | NOT_EXECUTED (pack declared out of scope) | E0 | C-04 |
+
+Current totals are stated once, in §2.
