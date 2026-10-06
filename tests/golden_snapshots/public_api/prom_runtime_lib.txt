@@ -33,6 +33,7 @@ pub event_id: AuditEventId,
 pub enum RuleEffectExecutionCode {
 UnsupportedEffectFamily,
 StateValidationFailed,
+AuditRecordingFailed,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleEffectExecutionError {
 pub code: RuleEffectExecutionCode,
@@ -40,6 +41,10 @@ pub rule_id: RuleId,
 pub effect_ordinal: usize,
 pub message: String,
 pub fn new( code: RuleEffectExecutionCode, rule_id: RuleId, effect_ordinal: usize, message: impl Into<String>, ) -> Self {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeStateAdvanceError {
+StateValidation(StateValidationError),
+Audit(AuditTrailError),
 pub struct ExecutionSession<'a, H: PrometheusHostAbi, C: CapabilityChecker> {
 pub fn new(host: &'a mut H, capabilities: &'a C, config: ExecutionConfig) -> Self {
 pub fn kernel_bound(host: &'a mut H, capabilities: &'a C) -> Self {
@@ -47,12 +52,12 @@ pub fn descriptor(&self) -> &RuntimeSessionDescriptor {
 pub fn derive_agenda(&self, state: &SemanticStateStore, rules: &RuleEngine) -> Agenda {
 pub fn select_next_activation(&self, agenda: &Agenda) -> Option<ActivationSelection> {
 pub fn begin_audit_trail(&self) -> AuditTrail {
-pub fn record_session_started(&self, trail: &mut AuditTrail, entry: &str) -> AuditEventId {
-pub fn record_session_finished(&self, trail: &mut AuditTrail) -> AuditEventId {
-pub fn record_rule_activation( &self, trail: &mut AuditTrail, selection: &ActivationSelection, ) -> AuditEventId {
-pub fn record_state_transition( &self, trail: &mut AuditTrail, transition: &StateTransitionMetadata, ) -> AuditEventId {
+pub fn record_session_started( &self, trail: &mut AuditTrail, entry: &str, ) -> Result<AuditEventId, AuditTrailError> {
+pub fn record_session_finished( &self, trail: &mut AuditTrail, ) -> Result<AuditEventId, AuditTrailError> {
+pub fn record_rule_activation( &self, trail: &mut AuditTrail, selection: &ActivationSelection, ) -> Result<AuditEventId, AuditTrailError> {
+pub fn record_state_transition( &self, trail: &mut AuditTrail, transition: &StateTransitionMetadata, ) -> Result<AuditEventId, AuditTrailError> {
 pub fn integration_snapshot( &self, state: &SemanticStateStore, agenda: &Agenda, ) -> RuntimeIntegrationSnapshot {
-pub fn apply_state_update_and_refresh_agenda( &self, state: &mut SemanticStateStore, update: StateUpdate, rules: &RuleEngine, trail: &mut AuditTrail, ) -> Result<RuntimeStateAdvance, StateValidationError> {
+pub fn apply_state_update_and_refresh_agenda( &self, state: &mut SemanticStateStore, update: StateUpdate, rules: &RuleEngine, trail: &mut AuditTrail, ) -> Result<RuntimeStateAdvance, RuntimeStateAdvanceError> {
 pub fn apply_rule_state_write_effects( &self, state: &mut SemanticStateStore, rule: &RuleDefinition, rules: &RuleEngine, trail: &mut AuditTrail, ) -> Result<Vec<RuleStateWriteAdvance>, RuleEffectExecutionError> {
 pub fn apply_rule_audit_note_effects( &self, trail: &mut AuditTrail, rule: &RuleDefinition, ) -> Result<Vec<RuleAuditNoteAdvance>, RuleEffectExecutionError> {
 pub fn run_verified_semcode(&mut self, bytes: &[u8]) -> Result<(), RuntimeError> {
@@ -64,12 +69,12 @@ pub fn descriptor(&self) -> &RuntimeSessionDescriptor {
 pub fn derive_agenda(&self, state: &SemanticStateStore, rules: &RuleEngine) -> Agenda {
 pub fn select_next_activation(&self, agenda: &Agenda) -> Option<ActivationSelection> {
 pub fn begin_audit_trail(&self) -> AuditTrail {
-pub fn record_session_started(&self, trail: &mut AuditTrail, entry: &str) -> AuditEventId {
-pub fn record_session_finished(&self, trail: &mut AuditTrail) -> AuditEventId {
-pub fn record_rule_activation( &self, trail: &mut AuditTrail, selection: &ActivationSelection, ) -> AuditEventId {
-pub fn record_state_transition( &self, trail: &mut AuditTrail, transition: &StateTransitionMetadata, ) -> AuditEventId {
+pub fn record_session_started( &self, trail: &mut AuditTrail, entry: &str, ) -> Result<AuditEventId, AuditTrailError> {
+pub fn record_session_finished( &self, trail: &mut AuditTrail, ) -> Result<AuditEventId, AuditTrailError> {
+pub fn record_rule_activation( &self, trail: &mut AuditTrail, selection: &ActivationSelection, ) -> Result<AuditEventId, AuditTrailError> {
+pub fn record_state_transition( &self, trail: &mut AuditTrail, transition: &StateTransitionMetadata, ) -> Result<AuditEventId, AuditTrailError> {
 pub fn integration_snapshot( &self, state: &SemanticStateStore, agenda: &Agenda, ) -> RuntimeIntegrationSnapshot {
-pub fn apply_state_update_and_refresh_agenda( &self, state: &mut SemanticStateStore, update: StateUpdate, rules: &RuleEngine, trail: &mut AuditTrail, ) -> Result<RuntimeStateAdvance, StateValidationError> {
+pub fn apply_state_update_and_refresh_agenda( &self, state: &mut SemanticStateStore, update: StateUpdate, rules: &RuleEngine, trail: &mut AuditTrail, ) -> Result<RuntimeStateAdvance, RuntimeStateAdvanceError> {
 pub fn apply_rule_state_write_effects( &self, state: &mut SemanticStateStore, rule: &RuleDefinition, rules: &RuleEngine, trail: &mut AuditTrail, ) -> Result<Vec<RuleStateWriteAdvance>, RuleEffectExecutionError> {
 pub fn apply_rule_audit_note_effects( &self, trail: &mut AuditTrail, rule: &RuleDefinition, ) -> Result<Vec<RuleAuditNoteAdvance>, RuleEffectExecutionError> {
 pub fn run_verified_semcode(&mut self, bytes: &[u8]) -> Result<(), RuntimeError> {

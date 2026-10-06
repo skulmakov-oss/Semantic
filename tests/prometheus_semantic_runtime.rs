@@ -49,11 +49,19 @@ fn runtime_composes_state_rules_and_audit_without_taking_ownership() {
     assert_eq!(activation.remaining_rules, 0);
 
     let mut audit = session.begin_audit_trail();
-    session.record_session_started(&mut audit, "main");
-    session.record_rule_activation(&mut audit, &activation);
+    session
+        .record_session_started(&mut audit, "main")
+        .expect("audit identity available");
+    session
+        .record_rule_activation(&mut audit, &activation)
+        .expect("audit identity available");
     let transition = state.transitions().last().expect("transition");
-    session.record_state_transition(&mut audit, transition);
-    session.record_session_finished(&mut audit);
+    session
+        .record_state_transition(&mut audit, transition)
+        .expect("audit identity available");
+    session
+        .record_session_finished(&mut audit)
+        .expect("audit identity available");
     let snapshot = session.integration_snapshot(&state, &agenda);
 
     assert_eq!(snapshot.session.context, ExecutionContext::KernelBound);

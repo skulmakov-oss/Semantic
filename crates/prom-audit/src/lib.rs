@@ -114,10 +114,74 @@ pub struct MultiSessionReplayArchiveFormatError {
     pub message: String,
 }
 
+/// A live audit trail failed to record (#1993). Infrastructure failure, never
+/// a policy decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditTrailError {
+    /// Every identity in the `AuditEventId` domain (`0..=u64::MAX`) has been
+    /// issued once; no further event can be recorded without reusing one.
+    EventIdExhausted,
+}
+
+impl core::fmt::Display for AuditTrailError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EventIdExhausted => write!(f, "audit event identity space is exhausted"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for AuditTrailError {}
+
+/// The single authority for live audit event identity (#1993). Issues every
+/// `AuditEventId` in `0..=u64::MAX` exactly once, in order; `None` is the
+/// explicit exhausted state, so no identity is wasted as a sentinel and none
+/// is ever reissued.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuditEventIdCursor {
+    next: Option<u64>,
+}
+
+impl AuditEventIdCursor {
+    const fn new() -> Self {
+        Self { next: Some(0) }
+    }
+
+    /// Can `additional` more identities be issued? No mutation.
+    fn ensure_capacity(&self, additional: usize) -> Result<(), AuditTrailError> {
+        if additional == 0 {
+            return Ok(());
+        }
+        let next = self.next.ok_or(AuditTrailError::EventIdExhausted)?;
+        // Remaining = u64::MAX - next + 1, which can be 2^64: computed in u128.
+        let remaining = u128::from(u64::MAX - next) + 1;
+        let wanted = u128::try_from(additional).map_err(|_| AuditTrailError::EventIdExhausted)?;
+        if wanted <= remaining {
+            Ok(())
+        } else {
+            Err(AuditTrailError::EventIdExhausted)
+        }
+    }
+
+    /// The identity the next successful record will take. No mutation.
+    fn peek(&self) -> Result<AuditEventId, AuditTrailError> {
+        self.next
+            .map(AuditEventId)
+            .ok_or(AuditTrailError::EventIdExhausted)
+    }
+
+    /// Consumes the identity returned by `peek`; after `u64::MAX` the cursor
+    /// becomes exhausted instead of wrapping.
+    fn commit(&mut self) {
+        self.next = self.next.and_then(|next| next.checked_add(1));
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditTrail {
     session: AuditSessionMetadata,
-    next_id: u64,
+    cursor: AuditEventIdCursor,
     events: Vec<AuditEvent>,
 }
 
@@ -125,7 +189,7 @@ impl AuditTrail {
     pub fn new(session: AuditSessionMetadata) -> Self {
         Self {
             session,
-            next_id: 0,
+            cursor: AuditEventIdCursor::new(),
             events: Vec::new(),
         }
     }
@@ -138,11 +202,19 @@ impl AuditTrail {
         &self.events
     }
 
-    pub fn record(&mut self, kind: AuditEventKind) -> AuditEventId {
-        let id = AuditEventId(self.next_id);
-        self.next_id += 1;
+    /// Records one event under the next unique identity (#1993). On
+    /// `EventIdExhausted` nothing is appended and the cursor is unchanged.
+    pub fn record(&mut self, kind: AuditEventKind) -> Result<AuditEventId, AuditTrailError> {
+        let id = self.cursor.peek()?;
         self.events.push(AuditEvent { id, kind });
-        id
+        self.cursor.commit();
+        Ok(id)
+    }
+
+    /// Whether `additional` more events can be recorded (#1993). Lets callers
+    /// admit audit capacity before performing visible work. No side effects.
+    pub fn ensure_record_capacity(&self, additional: usize) -> Result<(), AuditTrailError> {
+        self.cursor.ensure_capacity(additional)
     }
 
     pub fn replay_metadata(&self) -> ReplayMetadata {
@@ -1098,10 +1170,14 @@ mod tests {
     #[test]
     fn audit_trail_assigns_monotonic_event_ids() {
         let mut trail = AuditTrail::new(sample_session());
-        let first = trail.record(AuditEventKind::SessionStarted {
-            entry: "main".to_string(),
-        });
-        let second = trail.record(AuditEventKind::SessionFinished);
+        let first = trail
+            .record(AuditEventKind::SessionStarted {
+                entry: "main".to_string(),
+            })
+            .expect("audit identity available");
+        let second = trail
+            .record(AuditEventKind::SessionFinished)
+            .expect("audit identity available");
         assert_eq!(first, AuditEventId(0));
         assert_eq!(second, AuditEventId(1));
     }
@@ -1110,13 +1186,17 @@ mod tests {
     fn replay_metadata_reflects_session_and_event_count() {
         let session = sample_session();
         let mut trail = AuditTrail::new(session.clone());
-        trail.record(AuditEventKind::SessionStarted {
-            entry: "main".to_string(),
-        });
-        trail.record(AuditEventKind::GateRead {
-            device_id: 7,
-            port: 3,
-        });
+        trail
+            .record(AuditEventKind::SessionStarted {
+                entry: "main".to_string(),
+            })
+            .expect("audit identity available");
+        trail
+            .record(AuditEventKind::GateRead {
+                device_id: 7,
+                port: 3,
+            })
+            .expect("audit identity available");
 
         let replay = trail.replay_metadata();
         assert_eq!(replay.session, session);
@@ -1127,10 +1207,12 @@ mod tests {
     #[test]
     fn capability_denial_event_retains_call_context() {
         let mut trail = AuditTrail::new(sample_session());
-        trail.record(AuditEventKind::CapabilityDenied {
-            capability: CapabilityKind::PulseEmit,
-            call: Some("PulseEmit".to_string()),
-        });
+        trail
+            .record(AuditEventKind::CapabilityDenied {
+                capability: CapabilityKind::PulseEmit,
+                call: Some("PulseEmit".to_string()),
+            })
+            .expect("audit identity available");
         match &trail.events()[0].kind {
             AuditEventKind::CapabilityDenied { capability, call } => {
                 assert_eq!(*capability, CapabilityKind::PulseEmit);
@@ -1157,7 +1239,8 @@ mod tests {
             7,
             ControlledObservationAuditDecision::Record,
             controlled_observation_linkage(),
-        );
+        )
+        .expect("audit identity available");
 
         assert_eq!(
             result,
@@ -1202,7 +1285,8 @@ mod tests {
             9,
             ControlledObservationAuditDecision::Redact,
             controlled_observation_linkage(),
-        );
+        )
+        .expect("audit identity available");
 
         assert_eq!(
             result,
@@ -1241,7 +1325,8 @@ mod tests {
             1,
             ControlledObservationAuditDecision::NoStore,
             controlled_observation_linkage(),
-        );
+        )
+        .expect("audit identity available");
         assert_eq!(no_store, ControlledObservationAuditResult::NoStore);
         assert!(no_store_trail.events().is_empty());
 
@@ -1252,7 +1337,8 @@ mod tests {
             2,
             ControlledObservationAuditDecision::Deny,
             controlled_observation_linkage(),
-        );
+        )
+        .expect("audit identity available");
         assert_eq!(denied, ControlledObservationAuditResult::Denied);
         assert!(deny_trail.events().is_empty());
     }
@@ -1268,7 +1354,8 @@ mod tests {
             3,
             ControlledObservationAuditDecision::Record,
             linkage,
-        );
+        )
+        .expect("audit identity available");
 
         let mut second = AuditTrail::new(sample_session());
         apply_controlled_observation_audit_policy(
@@ -1277,7 +1364,8 @@ mod tests {
             3,
             ControlledObservationAuditDecision::Record,
             linkage,
-        );
+        )
+        .expect("audit identity available");
 
         assert_eq!(
             first
@@ -1294,10 +1382,12 @@ mod tests {
     #[test]
     fn replay_archive_roundtrips_controlled_observation_sink_capability_kind() {
         let mut trail = AuditTrail::new(sample_session());
-        trail.record(AuditEventKind::CapabilityDenied {
-            capability: CapabilityKind::ControlledObservationSink,
-            call: Some("ControlledObservationSink".to_string()),
-        });
+        trail
+            .record(AuditEventKind::CapabilityDenied {
+                capability: CapabilityKind::ControlledObservationSink,
+                call: Some("ControlledObservationSink".to_string()),
+            })
+            .expect("audit identity available");
 
         let archive = trail.replay_archive();
         let text = archive.to_canonical_text().expect("canonical archive");
@@ -1310,15 +1400,19 @@ mod tests {
     #[test]
     fn audit_trail_preserves_rule_activation_and_state_transition_events() {
         let mut trail = AuditTrail::new(sample_session());
-        trail.record(AuditEventKind::RuleActivated {
-            rule_id: "rule.alpha".to_string(),
-            salience: 9,
-        });
-        trail.record(AuditEventKind::StateTransition {
-            key: "fact.alpha".to_string(),
-            from_epoch: 1,
-            to_epoch: 2,
-        });
+        trail
+            .record(AuditEventKind::RuleActivated {
+                rule_id: "rule.alpha".to_string(),
+                salience: 9,
+            })
+            .expect("audit identity available");
+        trail
+            .record(AuditEventKind::StateTransition {
+                key: "fact.alpha".to_string(),
+                from_epoch: 1,
+                to_epoch: 2,
+            })
+            .expect("audit identity available");
 
         assert!(matches!(
             &trail.events()[0].kind,
@@ -1338,10 +1432,14 @@ mod tests {
     #[test]
     fn replay_archive_uses_canonical_format_and_copies_trail_state() {
         let mut trail = AuditTrail::new(sample_session());
-        trail.record(AuditEventKind::SessionStarted {
-            entry: "main".to_string(),
-        });
-        trail.record(AuditEventKind::SessionFinished);
+        trail
+            .record(AuditEventKind::SessionStarted {
+                entry: "main".to_string(),
+            })
+            .expect("audit identity available");
+        trail
+            .record(AuditEventKind::SessionFinished)
+            .expect("audit identity available");
 
         let archive = trail.replay_archive();
 
@@ -1355,21 +1453,29 @@ mod tests {
     #[test]
     fn replay_archive_roundtrips_through_canonical_text() {
         let mut trail = AuditTrail::new(sample_session());
-        trail.record(AuditEventKind::SessionStarted {
-            entry: "main\tentry".to_string(),
-        });
-        trail.record(AuditEventKind::CapabilityDenied {
-            capability: CapabilityKind::StateUpdate,
-            call: Some("StateUpdate".to_string()),
-        });
-        trail.record(AuditEventKind::StateTransition {
-            key: "fact.alpha".to_string(),
-            from_epoch: 2,
-            to_epoch: 3,
-        });
-        trail.record(AuditEventKind::Note {
-            message: "note:done".to_string(),
-        });
+        trail
+            .record(AuditEventKind::SessionStarted {
+                entry: "main\tentry".to_string(),
+            })
+            .expect("audit identity available");
+        trail
+            .record(AuditEventKind::CapabilityDenied {
+                capability: CapabilityKind::StateUpdate,
+                call: Some("StateUpdate".to_string()),
+            })
+            .expect("audit identity available");
+        trail
+            .record(AuditEventKind::StateTransition {
+                key: "fact.alpha".to_string(),
+                from_epoch: 2,
+                to_epoch: 3,
+            })
+            .expect("audit identity available");
+        trail
+            .record(AuditEventKind::Note {
+                message: "note:done".to_string(),
+            })
+            .expect("audit identity available");
 
         let archive = trail.replay_archive();
         let text = archive.to_canonical_text().expect("canonical archive");
@@ -1411,15 +1517,21 @@ replay\t1\t9\n";
     #[test]
     fn multi_session_replay_archive_uses_explicit_format_version() {
         let mut first = AuditTrail::new(sample_session());
-        first.record(AuditEventKind::SessionStarted {
-            entry: "alpha".to_string(),
-        });
+        first
+            .record(AuditEventKind::SessionStarted {
+                entry: "alpha".to_string(),
+            })
+            .expect("audit identity available");
 
         let mut second = AuditTrail::new(sample_session());
-        second.record(AuditEventKind::SessionStarted {
-            entry: "beta".to_string(),
-        });
-        second.record(AuditEventKind::SessionFinished);
+        second
+            .record(AuditEventKind::SessionStarted {
+                entry: "beta".to_string(),
+            })
+            .expect("audit identity available");
+        second
+            .record(AuditEventKind::SessionFinished)
+            .expect("audit identity available");
 
         let archive = MultiSessionReplayArchive::new(vec![
             MultiSessionReplayArchiveSession::new(0, first.replay_archive()),
@@ -1438,22 +1550,30 @@ replay\t1\t9\n";
     #[test]
     fn multi_session_replay_archive_roundtrips_through_canonical_text() {
         let mut first = AuditTrail::new(sample_session());
-        first.record(AuditEventKind::SessionStarted {
-            entry: "alpha".to_string(),
-        });
-        first.record(AuditEventKind::Note {
-            message: "first:done".to_string(),
-        });
+        first
+            .record(AuditEventKind::SessionStarted {
+                entry: "alpha".to_string(),
+            })
+            .expect("audit identity available");
+        first
+            .record(AuditEventKind::Note {
+                message: "first:done".to_string(),
+            })
+            .expect("audit identity available");
 
         let mut second = AuditTrail::new(sample_session());
-        second.record(AuditEventKind::SessionStarted {
-            entry: "beta".to_string(),
-        });
-        second.record(AuditEventKind::StateTransition {
-            key: "fact.beta".to_string(),
-            from_epoch: 2,
-            to_epoch: 3,
-        });
+        second
+            .record(AuditEventKind::SessionStarted {
+                entry: "beta".to_string(),
+            })
+            .expect("audit identity available");
+        second
+            .record(AuditEventKind::StateTransition {
+                key: "fact.beta".to_string(),
+                from_epoch: 2,
+                to_epoch: 3,
+            })
+            .expect("audit identity available");
 
         let archive = MultiSessionReplayArchive::new(vec![
             MultiSessionReplayArchiveSession::new(0, first.replay_archive()),
@@ -1538,9 +1658,11 @@ archive\treplay\t0\tnone\n";
     #[test]
     fn effective_quota_envelope_survives_full_canonical_pipeline() {
         let mut trail = AuditTrail::new(custom_session(ExecutionContext::VerifiedLocal));
-        trail.record(AuditEventKind::SessionStarted {
-            entry: "main".to_string(),
-        });
+        trail
+            .record(AuditEventKind::SessionStarted {
+                entry: "main".to_string(),
+            })
+            .expect("audit identity available");
 
         let archive = trail.replay_archive();
         assert_eq!(archive.session.quotas, custom_quota_envelope());
@@ -1578,7 +1700,9 @@ archive\treplay\t0\tnone\n";
     #[test]
     fn replay_metadata_session_matches_archive_session_including_quotas() {
         let mut trail = AuditTrail::new(custom_session(ExecutionContext::KernelBound));
-        trail.record(AuditEventKind::SessionFinished);
+        trail
+            .record(AuditEventKind::SessionFinished)
+            .expect("audit identity available");
 
         let archive = trail.replay_archive();
         assert_eq!(archive.session.quotas, archive.replay.session.quotas);
@@ -1655,12 +1779,16 @@ replay\t0\tnone\n";
     #[test]
     fn multi_session_replay_archive_keeps_outer_v1_with_embedded_v2_archives() {
         let mut first = AuditTrail::new(custom_session(ExecutionContext::VerifiedLocal));
-        first.record(AuditEventKind::SessionStarted {
-            entry: "alpha".to_string(),
-        });
+        first
+            .record(AuditEventKind::SessionStarted {
+                entry: "alpha".to_string(),
+            })
+            .expect("audit identity available");
 
         let mut second = AuditTrail::new(sample_session());
-        second.record(AuditEventKind::SessionFinished);
+        second
+            .record(AuditEventKind::SessionFinished)
+            .expect("audit identity available");
 
         let archive = MultiSessionReplayArchive::new(vec![
             MultiSessionReplayArchiveSession::new(0, first.replay_archive()),
@@ -1698,9 +1826,11 @@ replay\t0\tnone\n";
             },
             gate_registry_bound: false,
         });
-        baseline.record(AuditEventKind::SessionStarted {
-            entry: "main".to_string(),
-        });
+        baseline
+            .record(AuditEventKind::SessionStarted {
+                entry: "main".to_string(),
+            })
+            .expect("audit identity available");
 
         let mut tightened = AuditTrail::new(AuditSessionMetadata {
             context: ExecutionContext::VerifiedLocal,
@@ -1714,9 +1844,11 @@ replay\t0\tnone\n";
             },
             gate_registry_bound: false,
         });
-        tightened.record(AuditEventKind::SessionStarted {
-            entry: "main".to_string(),
-        });
+        tightened
+            .record(AuditEventKind::SessionStarted {
+                entry: "main".to_string(),
+            })
+            .expect("audit identity available");
 
         let archive = MultiSessionReplayArchive::new(vec![
             MultiSessionReplayArchiveSession::new(0, baseline.replay_archive()),
@@ -1770,13 +1902,19 @@ archive\treplay\t0\tnone\n";
 
     fn pb07_valid_archive() -> AuditReplayArchive {
         let mut trail = AuditTrail::new(sample_session());
-        trail.record(AuditEventKind::SessionStarted {
-            entry: "main".into(),
-        });
-        trail.record(AuditEventKind::Note {
-            message: "pb07".into(),
-        });
-        trail.record(AuditEventKind::SessionFinished);
+        trail
+            .record(AuditEventKind::SessionStarted {
+                entry: "main".into(),
+            })
+            .expect("audit identity available");
+        trail
+            .record(AuditEventKind::Note {
+                message: "pb07".into(),
+            })
+            .expect("audit identity available");
+        trail
+            .record(AuditEventKind::SessionFinished)
+            .expect("audit identity available");
         trail.replay_archive()
     }
 
@@ -1867,5 +2005,116 @@ archive\treplay\t0\tnone\n";
             .expect("session line");
         let hostile_lines = multi_text.replace(session_line, &format!("session\t0\t{max}"));
         assert!(MultiSessionReplayArchive::from_canonical_text(&hostile_lines).is_err());
+    }
+
+    // --- #1993: live audit event identity exhaustion ---
+
+    fn r1993_trail_near(next: Option<u64>) -> AuditTrail {
+        let mut trail = AuditTrail::new(sample_session());
+        trail.cursor = AuditEventIdCursor { next };
+        trail
+    }
+
+    #[test]
+    fn r1993_identities_are_issued_in_order_from_zero() {
+        let mut trail = AuditTrail::new(sample_session());
+        for expected in 0..3u64 {
+            let id = trail
+                .record(AuditEventKind::SessionFinished)
+                .expect("identity available");
+            assert_eq!(id, AuditEventId(expected));
+        }
+        let replay = trail.replay_metadata();
+        assert_eq!(replay.event_count, 3);
+        assert_eq!(replay.last_event_id, Some(AuditEventId(2)));
+    }
+
+    #[test]
+    fn r1993_cursor_issues_max_once_then_stays_exhausted() {
+        let mut cursor = AuditEventIdCursor {
+            next: Some(u64::MAX - 1),
+        };
+        for expected in [u64::MAX - 1, u64::MAX] {
+            assert_eq!(cursor.peek(), Ok(AuditEventId(expected)));
+            cursor.commit();
+        }
+        assert_eq!(cursor.next, None, "no wrap to 0");
+        for _ in 0..2 {
+            assert_eq!(cursor.peek(), Err(AuditTrailError::EventIdExhausted));
+            cursor.commit();
+            assert_eq!(cursor.next, None, "exhaustion is permanent");
+        }
+    }
+
+    #[test]
+    fn r1993_exhausted_record_appends_nothing_and_changes_nothing() {
+        let mut trail = r1993_trail_near(Some(u64::MAX));
+        assert_eq!(
+            trail.record(AuditEventKind::SessionFinished),
+            Ok(AuditEventId(u64::MAX)),
+            "the last identity is issuable"
+        );
+        let before = trail.clone();
+        assert_eq!(
+            trail.record(AuditEventKind::SessionFinished),
+            Err(AuditTrailError::EventIdExhausted)
+        );
+        assert_eq!(trail, before, "events and cursor unchanged on failure");
+    }
+
+    #[test]
+    fn r1993_capacity_is_exact_and_side_effect_free() {
+        let trail = r1993_trail_near(Some(u64::MAX - 2));
+        let before = trail.clone();
+        assert_eq!(trail.ensure_record_capacity(0), Ok(()));
+        assert_eq!(trail.ensure_record_capacity(3), Ok(()), "MAX-2, MAX-1, MAX");
+        assert_eq!(
+            trail.ensure_record_capacity(4),
+            Err(AuditTrailError::EventIdExhausted)
+        );
+        assert_eq!(trail, before, "preflight never mutates");
+
+        let exhausted = r1993_trail_near(None);
+        assert_eq!(exhausted.ensure_record_capacity(0), Ok(()));
+        assert_eq!(
+            exhausted.ensure_record_capacity(1),
+            Err(AuditTrailError::EventIdExhausted)
+        );
+        let fresh = AuditTrail::new(sample_session());
+        assert_eq!(fresh.ensure_record_capacity(usize::MAX), Ok(()));
+    }
+
+    #[test]
+    fn r1993_controlled_observation_audit_propagates_exhaustion_typed() {
+        let mut trail = r1993_trail_near(None);
+        let before = trail.clone();
+        for policy in [
+            ControlledObservationAuditDecision::Record,
+            ControlledObservationAuditDecision::Redact,
+        ] {
+            assert_eq!(
+                apply_controlled_observation_audit_policy(
+                    &mut trail,
+                    7,
+                    0,
+                    policy,
+                    controlled_observation_linkage(),
+                ),
+                Err(AuditTrailError::EventIdExhausted),
+                "{policy:?} must not be disguised as NoStore/Denied"
+            );
+        }
+        assert_eq!(trail, before);
+        // Policy outcomes that record nothing are unaffected by exhaustion.
+        assert_eq!(
+            apply_controlled_observation_audit_policy(
+                &mut trail,
+                7,
+                0,
+                ControlledObservationAuditDecision::NoStore,
+                controlled_observation_linkage(),
+            ),
+            Ok(ControlledObservationAuditResult::NoStore)
+        );
     }
 }
