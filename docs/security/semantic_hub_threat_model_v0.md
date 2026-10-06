@@ -9,10 +9,9 @@ untrusted project policy) and issue #1372 (Studio and ALM local data
 governance) as design constraints.
 
 This document describes one component's threat model. It is not the
-repository-wide threat model. The repository-wide track is `#1371`, and its
-own planned document is `docs/security/threat_model_v0.md` (not yet written
-as of this document). Nothing here should be read as satisfying that broader
-issue; this document only covers Semantic Hub v0.
+repository-wide threat model: that is `docs/security/threat_model_v0.md`
+(#1371), with `docs/security/untrusted_project_policy_v0.md`. This document
+covers Semantic Hub v0 only and stays consistent with those authorities.
 
 ## 1. Non-claims
 
@@ -311,9 +310,10 @@ These are real, named gaps in v0, not merely theoretical future work:
 - cryptographic tamper-evidence of the audit log does not exist: digests
   (HubDigest = FNV-1a-64 + byte length) are non-cryptographic correlation
   fingerprints only, chosen to confirm "this record refers to exactly
-  these bytes," not to detect deliberate forgery. A signing/provenance
-  chain is tracked separately under issue #1374 and is not implemented
-  here
+  these bytes," not to detect deliberate forgery. The repository-wide
+  provenance and signing policy is
+  `docs/security/artifact_provenance_and_signing_policy_v0.md` (#1374);
+  Hub v0 itself has no cryptographic signing chain
 ```
 
 ## 9. Out-of-scope threats for v0
@@ -398,11 +398,11 @@ and keeps all Hub state project-local under `.semantic/hub/`, matching the
 not implement, override, or attempt to satisfy those issues' broader policy
 scope (Studio/ALM/skill-export/consent-level machinery); it only needed the
 privacy-classification vocabulary, because it has no learning, export, or
-skill features of its own. The repository-wide threat model document that
-issue #1371 will eventually produce (`docs/security/threat_model_v0.md`,
-referenced from `SECURITY.md`, not yet written as of this document) is the
-correct place for cross-component untrusted-project policy; this document
-stays scoped to Semantic Hub v0 alone.
+skill features of its own. Cross-component untrusted-project policy now
+lives in the repository-wide `docs/security/threat_model_v0.md` and
+`docs/security/untrusted_project_policy_v0.md` (#1371), which keep Hub's
+`InProcessUnisolated` posture; #1372 was closed not planned together with the
+Studio/ALM surfaces. This document stays scoped to Semantic Hub v0 alone.
 
 ## 12. Update policy
 

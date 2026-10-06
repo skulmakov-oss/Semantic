@@ -1,7 +1,8 @@
 //! Provenance evidence: proves how a result was produced, not that it is
-//! true. No cryptographic signing chain is implemented here -- that is
-//! explicitly future work tracked by issue #1374 (artifact provenance and
-//! signing chain). `content_digest` is a bounded, deterministic,
+//! true. No cryptographic signing chain is implemented here; the
+//! repository-wide provenance and signing policy is
+//! `docs/security/artifact_provenance_and_signing_policy_v0.md` (#1374),
+//! under which artifacts stay unsigned. `content_digest` is a bounded, deterministic,
 //! non-cryptographic fingerprint (FNV-1a/64) used only to correlate exact
 //! bytes across request/reply/audit evidence; it is not a security
 //! commitment and must never be documented as one.

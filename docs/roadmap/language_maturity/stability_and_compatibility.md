@@ -1,6 +1,10 @@
 # Stability And Compatibility Discipline
 
-Status: proposed v0
+Status: current governance companion to SSF-10 (#1378). The canonical technical
+compatibility contract is `docs/architecture/artifact_identity_and_trust.md`
+(SSF-10 §2); deprecation states and migration rules are in
+`docs/roadmap/language_maturity/deprecation_and_migration.md`. This document
+is not a release qualification authority and marks no surface stable by itself.
 
 ## Goal
 
@@ -20,8 +24,9 @@ Today the repository already has:
 - release smoke and compatibility checks
 - active beta-line compatibility notes
 
-But it does not yet have one complete language-platform compatibility policy
-stack that answers:
+Before SSF-10 it did not yet have one complete language-platform compatibility
+policy stack. SSF-10 now defines the per-surface rules and
+`deprecation_and_migration.md` governs change; the original questions were:
 
 - which surfaces are stable
 - which surfaces are still draft or experimental
