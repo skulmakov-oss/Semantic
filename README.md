@@ -4,6 +4,8 @@
 
 # Semantic Language
 
+[Visual Identity v1.2](docs/brand/README.md)
+
 <p align="center">
   <strong>A deterministic, verifier-first programming language and execution platform with native four-state logic.</strong>
 </p>

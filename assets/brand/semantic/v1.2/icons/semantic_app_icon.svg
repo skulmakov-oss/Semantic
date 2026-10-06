@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+<title id="title">Semantic color cube</title>
+<desc id="desc">Left side and top of computational cube; front matrix N F above T S.</desc>
+<polygon points="12,32 73,10 116,34 58,53" fill="#000000" stroke="#FFFFFF" stroke-width="1.5"/>
+<polygon points="12,32 58,53 58,117 12,92" fill="#000000" stroke="#FFFFFF" stroke-width="1.5"/>
+<polygon points="58,53 116,34 116,98 58,117" fill="#000000" stroke="#FFFFFF" stroke-width="1.5"/>
+<g transform="matrix(0.52 -0.17 0 0.60 60 54)">
+<rect x="4" y="4" width="44" height="44" fill="#55575A" stroke="#FFFFFF" stroke-width="2"/>
+<path d="M 17 39 L 17 15 L 37 39 L 37 15" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="square" stroke-linejoin="miter"/>
+<rect x="54" y="4" width="44" height="44" fill="#D84A35" stroke="#FFFFFF" stroke-width="2"/>
+<path d="M 67 39 L 67 15 L 87 15 M 67 26 L 83 26" fill="none" stroke="#000000" stroke-width="5" stroke-linecap="square" stroke-linejoin="miter"/>
+<rect x="4" y="54" width="44" height="44" fill="#0E9F55" stroke="#FFFFFF" stroke-width="2"/>
+<path d="M 16 65 L 40 65 M 28 65 L 28 90" fill="none" stroke="#000000" stroke-width="5" stroke-linecap="square" stroke-linejoin="miter"/>
+<rect x="54" y="54" width="44" height="44" fill="#1769E8" stroke="#FFFFFF" stroke-width="2"/>
+<path d="M 89 68 L 85 64 L 72 64 L 67 69 L 67 74 L 72 78 L 83 78 L 88 83 L 88 88 L 84 92 L 71 92 L 66 88" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="square" stroke-linejoin="miter"/>
+</g>
+</svg>
