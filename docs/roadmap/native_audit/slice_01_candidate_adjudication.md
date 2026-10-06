@@ -21,7 +21,7 @@ empty registry for ceremony).
 Two **audit-method corrections** to the Slice 0 inventory heuristic were found
 while adjudicating (§ Method corrections). They are defects of the audit's own
 derivation, not repository readiness findings, and are corrected in
-`inventory.md` §9 without changing the reproducible Slice 0 query.
+[`inventory_overrides.tsv`](inventory_overrides.tsv) (summarized in `inventory.md` §9) without changing the reproducible Slice 0 query.
 
 ---
 
@@ -298,7 +298,9 @@ repository claim, and they are recorded so later slices do not inherit them.
   evidence: `CI_REFERENCED` (build-time embed, E0).
 
 The Slice 0 query and `inventory.tsv` are kept unchanged as the reproducible
-heuristic output; adjudicated overrides live in `inventory.md` §9. Changing the
+heuristic output (Slice-0 raw snapshot — historical derivation, superseded where
+adjudicated); the 50 adjudicated overrides live in `inventory_overrides.tsv`,
+composed with the raw snapshot by the rule in `inventory.md` §0. Changing the
 query would silently re-classify rows that have not been adjudicated.
 
 ## Commands used as evidence

@@ -1,0 +1,51 @@
+path	slice0_evidence	current_evidence	proven_level	adjudication_source
+crates/sm-vm/tests/fixtures/profiling/andromeda_fact_wave_256.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile, --ignored)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/andromeda_fact_wave_64.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/delta_like_kernel.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/dense_quad_probe.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/fact_intersect_kernel.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/fact_merge_kernel.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/p5a_probe/p5a_quad_batch_wave.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/p5a_probe/p5a_quad_batch_wave_surface.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/p5a_probe/p5a_quad_helper_mix.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/quad_logic_storm.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/quad_match_dispatch.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_dispatch_equalized_if_chain.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_dispatch_equalized_match.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_call_chain_helper.sm	CI_REFERENCED	CI_EXECUTED	E7+E9	NATIVE-AUDIT-01 / C-06
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_call_chain_inline.sm	CI_REFERENCED	CI_EXECUTED	E7+E9	NATIVE-AUDIT-01 / C-06
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_single_call_helper.sm	CI_REFERENCED	CI_EXECUTED	E7+E9	NATIVE-AUDIT-01 / C-06
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_single_call_inline.sm	CI_REFERENCED	CI_EXECUTED	E7+E9	NATIVE-AUDIT-01 / C-06
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_loop_accumulator_equalized_explicit.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_loop_accumulator_equalized_looped.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_temp_staging_multi_use_direct.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_temp_staging_multi_use_named.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_temp_staging_single_use_direct.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_temp_staging_single_use_named.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_transition_equalized_classified.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/g2/scalar_transition_equalized_repeated.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_branch_counters_local.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_branch_counters_return_value.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_dispatch_if_chain.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_dispatch_match.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_helper_boundary_helper.sm	CI_REFERENCED	CI_EXECUTED	E7+E9	NATIVE-AUDIT-01 / C-06
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_helper_boundary_inline.sm	CI_REFERENCED	CI_EXECUTED	E7+E9	NATIVE-AUDIT-01 / C-06
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_loop_accumulator_explicit.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_loop_accumulator_looped.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_temp_staging_direct.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_temp_staging_named.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_transition_old_new_packed_code.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+crates/sm-vm/tests/fixtures/profiling/scalar_movement/scalar_transition_old_new_repeated.sm	CI_REFERENCED	MANUAL_ONLY	E7 local (vm-profile)	NATIVE-AUDIT-01 / C-06 / M-02
+examples/pcc_candidates/loop_control_flow_probe/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / M-01
+examples/pcc_candidates/option_result_control_flow/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / M-01
+examples/quad_logic_calculator/src/calculator.sm	MANUAL_ONLY	CI_REFERENCED	E0 (build-time include_str!)	NATIVE-AUDIT-01 / C-03 / M-03
+examples/quad_logic_calculator/src/quad_calc.proj.sm	MANUAL_ONLY	CI_REFERENCED	E0 (build-time include_str!)	NATIVE-AUDIT-01 / C-03 / M-03
+examples/readiness_draft_canonical/cli_batch_core/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / C-04 / M-01
+examples/readiness_draft_canonical/data_audit_record_iterable/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / C-04 / M-01
+examples/readiness_draft_canonical/module_selected_import_audit_report/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / C-04 / M-01
+examples/readiness_draft_canonical/module_selected_import_settlement/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / C-04 / M-01
+examples/readiness_draft_canonical/module_selected_import_settlement/src/rendering.sm	UNKNOWN	NOT_EXECUTED	E0	NATIVE-AUDIT-01 / C-04
+examples/readiness_draft_canonical/module_selected_import_settlement/src/rules.sm	UNKNOWN	NOT_EXECUTED	E0	NATIVE-AUDIT-01 / C-04
+examples/readiness_draft_canonical/rule_state_decision/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / C-04 / M-01
+examples/readiness_draft_canonical/wave2_local_helper_import/src/helper.sm	UNKNOWN	NOT_EXECUTED	E0	NATIVE-AUDIT-01 / C-04
+examples/readiness_draft_canonical/wave2_local_helper_import/src/main.sm	CI_REFERENCED	INSPECTION_ONLY	E0	NATIVE-AUDIT-01 / C-04 / M-01

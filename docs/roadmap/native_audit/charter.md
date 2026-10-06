@@ -2,7 +2,7 @@
 
 Status: active audit charter (NATIVE-AUDIT-00, Slice 0 — charter and inventory)
 Audit base SHA: `d95bee488d26208f4a3a4215ae4dd34e04d429ee`
-Inventory: [`inventory.md`](inventory.md), per-file data [`inventory.tsv`](inventory.tsv)
+Inventory: [`inventory.md`](inventory.md). Current per-file evidence = Slice-0 raw snapshot [`inventory.tsv`](inventory.tsv) + adjudicated overrides [`inventory_overrides.tsv`](inventory_overrides.tsv) (composition rule: `inventory.md` §0)
 
 This charter fixes the perimeter, the evidence model and the rules for the
 Semantic-native readiness audit **before any finding is adjudicated or any
