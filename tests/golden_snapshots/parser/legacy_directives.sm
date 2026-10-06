@@ -1,0 +1,9 @@
+Import "shared.sm"
+Pulse emit = sensor.edge
+Entity Sensor:
+    state val: quad
+
+Profile fast mode
+Law "CheckSignal" [priority 10]:
+    When Sensor.val == T ->
+        Log.emit("Signal OK")
