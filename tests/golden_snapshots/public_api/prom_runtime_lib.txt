@@ -41,8 +41,8 @@ pub effect_ordinal: usize,
 pub message: String,
 pub fn new( code: RuleEffectExecutionCode, rule_id: RuleId, effect_ordinal: usize, message: impl Into<String>, ) -> Self {
 pub struct ExecutionSession<'a, H: PrometheusHostAbi, C: CapabilityChecker> {
-pub fn new( host: &'a mut H, capabilities: &'a C, config: ExecutionConfig, capability_manifest: CapabilityManifestMetadata, ) -> Self {
-pub fn kernel_bound( host: &'a mut H, capabilities: &'a C, capability_manifest: CapabilityManifestMetadata, ) -> Self {
+pub fn new(host: &'a mut H, capabilities: &'a C, config: ExecutionConfig) -> Self {
+pub fn kernel_bound(host: &'a mut H, capabilities: &'a C) -> Self {
 pub fn descriptor(&self) -> &RuntimeSessionDescriptor {
 pub fn derive_agenda(&self, state: &SemanticStateStore, rules: &RuleEngine) -> Agenda {
 pub fn select_next_activation(&self, agenda: &Agenda) -> Option<ActivationSelection> {
@@ -58,8 +58,8 @@ pub fn apply_rule_audit_note_effects( &self, trail: &mut AuditTrail, rule: &Rule
 pub fn run_verified_semcode(&mut self, bytes: &[u8]) -> Result<(), RuntimeError> {
 pub fn run_verified_semcode_entry( &mut self, bytes: &[u8], entry: &str, ) -> Result<(), RuntimeError> {
 pub struct GateExecutionSession<'a, B: GateBinding, C: CapabilityChecker> {
-pub fn new( registry: &'a GateRegistry, binding: &'a mut B, capabilities: &'a C, config: ExecutionConfig, capability_manifest: CapabilityManifestMetadata, ) -> Self {
-pub fn kernel_bound( registry: &'a GateRegistry, binding: &'a mut B, capabilities: &'a C, capability_manifest: CapabilityManifestMetadata, ) -> Self {
+pub fn new( registry: &'a GateRegistry, binding: &'a mut B, capabilities: &'a C, config: ExecutionConfig, ) -> Self {
+pub fn kernel_bound( registry: &'a GateRegistry, binding: &'a mut B, capabilities: &'a C, ) -> Self {
 pub fn descriptor(&self) -> &RuntimeSessionDescriptor {
 pub fn derive_agenda(&self, state: &SemanticStateStore, rules: &RuleEngine) -> Agenda {
 pub fn select_next_activation(&self, agenda: &Agenda) -> Option<ActivationSelection> {

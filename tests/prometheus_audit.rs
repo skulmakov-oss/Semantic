@@ -43,8 +43,7 @@ fn audit_trail_reuses_runtime_session_descriptor_without_owning_runtime_logic() 
     let mut binding = DeterministicGateMock::new();
     binding.seed_read(GateId::new(7, 3), AbiValue::I32(88));
 
-    let mut session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, manifest.metadata());
+    let mut session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
     let audit_session = AuditSessionMetadata {
         context: session.descriptor().context,
         quotas: session.descriptor().quotas,

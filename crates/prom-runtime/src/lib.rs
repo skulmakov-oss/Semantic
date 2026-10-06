@@ -6,6 +6,7 @@ use prom_audit::{AuditEventId, AuditEventKind, AuditSessionMetadata, AuditTrail}
 use prom_cap::{CapabilityChecker, CapabilityManifestMetadata};
 use prom_gates::{GateBinding, GateHostAdapter, GateRegistry};
 use prom_rules::{Agenda, AgendaEntry, RuleDefinition, RuleEffect, RuleEngine, RuleId};
+use prom_rules::{RuleAuditNoteEffect, RuleStateWriteEffect};
 use prom_state::{
     ContextWindow, FactResolution, SemanticStateStore, StateEpoch, StateTransitionMetadata,
     StateUpdate, StateValidationError,
@@ -138,6 +139,35 @@ fn apply_update_refresh_agenda(
     })
 }
 
+/// Admits a whole rule plan into one execution slice before any effect runs
+/// (#1784). Returns the plan's effects of the admitted family, or
+/// `UnsupportedEffectFamily` at the first foreign effect's ordinal; on error
+/// nothing has been executed, so no prefix effect can commit.
+fn admit_effect_family<'r, T>(
+    rule: &'r RuleDefinition,
+    slice: &str,
+    family: impl Fn(&'r RuleEffect) -> Option<&'r T>,
+) -> Result<Vec<&'r T>, RuleEffectExecutionError> {
+    rule.effect_plan()
+        .effects()
+        .iter()
+        .enumerate()
+        .map(|(effect_ordinal, effect)| {
+            family(effect).ok_or_else(|| {
+                RuleEffectExecutionError::new(
+                    RuleEffectExecutionCode::UnsupportedEffectFamily,
+                    rule.id.clone(),
+                    effect_ordinal,
+                    format!(
+                        "rule '{}' effect {} is not admitted by the current {} execution slice",
+                        rule.id.0, effect_ordinal, slice
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
 fn apply_rule_state_write_effects(
     descriptor: &RuntimeSessionDescriptor,
     state: &mut SemanticStateStore,
@@ -145,21 +175,14 @@ fn apply_rule_state_write_effects(
     rules: &RuleEngine,
     trail: &mut AuditTrail,
 ) -> Result<Vec<RuleStateWriteAdvance>, RuleEffectExecutionError> {
+    let effects: Vec<&RuleStateWriteEffect> =
+        admit_effect_family(rule, "state-write", |effect| match effect {
+            RuleEffect::StateWrite(effect) => Some(effect),
+            _ => None,
+        })?;
     let mut advances = Vec::new();
 
-    for (effect_ordinal, effect) in rule.effect_plan().effects().iter().enumerate() {
-        let RuleEffect::StateWrite(effect) = effect else {
-            return Err(RuleEffectExecutionError::new(
-                RuleEffectExecutionCode::UnsupportedEffectFamily,
-                rule.id.clone(),
-                effect_ordinal,
-                format!(
-                    "rule '{}' effect {} is not admitted by the current state-write execution slice",
-                    rule.id.0, effect_ordinal
-                ),
-            ));
-        };
-
+    for (effect_ordinal, effect) in effects.into_iter().enumerate() {
         let advance = apply_update_refresh_agenda(
             descriptor,
             state,
@@ -195,21 +218,14 @@ fn apply_rule_audit_note_effects(
     trail: &mut AuditTrail,
     rule: &RuleDefinition,
 ) -> Result<Vec<RuleAuditNoteAdvance>, RuleEffectExecutionError> {
+    let effects: Vec<&RuleAuditNoteEffect> =
+        admit_effect_family(rule, "audit-note", |effect| match effect {
+            RuleEffect::AuditNote(effect) => Some(effect),
+            _ => None,
+        })?;
     let mut advances = Vec::new();
 
-    for (effect_ordinal, effect) in rule.effect_plan().effects().iter().enumerate() {
-        let RuleEffect::AuditNote(effect) = effect else {
-            return Err(RuleEffectExecutionError::new(
-                RuleEffectExecutionCode::UnsupportedEffectFamily,
-                rule.id.clone(),
-                effect_ordinal,
-                format!(
-                    "rule '{}' effect {} is not admitted by the current audit-note execution slice",
-                    rule.id.0, effect_ordinal
-                ),
-            ));
-        };
-
+    for (effect_ordinal, effect) in effects.into_iter().enumerate() {
         let event_id = trail.record(AuditEventKind::Note {
             message: effect.message.clone(),
         });
@@ -231,35 +247,27 @@ pub struct ExecutionSession<'a, H: PrometheusHostAbi, C: CapabilityChecker> {
 }
 
 impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> ExecutionSession<'a, H, C> {
-    pub fn new(
-        host: &'a mut H,
-        capabilities: &'a C,
-        config: ExecutionConfig,
-        capability_manifest: CapabilityManifestMetadata,
-    ) -> Self {
+    /// Capability provenance is taken from `capabilities` itself (#1785); a
+    /// caller cannot supply metadata that differs from the authorizing checker.
+    pub fn new(host: &'a mut H, capabilities: &'a C, config: ExecutionConfig) -> Self {
         Self {
             host,
             capabilities,
             descriptor: RuntimeSessionDescriptor {
                 context: config.context,
                 quotas: config.quotas,
-                capability_manifest,
+                capability_manifest: capabilities.manifest_metadata(),
                 gate_registry_bound: false,
             },
             config,
         }
     }
 
-    pub fn kernel_bound(
-        host: &'a mut H,
-        capabilities: &'a C,
-        capability_manifest: CapabilityManifestMetadata,
-    ) -> Self {
+    pub fn kernel_bound(host: &'a mut H, capabilities: &'a C) -> Self {
         Self::new(
             host,
             capabilities,
             ExecutionConfig::for_context(ExecutionContext::KernelBound),
-            capability_manifest,
         )
     }
 
@@ -400,7 +408,6 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
         binding: &'a mut B,
         capabilities: &'a C,
         config: ExecutionConfig,
-        capability_manifest: CapabilityManifestMetadata,
     ) -> Self {
         Self {
             registry,
@@ -409,7 +416,7 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
             descriptor: RuntimeSessionDescriptor {
                 context: config.context,
                 quotas: config.quotas,
-                capability_manifest,
+                capability_manifest: capabilities.manifest_metadata(),
                 gate_registry_bound: true,
             },
             config,
@@ -420,14 +427,12 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
         registry: &'a GateRegistry,
         binding: &'a mut B,
         capabilities: &'a C,
-        capability_manifest: CapabilityManifestMetadata,
     ) -> Self {
         Self::new(
             registry,
             binding,
             capabilities,
             ExecutionConfig::for_context(ExecutionContext::KernelBound),
-            capability_manifest,
         )
     }
 
@@ -569,7 +574,7 @@ mod tests {
         let manifest = CapabilityManifest::gate_surface();
         let metadata = manifest.metadata();
         let mut host = RecordingHostAbi::with_read_value(AbiValue::I32(1));
-        let session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata.clone());
+        let session = ExecutionSession::kernel_bound(&mut host, &manifest);
         assert_eq!(session.descriptor().context, ExecutionContext::KernelBound);
         assert_eq!(session.descriptor().capability_manifest, metadata);
         assert!(!session.descriptor().gate_registry_bound);
@@ -578,30 +583,26 @@ mod tests {
     #[test]
     fn gate_execution_session_descriptor_marks_gate_binding() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let mut registry = GateRegistry::new();
         registry
             .register(GateDescriptor::read_write(7, 4, "gate.alpha"))
             .expect("register");
         let mut binding = DeterministicGateMock::new();
         binding.seed_read(GateId::new(7, 4), AbiValue::I32(1));
-        let session =
-            GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata);
+        let session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
         assert!(session.descriptor().gate_registry_bound);
     }
 
     #[test]
     fn gate_execution_session_derives_agenda_and_audit_without_owning_subdomains() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let mut registry = GateRegistry::new();
         registry
             .register(GateDescriptor::read_write(7, 4, "gate.alpha"))
             .expect("register");
         let mut binding = DeterministicGateMock::new();
         binding.seed_read(GateId::new(7, 4), AbiValue::I32(1));
-        let session =
-            GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata);
+        let session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
 
         let mut state = SemanticStateStore::new();
         state
@@ -646,15 +647,13 @@ mod tests {
     #[test]
     fn gate_execution_session_applies_state_update_refreshes_agenda_and_emits_audit() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let mut registry = GateRegistry::new();
         registry
             .register(GateDescriptor::read_write(7, 4, "gate.alpha"))
             .expect("register");
         let mut binding = DeterministicGateMock::new();
         binding.seed_read(GateId::new(7, 4), AbiValue::I32(1));
-        let session =
-            GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata);
+        let session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
 
         let mut state = SemanticStateStore::new();
         let mut rules = RuleEngine::new();
@@ -699,9 +698,8 @@ mod tests {
     #[test]
     fn execution_session_applies_rule_state_write_effects_in_declared_order() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let mut host = RecordingHostAbi::default();
-        let session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+        let session = ExecutionSession::kernel_bound(&mut host, &manifest);
 
         let mut state = SemanticStateStore::new();
         state
@@ -769,9 +767,8 @@ mod tests {
     #[test]
     fn execution_session_rejects_non_state_write_effect_families_in_first_wave() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let mut host = RecordingHostAbi::default();
-        let session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+        let session = ExecutionSession::kernel_bound(&mut host, &manifest);
 
         let mut state = SemanticStateStore::new();
         state
@@ -808,9 +805,8 @@ mod tests {
     #[test]
     fn execution_session_applies_rule_audit_note_effects_in_declared_order() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let mut host = RecordingHostAbi::default();
-        let session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+        let session = ExecutionSession::kernel_bound(&mut host, &manifest);
 
         let rule = RuleDefinition::new(
             "rule.alpha",
@@ -845,9 +841,8 @@ mod tests {
     #[test]
     fn execution_session_rejects_non_audit_note_effect_families_in_audit_slice() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let mut host = RecordingHostAbi::default();
-        let session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+        let session = ExecutionSession::kernel_bound(&mut host, &manifest);
 
         let rule = RuleDefinition::new(
             "rule.alpha",
@@ -893,10 +888,9 @@ mod tests {
     #[test]
     fn execution_session_propagates_custom_envelope_into_descriptor_and_audit_session() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let mut host = RecordingHostAbi::with_read_value(AbiValue::I32(1));
         let config = ExecutionConfig::new(ExecutionContext::VerifiedLocal, custom_quota_envelope());
-        let session = ExecutionSession::new(&mut host, &manifest, config, metadata);
+        let session = ExecutionSession::new(&mut host, &manifest, config);
 
         assert_eq!(
             session.descriptor().context,
@@ -912,12 +906,10 @@ mod tests {
     #[test]
     fn gate_execution_session_propagates_custom_envelope_into_descriptor_and_audit_session() {
         let manifest = CapabilityManifest::gate_surface();
-        let metadata = manifest.metadata();
         let registry = GateRegistry::new();
         let mut binding = DeterministicGateMock::new();
         let config = ExecutionConfig::new(ExecutionContext::VerifiedLocal, custom_quota_envelope());
-        let session =
-            GateExecutionSession::new(&registry, &mut binding, &manifest, config, metadata);
+        let session = GateExecutionSession::new(&registry, &mut binding, &manifest, config);
 
         assert_eq!(
             session.descriptor().context,
@@ -928,5 +920,133 @@ mod tests {
         let audit = session.begin_audit_trail();
         assert_eq!(audit.session().context, ExecutionContext::VerifiedLocal);
         assert_eq!(audit.session().quotas, custom_quota_envelope());
+    }
+
+    fn pb07_seeded_state() -> SemanticStateStore {
+        let mut state = SemanticStateStore::new();
+        state
+            .apply(StateUpdate::new(
+                "fact.alpha",
+                FactResolution::Certain(FactValue::Bool(true)),
+                ContextWindow::new("root"),
+                "seed alpha",
+            ))
+            .expect("seed");
+        state
+    }
+
+    fn pb07_rule(effects: Vec<RuleEffect>) -> RuleDefinition {
+        RuleDefinition::new(
+            "rule.mixed",
+            5,
+            vec![RuleCondition::equals("fact.alpha", FactValue::Bool(true))],
+        )
+        .with_effects(effects)
+    }
+
+    // #1784: a mixed plan is never admitted, so no prefix effect may commit.
+    #[test]
+    fn pb07_mixed_state_write_plan_commits_no_prefix_effect() {
+        let manifest = CapabilityManifest::gate_surface();
+        let mut host = RecordingHostAbi::default();
+        let session = ExecutionSession::kernel_bound(&mut host, &manifest);
+        let mut state = pb07_seeded_state();
+        let rule = pb07_rule(vec![
+            RuleEffect::state_write("fact.beta", FactValue::I32(1), "root", "prefix write"),
+            RuleEffect::audit_note("foreign family"),
+        ]);
+        let mut rules = RuleEngine::new();
+        rules.register(rule.clone()).expect("register rule");
+        let before = state.clone();
+        let agenda_before = session.derive_agenda(&state, &rules);
+        let mut audit = session.begin_audit_trail();
+
+        let err = session
+            .apply_rule_state_write_effects(&mut state, &rule, &rules, &mut audit)
+            .expect_err("mixed plan must not be admitted");
+
+        assert_eq!(err.code, RuleEffectExecutionCode::UnsupportedEffectFamily);
+        assert_eq!(err.effect_ordinal, 1);
+        assert_eq!(state, before, "state and epoch unchanged");
+        assert!(state.get("fact.beta").is_none());
+        assert!(audit.events().is_empty(), "audit unchanged");
+        assert_eq!(
+            session.derive_agenda(&state, &rules),
+            agenda_before,
+            "agenda unchanged"
+        );
+    }
+
+    #[test]
+    fn pb07_mixed_audit_note_plan_commits_no_prefix_effect() {
+        let manifest = CapabilityManifest::gate_surface();
+        let mut host = RecordingHostAbi::default();
+        let session = ExecutionSession::kernel_bound(&mut host, &manifest);
+        let rule = pb07_rule(vec![
+            RuleEffect::audit_note("prefix note"),
+            RuleEffect::state_write("fact.beta", FactValue::I32(1), "root", "foreign family"),
+        ]);
+        let mut audit = session.begin_audit_trail();
+
+        let err = session
+            .apply_rule_audit_note_effects(&mut audit, &rule)
+            .expect_err("mixed plan must not be admitted");
+
+        assert_eq!(err.code, RuleEffectExecutionCode::UnsupportedEffectFamily);
+        assert_eq!(err.effect_ordinal, 1);
+        assert!(audit.events().is_empty(), "no prefix audit note");
+    }
+
+    /// A checker whose provenance is unmistakable (#1785).
+    struct PB07Checker;
+
+    impl CapabilityChecker for PB07Checker {
+        fn require(
+            &self,
+            _capability: prom_cap::CapabilityKind,
+        ) -> Result<(), prom_cap::CapabilityDenied> {
+            Ok(())
+        }
+
+        fn manifest_metadata(&self) -> CapabilityManifestMetadata {
+            CapabilityManifestMetadata {
+                schema: "pb07.checker.owned".into(),
+                version: prom_cap::CapabilityManifestVersion::V1,
+            }
+        }
+    }
+
+    // #1785: recorded provenance is exactly the authorizing checker's.
+    #[test]
+    fn pb07_session_provenance_is_checker_owned() {
+        let checker = PB07Checker;
+        let expected = checker.manifest_metadata();
+        let state = pb07_seeded_state();
+        let rules = RuleEngine::new();
+
+        let mut host = RecordingHostAbi::default();
+        let session = ExecutionSession::kernel_bound(&mut host, &checker);
+        assert_eq!(session.descriptor().capability_manifest, expected);
+        assert_eq!(
+            session.begin_audit_trail().session().capability_manifest,
+            expected
+        );
+        let agenda = session.derive_agenda(&state, &rules);
+        assert_eq!(
+            session
+                .integration_snapshot(&state, &agenda)
+                .session
+                .capability_manifest,
+            expected
+        );
+
+        let registry = GateRegistry::new();
+        let mut binding = DeterministicGateMock::default();
+        let gate = GateExecutionSession::kernel_bound(&registry, &mut binding, &checker);
+        assert_eq!(gate.descriptor().capability_manifest, expected);
+        assert_eq!(
+            gate.begin_audit_trail().session().capability_manifest,
+            expected
+        );
     }
 }

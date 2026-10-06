@@ -176,7 +176,45 @@ impl AuditReplayArchive {
         }
     }
 
-    pub fn to_canonical_text(&self) -> String {
+    /// The canonical-evidence rule for one session (#1786), shared by the
+    /// writer and the reader. Nothing is normalized: a contradiction fails.
+    pub fn validate(&self) -> Result<(), AuditReplayArchiveFormatError> {
+        if self.format_version != AUDIT_REPLAY_ARCHIVE_FORMAT_VERSION {
+            return Err(AuditReplayArchiveFormatError::new(format!(
+                "unsupported archive format version {}; expected {}",
+                self.format_version, AUDIT_REPLAY_ARCHIVE_FORMAT_VERSION
+            )));
+        }
+        if self.replay.session != self.session {
+            return Err(AuditReplayArchiveFormatError::new(
+                "replay session provenance does not match archive session",
+            ));
+        }
+        if self.replay.event_count != self.events.len() {
+            return Err(AuditReplayArchiveFormatError::new(
+                "replay event count does not match archive events",
+            ));
+        }
+        if self.replay.last_event_id != self.events.last().map(|event| event.id) {
+            return Err(AuditReplayArchiveFormatError::new(
+                "replay last event id does not match archive events",
+            ));
+        }
+        for (index, event) in self.events.iter().enumerate() {
+            if event.id != AuditEventId(index as u64) {
+                return Err(AuditReplayArchiveFormatError::new(
+                    "archive event ids must be monotonic from zero",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Serializes canonical evidence only (#1786). Invalid evidence is an
+    /// error, never text the reader would reject or silently repair; valid
+    /// archives serialize byte-for-byte as before.
+    pub fn to_canonical_text(&self) -> Result<String, AuditReplayArchiveFormatError> {
+        self.validate()?;
         let mut out = String::new();
         out.push_str(AUDIT_REPLAY_ARCHIVE_MAGIC);
         out.push('\t');
@@ -241,7 +279,7 @@ impl AuditReplayArchive {
         }
         out.push('\n');
 
-        out
+        Ok(out)
     }
 
     pub fn from_canonical_text(src: &str) -> Result<Self, AuditReplayArchiveFormatError> {
@@ -301,7 +339,20 @@ impl AuditReplayArchive {
         }
         let expected_event_count = parse_usize_field(event_count_parts[1], "event count")?;
 
-        let mut events = Vec::with_capacity(expected_event_count);
+        // #1787: a declared count is untrusted. It must be structurally
+        // possible (one line per event, plus the replay line) before it may
+        // size an allocation, and the reservation itself is fallible.
+        let available_event_lines = src.lines().count().saturating_sub(4);
+        if expected_event_count > available_event_lines {
+            return Err(AuditReplayArchiveFormatError::new(format!(
+                "declared event count {} exceeds the {} event lines present",
+                expected_event_count, available_event_lines
+            )));
+        }
+        let mut events = Vec::new();
+        events.try_reserve(expected_event_count).map_err(|_| {
+            AuditReplayArchiveFormatError::new("cannot reserve memory for declared events")
+        })?;
         for _ in 0..expected_event_count {
             let event_line = lines
                 .next()
@@ -333,37 +384,20 @@ impl AuditReplayArchive {
             last_event_id: parse_optional_event_id(replay_parts[2])?,
         };
 
-        if replay.event_count != events.len() {
-            return Err(AuditReplayArchiveFormatError::new(
-                "replay event count does not match archive events",
-            ));
-        }
-        let actual_last_event_id = events.last().map(|event| event.id);
-        if replay.last_event_id != actual_last_event_id {
-            return Err(AuditReplayArchiveFormatError::new(
-                "replay last event id does not match archive events",
-            ));
-        }
-        for (index, event) in events.iter().enumerate() {
-            if event.id != AuditEventId(index as u64) {
-                return Err(AuditReplayArchiveFormatError::new(
-                    "archive event ids must be monotonic from zero",
-                ));
-            }
-        }
-
         if lines.any(|line| !line.trim().is_empty()) {
             return Err(AuditReplayArchiveFormatError::new(
                 "unexpected trailing archive lines",
             ));
         }
 
-        Ok(Self {
+        let archive = Self {
             format_version,
             session,
             events,
             replay,
-        })
+        };
+        archive.validate()?;
+        Ok(archive)
     }
 }
 
@@ -384,7 +418,33 @@ impl MultiSessionReplayArchive {
         }
     }
 
-    pub fn to_canonical_text(&self) -> String {
+    /// The canonical-evidence rule for a multi-session archive (#1786):
+    /// exact format version, ordinals exactly `0..N`, and every embedded
+    /// archive canonical.
+    pub fn validate(&self) -> Result<(), MultiSessionReplayArchiveFormatError> {
+        if self.format_version != MULTI_SESSION_REPLAY_ARCHIVE_FORMAT_VERSION {
+            return Err(MultiSessionReplayArchiveFormatError::new(format!(
+                "unsupported multi-session archive format version {}; expected {}",
+                self.format_version, MULTI_SESSION_REPLAY_ARCHIVE_FORMAT_VERSION
+            )));
+        }
+        for (index, session) in self.sessions.iter().enumerate() {
+            if u32::try_from(index).ok() != Some(session.session_ordinal) {
+                return Err(MultiSessionReplayArchiveFormatError::new(
+                    "multi-session replay session ordinals must be monotonic from zero",
+                ));
+            }
+            session
+                .archive
+                .validate()
+                .map_err(|err| MultiSessionReplayArchiveFormatError::new(err.message))?;
+        }
+        Ok(())
+    }
+
+    /// Serializes canonical evidence only (#1786); see `validate`.
+    pub fn to_canonical_text(&self) -> Result<String, MultiSessionReplayArchiveFormatError> {
+        self.validate()?;
         let mut out = String::new();
         out.push_str(MULTI_SESSION_REPLAY_ARCHIVE_MAGIC);
         out.push('\t');
@@ -395,7 +455,10 @@ impl MultiSessionReplayArchive {
         out.push('\n');
 
         for session in &self.sessions {
-            let archive_text = session.archive.to_canonical_text();
+            let archive_text = session
+                .archive
+                .to_canonical_text()
+                .map_err(|err| MultiSessionReplayArchiveFormatError::new(err.message))?;
             let archive_lines = archive_text.lines().collect::<Vec<_>>();
             out.push_str("session\t");
             out.push_str(&session.session_ordinal.to_string());
@@ -409,7 +472,7 @@ impl MultiSessionReplayArchive {
             }
         }
 
-        out
+        Ok(out)
     }
 
     pub fn from_canonical_text(src: &str) -> Result<Self, MultiSessionReplayArchiveFormatError> {
@@ -450,7 +513,20 @@ impl MultiSessionReplayArchive {
         )
         .map_err(|err| MultiSessionReplayArchiveFormatError::new(err.message))?;
 
-        let mut sessions = Vec::with_capacity(expected_session_count);
+        // #1787: every session needs at least a session line and one archive
+        // line, so the declared count must fit the remaining input before it
+        // may size an allocation; the reservation itself is fallible.
+        let available_sessions = src.lines().count().saturating_sub(2) / 2;
+        if expected_session_count > available_sessions {
+            return Err(MultiSessionReplayArchiveFormatError::new(format!(
+                "declared session count {} exceeds the {} sessions the input can hold",
+                expected_session_count, available_sessions
+            )));
+        }
+        let mut sessions = Vec::new();
+        sessions.try_reserve(expected_session_count).map_err(|_| {
+            MultiSessionReplayArchiveFormatError::new("cannot reserve memory for declared sessions")
+        })?;
         while let Some(line) = lines.next() {
             if line.trim().is_empty() {
                 continue;
@@ -512,18 +588,12 @@ impl MultiSessionReplayArchive {
                 sessions.len()
             )));
         }
-        for (index, session) in sessions.iter().enumerate() {
-            if session.session_ordinal != index as u32 {
-                return Err(MultiSessionReplayArchiveFormatError::new(
-                    "multi-session replay session ordinals must be monotonic from zero",
-                ));
-            }
-        }
-
-        Ok(Self {
+        let archive = Self {
             format_version,
             sessions,
-        })
+        };
+        archive.validate()?;
+        Ok(archive)
     }
 }
 
@@ -1116,7 +1186,7 @@ mod tests {
         }
 
         let archive = trail.replay_archive();
-        let text = archive.to_canonical_text();
+        let text = archive.to_canonical_text().expect("canonical archive");
         let parsed = AuditReplayArchive::from_canonical_text(&text).expect("parse");
         assert_eq!(parsed, archive);
         assert!(text.contains("controlled-observation"));
@@ -1156,7 +1226,7 @@ mod tests {
         }
 
         let archive = trail.replay_archive();
-        let text = archive.to_canonical_text();
+        let text = archive.to_canonical_text().expect("canonical archive");
         let parsed = AuditReplayArchive::from_canonical_text(&text).expect("parse");
         assert_eq!(parsed, archive);
         assert!(text.contains("controlled-observation"));
@@ -1210,8 +1280,14 @@ mod tests {
         );
 
         assert_eq!(
-            first.replay_archive().to_canonical_text(),
-            second.replay_archive().to_canonical_text()
+            first
+                .replay_archive()
+                .to_canonical_text()
+                .expect("canonical archive"),
+            second
+                .replay_archive()
+                .to_canonical_text()
+                .expect("canonical archive")
         );
     }
 
@@ -1224,7 +1300,7 @@ mod tests {
         });
 
         let archive = trail.replay_archive();
-        let text = archive.to_canonical_text();
+        let text = archive.to_canonical_text().expect("canonical archive");
         let parsed = AuditReplayArchive::from_canonical_text(&text).expect("parse");
 
         assert_eq!(parsed, archive);
@@ -1296,7 +1372,7 @@ mod tests {
         });
 
         let archive = trail.replay_archive();
-        let text = archive.to_canonical_text();
+        let text = archive.to_canonical_text().expect("canonical archive");
         let parsed = AuditReplayArchive::from_canonical_text(&text).expect("parse");
 
         assert_eq!(parsed, archive);
@@ -1384,7 +1460,7 @@ replay\t1\t9\n";
             MultiSessionReplayArchiveSession::new(1, second.replay_archive()),
         ]);
 
-        let text = archive.to_canonical_text();
+        let text = archive.to_canonical_text().expect("canonical archive");
         let parsed = MultiSessionReplayArchive::from_canonical_text(&text).expect("parse");
 
         assert_eq!(parsed, archive);
@@ -1469,7 +1545,7 @@ archive\treplay\t0\tnone\n";
         let archive = trail.replay_archive();
         assert_eq!(archive.session.quotas, custom_quota_envelope());
 
-        let text = archive.to_canonical_text();
+        let text = archive.to_canonical_text().expect("canonical archive");
         let parsed = AuditReplayArchive::from_canonical_text(&text).expect("parse");
 
         assert_eq!(parsed, archive);
@@ -1482,7 +1558,10 @@ archive\treplay\t0\tnone\n";
     #[test]
     fn canonical_session_line_emits_thirteen_tokens_in_frozen_quota_order() {
         let trail = AuditTrail::new(custom_session(ExecutionContext::VerifiedLocal));
-        let text = trail.replay_archive().to_canonical_text();
+        let text = trail
+            .replay_archive()
+            .to_canonical_text()
+            .expect("canonical archive");
         let session_line = text.lines().nth(1).expect("session line");
 
         assert_eq!(
@@ -1504,8 +1583,10 @@ archive\treplay\t0\tnone\n";
         let archive = trail.replay_archive();
         assert_eq!(archive.session.quotas, archive.replay.session.quotas);
 
-        let parsed =
-            AuditReplayArchive::from_canonical_text(&archive.to_canonical_text()).expect("parse");
+        let parsed = AuditReplayArchive::from_canonical_text(
+            &archive.to_canonical_text().expect("canonical archive"),
+        )
+        .expect("parse");
         assert_eq!(parsed.session.quotas, parsed.replay.session.quotas);
         assert_eq!(parsed.session.quotas, custom_quota_envelope());
     }
@@ -1589,7 +1670,7 @@ replay\t0\tnone\n";
         assert_eq!(archive.sessions[0].archive.format_version, 2);
         assert_eq!(archive.sessions[1].archive.format_version, 2);
 
-        let text = archive.to_canonical_text();
+        let text = archive.to_canonical_text().expect("canonical archive");
         assert!(text.starts_with("semantic_multi_session_replay_archive\t1\n"));
         assert!(text.contains("archive\tsemantic_audit_replay_archive\t2\n"));
 
@@ -1641,8 +1722,10 @@ replay\t0\tnone\n";
             MultiSessionReplayArchiveSession::new(0, baseline.replay_archive()),
             MultiSessionReplayArchiveSession::new(1, tightened.replay_archive()),
         ]);
-        let parsed = MultiSessionReplayArchive::from_canonical_text(&archive.to_canonical_text())
-            .expect("parse");
+        let parsed = MultiSessionReplayArchive::from_canonical_text(
+            &archive.to_canonical_text().expect("canonical archive"),
+        )
+        .expect("parse");
 
         assert_eq!(
             parsed.sessions[0].archive.session.context,
@@ -1683,5 +1766,106 @@ archive\treplay\t0\tnone\n";
 
         assert!(err.message.contains("unsupported archive format version 1"));
         assert!(err.message.contains("expected 2"));
+    }
+
+    fn pb07_valid_archive() -> AuditReplayArchive {
+        let mut trail = AuditTrail::new(sample_session());
+        trail.record(AuditEventKind::SessionStarted {
+            entry: "main".into(),
+        });
+        trail.record(AuditEventKind::Note {
+            message: "pb07".into(),
+        });
+        trail.record(AuditEventKind::SessionFinished);
+        trail.replay_archive()
+    }
+
+    // #1786: a canonical writer refuses contradictory evidence instead of
+    // emitting text that its reader would reject or silently repair.
+    #[test]
+    fn pb07_canonical_writer_rejects_contradictory_evidence() {
+        let valid = pb07_valid_archive();
+        let text = valid.to_canonical_text().expect("valid archive");
+        assert_eq!(
+            AuditReplayArchive::from_canonical_text(&text).expect("round trip"),
+            valid
+        );
+
+        let mut other_session = sample_session();
+        other_session.gate_registry_bound = !other_session.gate_registry_bound;
+        let mut provenance = valid.clone();
+        provenance.replay.session = other_session;
+        let mut count = valid.clone();
+        count.replay.event_count += 1;
+        let mut last_id = valid.clone();
+        last_id.replay.last_event_id = Some(AuditEventId(0));
+        let mut ids = valid.clone();
+        ids.events[1].id = AuditEventId(7);
+        let mut version = valid.clone();
+        version.format_version += 1;
+        for (label, archive) in [
+            ("provenance A/B", provenance),
+            ("event count", count),
+            ("last event id", last_id),
+            ("event ids", ids),
+            ("format version", version),
+        ] {
+            assert!(archive.validate().is_err(), "{label}: validate");
+            assert!(archive.to_canonical_text().is_err(), "{label}: writer");
+        }
+    }
+
+    #[test]
+    fn pb07_multi_session_writer_rejects_invalid_inner_or_ordinals() {
+        let valid = MultiSessionReplayArchive::new(vec![
+            MultiSessionReplayArchiveSession::new(0, pb07_valid_archive()),
+            MultiSessionReplayArchiveSession::new(1, pb07_valid_archive()),
+        ]);
+        let text = valid.to_canonical_text().expect("valid multi archive");
+        assert_eq!(
+            MultiSessionReplayArchive::from_canonical_text(&text).expect("round trip"),
+            valid
+        );
+
+        let mut gap = valid.clone();
+        gap.sessions[1].session_ordinal = 2;
+        let mut inner = valid.clone();
+        inner.sessions[0].archive.replay.event_count += 1;
+        for (label, archive) in [("ordinal gap", gap), ("invalid inner", inner)] {
+            assert!(archive.validate().is_err(), "{label}: validate");
+            assert!(archive.to_canonical_text().is_err(), "{label}: writer");
+        }
+    }
+
+    // #1787: hostile declared counts are typed errors, never allocation panics.
+    #[test]
+    fn pb07_hostile_declared_counts_are_typed_errors() {
+        let text = pb07_valid_archive()
+            .to_canonical_text()
+            .expect("valid archive");
+        let max = usize::MAX.to_string();
+        let events_line = text
+            .lines()
+            .find(|line| line.starts_with("events\t"))
+            .expect("events line");
+        let hostile = text.replace(events_line, &format!("events\t{max}"));
+        assert!(AuditReplayArchive::from_canonical_text(&hostile).is_err());
+
+        let multi_text =
+            MultiSessionReplayArchive::new(vec![MultiSessionReplayArchiveSession::new(
+                0,
+                pb07_valid_archive(),
+            )])
+            .to_canonical_text()
+            .expect("valid multi archive");
+        let hostile_sessions = multi_text.replace("sessions\t1", &format!("sessions\t{max}"));
+        assert!(MultiSessionReplayArchive::from_canonical_text(&hostile_sessions).is_err());
+
+        let session_line = multi_text
+            .lines()
+            .find(|line| line.starts_with("session\t0\t"))
+            .expect("session line");
+        let hostile_lines = multi_text.replace(session_line, &format!("session\t0\t{max}"));
+        assert!(MultiSessionReplayArchive::from_canonical_text(&hostile_lines).is_err());
     }
 }

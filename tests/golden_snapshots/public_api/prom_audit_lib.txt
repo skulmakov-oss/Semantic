@@ -60,11 +60,13 @@ pub fn record(&mut self, kind: AuditEventKind) -> AuditEventId {
 pub fn replay_metadata(&self) -> ReplayMetadata {
 pub fn replay_archive(&self) -> AuditReplayArchive {
 pub fn new( session: AuditSessionMetadata, events: Vec<AuditEvent>, replay: ReplayMetadata, ) -> Self {
-pub fn to_canonical_text(&self) -> String {
+pub fn validate(&self) -> Result<(), AuditReplayArchiveFormatError> {
+pub fn to_canonical_text(&self) -> Result<String, AuditReplayArchiveFormatError> {
 pub fn from_canonical_text(src: &str) -> Result<Self, AuditReplayArchiveFormatError> {
 pub fn new(session_ordinal: u32, archive: AuditReplayArchive) -> Self {
 pub fn new(sessions: Vec<MultiSessionReplayArchiveSession>) -> Self {
-pub fn to_canonical_text(&self) -> String {
+pub fn validate(&self) -> Result<(), MultiSessionReplayArchiveFormatError> {
+pub fn to_canonical_text(&self) -> Result<String, MultiSessionReplayArchiveFormatError> {
 pub fn from_canonical_text(src: &str) -> Result<Self, MultiSessionReplayArchiveFormatError> {
 pub fn new(message: impl Into<String>) -> Self {
 pub fn new(message: impl Into<String>) -> Self {

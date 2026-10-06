@@ -4,7 +4,7 @@ use crate::semcode_format::{
 };
 use crate::QuadVal;
 use prom_abi::{
-    AbiError, AbiFailureKind, AbiValue, ApplicationHostAbi, HostCallId, PrometheusHostAbi,
+    AbiError, AbiFailureKind, AbiQuad, AbiValue, ApplicationHostAbi, HostCallId, PrometheusHostAbi,
 };
 use prom_cap::{CapabilityChecker, CapabilityDenied};
 use semantic_core_quad::{QuadState, QuadroReg32};
@@ -1830,7 +1830,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
             .host
             .gate_read(device_id, port)
             .map_err(RuntimeError::HostAbi)?;
-        value_from_abi(raw, HostCallId::GateRead)
+        Ok(value_from_abi(raw))
     }
 
     fn gate_write(&mut self, device_id: u16, port: u16, value: Value) -> Result<(), RuntimeError> {
@@ -1854,7 +1854,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
             .require_call(HostCallId::StateQuery)
             .map_err(RuntimeError::CapabilityDenied)?;
         let raw = self.host.state_query(key).map_err(RuntimeError::HostAbi)?;
-        value_from_abi(raw, HostCallId::StateQuery)
+        Ok(value_from_abi(raw))
     }
 
     fn state_update(&mut self, key: &str, value: Value) -> Result<(), RuntimeError> {
@@ -1906,7 +1906,7 @@ impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> ApplicationVmHost<'a, H, C
             Err(RuntimeError::HostAbi(AbiError::new(
                 call,
                 AbiFailureKind::InvalidInput,
-                "application writes require a preceding captured observation",
+                "application writes require a preceding successful host observation",
             )))
         }
     }
@@ -2973,7 +2973,7 @@ where
 
 fn value_to_abi(value: Value) -> Result<AbiValue, RuntimeError> {
     match value {
-        Value::Quad(q) => Ok(AbiValue::Quad(quad_to_u8(q))),
+        Value::Quad(q) => Ok(AbiValue::Quad(quad_to_abi(q))),
         Value::Bool(v) => Ok(AbiValue::Bool(v)),
         Value::Text(_) => Err(RuntimeError::TypeMismatchRuntime(
             "text values are not part of the PROMETHEUS host ABI surface".to_string(),
@@ -3006,26 +3006,20 @@ fn value_to_abi(value: Value) -> Result<AbiValue, RuntimeError> {
 
 /// Converts a host-supplied `AbiValue` into a VM `Value`.
 ///
-/// This is the untrusted host-ABI -> VM boundary (FA-09-007 / #1775): a
-/// `PrometheusHostAbi` implementation is arbitrary caller-supplied code, and
-/// its return values must be validated before they acquire VM-internal
-/// meaning. `call` identifies which host operation produced `value`, so a
-/// rejection carries accurate `AbiError` context.
-fn value_from_abi(value: AbiValue, call: HostCallId) -> Result<Value, RuntimeError> {
+/// This is the untrusted host-ABI -> VM boundary (FA-09-007 / #1775). Since
+/// #1778 every `AbiValue` is canonical by construction (`AbiQuad` is closed),
+/// so the conversion is total and never needs to normalize anything.
+fn value_from_abi(value: AbiValue) -> Value {
     match value {
-        AbiValue::Quad(raw) => quad_from_abi(raw).map(Value::Quad).map_err(|raw| {
-            RuntimeError::HostAbi(AbiError::new(
-                call,
-                AbiFailureKind::InvalidInput,
-                format!("host returned out-of-domain quad byte {raw} (valid domain is 0..=3)"),
-            ))
-        }),
-        AbiValue::Bool(v) => Ok(Value::Bool(v)),
-        AbiValue::I32(v) => Ok(Value::I32(v)),
-        AbiValue::F64(v) => Ok(Value::F64(v)),
-        AbiValue::U32(v) => Ok(Value::U32(v)),
-        AbiValue::Fx(v) => Ok(Value::Fx(v)),
-        AbiValue::Unit => Ok(Value::Unit),
+        // #1778: `AbiQuad` is closed, so every ABI quad is already canonical;
+        // the conversion is an exhaustive table with no masking.
+        AbiValue::Quad(quad) => Value::Quad(quad_from_abi(quad)),
+        AbiValue::Bool(v) => Value::Bool(v),
+        AbiValue::I32(v) => Value::I32(v),
+        AbiValue::F64(v) => Value::F64(v),
+        AbiValue::U32(v) => Value::U32(v),
+        AbiValue::Fx(v) => Value::Fx(v),
+        AbiValue::Unit => Value::Unit,
     }
 }
 
@@ -3477,22 +3471,24 @@ fn u8_to_quad(v: u8) -> QuadVal {
     }
 }
 
-/// Validates a raw host-ABI quad byte against the canonical four-value
-/// domain (0=N, 1=F, 2=T, 3=S).
-///
-/// Unlike `u8_to_quad` (which masks bytes that are trusted, internally
-/// produced, and already known to be closed under `0..=3`, e.g. bitwise
-/// combinations of two already-valid `QuadVal`s), this function is the
-/// gatekeeper for bytes arriving from an untrusted host ABI implementation.
-/// It rejects anything outside `0..=3` instead of silently truncating it
-/// into a plausible value. See `value_from_abi`.
-fn quad_from_abi(raw: u8) -> Result<QuadVal, u8> {
-    match raw {
-        0 => Ok(QuadVal::N),
-        1 => Ok(QuadVal::F),
-        2 => Ok(QuadVal::T),
-        3 => Ok(QuadVal::S),
-        other => Err(other),
+/// Host-ABI quad -> VM quad (#1775, #1778). Raw bytes are validated where
+/// they enter the ABI (`AbiQuad::try_from`); here the mapping is a total,
+/// exhaustive table, so nothing is ever masked into a plausible value.
+fn quad_from_abi(quad: AbiQuad) -> QuadVal {
+    match quad {
+        AbiQuad::N => QuadVal::N,
+        AbiQuad::F => QuadVal::F,
+        AbiQuad::T => QuadVal::T,
+        AbiQuad::S => QuadVal::S,
+    }
+}
+
+fn quad_to_abi(quad: QuadVal) -> AbiQuad {
+    match quad {
+        QuadVal::N => AbiQuad::N,
+        QuadVal::F => AbiQuad::F,
+        QuadVal::T => AbiQuad::T,
+        QuadVal::S => AbiQuad::S,
     }
 }
 
@@ -6925,7 +6921,7 @@ mod tests {
     /// architecture inspection), so it must not consume a Call either.
     #[test]
     fn vm_gate_read_effect_opcode_does_not_consume_calls() {
-        let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(1));
+        let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(AbiQuad::F));
         let capabilities = gate_read_capabilities();
         let (vm, result) = run_prometheus_program_returning_vm(
             gate_read_into_return_program(),
@@ -7038,7 +7034,7 @@ mod tests {
     /// it is charged relative to the host call).
     #[test]
     fn gate_read_blocked_by_effect_calls_quota_never_reaches_host() {
-        let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(1));
+        let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(AbiQuad::F));
         let capabilities = gate_read_capabilities();
         let mut config = ExecutionConfig::for_context(ExecutionContext::KernelBound);
         config.quotas.max_effect_calls = 0;
@@ -9380,7 +9376,8 @@ mod tests {
             (2u8, QuadVal::T),
             (3u8, QuadVal::S),
         ] {
-            let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(raw));
+            let quad = AbiQuad::try_from(raw).expect("canonical byte");
+            let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(quad));
             let capabilities = gate_read_capabilities();
             let result = run_prometheus_program_capturing_value(
                 gate_read_into_return_program(),
@@ -9392,53 +9389,32 @@ mod tests {
         }
     }
 
-    /// A5.5-A5.7 (the core #1775 regression): raw bytes 4, 5, and 0xff are
-    /// outside the canonical quad domain and must now be rejected with a
-    /// deterministic `RuntimeError::HostAbi` error instead of being masked
-    /// (pre-fix: `4 & 3 == 0` -> silently `N`; `5 & 3 == 1` -> silently `F`;
-    /// `0xff & 3 == 3` -> silently `S`, all with no error).
+    /// A5.5-A5.7 (the core #1775 regression), moved to the ABI boundary by
+    /// #1778: raw bytes 4, 5 and 0xff cannot become an `AbiQuad`, so a host
+    /// can no longer hand the VM a malformed quad at all (pre-#1775 they were
+    /// silently masked to N/F/S).
     #[test]
-    fn gate_read_rejects_every_out_of_domain_quad_byte() {
+    fn out_of_domain_quad_bytes_cannot_reach_the_vm() {
         for raw in [4u8, 5u8, 0xffu8] {
-            let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(raw));
-            let capabilities = gate_read_capabilities();
-            let err = run_prometheus_program_capturing_value(
-                gate_read_into_return_program(),
-                &mut host,
-                &capabilities,
-            )
-            .expect_err(&format!(
-                "out-of-domain raw quad byte {raw} must now be rejected, not masked"
-            ));
-            match err {
-                RuntimeError::HostAbi(abi_err) => {
-                    assert_eq!(abi_err.call, HostCallId::GateRead);
-                    assert_eq!(abi_err.kind, AbiFailureKind::InvalidInput);
-                    assert!(
-                        abi_err.message.contains(&raw.to_string()),
-                        "error message should name the offending byte {raw}: {}",
-                        abi_err.message
-                    );
-                }
-                other => panic!("expected RuntimeError::HostAbi for raw byte {raw}, got {other:?}"),
-            }
+            assert_eq!(
+                AbiQuad::try_from(raw),
+                Err(prom_abi::InvalidAbiQuad(raw)),
+                "raw byte {raw} must not be representable"
+            );
         }
     }
 
-    /// Direct unit-level check of the boundary function's exact matching
-    /// table, independent of VM plumbing: 0/1/2/3 map to N/F/T/S and
-    /// everything else is rejected (proven exhaustively over all 256 byte
-    /// values, not just the issue's representative samples).
+    /// The VM boundary table is total and exact over the closed ABI domain.
     #[test]
     fn quad_from_abi_matches_canonical_domain_exhaustively() {
-        for raw in 0u8..=255 {
-            match raw {
-                0 => assert_eq!(quad_from_abi(raw), Ok(QuadVal::N)),
-                1 => assert_eq!(quad_from_abi(raw), Ok(QuadVal::F)),
-                2 => assert_eq!(quad_from_abi(raw), Ok(QuadVal::T)),
-                3 => assert_eq!(quad_from_abi(raw), Ok(QuadVal::S)),
-                other => assert_eq!(quad_from_abi(other), Err(other)),
-            }
+        for (abi, vm) in [
+            (AbiQuad::N, QuadVal::N),
+            (AbiQuad::F, QuadVal::F),
+            (AbiQuad::T, QuadVal::T),
+            (AbiQuad::S, QuadVal::S),
+        ] {
+            assert_eq!(quad_from_abi(abi), vm);
+            assert_eq!(quad_to_abi(vm), abi);
         }
     }
 
@@ -9526,7 +9502,8 @@ mod tests {
     /// correctly rather than hardcoded.
     #[test]
     fn state_query_quad_boundary_matches_gate_read() {
-        let mut ok_host = prom_abi::RecordingHostAbi::with_state_query_value(AbiValue::Quad(2));
+        let mut ok_host =
+            prom_abi::RecordingHostAbi::with_state_query_value(AbiValue::Quad(AbiQuad::T));
         let mut manifest = prom_cap::CapabilityManifest::new();
         manifest.allow(prom_cap::CapabilityKind::StateQuery);
         let program = vec![
@@ -9541,16 +9518,9 @@ mod tests {
                 .expect("canonical raw byte 2 via state_query must succeed");
         assert_eq!(result, Value::Quad(QuadVal::T));
 
-        let mut bad_host = prom_abi::RecordingHostAbi::with_state_query_value(AbiValue::Quad(0xff));
-        let err = run_prometheus_program_capturing_value(program, &mut bad_host, &manifest)
-            .expect_err("out-of-domain raw byte via state_query must now be rejected");
-        match err {
-            RuntimeError::HostAbi(abi_err) => {
-                assert_eq!(abi_err.call, HostCallId::StateQuery);
-                assert_eq!(abi_err.kind, AbiFailureKind::InvalidInput);
-            }
-            other => panic!("expected RuntimeError::HostAbi, got {other:?}"),
-        }
+        // #1778: the out-of-domain byte this test once injected through
+        // `state_query` is no longer representable as an ABI quad.
+        assert!(AbiQuad::try_from(0xff).is_err());
     }
 
     // #1766: the VM is the only observation sequence authority.
@@ -9596,5 +9566,102 @@ mod tests {
             vec![u64::MAX - 1],
             "the failed observation was not delivered"
         );
+    }
+
+    /// #1779: the generic application bridge admits a write only after a
+    /// preceding *successful* host observation. It proves nothing about
+    /// replay capture, and a failed read must not establish observation.
+    struct ScriptedApplicationHost {
+        read_ok: bool,
+        writes: Vec<String>,
+    }
+
+    impl ApplicationHostAbi for ScriptedApplicationHost {
+        fn args_read(&mut self, _index: u32) -> Result<String, AbiError> {
+            if self.read_ok {
+                Ok("arg".to_string())
+            } else {
+                Err(AbiError::new(
+                    HostCallId::ArgsRead,
+                    AbiFailureKind::Unavailable,
+                    "scripted read failure",
+                ))
+            }
+        }
+        fn stdin_read_text(&mut self) -> Result<String, AbiError> {
+            unimplemented!("not exercised")
+        }
+        fn stdout_write(&mut self, text: &str) -> Result<(), AbiError> {
+            self.writes.push(text.to_string());
+            Ok(())
+        }
+        fn stderr_write(&mut self, _text: &str) -> Result<(), AbiError> {
+            unimplemented!("not exercised")
+        }
+        fn path_inspect(&mut self, _path: &str) -> Result<bool, AbiError> {
+            unimplemented!("not exercised")
+        }
+        fn fs_read_text(&mut self, _path: &str) -> Result<String, AbiError> {
+            unimplemented!("not exercised")
+        }
+        fn fs_write_text(&mut self, _path: &str, _text: &str) -> Result<(), AbiError> {
+            unimplemented!("not exercised")
+        }
+        fn time_duration_millis(&mut self) -> Result<u32, AbiError> {
+            unimplemented!("not exercised")
+        }
+    }
+
+    #[test]
+    fn pb07_application_write_requires_a_preceding_successful_observation() {
+        let capabilities = prom_cap::CapabilityManifest::for_application_profile(
+            prom_cap::ApplicationCapabilityProfile::CliReadOnly,
+        );
+        let mut host = ScriptedApplicationHost {
+            read_ok: false,
+            writes: Vec::new(),
+        };
+        let mut bridge = ApplicationVmHost {
+            host: &mut host,
+            capabilities: &capabilities,
+            observed: false,
+            quotas: RuntimeQuotas::verified_local(),
+            effect_calls: 0,
+        };
+        let not_observed = |err: RuntimeError| match err {
+            RuntimeError::HostAbi(abi) => {
+                assert_eq!(abi.call, HostCallId::StdoutWrite);
+                assert_eq!(abi.kind, AbiFailureKind::InvalidInput);
+                assert!(abi
+                    .message
+                    .contains("preceding successful host observation"));
+            }
+            other => panic!("expected HostAbi, got {other:?}"),
+        };
+
+        // Write before any observation: rejected.
+        not_observed(
+            bridge
+                .stdout_write("early")
+                .expect_err("no observation yet"),
+        );
+        // A failed read establishes nothing: the write is still rejected.
+        bridge.args_read(0).expect_err("scripted read failure");
+        assert!(
+            !bridge.observed,
+            "a failed read must not set observation state"
+        );
+        not_observed(
+            bridge
+                .stdout_write("after failure")
+                .expect_err("still no observation"),
+        );
+        // A successful read establishes observation; the write is admitted.
+        bridge.host.read_ok = true;
+        bridge.args_read(0).expect("successful read");
+        bridge
+            .stdout_write("after success")
+            .expect("write admitted");
+        assert_eq!(host.writes, vec!["after success".to_string()]);
     }
 }

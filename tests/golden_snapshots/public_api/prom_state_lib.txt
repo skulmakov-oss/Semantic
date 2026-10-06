@@ -68,6 +68,7 @@ NonMonotonicCheckpointOrdinal,
 NonMonotonicTransitionCount,
 SnapshotEpochMismatch,
 TransitionCountOutOfRange,
+InvalidCheckpointSnapshot,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateRollbackError {
 pub code: StateRollbackCode,
@@ -87,6 +88,9 @@ EmptyReason,
 EmptyAlternatives,
 DuplicateAlternatives,
 NotEnoughAlternatives,
+KeyMismatch,
+RecordEpochAfterSnapshot,
+EpochExhausted,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateValidationError {
 pub code: StateValidationCode,
@@ -103,11 +107,12 @@ pub fn records(&self) -> &BTreeMap<String, StateRecord> {
 pub fn transitions(&self) -> &[TransitionMetadata] {
 pub fn snapshot(&self) -> StateSnapshot {
 pub fn apply( &mut self, update: StateUpdate, ) -> Result<TransitionMetadata, StateValidationError> {
-pub fn restore(&mut self, snapshot: StateSnapshot) {
+pub fn restore(&mut self, snapshot: StateSnapshot) -> Result<(), StateValidationError> {
 pub fn apply_rollback( &mut self, artifact: &StateRollbackArtifact, checkpoint_ordinal: u32, ) -> Result<StateRollbackAdvance, StateRollbackError> {
 pub fn archive(&self) -> StateSnapshotArchive {
+pub fn validate(&self) -> Result<(), StateValidationError> {
 pub fn new(snapshot: StateSnapshot) -> Self {
-pub fn to_canonical_text(&self) -> String {
+pub fn to_canonical_text(&self) -> Result<String, StateSnapshotArchiveFormatError> {
 pub fn from_canonical_text(src: &str) -> Result<Self, StateSnapshotArchiveFormatError> {
 pub fn new( checkpoint_ordinal: u32, snapshot: StateSnapshotArchive, applied_transition_count: usize, ) -> Self {
 pub fn new(head_epoch: StateEpoch, checkpoints: Vec<StateRollbackCheckpoint>) -> Self {

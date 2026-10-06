@@ -115,8 +115,7 @@ fn gate_execution_session_runs_verified_program_with_bound_registry() {
     let mut binding = DeterministicGateMock::new();
     binding.seed_read(GateId::new(7, 3), AbiValue::I32(99));
 
-    let mut session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata.clone());
+    let mut session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
     assert_eq!(session.descriptor().context, ExecutionContext::KernelBound);
     assert!(session.descriptor().gate_registry_bound);
     assert_eq!(session.descriptor().capability_manifest, metadata);
@@ -139,7 +138,7 @@ fn execution_session_runs_state_query_with_generic_host_path() {
     let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::with_state_query_value(AbiValue::I32(123));
 
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata.clone());
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
     assert_eq!(session.descriptor().context, ExecutionContext::KernelBound);
     assert!(!session.descriptor().gate_registry_bound);
     assert_eq!(session.descriptor().capability_manifest, metadata);
@@ -157,9 +156,8 @@ fn execution_session_denies_state_query_without_manifest_capability() {
     let bytes = emit_ir_to_semcode(&state_query_program(), false).expect("emit");
 
     let manifest = CapabilityManifest::new();
-    let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::with_state_query_value(AbiValue::I32(123));
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
 
     let err = session
         .run_verified_semcode(&bytes)
@@ -185,7 +183,7 @@ fn execution_session_runs_state_update_with_generic_host_path() {
     let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::default();
 
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata.clone());
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
     assert_eq!(session.descriptor().context, ExecutionContext::KernelBound);
     assert!(!session.descriptor().gate_registry_bound);
     assert_eq!(session.descriptor().capability_manifest, metadata);
@@ -206,9 +204,8 @@ fn execution_session_denies_state_update_without_manifest_capability() {
     let bytes = emit_ir_to_semcode(&state_update_program(), false).expect("emit");
 
     let manifest = CapabilityManifest::new();
-    let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::default();
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
 
     let err = session
         .run_verified_semcode(&bytes)
@@ -234,7 +231,7 @@ fn execution_session_runs_event_post_with_generic_host_path() {
     let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::default();
 
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata.clone());
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
     assert_eq!(session.descriptor().context, ExecutionContext::KernelBound);
     assert!(!session.descriptor().gate_registry_bound);
     assert_eq!(session.descriptor().capability_manifest, metadata);
@@ -252,9 +249,8 @@ fn execution_session_denies_event_post_without_manifest_capability() {
     let bytes = emit_ir_to_semcode(&event_post_program(), false).expect("emit");
 
     let manifest = CapabilityManifest::new();
-    let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::default();
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
 
     let err = session
         .run_verified_semcode(&bytes)
@@ -280,7 +276,7 @@ fn execution_session_runs_clock_read_with_generic_host_path() {
     let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::with_clock_read_value(42);
 
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata.clone());
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
     assert_eq!(session.descriptor().context, ExecutionContext::KernelBound);
     assert!(!session.descriptor().gate_registry_bound);
     assert_eq!(session.descriptor().capability_manifest, metadata);
@@ -298,9 +294,8 @@ fn execution_session_denies_clock_read_without_manifest_capability() {
     let bytes = emit_ir_to_semcode(&clock_read_program(), false).expect("emit");
 
     let manifest = CapabilityManifest::new();
-    let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::with_clock_read_value(42);
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
 
     let err = session
         .run_verified_semcode(&bytes)
@@ -345,9 +340,8 @@ fn r5000_program() -> Vec<IrFunction> {
 fn execution_session_kernel_bound_admits_r5000() {
     let bytes = emit_ir_to_semcode(&r5000_program(), false).expect("emit");
     let manifest = CapabilityManifest::new();
-    let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::default();
-    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest);
     session
         .run_verified_semcode(&bytes)
         .expect("KernelBound session must admit and run an r5000 artifact");
@@ -357,13 +351,11 @@ fn execution_session_kernel_bound_admits_r5000() {
 fn execution_session_verified_local_rejects_r5000() {
     let bytes = emit_ir_to_semcode(&r5000_program(), false).expect("emit");
     let manifest = CapabilityManifest::new();
-    let metadata = manifest.metadata();
     let mut host = RecordingHostAbi::default();
     let mut session = ExecutionSession::new(
         &mut host,
         &manifest,
         ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
-        metadata,
     );
     let err = session
         .run_verified_semcode(&bytes)
@@ -379,10 +371,8 @@ fn gate_execution_session_kernel_bound_admits_r5000() {
     let bytes = emit_ir_to_semcode(&r5000_program(), false).expect("emit");
     let registry = GateRegistry::new();
     let manifest = CapabilityManifest::new();
-    let metadata = manifest.metadata();
     let mut binding = DeterministicGateMock::new();
-    let mut session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata);
+    let mut session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
     session
         .run_verified_semcode(&bytes)
         .expect("KernelBound gate session must admit and run an r5000 artifact");
@@ -393,14 +383,12 @@ fn gate_execution_session_verified_local_rejects_r5000() {
     let bytes = emit_ir_to_semcode(&r5000_program(), false).expect("emit");
     let registry = GateRegistry::new();
     let manifest = CapabilityManifest::new();
-    let metadata = manifest.metadata();
     let mut binding = DeterministicGateMock::new();
     let mut session = GateExecutionSession::new(
         &registry,
         &mut binding,
         &manifest,
         ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
-        metadata,
     );
     let err = session
         .run_verified_semcode(&bytes)

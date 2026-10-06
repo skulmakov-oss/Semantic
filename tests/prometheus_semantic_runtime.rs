@@ -21,8 +21,7 @@ fn runtime_composes_state_rules_and_audit_without_taking_ownership() {
     let mut binding = DeterministicGateMock::new();
     binding.seed_read(GateId::new(7, 4), AbiValue::I32(1));
 
-    let session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata.clone());
+    let session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
 
     let mut state = SemanticStateStore::new();
     state
@@ -90,8 +89,7 @@ fn runtime_applies_state_update_and_refreshes_agenda_through_owner_layers() {
     let mut binding = DeterministicGateMock::new();
     binding.seed_read(GateId::new(7, 4), AbiValue::I32(1));
 
-    let session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata.clone());
+    let session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
 
     let mut state = SemanticStateStore::new();
     let mut rules = RuleEngine::new();

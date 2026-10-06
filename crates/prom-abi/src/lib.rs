@@ -127,9 +127,58 @@ pub const fn descriptor_for_call(id: HostCallId) -> HostCallDescriptor {
     }
 }
 
+/// The four canonical quad states at the host ABI boundary (#1778). A
+/// malformed quad cannot be represented: raw bytes enter only through the
+/// checked `TryFrom<u8>`, which never masks or falls back.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AbiQuad {
+    N = 0,
+    F = 1,
+    T = 2,
+    S = 3,
+}
+
+/// A raw byte outside the canonical quad domain `0..=3`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidAbiQuad(pub u8);
+
+impl AbiQuad {
+    pub const fn as_u8(self) -> u8 {
+        self as u8
+    }
+}
+
+impl TryFrom<u8> for AbiQuad {
+    type Error = InvalidAbiQuad;
+
+    fn try_from(raw: u8) -> Result<Self, Self::Error> {
+        match raw {
+            0 => Ok(Self::N),
+            1 => Ok(Self::F),
+            2 => Ok(Self::T),
+            3 => Ok(Self::S),
+            other => Err(InvalidAbiQuad(other)),
+        }
+    }
+}
+
+impl core::fmt::Display for InvalidAbiQuad {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "raw quad byte {} is outside the canonical domain 0..=3",
+            self.0
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InvalidAbiQuad {}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AbiValue {
-    Quad(u8),
+    Quad(AbiQuad),
     Bool(bool),
     I32(i32),
     U32(u32),
@@ -189,8 +238,13 @@ pub trait PrometheusHostAbi {
 ///
 /// A source request and a capability manifest are not grants. The runtime must
 /// check the matching capability before invoking any method on this trait.
-/// Read results are host-bound observations and must be captured by a replay
-/// layer before a later write is admitted.
+/// Read results are host-bound observations. The generic VM bridge admits a
+/// write only after at least one preceding *successful* host observation in
+/// the same execution; a failed read establishes nothing.
+///
+/// This seam does not prove that an observation was persisted to any replay or
+/// audit substrate (#1779). An orchestration or replay layer that claims
+/// replay capture must establish that separately.
 pub trait ApplicationHostAbi {
     fn args_read(&mut self, index: u32) -> Result<String, AbiError>;
     fn stdin_read_text(&mut self) -> Result<String, AbiError>;
@@ -336,6 +390,21 @@ mod tests {
         let mut host = RecordingHostAbi::default();
         host.event_post("alert.raised").expect("event post");
         assert_eq!(host.event_posts, alloc::vec!["alert.raised".to_string()]);
+    }
+
+    // #1778: exactly the canonical domain converts; nothing is masked.
+    #[test]
+    fn abi_quad_admits_only_the_canonical_domain() {
+        assert_eq!(AbiQuad::try_from(0), Ok(AbiQuad::N));
+        assert_eq!(AbiQuad::try_from(1), Ok(AbiQuad::F));
+        assert_eq!(AbiQuad::try_from(2), Ok(AbiQuad::T));
+        assert_eq!(AbiQuad::try_from(3), Ok(AbiQuad::S));
+        for raw in 4..=u8::MAX {
+            assert_eq!(AbiQuad::try_from(raw), Err(InvalidAbiQuad(raw)), "{raw}");
+        }
+        for quad in [AbiQuad::N, AbiQuad::F, AbiQuad::T, AbiQuad::S] {
+            assert_eq!(AbiQuad::try_from(quad.as_u8()), Ok(quad), "round trip");
+        }
     }
 
     #[test]

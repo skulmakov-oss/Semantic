@@ -1,0 +1,24 @@
+source: crates/prom-cap/src/hello_observation_capability.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelloObservationCapability {
+ObservationSink,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HelloObservationCapabilityPolicy;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelloObservationCapabilityContext {
+pub observation_sink_present: bool,
+pub sink_available: bool,
+pub requested_host_channel: Option<&'static str>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelloObservationCapabilityDecision {
+Allow,
+Deny(HelloObservationCapabilityDenial),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelloObservationCapabilityDenial {
+MissingObservationCapability,
+InvalidCapabilityContract,
+SinkUnavailable,
+StdoutNotDefaultSink,
+GenericIoNotAllowed,
+pub fn evaluate_hello_observation_capability( context: &HelloObservationCapabilityContext, ) -> HelloObservationCapabilityDecision {
+pub fn require_hello_observation_sink_capability<C: CapabilityChecker>( checker: &C, context: &HelloObservationCapabilityContext, ) -> HelloObservationCapabilityDecision {

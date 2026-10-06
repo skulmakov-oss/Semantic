@@ -61,8 +61,7 @@ fn render_compat_matrix() -> String {
 
     let mut binding = DeterministicGateMock::new();
     binding.seed_read(GateId::new(7, 3), AbiValue::I32(11));
-    let session =
-        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata.clone());
+    let session = GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest);
 
     let mut out = String::new();
     out.push_str(&format!(
