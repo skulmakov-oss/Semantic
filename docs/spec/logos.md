@@ -141,6 +141,15 @@ Current CLI support is `dump-ast`, `dump-ir --profile logos`, and
 `hash-ir --profile logos`. SemCode-producing and execution commands reject
 Logos input before artifact emission.
 
+Accepted `Pulse` and `Profile` directives are legacy-compatibility-gated,
+Logos-exclusive declarations. Their exact source lines are preserved in
+`LogosProgram::legacy_directives` and are visible through `dump-ast`. Their
+payload has no current semantic interpretation; Logos semantic analysis does
+not interpret them, and they do not participate in `LogosIrLaw`, SemCode
+generation or VM execution (#1987). The AST inspection projection is lossless
+for accepted directive lines; the `LogosIrLaw` projection remains a law
+summary, not a full AST serialization.
+
 ## Files, Modules, and Packages
 
 - one source file belongs to one surface for the current tool invocation;

@@ -1,37 +1,32 @@
 task:
-  id: PHASE-B-PB-07
-  title: "PROMETHEUS Trust Hardening"
-  type: phase_b_prometheus_trust_hardening
-  target: "Phase-B PB-07 / PROMETHEUS trust boundaries (#1778-#1787)"
+  id: RESIDUAL-FA-02-042
+  title: "Preserve Logos Pulse/Profile directives"
+  type: residual_frontend_trust_cleanup
+  target: "Residual FA-02-042 / #1987 Logos Pulse/Profile preservation"
   mode: active
-  supersedes: PHASE-B-PB-06
+  supersedes: PHASE-B-PB-07
   umbrella: 1617
-  issues: [1778, 1779, 1780, 1781, 1782, 1783, 1784, 1785, 1786, 1787]
-  base_sha: 9e79f5f2aba1e830795948da02669c09abe75e43
+  issues: [1987]
+  base_sha: 37f988447b540760431e21515ad32ebc45ff0fc6
   authorized_by: >-
-    Repository owner direct instruction (2026-10-06, "GO - Phase B / PB-07 -
-    PROMETHEUS Trust Hardening"). Merge, auto-merge, release, tag, manual
-    issue closure, branch deletion and #1987 are NOT authorized.
+    Repository owner direct instruction (2026-10-06, "GO - Residual cleanup
+    #1987 - Logos Pulse/Profile Preservation"). Merge, auto-merge, release,
+    tag, manual issue closure, branch deletion, #1993 repair and any Logos
+    execution work are NOT authorized.
 
 intent:
   summary: >-
-    Closed ABI quad state space, non-overclaiming application host contract,
-    typed invalid capability contracts, validated state restore and epoch
-    exhaustion, zero-prefix rule effect admission, checker-owned capability
-    provenance, canonical audit evidence and bounded archive loading.
-  decision_record: docs/roadmap/phase_b/pb07_prometheus_trust_hardening_decision.md
+    Accepted legacy Logos Pulse/Profile directives are preserved as opaque
+    inspection nodes instead of being discarded, without semantics,
+    execution or surface-authority changes.
+  decision_record: docs/roadmap/phase_b/fa02_042_logos_directive_preservation_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-abi/**
-    - crates/prom-cap/**
-    - crates/prom-state/**
-    - crates/prom-runtime/**
-    - crates/prom-audit/**
-    - crates/prom-gates/**
-    - crates/sm-vm/**
-    - crates/smc-cli/**
+    - crates/sm-front/**
+    - docs/LOGOS_GRAMMAR_v0_1.md
+    - docs/spec/logos.md
     - docs/roadmap/phase_b/**
     - tests/**
 
@@ -62,7 +57,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 9e79f5f2aba1e830795948da02669c09abe75e43
+  base_sha: 37f988447b540760431e21515ad32ebc45ff0fc6
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
