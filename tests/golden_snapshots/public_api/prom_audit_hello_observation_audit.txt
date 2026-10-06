@@ -39,4 +39,4 @@ Recorded(AuditEventId),
 NoStore,
 Denied,
 pub fn build_hello_observation_audit_event( payload_hash: u64, sequence_index: u64, audit_policy_class: HelloObservationAuditPolicyClass, linkage: HelloObservationAuditLinkage, ) -> HelloObservationAuditEvent {
-pub fn apply_controlled_observation_audit_policy( trail: &mut AuditTrail, text_hash: u64, sequence_index: u64, policy: ControlledObservationAuditDecision, linkage: HelloObservationAuditLinkage, ) -> ControlledObservationAuditResult {
+pub fn apply_controlled_observation_audit_policy( trail: &mut AuditTrail, text_hash: u64, sequence_index: u64, policy: ControlledObservationAuditDecision, linkage: HelloObservationAuditLinkage, ) -> Result<ControlledObservationAuditResult, AuditTrailError> {

@@ -51,12 +51,16 @@ pub message: String,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultiSessionReplayArchiveFormatError {
 pub message: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditTrailError {
+EventIdExhausted,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditTrail {
 pub fn new(session: AuditSessionMetadata) -> Self {
 pub fn session(&self) -> &AuditSessionMetadata {
 pub fn events(&self) -> &[AuditEvent] {
-pub fn record(&mut self, kind: AuditEventKind) -> AuditEventId {
+pub fn record(&mut self, kind: AuditEventKind) -> Result<AuditEventId, AuditTrailError> {
+pub fn ensure_record_capacity(&self, additional: usize) -> Result<(), AuditTrailError> {
 pub fn replay_metadata(&self) -> ReplayMetadata {
 pub fn replay_archive(&self) -> AuditReplayArchive {
 pub fn new( session: AuditSessionMetadata, events: Vec<AuditEvent>, replay: ReplayMetadata, ) -> Self {

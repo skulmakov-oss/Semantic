@@ -3,7 +3,7 @@
 //! This module models future audit records for controlled Hello observation
 //! without wiring into production audit storage or runtime routing.
 
-use crate::{AuditEventId, AuditEventKind, AuditTrail};
+use crate::{AuditEventId, AuditEventKind, AuditTrail, AuditTrailError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelloObservationAuditEventKind {
@@ -82,7 +82,7 @@ pub fn apply_controlled_observation_audit_policy(
     sequence_index: u64,
     policy: ControlledObservationAuditDecision,
     linkage: HelloObservationAuditLinkage,
-) -> Result<ControlledObservationAuditResult, crate::AuditTrailError> {
+) -> Result<ControlledObservationAuditResult, AuditTrailError> {
     // Audit infrastructure failure (#1993) is an error, never a policy result:
     // it is not disguised as `NoStore` or `Denied`.
     Ok(match policy {
