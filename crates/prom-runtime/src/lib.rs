@@ -1148,4 +1148,109 @@ mod tests {
             expected
         );
     }
+
+    /// #1993: a trail with a fixed number of remaining identities, used through
+    /// the private `RuntimeAudit` seam so no public counter API is needed.
+    struct LimitedAudit {
+        remaining: usize,
+        events: Vec<AuditEventKind>,
+    }
+
+    impl RuntimeAudit for LimitedAudit {
+        fn ensure_record_capacity(&self, additional: usize) -> Result<(), AuditTrailError> {
+            if additional <= self.remaining {
+                Ok(())
+            } else {
+                Err(AuditTrailError::EventIdExhausted)
+            }
+        }
+
+        fn record(&mut self, kind: AuditEventKind) -> Result<AuditEventId, AuditTrailError> {
+            if self.remaining == 0 {
+                return Err(AuditTrailError::EventIdExhausted);
+            }
+            self.remaining -= 1;
+            self.events.push(kind);
+            Ok(AuditEventId(self.events.len() as u64 - 1))
+        }
+    }
+
+    fn r1993_descriptor() -> RuntimeSessionDescriptor {
+        let manifest = CapabilityManifest::gate_surface();
+        let mut host = RecordingHostAbi::default();
+        ExecutionSession::kernel_bound(&mut host, &manifest)
+            .descriptor()
+            .clone()
+    }
+
+    #[test]
+    fn r1993_exhausted_audit_blocks_state_update_before_mutation() {
+        let descriptor = r1993_descriptor();
+        let mut state = pb07_seeded_state();
+        let before = state.clone();
+        let rules = RuleEngine::new();
+        let mut audit = LimitedAudit {
+            remaining: 0,
+            events: Vec::new(),
+        };
+        let err = apply_update_refresh_agenda(
+            &descriptor,
+            &mut state,
+            StateUpdate::new(
+                "fact.beta",
+                FactResolution::Certain(FactValue::I32(1)),
+                ContextWindow::new("root"),
+                "valid update",
+            ),
+            &rules,
+            &mut audit,
+        )
+        .expect_err("audit capacity unavailable");
+        assert_eq!(
+            err,
+            RuntimeStateAdvanceError::Audit(AuditTrailError::EventIdExhausted)
+        );
+        assert_eq!(state, before, "state, epoch and transitions unchanged");
+        assert!(audit.events.is_empty(), "no audit append");
+    }
+
+    #[test]
+    fn r1993_state_write_batch_admits_all_audit_ids_before_first_write() {
+        let descriptor = r1993_descriptor();
+        let mut state = pb07_seeded_state();
+        let before = state.clone();
+        let rule = pb07_rule(vec![
+            RuleEffect::state_write("fact.beta", FactValue::I32(1), "root", "first"),
+            RuleEffect::state_write("fact.gamma", FactValue::I32(2), "root", "second"),
+        ]);
+        let mut rules = RuleEngine::new();
+        rules.register(rule.clone()).expect("register rule");
+        let mut audit = LimitedAudit {
+            remaining: 1,
+            events: Vec::new(),
+        };
+        let err =
+            apply_rule_state_write_effects(&descriptor, &mut state, &rule, &rules, &mut audit)
+                .expect_err("two writes need two audit identities");
+        assert_eq!(err.code, RuleEffectExecutionCode::AuditRecordingFailed);
+        assert_eq!(state, before, "no prefix state write");
+        assert!(audit.events.is_empty(), "no prefix transition event");
+    }
+
+    #[test]
+    fn r1993_audit_note_batch_admits_all_ids_before_first_note() {
+        let rule = pb07_rule(vec![
+            RuleEffect::audit_note("one"),
+            RuleEffect::audit_note("two"),
+            RuleEffect::audit_note("three"),
+        ]);
+        let mut audit = LimitedAudit {
+            remaining: 2,
+            events: Vec::new(),
+        };
+        let err = apply_rule_audit_note_effects(&mut audit, &rule)
+            .expect_err("three notes need three audit identities");
+        assert_eq!(err.code, RuleEffectExecutionCode::AuditRecordingFailed);
+        assert!(audit.events.is_empty(), "zero prefix notes");
+    }
 }
