@@ -179,6 +179,10 @@ fn render_state_validation_rejection_baseline() -> String {
             &mut audit,
         )
         .expect_err("invalid state update must reject");
+    // #1993: state and audit failures are separate typed domains.
+    let prom_runtime::RuntimeStateAdvanceError::StateValidation(err) = err else {
+        panic!("expected a state-validation failure, got {err:?}");
+    };
 
     format!(
         "error=StateValidation\ncode={:?}\nmessage={}\nstate_epoch={}\naudit_events={}\nmanifest={}@{:?}\n",

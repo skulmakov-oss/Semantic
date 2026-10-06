@@ -4587,6 +4587,12 @@ fn qualify_collected_observation_events(
         sink_policy_ref: Some(3),
     };
 
+    // #1993: one audit event per observation; admit the whole batch before
+    // the first record so an exhausted trail leaves no prefix of evidence.
+    // The typed audit error is rendered only at this presentation boundary.
+    audit_trail
+        .ensure_record_capacity(events.len())
+        .map_err(|err| format!("controlled observation audit unavailable: {err}"))?;
     let mut audit_results = Vec::with_capacity(events.len());
     let mut collected_events = Vec::with_capacity(events.len());
     for (expected_index, event) in events.into_iter().enumerate() {
@@ -4608,7 +4614,8 @@ fn qualify_collected_observation_events(
             event.sequence_index.0,
             ControlledObservationAuditDecision::Record,
             linkage,
-        );
+        )
+        .map_err(|err| format!("controlled observation audit unavailable: {err}"))?;
         match audit_result {
             ControlledObservationAuditResult::Recorded(AuditEventId(_)) => {}
             ControlledObservationAuditResult::NoStore => {

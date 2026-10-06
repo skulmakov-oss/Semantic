@@ -104,9 +104,15 @@ fn render_runtime_baseline() -> String {
         .select_next_activation(&advance.agenda)
         .expect("activation");
 
-    session.record_session_started(&mut audit, "main");
-    session.record_rule_activation(&mut audit, &activation);
-    session.record_session_finished(&mut audit);
+    session
+        .record_session_started(&mut audit, "main")
+        .expect("audit identity available");
+    session
+        .record_rule_activation(&mut audit, &activation)
+        .expect("audit identity available");
+    session
+        .record_session_finished(&mut audit)
+        .expect("audit identity available");
     // Intentional byte-shim compatibility coverage: this test protects the public run_verified_semcode* API surface.
     session
         .run_verified_semcode(&bytes)

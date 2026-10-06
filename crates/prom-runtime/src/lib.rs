@@ -2,7 +2,7 @@
 
 extern crate alloc;
 use prom_abi::PrometheusHostAbi;
-use prom_audit::{AuditEventId, AuditEventKind, AuditSessionMetadata, AuditTrail};
+use prom_audit::{AuditEventId, AuditEventKind, AuditSessionMetadata, AuditTrail, AuditTrailError};
 use prom_cap::{CapabilityChecker, CapabilityManifestMetadata};
 use prom_gates::{GateBinding, GateHostAdapter, GateRegistry};
 use prom_rules::{Agenda, AgendaEntry, RuleDefinition, RuleEffect, RuleEngine, RuleId};
@@ -61,6 +61,8 @@ pub struct RuleAuditNoteAdvance {
 pub enum RuleEffectExecutionCode {
     UnsupportedEffectFamily,
     StateValidationFailed,
+    /// The audit trail cannot record the events this plan requires (#1993).
+    AuditRecordingFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +98,58 @@ impl core::fmt::Display for RuleEffectExecutionError {
 #[cfg(feature = "std")]
 impl std::error::Error for RuleEffectExecutionError {}
 
+/// Why a state update could not be applied and audited (#1993). The two
+/// failure domains keep their own typed owners.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeStateAdvanceError {
+    StateValidation(StateValidationError),
+    Audit(AuditTrailError),
+}
+
+impl core::fmt::Display for RuntimeStateAdvanceError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::StateValidation(err) => write!(f, "{err}"),
+            Self::Audit(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for RuntimeStateAdvanceError {}
+
+/// The audit operations the runtime's state and rule paths depend on
+/// (#1993). Private: `AuditTrail` is the only production implementation; it
+/// exists so audit admission ordering can be tested without any public
+/// counter seam.
+trait RuntimeAudit {
+    fn ensure_record_capacity(&self, additional: usize) -> Result<(), AuditTrailError>;
+    fn record(&mut self, kind: AuditEventKind) -> Result<AuditEventId, AuditTrailError>;
+}
+
+impl RuntimeAudit for AuditTrail {
+    fn ensure_record_capacity(&self, additional: usize) -> Result<(), AuditTrailError> {
+        AuditTrail::ensure_record_capacity(self, additional)
+    }
+
+    fn record(&mut self, kind: AuditEventKind) -> Result<AuditEventId, AuditTrailError> {
+        AuditTrail::record(self, kind)
+    }
+}
+
+fn audit_admission_error(
+    rule: &RuleDefinition,
+    effect_ordinal: usize,
+    err: AuditTrailError,
+) -> RuleEffectExecutionError {
+    RuleEffectExecutionError::new(
+        RuleEffectExecutionCode::AuditRecordingFailed,
+        rule.id.clone(),
+        effect_ordinal,
+        err.to_string(),
+    )
+}
+
 fn build_audit_session(descriptor: &RuntimeSessionDescriptor) -> AuditSessionMetadata {
     AuditSessionMetadata {
         context: descriptor.context,
@@ -117,19 +171,28 @@ fn build_integration_snapshot(
     }
 }
 
-fn apply_update_refresh_agenda(
+fn apply_update_refresh_agenda<A: RuntimeAudit>(
     descriptor: &RuntimeSessionDescriptor,
     state: &mut SemanticStateStore,
     update: StateUpdate,
     rules: &RuleEngine,
-    trail: &mut AuditTrail,
-) -> Result<RuntimeStateAdvance, StateValidationError> {
-    let transition = state.apply(update)?;
-    trail.record(AuditEventKind::StateTransition {
-        key: transition.key.clone(),
-        from_epoch: transition.from_epoch.0,
-        to_epoch: transition.to_epoch.0,
-    });
+    trail: &mut A,
+) -> Result<RuntimeStateAdvance, RuntimeStateAdvanceError> {
+    // #1993: the transition event is admitted before the state changes, so an
+    // exhausted trail can never leave a mutated state without its evidence.
+    trail
+        .ensure_record_capacity(1)
+        .map_err(RuntimeStateAdvanceError::Audit)?;
+    let transition = state
+        .apply(update)
+        .map_err(RuntimeStateAdvanceError::StateValidation)?;
+    trail
+        .record(AuditEventKind::StateTransition {
+            key: transition.key.clone(),
+            from_epoch: transition.from_epoch.0,
+            to_epoch: transition.to_epoch.0,
+        })
+        .map_err(RuntimeStateAdvanceError::Audit)?;
     let agenda = rules.evaluate(state);
     let snapshot = build_integration_snapshot(descriptor, state, &agenda);
     Ok(RuntimeStateAdvance {
@@ -168,18 +231,23 @@ fn admit_effect_family<'r, T>(
         .collect()
 }
 
-fn apply_rule_state_write_effects(
+fn apply_rule_state_write_effects<A: RuntimeAudit>(
     descriptor: &RuntimeSessionDescriptor,
     state: &mut SemanticStateStore,
     rule: &RuleDefinition,
     rules: &RuleEngine,
-    trail: &mut AuditTrail,
+    trail: &mut A,
 ) -> Result<Vec<RuleStateWriteAdvance>, RuleEffectExecutionError> {
     let effects: Vec<&RuleStateWriteEffect> =
         admit_effect_family(rule, "state-write", |effect| match effect {
             RuleEffect::StateWrite(effect) => Some(effect),
             _ => None,
         })?;
+    // #1993: each admitted write records one transition event; admit them all
+    // before the first write so exhaustion leaves no prefix of committed state.
+    trail
+        .ensure_record_capacity(effects.len())
+        .map_err(|err| audit_admission_error(rule, 0, err))?;
     let mut advances = Vec::new();
 
     for (effect_ordinal, effect) in effects.into_iter().enumerate() {
@@ -195,13 +263,16 @@ fn apply_rule_state_write_effects(
             rules,
             trail,
         )
-        .map_err(|err| {
-            RuleEffectExecutionError::new(
+        .map_err(|err| match err {
+            RuntimeStateAdvanceError::StateValidation(err) => RuleEffectExecutionError::new(
                 RuleEffectExecutionCode::StateValidationFailed,
                 rule.id.clone(),
                 effect_ordinal,
                 err.to_string(),
-            )
+            ),
+            RuntimeStateAdvanceError::Audit(err) => {
+                audit_admission_error(rule, effect_ordinal, err)
+            }
         })?;
 
         advances.push(RuleStateWriteAdvance {
@@ -214,8 +285,8 @@ fn apply_rule_state_write_effects(
     Ok(advances)
 }
 
-fn apply_rule_audit_note_effects(
-    trail: &mut AuditTrail,
+fn apply_rule_audit_note_effects<A: RuntimeAudit>(
+    trail: &mut A,
     rule: &RuleDefinition,
 ) -> Result<Vec<RuleAuditNoteAdvance>, RuleEffectExecutionError> {
     let effects: Vec<&RuleAuditNoteEffect> =
@@ -223,12 +294,18 @@ fn apply_rule_audit_note_effects(
             RuleEffect::AuditNote(effect) => Some(effect),
             _ => None,
         })?;
+    // #1993: admit the whole fixed-size note batch before the first append.
+    trail
+        .ensure_record_capacity(effects.len())
+        .map_err(|err| audit_admission_error(rule, 0, err))?;
     let mut advances = Vec::new();
 
     for (effect_ordinal, effect) in effects.into_iter().enumerate() {
-        let event_id = trail.record(AuditEventKind::Note {
-            message: effect.message.clone(),
-        });
+        let event_id = trail
+            .record(AuditEventKind::Note {
+                message: effect.message.clone(),
+            })
+            .map_err(|err| audit_admission_error(rule, effect_ordinal, err))?;
         advances.push(RuleAuditNoteAdvance {
             rule_id: rule.id.clone(),
             effect_ordinal,
@@ -294,13 +371,20 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> ExecutionSession<'a, H, C> 
         AuditTrail::new(build_audit_session(&self.descriptor))
     }
 
-    pub fn record_session_started(&self, trail: &mut AuditTrail, entry: &str) -> AuditEventId {
+    pub fn record_session_started(
+        &self,
+        trail: &mut AuditTrail,
+        entry: &str,
+    ) -> Result<AuditEventId, AuditTrailError> {
         trail.record(AuditEventKind::SessionStarted {
             entry: entry.into(),
         })
     }
 
-    pub fn record_session_finished(&self, trail: &mut AuditTrail) -> AuditEventId {
+    pub fn record_session_finished(
+        &self,
+        trail: &mut AuditTrail,
+    ) -> Result<AuditEventId, AuditTrailError> {
         trail.record(AuditEventKind::SessionFinished)
     }
 
@@ -308,7 +392,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> ExecutionSession<'a, H, C> 
         &self,
         trail: &mut AuditTrail,
         selection: &ActivationSelection,
-    ) -> AuditEventId {
+    ) -> Result<AuditEventId, AuditTrailError> {
         trail.record(AuditEventKind::RuleActivated {
             rule_id: selection.entry.rule_id.0.clone(),
             salience: selection.entry.salience.0,
@@ -319,7 +403,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> ExecutionSession<'a, H, C> 
         &self,
         trail: &mut AuditTrail,
         transition: &StateTransitionMetadata,
-    ) -> AuditEventId {
+    ) -> Result<AuditEventId, AuditTrailError> {
         trail.record(AuditEventKind::StateTransition {
             key: transition.key.clone(),
             from_epoch: transition.from_epoch.0,
@@ -341,7 +425,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> ExecutionSession<'a, H, C> 
         update: StateUpdate,
         rules: &RuleEngine,
         trail: &mut AuditTrail,
-    ) -> Result<RuntimeStateAdvance, StateValidationError> {
+    ) -> Result<RuntimeStateAdvance, RuntimeStateAdvanceError> {
         apply_update_refresh_agenda(&self.descriptor, state, update, rules, trail)
     }
 
@@ -459,13 +543,20 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
         AuditTrail::new(build_audit_session(&self.descriptor))
     }
 
-    pub fn record_session_started(&self, trail: &mut AuditTrail, entry: &str) -> AuditEventId {
+    pub fn record_session_started(
+        &self,
+        trail: &mut AuditTrail,
+        entry: &str,
+    ) -> Result<AuditEventId, AuditTrailError> {
         trail.record(AuditEventKind::SessionStarted {
             entry: entry.into(),
         })
     }
 
-    pub fn record_session_finished(&self, trail: &mut AuditTrail) -> AuditEventId {
+    pub fn record_session_finished(
+        &self,
+        trail: &mut AuditTrail,
+    ) -> Result<AuditEventId, AuditTrailError> {
         trail.record(AuditEventKind::SessionFinished)
     }
 
@@ -473,7 +564,7 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
         &self,
         trail: &mut AuditTrail,
         selection: &ActivationSelection,
-    ) -> AuditEventId {
+    ) -> Result<AuditEventId, AuditTrailError> {
         trail.record(AuditEventKind::RuleActivated {
             rule_id: selection.entry.rule_id.0.clone(),
             salience: selection.entry.salience.0,
@@ -484,7 +575,7 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
         &self,
         trail: &mut AuditTrail,
         transition: &StateTransitionMetadata,
-    ) -> AuditEventId {
+    ) -> Result<AuditEventId, AuditTrailError> {
         trail.record(AuditEventKind::StateTransition {
             key: transition.key.clone(),
             from_epoch: transition.from_epoch.0,
@@ -506,7 +597,7 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
         update: StateUpdate,
         rules: &RuleEngine,
         trail: &mut AuditTrail,
-    ) -> Result<RuntimeStateAdvance, StateValidationError> {
+    ) -> Result<RuntimeStateAdvance, RuntimeStateAdvanceError> {
         apply_update_refresh_agenda(&self.descriptor, state, update, rules, trail)
     }
 
@@ -631,11 +722,19 @@ mod tests {
         assert_eq!(activation.remaining_rules, 0);
 
         let mut audit = session.begin_audit_trail();
-        session.record_session_started(&mut audit, "main");
-        session.record_rule_activation(&mut audit, &activation);
+        session
+            .record_session_started(&mut audit, "main")
+            .expect("audit identity available");
+        session
+            .record_rule_activation(&mut audit, &activation)
+            .expect("audit identity available");
         let transition = state.transitions().last().expect("transition");
-        session.record_state_transition(&mut audit, transition);
-        session.record_session_finished(&mut audit);
+        session
+            .record_state_transition(&mut audit, transition)
+            .expect("audit identity available");
+        session
+            .record_session_finished(&mut audit)
+            .expect("audit identity available");
         assert!(audit.session().gate_registry_bound);
         assert_eq!(audit.events().len(), 4);
 
