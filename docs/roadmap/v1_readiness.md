@@ -14,7 +14,8 @@ reading for the repository.
 The repository currently spans four different factual layers:
 
 - `published stable`
-  - no current feature meets this evidence test
+  - `v1.2.0`, the Stable Foundation release at qualified candidate C1, within
+    its documented explicit limits
 - `qualified limited release`
   - the current practical-programming verdict from the completed Gate 1 cycle
 - `landed on main, not yet promised`
@@ -26,24 +27,43 @@ The repository currently spans four different factual layers:
 
 Current top-level reading:
 
-- Semantic is **not** currently positioned as `public release`
-- Semantic is currently qualified only for a **limited release** practical
-  contour
-- current `main` contains wider landed work than the current qualified contour
+- `v1.2.0` is the published Stable Foundation release, Windows x64 only, with
+  explicit limits
+- Semantic is **not** positioned as a general production-ready public release
+  beyond that contour
+- the Gate 1 practical-programming contour remains a separate
+  **qualified limited release** reading
+- current `main` is development beyond C1 and contains wider landed work that
+  is not part of any release promise
 
 ## Published Stable and Candidates
 
-There is no currently evidenced published stable line. The repository has a
-`v1.1.1` git tag, but the decision stored at that tag describes a proposed
-stable-tag checkpoint, leaves downloaded-asset smoke for the exact tag as a
-blocker, and no corresponding GitHub Release exists.
+`v1.2.0` is the published stable release: **Semantic v1.2.0 — Stable
+Foundation Release**, published on 2026-10-04 from qualified candidate C1
+`89641da8237f4fcefb50cf1958a50e4d4003aea7` (`v1.2.0^{}` dereferences to C1).
 
-The current prerelease is:
+- Foundation Oracle Verdict: `ORACLE QUALIFIED WITH EXPLICIT LIMITS`
+- Stable Foundation Promotion Decision: `PROMOTE WITH EXPLICIT LIMITS`
+- release contour: the Stable Foundation contour in `reports/semantic_stable_foundation_final_verdict.md` (section 6)
+- platform: Windows x64 (`x86_64-pc-windows-msvc`) only; Linux and macOS
+  release binaries are outside the v1.2.0 contour
+- artifact trust: assets are explicitly unsigned; trust is bound to the
+  published SHA-256 digests
+- explicit limits: R1 (Quad helper predicates `known`/`unknown`/`conflict`
+  are rejected), R2 (string literals do not process escapes), R3 (generic
+  rejection has no stable diagnostic code), R4 (host paths appear in
+  diagnostics), and `std.serde` (G-08) is not applicable / excluded
 
-- `v1.2.0-beta.1`
+Current `main` is development beyond C1 (including the later Phase-B and
+residual hardening). It is not the v1.2.0 release and is not qualified as any
+new release; nothing landed after C1 widens the v1.2.0 promise.
 
-It should be read as prerelease evidence, not as a stable publication or a
-complete description of everything already landed on current `main`.
+History: the earlier `v1.1.1` tag remains an unresolved stable-tag checkpoint
+(no GitHub Release), and `v1.2.0-beta.1` was the prerelease that preceded the
+Stable Foundation release.
+
+The v1.2.0 release is a statement about C1, not a complete description of
+everything already landed on current `main`.
 
 The intended artifact model and platform-scope rules are defined in:
 

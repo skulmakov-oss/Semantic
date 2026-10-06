@@ -70,6 +70,47 @@ fn ssf_00_status_authorities_do_not_drift() {
                     .contains("published stable line is currently:\n\n```text\nv1.1.1\n```"),
             "stale published-stable assertion remains in {relative}"
         );
+        // v1.2.0 (Stable Foundation, C1) is published: a current-facing
+        // authority must not say otherwise or name the superseded prerelease
+        // as current.
+        let flat = current_facing
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        for stale in [
+            "there is no currently evidenced published stable line",
+            "the current prerelease is",
+            "the new prerelease candidate is",
+        ] {
+            assert!(
+                !flat.contains(stale),
+                "stale pre-v1.2.0 posture ({stale:?}) remains in {relative}"
+            );
+        }
+    }
+}
+
+/// The release-posture authority must keep the published release, its
+/// qualified oracle and current development `main` as distinct concepts:
+/// `v1.2.0` is the release, C1 is its oracle, and `main` beyond C1 is not
+/// automatically released or qualified.
+#[test]
+fn release_posture_separates_the_v1_2_0_oracle_from_current_main() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readiness = read(root, "docs/roadmap/v1_readiness.md");
+    let flat = readiness.split_whitespace().collect::<Vec<_>>().join(" ");
+    for anchor in [
+        "`v1.2.0` is the published stable release",
+        "89641da8237f4fcefb50cf1958a50e4d4003aea7",
+        "PROMOTE WITH EXPLICIT LIMITS",
+        "Windows x64 (`x86_64-pc-windows-msvc`) only",
+        "Current `main` is development beyond C1",
+        "is not qualified as any new release",
+    ] {
+        assert!(
+            flat.contains(anchor),
+            "v1_readiness.md lost release-posture anchor {anchor:?}"
+        );
     }
 }
 

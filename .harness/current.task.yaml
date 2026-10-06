@@ -1,36 +1,45 @@
 task:
-  id: RESIDUAL-1993
-  title: "Audit event identity exhaustion"
-  type: residual_audit_trust_cleanup
-  target: "Residual #1993 / prom-audit AuditTrail event identity exhaustion"
+  id: RELEASE-POSTURE-RECONCILIATION
+  title: "Reconcile v1.2.0 release posture"
+  type: documentation_status_reconciliation
+  target: "Current-facing release/readiness posture after the v1.2.0 Stable Foundation release"
   mode: active
-  supersedes: RESIDUAL-FA-02-042
+  supersedes: RESIDUAL-1993
   umbrella: 1617
-  issues: [1993]
-  base_sha: 1065f3e9a011af7ab707dc6ba7000ff268998a1e
+  issues: []
+  base_sha: bc9996d133c1ebe24106d5ff4d6ad9a6a1c7dc29
   authorized_by: >-
-    Repository owner direct instruction (2026-10-06, "GO - Residual #1993 -
-    Audit Event Identity Exhaustion"). Merge, auto-merge, release, tag,
-    manual issue closure, branch deletion, new residual repairs, a global
-    transaction framework and archive-format redesign are NOT authorized.
+    Repository owner direct instruction (2026-10-06, "Release-Posture
+    Reconciliation"). Docs/status reconciliation only: no release, no tag,
+    no merge, no native audit, no implementation changes, no issue closure.
 
 intent:
   summary: >-
-    Live audit event identity allocation has an explicit deterministic
-    exhaustion state; recording fails typed without panic, wrap, reuse or
-    partial append, and runtime mutation paths admit audit capacity first.
-  decision_record: docs/roadmap/phase_b/residual_1993_audit_event_id_exhaustion_decision.md
+    Current-facing authorities state that v1.2.0 is the published Stable
+    Foundation release at C1 (Windows x64, explicit limits) and that current
+    main is development beyond C1, neither released nor qualified as a new
+    release. Historical evidence is untouched.
+  decision_record: docs/roadmap/v1_readiness.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-audit/**
-    - crates/prom-runtime/**
-    - crates/smc-cli/src/app.rs
-    - docs/roadmap/phase_b/**
-    - tests/**
+    - README.md
+    - docs/roadmap/v1_readiness.md
+    - docs/roadmap/compatibility_statement.md
+    - docs/roadmap/stable_release_policy.md
+    - docs/roadmap/public_status_model.md
+    - docs/roadmap/backlog.md
+    - docs/roadmap/wbs.md
+    - docs/roadmap/language_maturity/mainline_source_of_truth_policy.md
+    - docs/release_artifact_model.md
+    - docs/status/feature_maturity_matrix.md
+    - docs/wiki/current_status.md
+    - tests/ssf_status_drift.rs
 
   forbidden_paths:
+    - src/**
+    - crates/**
     - apps/**
     - reports/**
     - tools/**
@@ -57,7 +66,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 1065f3e9a011af7ab707dc6ba7000ff268998a1e
+  base_sha: bc9996d133c1ebe24106d5ff4d6ad9a6a1c7dc29
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
