@@ -84,7 +84,10 @@ OS account, a compromised Rust toolchain, or hardware faults.
 - `<artifact>.provenance.json` sidecars received externally;
 - Semantic Hub request payloads;
 - traces and audit material received externally;
-- release assets before digest verification and verifier admission;
+- release assets (`smc.exe`, `svm.exe`, release ZIP archives) before
+  verification against their published SHA-256 digests; SemCode produced or
+  consumed through those tools remains subject to normal verifier admission
+  before execution;
 - future packages, adapters and extensions.
 
 ## 7. Admission and validation boundaries
@@ -97,7 +100,7 @@ OS account, a compromised Rust toolchain, or hardware faults.
 | provenance sidecar | `smc artifact inspect`, staleness detection | integrity correlation only (`artifact_hash`); `CorruptedMismatch` / `MissingProvenance` fail closed |
 | host effects | PROMETHEUS capability / gate layer | denial is a valid, visible outcome |
 | Hub requests | `semantic-hub` admission | bounded, `InProcessUnisolated`; FNV `content_digest` is correlation only |
-| release assets | published SHA-256 digests + verifier | assets unsigned; trust is digest-bound |
+| release assets (executables, archives) | release verification / published SHA-256 digests | assets are explicitly unsigned; integrity is checked against published digests and release-smoke evidence; release executables and archives are not SemCode and are not verifier-admitted |
 
 ## 8. Threat categories
 
