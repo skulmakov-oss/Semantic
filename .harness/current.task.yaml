@@ -1,32 +1,32 @@
 task:
-  id: RESIDUAL-FA-02-042
-  title: "Preserve Logos Pulse/Profile directives"
-  type: residual_frontend_trust_cleanup
-  target: "Residual FA-02-042 / #1987 Logos Pulse/Profile preservation"
+  id: RESIDUAL-1993
+  title: "Audit event identity exhaustion"
+  type: residual_audit_trust_cleanup
+  target: "Residual #1993 / prom-audit AuditTrail event identity exhaustion"
   mode: active
-  supersedes: PHASE-B-PB-07
+  supersedes: RESIDUAL-FA-02-042
   umbrella: 1617
-  issues: [1987]
-  base_sha: 37f988447b540760431e21515ad32ebc45ff0fc6
+  issues: [1993]
+  base_sha: 1065f3e9a011af7ab707dc6ba7000ff268998a1e
   authorized_by: >-
-    Repository owner direct instruction (2026-10-06, "GO - Residual cleanup
-    #1987 - Logos Pulse/Profile Preservation"). Merge, auto-merge, release,
-    tag, manual issue closure, branch deletion, #1993 repair and any Logos
-    execution work are NOT authorized.
+    Repository owner direct instruction (2026-10-06, "GO - Residual #1993 -
+    Audit Event Identity Exhaustion"). Merge, auto-merge, release, tag,
+    manual issue closure, branch deletion, new residual repairs, a global
+    transaction framework and archive-format redesign are NOT authorized.
 
 intent:
   summary: >-
-    Accepted legacy Logos Pulse/Profile directives are preserved as opaque
-    inspection nodes instead of being discarded, without semantics,
-    execution or surface-authority changes.
-  decision_record: docs/roadmap/phase_b/fa02_042_logos_directive_preservation_decision.md
+    Live audit event identity allocation has an explicit deterministic
+    exhaustion state; recording fails typed without panic, wrap, reuse or
+    partial append, and runtime mutation paths admit audit capacity first.
+  decision_record: docs/roadmap/phase_b/residual_1993_audit_event_id_exhaustion_decision.md
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/sm-front/**
-    - docs/LOGOS_GRAMMAR_v0_1.md
-    - docs/spec/logos.md
+    - crates/prom-audit/**
+    - crates/prom-runtime/**
+    - crates/smc-cli/src/app.rs
     - docs/roadmap/phase_b/**
     - tests/**
 
@@ -57,7 +57,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 37f988447b540760431e21515ad32ebc45ff0fc6
+  base_sha: 1065f3e9a011af7ab707dc6ba7000ff268998a1e
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
