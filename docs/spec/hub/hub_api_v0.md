@@ -27,8 +27,10 @@ canonical audit text encoding.
 `semantic-hub` does not own Semantic language meaning, verifier admission,
 or VM execution; any one tool's business logic (that is the adapter's --
 see `hub_adapter_contract_v0.md`); or a cryptographic signing/provenance
-chain (tracked separately by issue #1374 -- Hub v0 provenance is a bounded
-correlation fingerprint, not a security commitment).
+chain (governed repository-wide by
+`docs/security/artifact_provenance_and_signing_policy_v0.md`, #1374, under
+which artifacts stay unsigned -- Hub v0 provenance is a bounded correlation
+fingerprint, not a security commitment).
 
 ## 2. Identifiers
 

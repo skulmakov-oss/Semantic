@@ -1,6 +1,10 @@
 # Compatibility Policy Stack
 
-Status: proposed v0
+Status: current governance companion to SSF-10 (#1378). The canonical technical
+compatibility contract is `docs/architecture/artifact_identity_and_trust.md`
+(SSF-10 §2); deprecation states and migration rules are in
+`docs/roadmap/language_maturity/deprecation_and_migration.md`. This document
+is not a release qualification authority and marks no surface stable by itself.
 
 ## Purpose
 

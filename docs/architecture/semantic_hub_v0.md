@@ -406,8 +406,9 @@ Success/Rejected/ToolFailed/Crashed/HubFault), and `fault_code`
 
 `HubDigest` is FNV-1a-64 plus byte length -- explicitly a non-cryptographic
 correlation fingerprint, not a security or integrity guarantee; there is no
-signing chain yet. That is tracked as future work under issue #1374, not
-claimed as done here.
+signing chain. Artifacts stay unsigned under the repository-wide provenance and
+signing policy (`docs/security/artifact_provenance_and_signing_policy_v0.md`,
+#1374); nothing here claims otherwise.
 
 `status_code` and `fault_code` are kept structurally distinct rather than
 folded into one field. An earlier implementation bug conflated them and
@@ -833,5 +834,6 @@ criteria. Issue #1553 is the original implementation issue (#1554, #1555)
 this document also closes. Issue #1373 is the extension/plugin boundary
 issue, related but non-duplicative -- see section 17. Issue #1372 proposed
 the `.semantic/hub/` project-local storage convention this implementation
-follows. Issue #1374 tracks the future cryptographic signing chain that Hub
-audit digests do not yet provide.
+follows. Issue #1374 produced the repository-wide provenance and signing
+policy (`docs/security/artifact_provenance_and_signing_policy_v0.md`); Hub
+audit digests remain correlation only and no signing chain exists.

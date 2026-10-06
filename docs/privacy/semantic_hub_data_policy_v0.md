@@ -124,11 +124,13 @@ attacker who can construct arbitrary payloads can also construct an
 FNV-1a-64 collision without meaningful difficulty; nothing about this
 digest resists deliberate tampering.
 
-No signing or provenance chain exists in Hub v0. That is explicitly the
-separate, not-yet-implemented, docs-only issue #1374 ("Semantic artifact
-provenance and signing chain"). Semantic Hub v0 does not claim to satisfy
-issue #1374; it only records a correlation fingerprint, and this document
-should not be read as asserting anything stronger than that.
+Hub v0 itself has no cryptographic signing chain. The repository-wide
+provenance and signing policy is
+`docs/security/artifact_provenance_and_signing_policy_v0.md` (#1374), which
+classifies Hub's FNV `content_digest` as correlation only -- not cryptographic
+trust, not a signature, not verifier admission. Hub v0 only records a
+correlation fingerprint, and this document should not be read as asserting
+anything stronger than that.
 
 ## 6. TurboVec metadata privacy
 
@@ -244,6 +246,8 @@ broader governance scope -- Studio/ALM consent-level workflows, skill
 export policy, or organization-wide data handling rules. It has no
 learning, export, or skill-authoring feature of its own in v0, so it only
 needed the classification vocabulary those issues define, not their full
-governance machinery. When #1371 and #1372 are published as full documents,
-this document should be reviewed for consistency with them, but it is not
-gated on their publication and does not attempt to preempt their content.
+governance machinery. #1371 is now published as
+`docs/security/threat_model_v0.md` and
+`docs/security/untrusted_project_policy_v0.md`; this document is consistent
+with them. #1372 was closed not planned together with the Studio/ALM surfaces,
+so no broader local-data governance document exists to preempt.

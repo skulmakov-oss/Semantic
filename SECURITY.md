@@ -90,23 +90,21 @@ Traces and skills stay local unless explicitly reviewed/exported.
 Packages/extensions wait for trust policy.
 ```
 
-The first explicit Semantic threat-model track is:
+Detailed security authorities:
 
 ```text
-#1371 security: Semantic threat model and untrusted project policy
+docs/security/threat_model_v0.md                       repository-wide threat model (#1371)
+docs/security/untrusted_project_policy_v0.md           untrusted project policy (#1371)
+docs/security/artifact_provenance_and_signing_policy_v0.md  provenance and signing policy (#1374)
+docs/security/semantic_hub_threat_model_v0.md          Semantic Hub v0 component threat model
+docs/architecture/artifact_identity_and_trust.md       SSF-10 artifact identity and trust (technical authority)
 ```
 
-Planned detailed documents include:
+Workbench/Studio command safety, ALM skill security and UI snapshot/event security have no separate documents: those surfaces are retired or not implemented, and the threat model lists them as deferred surfaces blocked until their own policy exists.
 
-```text
-docs/security/threat_model_v0.md
-docs/security/untrusted_project_policy_v0.md
-docs/security/workbench_studio_command_safety_v0.md
-docs/security/alm_skill_security_v0.md
-docs/security/ui_snapshot_event_security_v0.md
-```
+Semantic artifacts and release binaries are explicitly unsigned; trust is bound to published SHA-256 digests and verifier admission.
 
-Until those documents exist, this `SECURITY.md` is only the public reporting and boundary statement. It does not widen release, compatibility, runtime, package, Workbench, Studio, or ALM claims.
+This `SECURITY.md` remains the public reporting and boundary statement. It does not widen release, compatibility, runtime, package, Workbench, Studio, or ALM claims.
 
 ## Disclosure handling
 
