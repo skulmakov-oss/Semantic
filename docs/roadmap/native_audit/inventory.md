@@ -19,7 +19,7 @@ the query in §7. Nothing is estimated. A row's execution evidence records a
 | N2 | 7 | DEMO / ILLUSTRATIVE 2; EXAMPLE / UNKNOWN 5 |
 | N3 | 0 | — |
 | N4 | 0 | — (external repo `Semantic-Language`: 0 `.sm`) |
-| N5 | 0 `.sm` | 10 crates (see §5) |
+| N5 | 0 `.sm` | 11 crates (see §5) |
 | N6 | 3 | LEGACY / HISTORICAL 3 (+5 `prom-ui*` crates) |
 | N7 | 1 | LEGACY / UNKNOWN 1 |
 | N8 | 310 | TEST_FIXTURE / INTERNAL_CONTRACT 310 |
@@ -140,7 +140,7 @@ Unresolved ownership: N2 top-level `examples/*.sm` and `examples/quad_logic_calc
 | N2 Examples/demos | 7 `.sm` | unresolved | 3 CI_REFERENCED, 4 non-CI | ILLUSTRATIVE / UNKNOWN | INVENTORIED — NOT AUDITED |
 | N3 Product | 0 | — | — | none | INVENTORIED — EMPTY |
 | N4 Bootstrap | 0 (`#1910` direction; external docs-only repo) | #1910 | none in CI | EXPERIMENTAL direction, "not a release promise" (README) | INVENTORIED — NOT AUDITED |
-| N5 Support/composition crates | 10 crates | respective crates | workspace tests in CI | UNKNOWN | INVENTORIED — NOT AUDITED |
+| N5 Support/composition crates | 11 crates | respective crates | workspace tests in CI | UNKNOWN | INVENTORIED — NOT AUDITED |
 | N6 UI (retired) | 3 `.sm` + 5 crates + `examples/workbench_semantic` | retirement decision | 3 CI_REFERENCED (reference only) | HISTORICAL | INVENTORIED — NOT AUDITED |
 | N7 Legacy | 1 `.sm` + `ton618_legacy/**` | legacy perimeter | 1 UNKNOWN | UNKNOWN | INVENTORIED — NOT AUDITED |
 | N8 Test fixtures | 310 `.sm` | owning platform tests | 310 CI_REFERENCED | INTERNAL_CONTRACT | INVENTORIED — NOT AUDITED |
