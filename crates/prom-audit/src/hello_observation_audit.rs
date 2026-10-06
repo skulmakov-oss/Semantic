@@ -82,8 +82,10 @@ pub fn apply_controlled_observation_audit_policy(
     sequence_index: u64,
     policy: ControlledObservationAuditDecision,
     linkage: HelloObservationAuditLinkage,
-) -> ControlledObservationAuditResult {
-    match policy {
+) -> Result<ControlledObservationAuditResult, crate::AuditTrailError> {
+    // Audit infrastructure failure (#1993) is an error, never a policy result:
+    // it is not disguised as `NoStore` or `Denied`.
+    Ok(match policy {
         ControlledObservationAuditDecision::Record => {
             let event_id = trail.record(AuditEventKind::ControlledObservation {
                 operation_kind: "controlled_observation_text".to_string(),
@@ -93,7 +95,7 @@ pub fn apply_controlled_observation_audit_policy(
                 sequence_index,
                 policy,
                 linkage,
-            });
+            })?;
             ControlledObservationAuditResult::Recorded(event_id)
         }
         ControlledObservationAuditDecision::Redact => {
@@ -105,10 +107,10 @@ pub fn apply_controlled_observation_audit_policy(
                 sequence_index,
                 policy,
                 linkage,
-            });
+            })?;
             ControlledObservationAuditResult::Recorded(event_id)
         }
         ControlledObservationAuditDecision::NoStore => ControlledObservationAuditResult::NoStore,
         ControlledObservationAuditDecision::Deny => ControlledObservationAuditResult::Denied,
-    }
+    })
 }

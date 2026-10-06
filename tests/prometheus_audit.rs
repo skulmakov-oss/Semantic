@@ -51,23 +51,31 @@ fn audit_trail_reuses_runtime_session_descriptor_without_owning_runtime_logic() 
         gate_registry_bound: session.descriptor().gate_registry_bound,
     };
     let mut audit = AuditTrail::new(audit_session);
-    audit.record(AuditEventKind::SessionStarted {
-        entry: "main".to_string(),
-    });
+    audit
+        .record(AuditEventKind::SessionStarted {
+            entry: "main".to_string(),
+        })
+        .expect("audit identity available");
 
     // Intentional byte-shim compatibility coverage: this test protects the public run_verified_semcode* API surface.
     session.run_verified_semcode(&bytes).expect("run");
     drop(session);
 
-    audit.record(AuditEventKind::GateRead {
-        device_id: 7,
-        port: 3,
-    });
-    audit.record(AuditEventKind::GateWrite {
-        device_id: 7,
-        port: 4,
-    });
-    audit.record(AuditEventKind::SessionFinished);
+    audit
+        .record(AuditEventKind::GateRead {
+            device_id: 7,
+            port: 3,
+        })
+        .expect("audit identity available");
+    audit
+        .record(AuditEventKind::GateWrite {
+            device_id: 7,
+            port: 4,
+        })
+        .expect("audit identity available");
+    audit
+        .record(AuditEventKind::SessionFinished)
+        .expect("audit identity available");
 
     let replay = audit.replay_metadata();
     assert_eq!(replay.session.context, ExecutionContext::KernelBound);
@@ -84,10 +92,12 @@ fn audit_trail_records_capability_denial_with_manifest_context() {
         capability_manifest: CapabilityManifest::new().metadata(),
         gate_registry_bound: true,
     });
-    audit.record(AuditEventKind::CapabilityDenied {
-        capability: CapabilityKind::PulseEmit,
-        call: Some("PulseEmit".to_string()),
-    });
+    audit
+        .record(AuditEventKind::CapabilityDenied {
+            capability: CapabilityKind::PulseEmit,
+            call: Some("PulseEmit".to_string()),
+        })
+        .expect("audit identity available");
 
     let replay = audit.replay_metadata();
     assert_eq!(replay.event_count, 1);
