@@ -1,8 +1,10 @@
 # Pre-Bootstrap Governance Closeout
 
 Status: closeout evidence map for #1371, #1374, #1378 (governance only)
-Base SHA: `242c684dcf0702f1affdf3a2bfa5f05eabeaae41`
-Remains open: #1910 Semantic Self-Hosting Foundation — **not started**
+Base SHA: `f0b168f718f61094ed44c36081f0bc3a8509c51f`
+Remains open: #1910 Semantic Self-Hosting Foundation (active execution
+priority) — **not started**; #1909 Native Reasoning Foundation (deferred
+roadmap successor) — **not started**
 
 This record maps every acceptance item of the three governance issues to its
 current authority. `DEFERRED-BY-EXPLICIT-NONCLAIM` is used only for surfaces
@@ -11,9 +13,14 @@ until their own policy exists; it never hides a missing current contract.
 
 Related-track states used below (GitHub, at base SHA): #675 closed completed;
 #1365 closed completed; #1366, #1367, #1368, #1369, #1370, #1372, #1373, #1375,
-#1376, #1377, #1909 closed not planned. #1376 (package ecosystem) and #1909
-(Full Sigma / Native Reasoning) are not required for first self-hosting and are
-not reopened.
+#1376, #1377 closed not planned. #1376 (package ecosystem) is not required for
+first self-hosting and is not reopened.
+
+#1909 (Native Reasoning Foundation / Full Sigma + t¤) is **OPEN** — intentionally
+deferred until after a qualified Semantic self-hosting C0 → C1 → C2 fixed point.
+It remains an active architectural roadmap track but is not a prerequisite for
+the first self-hosting bootstrap. Not a prerequisite is not the same as
+cancelled; no Native Reasoning implementation has started.
 
 ## #1371 — Semantic threat model and untrusted project policy
 
@@ -114,7 +121,10 @@ SATISFIED. Every DEFERRED-BY-EXPLICIT-NONCLAIM item concerns a retired
 (Workbench, Studio, native UI) or never-built (ALM, registry, extensions)
 surface, and each is blocked from activation until its own policy exists.
 
-**#1371, #1374 and #1378 can honestly close.** #1910 stays open and
+**#1371, #1374 and #1378 can honestly close.** After this closeout merges, the
+expected open issues are exactly two: #1910 (Semantic Self-Hosting Foundation —
+active execution priority) and #1909 (Native Reasoning Foundation — deferred
+roadmap successor, after the self-hosting fixed point). #1910 stays open and
 self-hosting implementation has not started.
 
 Governance boundary for SHF-0 under #1910:

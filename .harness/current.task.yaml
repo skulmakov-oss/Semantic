@@ -7,7 +7,7 @@ task:
   supersedes: NATIVE-AUDIT-02
   issues: [1371, 1374, 1378]
   must_remain_open: [1910]
-  base_sha: 242c684dcf0702f1affdf3a2bfa5f05eabeaae41
+  base_sha: f0b168f718f61094ed44c36081f0bc3a8509c51f
   authorized_by: >-
     Repository owner direct instruction (2026-10-06, "GO - PRE-BOOTSTRAP
     GOVERNANCE CLOSEOUT"). Governance/documentation only; one comment-only
@@ -81,7 +81,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 242c684dcf0702f1affdf3a2bfa5f05eabeaae41
+  base_sha: f0b168f718f61094ed44c36081f0bc3a8509c51f
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
