@@ -67,6 +67,8 @@ pub use types::{
     LogosEvidenceOp,
     LogosImport,
     LogosLaw,
+    LogosLegacyDirective,
+    LogosLegacyDirectiveKind,
     LogosProgram,
     LogosSystem,
     LogosWhen,
