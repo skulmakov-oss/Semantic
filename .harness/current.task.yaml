@@ -1,25 +1,27 @@
 task:
-  id: PRE-BOOTSTRAP-GOVERNANCE-CLOSEOUT
-  title: "Close threat, provenance, and migration governance before self-hosting"
-  type: governance_closeout
-  target: "Land repository-wide threat model, untrusted-project policy, provenance/signing policy and migration/deprecation governance (#1371, #1374, #1378) before #1910 implementation."
+  id: SHF-1A-COMPILER-TEXT-CONTRACT
+  title: "Freeze compiler-grade UTF-8 byte-inspection text contract (SHF-1A)"
+  type: contract_documentation
+  target: "Freeze the normative semantics of a deterministic UTF-8 byte-inspection text surface for a Semantic-written lexer (#2002), as SHF-1A of #1910. Contract only; implementation is SHF-1B."
   mode: active
-  supersedes: NATIVE-AUDIT-02
-  issues: [1371, 1374, 1378]
+  supersedes: PRE-BOOTSTRAP-GOVERNANCE-CLOSEOUT
+  issues: [2002]
   must_remain_open: [1910]
-  base_sha: f0b168f718f61094ed44c36081f0bc3a8509c51f
+  base_sha: 5f3e230223a35384cb505e418fdac0b07102d2e6
   authorized_by: >-
-    Repository owner direct instruction (2026-10-06, "GO - PRE-BOOTSTRAP
-    GOVERNANCE CLOSEOUT"). Governance/documentation only; one comment-only
-    edit in crates/semantic-hub/src/provenance.rs; no implementation, no
-    signing, no release/tag, no merge without owner GO; #1910 not started.
+    Repository owner explicit authorization (2026-10-07, "OWNER AUTHORIZATION -
+    SHF-1A HARNESS TRANSITION" / "GO - SHF-1A HARNESS ENVELOPE TRANSITION"):
+    controlled governance-envelope transition for the named task
+    SHF-1A-COMPILER-TEXT-CONTRACT on its dedicated branch. Documentation /
+    contract only; no implementation; no merge without separate owner GO;
+    #1910 stays open.
 
 intent:
   summary: >-
-    Reconcile and land the pre-bootstrap governance contracts around the
-    SSF-10 artifact authority, including explicit self-hosting bootstrap
-    trust, provenance and migration rules, without starting self-hosting.
-  decision_record: docs/roadmap/pre_bootstrap_governance_closeout.md
+    Add the normative compiler text inspection contract
+    (semantic.compiler.text/0.1) and its spec-index entry, without
+    implementing or exposing any new operation.
+  decision_record: docs/spec/compiler_text_v0.md
 
 governance_constraints:
   compiler_implementation: false
@@ -27,30 +29,21 @@ governance_constraints:
   runtime_implementation: false
   verifier_changes: false
   semcode_changes: false
+  opcode_or_builtin_changes: false
   workflow_changes: false
   dependency_changes: false
   release_tag_changes: false
   self_hosting_started: false
   merge_without_owner_go: false
-  comment_only_source_exception: crates/semantic-hub/src/provenance.rs
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - SECURITY.md
-    - docs/security/**
-    - docs/privacy/semantic_hub_data_policy_v0.md
-    - docs/architecture/semantic_hub_v0.md
-    - docs/spec/hub/hub_api_v0.md
-    - docs/roadmap/pre_bootstrap_governance_closeout.md
-    - docs/roadmap/language_maturity/deprecation_and_migration.md
-    - docs/roadmap/language_maturity/stability_and_compatibility.md
-    - docs/roadmap/language_maturity/compatibility_policy_stack.md
-    # Comment-only exception (no executable change); every other crates/**
-    # path stays outside allowed scope and is rejected by harness-check.
-    - crates/semantic-hub/src/provenance.rs
+    - docs/spec/compiler_text_v0.md
+    - docs/spec/index.md
 
   forbidden_paths:
+    - crates/**
     - tests/**
     - examples/**
     - "**/*.sm"
@@ -59,6 +52,7 @@ scope:
     - reports/**
     - tools/**
     - scripts/**
+    - .github/**
     - Cargo.toml
     - Cargo.lock
     - experiments/**
@@ -81,7 +75,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: f0b168f718f61094ed44c36081f0bc3a8509c51f
+  base_sha: 5f3e230223a35384cb505e418fdac0b07102d2e6
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
@@ -96,7 +90,7 @@ constraints:
 # Standing cross-authority anchors carried forward from the sealed SSF
 # envelope (checked by tests/ssf_status_drift.rs against the immutable
 # dependency map / decision record). Historical reference only: they grant
-# no SSF authority to PB-01.
+# no SSF authority to SHF-1A.
 ssf_reference:
   active_phase: SSF-12
   issue: 1583
