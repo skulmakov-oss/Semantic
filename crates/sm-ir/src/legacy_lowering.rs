@@ -2854,9 +2854,7 @@ fn has_v8_text_instr(funcs: &[IrFunction]) -> bool {
     funcs.iter().any(|f| {
         f.instrs.iter().any(|i| match i {
             IrInstr::LoadText { .. } | IrInstr::ConcatText { .. } => true,
-            IrInstr::Call { name, .. } => {
-                name == "to_text" || compiler_text_builtin_signature(name).is_some()
-            }
+            IrInstr::Call { name, .. } => name == "to_text",
             _ => false,
         })
     })

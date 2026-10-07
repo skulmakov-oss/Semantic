@@ -133,6 +133,8 @@ fn text_starts_with_and_ends_with_compare_exact_bytes() {
     check("bool", "text_starts_with(\"abc\", \"ab\")", b(true));
     check("bool", "text_starts_with(\"abc\", \"bc\")", b(false));
     check("bool", "text_starts_with(\"abc\", \"Ab\")", b(false));
+    check("bool", "text_starts_with(\"Abc\", \"ab\")", b(false));
+    check("bool", "text_ends_with(\"abC\", \"bc\")", b(false));
     check("bool", "text_starts_with(\"ab\", \"abc\")", b(false));
     check("bool", &format!("text_starts_with({MIXED}, \"a\u{e9}\")"), b(true));
     check("bool", "text_ends_with(\"abc\", \"\")", b(true));
@@ -174,9 +176,9 @@ fn option_results_are_canonical_semantic_options_through_match() {
 }
 
 #[test]
-fn text_only_program_without_literals_selects_text_capable_header() {
-    // No LoadText/ConcatText anywhere: only the text builtin call can make the
-    // emitter select a header that admits CAP_TEXT_VALUES.
+fn text_builtin_on_a_parameter_runs_without_any_text_literal() {
+    // No LoadText/ConcatText anywhere: the text value arrives as an argument
+    // and is inspected only by the builtin, through the verified entry.
     let src = "fn probe(t: text) -> u32 {\n    return text_len(t);\n}\nfn main() {\n    return;\n}\n";
     let bytes = compile_program_to_semcode(src).expect("compile");
     let token = verify_semcode_token(&bytes).expect("verify");
