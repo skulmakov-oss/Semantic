@@ -3735,7 +3735,11 @@ fn eval_compiler_text_builtin(name: &str, args: &[Value]) -> Result<Value, Runti
         "text_is_empty" => Value::Bool(text.is_empty()),
         "text_byte_at" => {
             let index = compiler_u32_arg(name, args, 1)? as usize;
-            option_value(text.as_bytes().get(index).map(|byte| Value::U32(u32::from(*byte))))
+            option_value(
+                text.as_bytes()
+                    .get(index)
+                    .map(|byte| Value::U32(u32::from(*byte))),
+            )
         }
         "text_slice" => {
             let start = compiler_u32_arg(name, args, 1)? as usize;
@@ -3747,12 +3751,14 @@ fn eval_compiler_text_builtin(name: &str, args: &[Value]) -> Result<Value, Runti
                 && text.is_char_boundary(end);
             option_value(valid.then(|| Value::Text(text[start..end].to_string())))
         }
-        "text_starts_with" => {
-            Value::Bool(text.as_bytes().starts_with(compiler_text_arg(name, args, 1)?.as_bytes()))
-        }
-        "text_ends_with" => {
-            Value::Bool(text.as_bytes().ends_with(compiler_text_arg(name, args, 1)?.as_bytes()))
-        }
+        "text_starts_with" => Value::Bool(
+            text.as_bytes()
+                .starts_with(compiler_text_arg(name, args, 1)?.as_bytes()),
+        ),
+        "text_ends_with" => Value::Bool(
+            text.as_bytes()
+                .ends_with(compiler_text_arg(name, args, 1)?.as_bytes()),
+        ),
         "text_find" => {
             // `str::find` returns the smallest byte offset; "" matches at 0.
             let found = text.find(compiler_text_arg(name, args, 1)?);

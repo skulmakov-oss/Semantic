@@ -253,24 +253,6 @@ fn builtin_name_policy(name: &str) -> Option<BuiltinNamePolicy> {
         .map(|(_, policy)| *policy)
 }
 
-/// SHF-1B (#2004): the frozen `semantic.compiler.text/0.1` signatures
-/// (`docs/spec/compiler_text_v0.md` §6), shared by typecheck and lowering so
-/// the two cannot drift. Returns `(parameter types, result type)`.
-#[cfg(any(feature = "alloc", feature = "std"))]
-pub fn compiler_text_builtin_signature(name: &str) -> Option<(Vec<Type>, Type)> {
-    let opt = |t: Type| Type::Option(Box::new(t));
-    let sig = match name {
-        "text_len" => (vec![Type::Text], Type::U32),
-        "text_byte_at" => (vec![Type::Text, Type::U32], opt(Type::U32)),
-        "text_slice" => (vec![Type::Text, Type::U32, Type::U32], opt(Type::Text)),
-        "text_starts_with" | "text_ends_with" => (vec![Type::Text, Type::Text], Type::Bool),
-        "text_find" => (vec![Type::Text, Type::Text], opt(Type::U32)),
-        "text_is_empty" => (vec![Type::Text], Type::Bool),
-        _ => return None,
-    };
-    Some(sig)
-}
-
 /// SSF-09 D2: the built-in ADT identities. A user enum must not take one of
 /// these names, or its ADT descriptor would collide with the built-in's.
 const BUILTIN_ADT_NAMES: &[&str] = &["Option", "Result"];
@@ -1400,6 +1382,55 @@ pub fn canonicalize_declared_type_generic(
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn builtin_sig(name: &str) -> Option<FnSig> {
     match name {
+        // SHF-1B (#2004): frozen `semantic.compiler.text/0.1` signatures.
+        "text_len" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::U32,
+        }),
+        "text_byte_at" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text, Type::U32],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Option(Box::new(Type::U32)),
+        }),
+        "text_slice" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text, Type::U32, Type::U32],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Option(Box::new(Type::Text)),
+        }),
+        "text_starts_with" | "text_ends_with" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text, Type::Text],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Bool,
+        }),
+        "text_find" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text, Type::Text],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Option(Box::new(Type::U32)),
+        }),
+        "text_is_empty" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Bool,
+        }),
         "sin" | "cos" | "tan" | "sqrt" | "abs" => Some(FnSig {
             type_params: Vec::new(),
             trait_bounds: Vec::new(),

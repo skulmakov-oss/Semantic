@@ -8,8 +8,8 @@
 //! a substitute for the pipeline.
 
 use sm_emit::compile_program_to_semcode;
-use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
 use sm_format::semcode_format::MAGIC7;
+use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
 use sm_runtime_core::AdtCarrier;
 use sm_verify::{verify_semcode, verify_semcode_token, VerificationCode};
 use sm_vm::{run_verified_function_semcode_with_args, Value};
@@ -17,7 +17,8 @@ use sm_vm::{run_verified_function_semcode_with_args, Value};
 /// Compile `fn probe() -> <ret> { return <expr>; }`, verify it, run the
 /// verified `probe` entry, and return the observed value.
 fn eval(ret: &str, expr: &str) -> Value {
-    let src = format!("fn probe() -> {ret} {{\n    return {expr};\n}}\nfn main() {{\n    return;\n}}\n");
+    let src =
+        format!("fn probe() -> {ret} {{\n    return {expr};\n}}\nfn main() {{\n    return;\n}}\n");
     eval_source(&src)
 }
 
@@ -94,10 +95,18 @@ fn text_byte_at_returns_raw_bytes_including_continuation_bytes() {
     check(r, "text_byte_at(\"\u{e9}\", 1u32)", some(u(0xA9)));
     check(r, "text_byte_at(\"\u{e9}\", 2u32)", none());
     for (i, byte) in [0xE2u32, 0x82, 0xAC].into_iter().enumerate() {
-        check(r, &format!("text_byte_at(\"\u{20ac}\", {i}u32)"), some(u(byte)));
+        check(
+            r,
+            &format!("text_byte_at(\"\u{20ac}\", {i}u32)"),
+            some(u(byte)),
+        );
     }
     for (i, byte) in [0xF0u32, 0x9F, 0x99, 0x82].into_iter().enumerate() {
-        check(r, &format!("text_byte_at(\"\u{1f642}\", {i}u32)"), some(u(byte)));
+        check(
+            r,
+            &format!("text_byte_at(\"\u{1f642}\", {i}u32)"),
+            some(u(byte)),
+        );
     }
     check(r, &format!("text_byte_at({MIXED}, 0u32)"), some(u(0x61)));
     check(r, &format!("text_byte_at({MIXED}, 10u32)"), some(u(0x7A)));
@@ -110,10 +119,26 @@ fn text_byte_at_returns_raw_bytes_including_continuation_bytes() {
 fn text_slice_is_half_open_and_rejects_non_scalar_boundaries() {
     let r = "Option(text)";
     check(r, &format!("text_slice({MIXED}, 3u32, 3u32)"), some(t("")));
-    check(r, &format!("text_slice({MIXED}, 0u32, 11u32)"), some(t("a\u{e9}\u{20ac}\u{1f642}z")));
-    check(r, &format!("text_slice({MIXED}, 1u32, 6u32)"), some(t("\u{e9}\u{20ac}")));
-    check(r, &format!("text_slice({MIXED}, 6u32, 10u32)"), some(t("\u{1f642}")));
-    check(r, &format!("text_slice({MIXED}, 11u32, 11u32)"), some(t("")));
+    check(
+        r,
+        &format!("text_slice({MIXED}, 0u32, 11u32)"),
+        some(t("a\u{e9}\u{20ac}\u{1f642}z")),
+    );
+    check(
+        r,
+        &format!("text_slice({MIXED}, 1u32, 6u32)"),
+        some(t("\u{e9}\u{20ac}")),
+    );
+    check(
+        r,
+        &format!("text_slice({MIXED}, 6u32, 10u32)"),
+        some(t("\u{1f642}")),
+    );
+    check(
+        r,
+        &format!("text_slice({MIXED}, 11u32, 11u32)"),
+        some(t("")),
+    );
     // start / end inside a multi-byte scalar
     check(r, &format!("text_slice({MIXED}, 2u32, 6u32)"), none());
     check(r, &format!("text_slice({MIXED}, 1u32, 2u32)"), none());
@@ -136,15 +161,27 @@ fn text_starts_with_and_ends_with_compare_exact_bytes() {
     check("bool", "text_starts_with(\"Abc\", \"ab\")", b(false));
     check("bool", "text_ends_with(\"abC\", \"bc\")", b(false));
     check("bool", "text_starts_with(\"ab\", \"abc\")", b(false));
-    check("bool", &format!("text_starts_with({MIXED}, \"a\u{e9}\")"), b(true));
+    check(
+        "bool",
+        &format!("text_starts_with({MIXED}, \"a\u{e9}\")"),
+        b(true),
+    );
     check("bool", "text_ends_with(\"abc\", \"\")", b(true));
     check("bool", "text_ends_with(\"\", \"\")", b(true));
     check("bool", "text_ends_with(\"abc\", \"bc\")", b(true));
     check("bool", "text_ends_with(\"abc\", \"ab\")", b(false));
     check("bool", "text_ends_with(\"bc\", \"abc\")", b(false));
-    check("bool", &format!("text_ends_with({MIXED}, \"\u{1f642}z\")"), b(true));
+    check(
+        "bool",
+        &format!("text_ends_with({MIXED}, \"\u{1f642}z\")"),
+        b(true),
+    );
     // decomposed e + combining acute is not equal to precomposed U+00E9
-    check("bool", "text_ends_with(\"caf\u{e9}\", \"e\u{301}\")", b(false));
+    check(
+        "bool",
+        "text_ends_with(\"caf\u{e9}\", \"e\u{301}\")",
+        b(false),
+    );
 }
 
 #[test]
@@ -179,7 +216,8 @@ fn option_results_are_canonical_semantic_options_through_match() {
 fn text_builtin_on_a_parameter_runs_without_any_text_literal() {
     // No LoadText/ConcatText anywhere: the text value arrives as an argument
     // and is inspected only by the builtin, through the verified entry.
-    let src = "fn probe(t: text) -> u32 {\n    return text_len(t);\n}\nfn main() {\n    return;\n}\n";
+    let src =
+        "fn probe(t: text) -> u32 {\n    return text_len(t);\n}\nfn main() {\n    return;\n}\n";
     let bytes = compile_program_to_semcode(src).expect("compile");
     let token = verify_semcode_token(&bytes).expect("verify");
     let entry = token.require_entry("probe").expect("entry");
@@ -229,8 +267,7 @@ fn bare_text_builtin_calls_require_text_capability_at_admission() {
 /// Re-encode a current artifact under an older header (same technique as the
 /// existing `to_text` capability tests in `sm-vm`).
 fn downgrade_header(bytes: &[u8], target_magic: [u8; 8]) -> Vec<u8> {
-    let (_, functions) =
-        sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode");
+    let (_, functions) = sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode");
     let mut out = Vec::new();
     out.extend_from_slice(&target_magic);
     for f in &functions {
@@ -259,7 +296,10 @@ fn text_builtin_names_are_reserved_against_user_definitions() {
         let err = compile_err(&format!(
             "fn {name}(x: i32) -> i32 {{\n    return x;\n}}\nfn main() {{\n    return;\n}}\n"
         ));
-        assert!(err.contains(name) && err.contains("reserved"), "{name}: {err}");
+        assert!(
+            err.contains(name) && err.contains("reserved"),
+            "{name}: {err}"
+        );
     }
 }
 
@@ -267,33 +307,123 @@ fn text_builtin_names_are_reserved_against_user_definitions() {
 fn text_builtins_reject_wrong_arity_and_argument_families() {
     let cases: &[(&str, &str, &str)] = &[
         // (call, return type, required message fragment)
-        ("text_len()", "u32", "builtin 'text_len' takes exactly 1 positional argument"),
-        ("text_len(\"a\", \"b\")", "u32", "builtin 'text_len' takes exactly 1 positional argument"),
-        ("text_len(7u32)", "u32", "builtin 'text_len' argument 1 must be text"),
-        ("text_byte_at(\"a\")", "Option(u32)", "builtin 'text_byte_at' takes exactly 2 positional arguments"),
-        ("text_byte_at(7u32, 0u32)", "Option(u32)", "builtin 'text_byte_at' argument 1 must be text"),
-        ("text_byte_at(\"a\", 0)", "Option(u32)", "builtin 'text_byte_at' argument 2 must be u32"),
-        ("text_byte_at(\"a\", \"0\")", "Option(u32)", "builtin 'text_byte_at' argument 2 must be u32"),
-        ("text_slice(\"a\", 0u32)", "Option(text)", "builtin 'text_slice' takes exactly 3 positional arguments"),
-        ("text_slice(true, 0u32, 0u32)", "Option(text)", "builtin 'text_slice' argument 1 must be text"),
-        ("text_slice(\"a\", 0, 1u32)", "Option(text)", "builtin 'text_slice' argument 2 must be u32"),
-        ("text_slice(\"a\", 0u32, true)", "Option(text)", "builtin 'text_slice' argument 3 must be u32"),
-        ("text_starts_with(\"a\")", "bool", "builtin 'text_starts_with' takes exactly 2 positional arguments"),
-        ("text_starts_with(1u32, \"a\")", "bool", "builtin 'text_starts_with' argument 1 must be text"),
-        ("text_starts_with(\"a\", 1u32)", "bool", "builtin 'text_starts_with' argument 2 must be text"),
-        ("text_ends_with(\"a\", \"b\", \"c\")", "bool", "builtin 'text_ends_with' takes exactly 2 positional arguments"),
-        ("text_ends_with(\"a\", 1)", "bool", "builtin 'text_ends_with' argument 2 must be text"),
-        ("text_find(\"a\")", "Option(u32)", "builtin 'text_find' takes exactly 2 positional arguments"),
-        ("text_find(1u32, \"a\")", "Option(u32)", "builtin 'text_find' argument 1 must be text"),
-        ("text_find(\"a\", false)", "Option(u32)", "builtin 'text_find' argument 2 must be text"),
-        ("text_is_empty()", "bool", "builtin 'text_is_empty' takes exactly 1 positional argument"),
-        ("text_is_empty(0u32)", "bool", "builtin 'text_is_empty' argument 1 must be text"),
+        (
+            "text_len()",
+            "u32",
+            "builtin 'text_len' takes exactly 1 positional argument",
+        ),
+        (
+            "text_len(\"a\", \"b\")",
+            "u32",
+            "builtin 'text_len' takes exactly 1 positional argument",
+        ),
+        (
+            "text_len(7u32)",
+            "u32",
+            "builtin 'text_len' argument 1 must be text",
+        ),
+        (
+            "text_byte_at(\"a\")",
+            "Option(u32)",
+            "builtin 'text_byte_at' takes exactly 2 positional arguments",
+        ),
+        (
+            "text_byte_at(7u32, 0u32)",
+            "Option(u32)",
+            "builtin 'text_byte_at' argument 1 must be text",
+        ),
+        (
+            "text_byte_at(\"a\", 0)",
+            "Option(u32)",
+            "builtin 'text_byte_at' argument 2 must be u32",
+        ),
+        (
+            "text_byte_at(\"a\", \"0\")",
+            "Option(u32)",
+            "builtin 'text_byte_at' argument 2 must be u32",
+        ),
+        (
+            "text_slice(\"a\", 0u32)",
+            "Option(text)",
+            "builtin 'text_slice' takes exactly 3 positional arguments",
+        ),
+        (
+            "text_slice(true, 0u32, 0u32)",
+            "Option(text)",
+            "builtin 'text_slice' argument 1 must be text",
+        ),
+        (
+            "text_slice(\"a\", 0, 1u32)",
+            "Option(text)",
+            "builtin 'text_slice' argument 2 must be u32",
+        ),
+        (
+            "text_slice(\"a\", 0u32, true)",
+            "Option(text)",
+            "builtin 'text_slice' argument 3 must be u32",
+        ),
+        (
+            "text_starts_with(\"a\")",
+            "bool",
+            "builtin 'text_starts_with' takes exactly 2 positional arguments",
+        ),
+        (
+            "text_starts_with(1u32, \"a\")",
+            "bool",
+            "builtin 'text_starts_with' argument 1 must be text",
+        ),
+        (
+            "text_starts_with(\"a\", 1u32)",
+            "bool",
+            "builtin 'text_starts_with' argument 2 must be text",
+        ),
+        (
+            "text_ends_with(\"a\", \"b\", \"c\")",
+            "bool",
+            "builtin 'text_ends_with' takes exactly 2 positional arguments",
+        ),
+        (
+            "text_ends_with(\"a\", 1)",
+            "bool",
+            "builtin 'text_ends_with' argument 2 must be text",
+        ),
+        (
+            "text_find(\"a\")",
+            "Option(u32)",
+            "builtin 'text_find' takes exactly 2 positional arguments",
+        ),
+        (
+            "text_find(1u32, \"a\")",
+            "Option(u32)",
+            "builtin 'text_find' argument 1 must be text",
+        ),
+        (
+            "text_find(\"a\", false)",
+            "Option(u32)",
+            "builtin 'text_find' argument 2 must be text",
+        ),
+        (
+            "text_is_empty()",
+            "bool",
+            "builtin 'text_is_empty' takes exactly 1 positional argument",
+        ),
+        (
+            "text_is_empty(0u32)",
+            "bool",
+            "builtin 'text_is_empty' argument 1 must be text",
+        ),
     ];
     for (call, ret, fragment) in cases {
-        let src = format!("fn probe() -> {ret} {{\n    return {call};\n}}\nfn main() {{\n    return;\n}}\n");
+        let src = format!(
+            "fn probe() -> {ret} {{\n    return {call};\n}}\nfn main() {{\n    return;\n}}\n"
+        );
         let first = compile_err(&src);
         assert!(first.contains(fragment), "{call}: {first}");
-        assert_eq!(first, compile_err(&src), "{call}: diagnostic must be deterministic");
+        assert_eq!(
+            first,
+            compile_err(&src),
+            "{call}: diagnostic must be deterministic"
+        );
     }
 }
 
@@ -331,12 +461,24 @@ fn compilation_and_execution_are_deterministic() {
 fn invalid_utf8_in_string_table_is_rejected_before_execution() {
     // SHF-1B adds no new ingress: a corrupted text literal must still be
     // rejected by admission, never reach the new builtins.
-    let src = "fn probe() -> u32 {\n    return text_len(\"QZQZQZ\");\n}\nfn main() {\n    return;\n}\n";
+    let src =
+        "fn probe() -> u32 {\n    return text_len(\"QZQZQZ\");\n}\nfn main() {\n    return;\n}\n";
     let mut bytes = compile_program_to_semcode(src).expect("compile");
     let at = bytes
         .windows(6)
         .position(|w| w == b"QZQZQZ")
         .expect("literal bytes present");
     bytes[at] = 0xFF;
-    assert!(verify_semcode_token(&bytes).is_err(), "invalid UTF-8 must not be admitted");
+    assert!(
+        verify_semcode_token(&bytes).is_err(),
+        "invalid UTF-8 must not be admitted"
+    );
+}
+
+#[test]
+fn text_builtins_lower_in_statement_position_with_discarded_results() {
+    // Statement-level calls take a separate lowering path from expression calls;
+    // both must route through the same builtin signatures.
+    let src = "fn probe() -> u32 {\n    text_len(\"abc\");\n    text_byte_at(\"abc\", 9u32);\n    text_slice(\"abc\", 0u32, 1u32);\n    text_starts_with(\"abc\", \"a\");\n    text_ends_with(\"abc\", \"c\");\n    text_find(\"abc\", \"z\");\n    text_is_empty(\"abc\");\n    return 7u32;\n}\nfn main() {\n    return;\n}\n";
+    assert_eq!(format!("{:?}", eval_source(src)), format!("{:?}", u(7)));
 }

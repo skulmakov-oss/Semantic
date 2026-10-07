@@ -10,6 +10,19 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::{String, ToString};
 
+/// SHF-1B (#2004): the `semantic.compiler.text/0.1` builtins
+/// (`docs/spec/compiler_text_v0.md`). Their signatures live in `builtin_sig`;
+/// this list only routes them to exact arity/family diagnostics.
+const COMPILER_TEXT_BUILTINS: &[&str] = &[
+    "text_len",
+    "text_byte_at",
+    "text_slice",
+    "text_starts_with",
+    "text_ends_with",
+    "text_find",
+    "text_is_empty",
+];
+
 fn fx_coercion_gap_message() -> &'static str {
     "fx coercion from non-literal numeric expressions is not implemented in the canonical Rust-like path yet"
 }
@@ -3394,10 +3407,13 @@ fn infer_expr_type(
                 }
                 return Ok(Type::Unit);
             }
-            if let Some((params, result)) =
-                compiler_text_builtin_signature(resolve_symbol_name(arena, *name)?)
-            {
+            if COMPILER_TEXT_BUILTINS.contains(&resolve_symbol_name(arena, *name)?) {
                 let builtin = resolve_symbol_name(arena, *name)?;
+                let FnSig {
+                    params,
+                    ret: result,
+                    ..
+                } = builtin_sig(builtin).expect("every compiler text builtin has a signature");
                 if args.len() != params.len() || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
                         detail: None,
@@ -3422,7 +3438,11 @@ fn infer_expr_type(
                         impl_list,
                     )?;
                     if actual != *expected {
-                        let family = if *expected == Type::Text { "text" } else { "u32" };
+                        let family = if *expected == Type::Text {
+                            "text"
+                        } else {
+                            "u32"
+                        };
                         return Err(FrontendError {
                             detail: None,
                             pos: 0,
