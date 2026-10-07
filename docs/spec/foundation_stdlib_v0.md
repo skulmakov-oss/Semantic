@@ -110,6 +110,12 @@ sequence; equality is exact and performs no locale folding or Unicode
 normalization. This version exposes no indexing, slicing, ordering, or length
 API, so no code-point-versus-byte indexing promise is implied.
 
+Additive surface on `main`, outside this contract: the compiler-grade UTF-8 byte-inspection
+operations of `semantic.compiler.text/0.1` (`text_len`, `text_byte_at`, `text_slice`,
+`text_starts_with`, `text_ends_with`, `text_find`, `text_is_empty`) are implemented and qualified
+by SHF-1B and specified in [`compiler_text_v0.md`](compiler_text_v0.md). They are not part of
+`semantic.foundation.std/0.1` or the published `v1.2.0` contour.
+
 `to_text` is defined only for `text`, `bool`, `i32`, `u32`, and `quad`:
 
 - `text` is returned unchanged;
