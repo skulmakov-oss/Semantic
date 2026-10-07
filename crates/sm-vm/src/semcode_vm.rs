@@ -3642,6 +3642,8 @@ fn try_eval_builtin_call<'a, H: VmHostBridge>(
             Value::F64(lhs.powf(rhs))
         }
         "to_text" => Value::Text(value_to_text(expect_builtin_to_text_arg(name, args)?)?),
+        "text_len" | "text_byte_at" | "text_slice" | "text_starts_with" | "text_ends_with"
+        | "text_find" | "text_is_empty" => eval_compiler_text_builtin(name, args)?,
         "print" => {
             if args.len() != 1 {
                 return Err(RuntimeError::TypeMismatchRuntime(format!(
@@ -3715,6 +3717,105 @@ fn try_eval_builtin_call<'a, H: VmHostBridge>(
         _ => return Ok(None),
     };
     Ok(Some(value))
+}
+
+/// SHF-1B (#2004): the seven `semantic.compiler.text/0.1` operations
+/// (`docs/spec/compiler_text_v0.md` §6). All indices are UTF-8 byte offsets;
+/// `None` results are canonical `Option` values, identical to `MakeAdt`'s.
+fn eval_compiler_text_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    let arity = match name {
+        "text_len" | "text_is_empty" => 1,
+        "text_slice" => 3,
+        _ => 2,
+    };
+    expect_builtin_arity(name, args, arity)?;
+    let text = compiler_text_arg(name, args, 0)?;
+    Ok(match name {
+        "text_len" => Value::U32(text_len_u32(text)?),
+        "text_is_empty" => Value::Bool(text.is_empty()),
+        "text_byte_at" => {
+            let index = compiler_u32_arg(name, args, 1)? as usize;
+            option_value(text.as_bytes().get(index).map(|byte| Value::U32(u32::from(*byte))))
+        }
+        "text_slice" => {
+            let start = compiler_u32_arg(name, args, 1)? as usize;
+            let end = compiler_u32_arg(name, args, 2)? as usize;
+            // No clamping or rounding: every invalid bound is `None`.
+            let valid = start <= end
+                && end <= text.len()
+                && text.is_char_boundary(start)
+                && text.is_char_boundary(end);
+            option_value(valid.then(|| Value::Text(text[start..end].to_string())))
+        }
+        "text_starts_with" => {
+            Value::Bool(text.as_bytes().starts_with(compiler_text_arg(name, args, 1)?.as_bytes()))
+        }
+        "text_ends_with" => {
+            Value::Bool(text.as_bytes().ends_with(compiler_text_arg(name, args, 1)?.as_bytes()))
+        }
+        "text_find" => {
+            // `str::find` returns the smallest byte offset; "" matches at 0.
+            let found = text.find(compiler_text_arg(name, args, 1)?);
+            option_value(match found {
+                Some(offset) => Some(Value::U32(usize_to_u32_checked(offset)?)),
+                None => None,
+            })
+        }
+        _ => {
+            return Err(RuntimeError::UnknownFunction(name.to_string()));
+        }
+    })
+}
+
+/// Every operation guards its text argument: a text whose byte length cannot
+/// be represented as `u32` traps deterministically (never truncates, wraps
+/// or saturates), per `compiler_text_v0.md` §7.
+fn compiler_text_arg<'a>(
+    name: &str,
+    args: &'a [Value],
+    index: usize,
+) -> Result<&'a str, RuntimeError> {
+    match &args[index] {
+        Value::Text(value) => {
+            text_len_u32(value)?;
+            Ok(value.as_str())
+        }
+        other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin '{name}' argument {} expects text, got {other:?}",
+            index + 1
+        ))),
+    }
+}
+
+fn compiler_u32_arg(name: &str, args: &[Value], index: usize) -> Result<u32, RuntimeError> {
+    match args[index] {
+        Value::U32(value) => Ok(value),
+        ref other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin '{name}' argument {} expects u32, got {other:?}",
+            index + 1
+        ))),
+    }
+}
+
+fn text_len_u32(text: &str) -> Result<u32, RuntimeError> {
+    usize_to_u32_checked(text.len())
+}
+
+fn usize_to_u32_checked(value: usize) -> Result<u32, RuntimeError> {
+    u32::try_from(value).map_err(|_| RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))
+}
+
+fn option_value(value: Option<Value>) -> Value {
+    let (variant_name, tag, payload) = match value {
+        Some(value) => ("Some", 1, vec![value]),
+        None => ("None", 0, Vec::new()),
+    };
+    Value::Adt(AdtCarrier {
+        type_name: "Option".to_string(),
+        variant_name: variant_name.to_string(),
+        tag,
+        payload,
+    })
 }
 
 fn expect_builtin_arity(name: &str, args: &[Value], expected: usize) -> Result<(), RuntimeError> {
@@ -9663,5 +9764,41 @@ mod tests {
             .stdout_write("after success")
             .expect("write admitted");
         assert_eq!(host.writes, vec!["after success".to_string()]);
+    }
+
+    /// SHF-1B (#2004) supplemental boundary evidence for
+    /// `compiler_text_v0.md` §7: allocating a >4 GiB text is unreasonable in
+    /// CI, so the checked conversion every text operation routes through is
+    /// exercised synthetically. Full-pipeline vectors live in
+    /// `tests/shf1b_compiler_text_qualification.rs`.
+    #[test]
+    fn compiler_text_lengths_beyond_u32_trap_instead_of_truncating() {
+        assert_eq!(usize_to_u32_checked(0).expect("zero"), 0);
+        assert_eq!(
+            usize_to_u32_checked(u32::MAX as usize).expect("u32::MAX fits"),
+            u32::MAX
+        );
+        #[cfg(target_pointer_width = "64")]
+        for too_long in [u32::MAX as usize + 1, usize::MAX] {
+            assert!(matches!(
+                usize_to_u32_checked(too_long),
+                Err(RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))
+            ));
+        }
+    }
+
+    #[test]
+    fn compiler_text_builtins_reject_wrong_runtime_families() {
+        let err = eval_compiler_text_builtin("text_len", &[Value::U32(1)]).expect_err("u32");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+        let err = eval_compiler_text_builtin(
+            "text_byte_at",
+            &[Value::Text("a".to_string()), Value::I32(0)],
+        )
+        .expect_err("i32 index");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+        let err = eval_compiler_text_builtin("text_slice", &[Value::Text("a".to_string())])
+            .expect_err("arity");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
     }
 }

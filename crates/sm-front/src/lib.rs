@@ -211,6 +211,15 @@ const BUILTIN_NAMESPACE: &[(&str, BuiltinNamePolicy)] = &[
     ("map_set", BuiltinNamePolicy::Reserved),
     ("print", BuiltinNamePolicy::Reserved),
     ("to_text", BuiltinNamePolicy::Reserved),
+    // SHF-1B (#2004): compiler-grade UTF-8 byte inspection
+    // (`docs/spec/compiler_text_v0.md`), typechecked and lowered by name.
+    ("text_len", BuiltinNamePolicy::Reserved),
+    ("text_byte_at", BuiltinNamePolicy::Reserved),
+    ("text_slice", BuiltinNamePolicy::Reserved),
+    ("text_starts_with", BuiltinNamePolicy::Reserved),
+    ("text_ends_with", BuiltinNamePolicy::Reserved),
+    ("text_find", BuiltinNamePolicy::Reserved),
+    ("text_is_empty", BuiltinNamePolicy::Reserved),
     ("random_seed", BuiltinNamePolicy::Reserved),
     ("random_next_i32", BuiltinNamePolicy::Reserved),
     // Math: user-first resolution (#1653/#1750).
@@ -242,6 +251,24 @@ fn builtin_name_policy(name: &str) -> Option<BuiltinNamePolicy> {
         .iter()
         .find(|(builtin, _)| *builtin == name)
         .map(|(_, policy)| *policy)
+}
+
+/// SHF-1B (#2004): the frozen `semantic.compiler.text/0.1` signatures
+/// (`docs/spec/compiler_text_v0.md` §6), shared by typecheck and lowering so
+/// the two cannot drift. Returns `(parameter types, result type)`.
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub fn compiler_text_builtin_signature(name: &str) -> Option<(Vec<Type>, Type)> {
+    let opt = |t: Type| Type::Option(Box::new(t));
+    let sig = match name {
+        "text_len" => (vec![Type::Text], Type::U32),
+        "text_byte_at" => (vec![Type::Text, Type::U32], opt(Type::U32)),
+        "text_slice" => (vec![Type::Text, Type::U32, Type::U32], opt(Type::Text)),
+        "text_starts_with" | "text_ends_with" => (vec![Type::Text, Type::Text], Type::Bool),
+        "text_find" => (vec![Type::Text, Type::Text], opt(Type::U32)),
+        "text_is_empty" => (vec![Type::Text], Type::Bool),
+        _ => return None,
+    };
+    Some(sig)
 }
 
 /// SSF-09 D2: the built-in ADT identities. A user enum must not take one of
@@ -1908,6 +1935,13 @@ fn main() {
             "map_set",
             "print",
             "to_text",
+            "text_len",
+            "text_byte_at",
+            "text_slice",
+            "text_starts_with",
+            "text_ends_with",
+            "text_find",
+            "text_is_empty",
             "random_seed",
             "random_next_i32",
             "stdout_write",

@@ -4335,6 +4335,9 @@ fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
     match name {
         "sin" | "cos" | "tan" | "sqrt" | "abs" | "pow" => Some(CAP_F64_MATH),
         "to_text" => Some(CAP_TEXT_VALUES),
+        // SHF-1B (#2004): pure text mechanics, gated like every text value.
+        "text_len" | "text_byte_at" | "text_slice" | "text_starts_with" | "text_ends_with"
+        | "text_find" | "text_is_empty" => Some(CAP_TEXT_VALUES),
         "print" => Some(CAP_STDOUT),
         "args_read" => Some(CAP_ARGS_READ),
         "stdin_read_text" => Some(CAP_STDIN_READ_TEXT),

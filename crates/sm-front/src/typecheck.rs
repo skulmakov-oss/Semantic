@@ -3394,6 +3394,48 @@ fn infer_expr_type(
                 }
                 return Ok(Type::Unit);
             }
+            if let Some((params, result)) =
+                compiler_text_builtin_signature(resolve_symbol_name(arena, *name)?)
+            {
+                let builtin = resolve_symbol_name(arena, *name)?;
+                if args.len() != params.len() || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        detail: None,
+                        pos: 0,
+                        message: format!(
+                            "builtin '{builtin}' takes exactly {} positional argument{}",
+                            params.len(),
+                            if params.len() == 1 { "" } else { "s" }
+                        ),
+                    });
+                }
+                for (index, (arg, expected)) in args.iter().zip(params.iter()).enumerate() {
+                    let actual = infer_expr_type(
+                        arg.value,
+                        arena,
+                        env,
+                        table,
+                        record_table,
+                        adt_table,
+                        ret_ty.clone(),
+                        loop_stack,
+                        impl_list,
+                    )?;
+                    if actual != *expected {
+                        let family = if *expected == Type::Text { "text" } else { "u32" };
+                        return Err(FrontendError {
+                            detail: None,
+                            pos: 0,
+                            message: format!(
+                                "builtin '{builtin}' argument {} must be {family}, got {:?}",
+                                index + 1,
+                                actual
+                            ),
+                        });
+                    }
+                }
+                return Ok(result);
+            }
             if resolve_symbol_name(arena, *name)? == "to_text" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {

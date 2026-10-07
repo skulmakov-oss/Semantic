@@ -17,7 +17,7 @@ use sm_front::types::{
     MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget, SequenceCollectionFamily,
     SequenceType,
 };
-use sm_front::{CallArg, LoopExpr, TuplePatternItem};
+use sm_front::{compiler_text_builtin_signature, CallArg, LoopExpr, TuplePatternItem};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2854,7 +2854,9 @@ fn has_v8_text_instr(funcs: &[IrFunction]) -> bool {
     funcs.iter().any(|f| {
         f.instrs.iter().any(|i| match i {
             IrInstr::LoadText { .. } | IrInstr::ConcatText { .. } => true,
-            IrInstr::Call { name, .. } => name == "to_text",
+            IrInstr::Call { name, .. } => {
+                name == "to_text" || compiler_text_builtin_signature(name).is_some()
+            }
             _ => false,
         })
     })
@@ -5087,6 +5089,50 @@ fn lower_expr_with_expected(
                     args: vec![arg_reg],
                 });
                 return Ok((dst, Type::Unit));
+            }
+            if let Some((params, result)) =
+                compiler_text_builtin_signature(resolve_symbol_name(arena, *name)?)
+            {
+                // SHF-1B (#2004): typecheck already admitted arity and argument
+                // families; lowering is a plain name-dispatched `Call`.
+                let builtin = resolve_symbol_name(arena, *name)?.to_string();
+                if args.len() != params.len() || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        detail: None,
+                        pos: 0,
+                        message: format!(
+                            "builtin '{builtin}' takes exactly {} positional argument{}",
+                            params.len(),
+                            if params.len() == 1 { "" } else { "s" }
+                        ),
+                    });
+                }
+                let mut arg_regs = Vec::with_capacity(args.len());
+                for arg in args {
+                    let (reg, _) = lower_expr(
+                        arg.value,
+                        arena,
+                        next,
+                        out,
+                        env,
+                        loop_stack,
+                        fn_table,
+                        record_table,
+                        adt_table,
+                        ret_ty.clone(),
+                        closure_state,
+                        ownership_events,
+                        lowered_locals,
+                    )?;
+                    arg_regs.push(reg);
+                }
+                let dst = alloc(next)?;
+                out.push(IrInstr::Call {
+                    dst: Some(dst),
+                    name: builtin,
+                    args: arg_regs,
+                });
+                return Ok((dst, result));
             }
             if resolve_symbol_name(arena, *name)? == "to_text" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
