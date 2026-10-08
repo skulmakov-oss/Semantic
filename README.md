@@ -81,6 +81,8 @@ Language semantics, SemCode, verifier, VM, and PROMETHEUS authority remain in th
 
 See [SemCode](docs/spec/semcode.md), [verifier](docs/spec/verifier.md), [VM](docs/spec/vm.md), and the [module ownership map](docs/architecture/module_ownership_map.md).
 
+The legacy perimeter (`crates/ton618-core`, `src/bin/ton618_core.rs`, `ton618_legacy/`) remains compatibility-only; canonical development belongs to the owners above. See the [legacy map](docs/legacy-map.md).
+
 ## Current status
 
 Status snapshot: **2026-10-09**. Implementation, qualification, and publication are separate states; see the [public status model](docs/roadmap/public_status_model.md).
