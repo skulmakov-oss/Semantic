@@ -22,6 +22,7 @@ pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
 pub const MAGIC20: [u8; 8] = *b"SEMCOD20";
 pub const MAGIC21: [u8; 8] = *b"SEMCOD21";
 pub const MAGIC22: [u8; 8] = *b"SEMCOD22";
+pub const MAGIC23: [u8; 8] = *b"SEMCOD23";
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
 pub const CAP_GATE_SURFACE: u32 = 1 << 2;
@@ -97,6 +98,8 @@ pub const SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
 pub const SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION: u16 = HEADER_V21.rev;
 pub const HEADER_V22: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC22, epoch: 0, rev: 23, capabilities: HEADER_V21.capabilities, };
 pub const SEMCODE_ADT_DESCRIPTOR_MIN_REVISION: u16 = HEADER_V22.rev;
+pub const HEADER_V23: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC23, epoch: 0, rev: 24, capabilities: HEADER_V22.capabilities, };
+pub const SEMCODE_U32_ARITH_MIN_REVISION: u16 = HEADER_V23.rev;
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
 pub fn header_spec_from_magic(magic: &[u8; 8]) -> Option<SemcodeHeaderSpec> {
 #[repr(u8)]
@@ -129,6 +132,13 @@ CmpEq = 0x20,
 CmpNe = 0x21,
 CmpI32Lt = 0x22,
 CmpI32Le = 0x23,
+CmpU32Lt = 0x24,
+CmpU32Le = 0x25,
+AddU32 = 0x26,
+SubU32 = 0x27,
+MulU32 = 0x28,
+DivU32 = 0x29,
+ModU32 = 0x2a,
 Jmp = 0x30,
 JmpIf = 0x31,
 Call = 0x40,

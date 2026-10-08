@@ -273,7 +273,7 @@ impl OpcodeProfileSink for NoopOpcodeProfile {
 }
 
 #[cfg(feature = "vm-profile")]
-const OPCODE_PROFILE_SLOT_COUNT: usize = 73;
+const OPCODE_PROFILE_SLOT_COUNT: usize = 80;
 
 #[cfg(feature = "vm-profile")]
 const OPCODE_PROFILE_OPCODES: [Opcode; OPCODE_PROFILE_SLOT_COUNT] = [
@@ -350,6 +350,13 @@ const OPCODE_PROFILE_OPCODES: [Opcode; OPCODE_PROFILE_SLOT_COUNT] = [
     Opcode::QTruthOr,
     Opcode::QTruthNot,
     Opcode::QTruthImpl,
+    Opcode::CmpU32Lt,
+    Opcode::CmpU32Le,
+    Opcode::AddU32,
+    Opcode::SubU32,
+    Opcode::MulU32,
+    Opcode::DivU32,
+    Opcode::ModU32,
 ];
 
 #[cfg(feature = "vm-profile")]
@@ -428,6 +435,13 @@ fn opcode_profile_index(opcode: Opcode) -> usize {
         Opcode::QTruthOr => 70,
         Opcode::QTruthNot => 71,
         Opcode::QTruthImpl => 72,
+        Opcode::CmpU32Lt => 73,
+        Opcode::CmpU32Le => 74,
+        Opcode::AddU32 => 75,
+        Opcode::SubU32 => 76,
+        Opcode::MulU32 => 77,
+        Opcode::DivU32 => 78,
+        Opcode::ModU32 => 79,
     }
 }
 
@@ -1627,6 +1641,13 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
             | Opcode::CmpNe
             | Opcode::CmpI32Lt
             | Opcode::CmpI32Le
+            | Opcode::CmpU32Lt
+            | Opcode::CmpU32Le
+            | Opcode::AddU32
+            | Opcode::SubU32
+            | Opcode::MulU32
+            | Opcode::DivU32
+            | Opcode::ModU32
             | Opcode::AddF64
             | Opcode::SubF64
             | Opcode::MulF64
@@ -2721,6 +2742,36 @@ where
                 set_reg(vm, frame_idx, dst, Value::Bool(out))?;
                 next_pc = cur - f.instr_start;
             }
+            Opcode::CmpU32Lt | Opcode::CmpU32Le => {
+                // SHF-3A2: unsigned comparison of the actual u32 values - no
+                // cast through i32/usize/isize.
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let rhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let l = as_u32(get_reg(vm, frame_idx, lhs)?)?;
+                let r = as_u32(get_reg(vm, frame_idx, rhs)?)?;
+                let out = if opcode == Opcode::CmpU32Lt {
+                    l < r
+                } else {
+                    l <= r
+                };
+                set_reg(vm, frame_idx, dst, Value::Bool(out))?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::AddU32
+            | Opcode::SubU32
+            | Opcode::MulU32
+            | Opcode::DivU32
+            | Opcode::ModU32 => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let rhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let l = as_u32(get_reg(vm, frame_idx, lhs)?)?;
+                let r = as_u32(get_reg(vm, frame_idx, rhs)?)?;
+                let out = u32_arith(opcode, l, r)?;
+                set_reg(vm, frame_idx, dst, Value::U32(out))?;
+                next_pc = cur - f.instr_start;
+            }
             Opcode::CmpI32Lt | Opcode::CmpI32Le => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -3349,6 +3400,38 @@ fn as_i32(v: Value) -> Result<i32, RuntimeError> {
         Err(RuntimeError::TypeMismatchRuntime(
             "expected i32".to_string(),
         ))
+    }
+}
+
+fn as_u32(v: Value) -> Result<u32, RuntimeError> {
+    if let Value::U32(x) = v {
+        Ok(x)
+    } else {
+        Err(RuntimeError::TypeMismatchRuntime(
+            "expected u32".to_string(),
+        ))
+    }
+}
+
+/// SHF-3A2 (#2008): `semantic.compiler.u32/0.1` arithmetic. `+ - *` are
+/// checked: a result outside `0..=u32::MAX` is `ArithmeticOverflow` (never a
+/// wrapped or saturated value). `/ %` by zero is `DivisionByZero`; with a
+/// non-zero divisor unsigned division cannot overflow.
+fn u32_arith(opcode: Opcode, l: u32, r: u32) -> Result<u32, RuntimeError> {
+    let overflow = RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow);
+    match opcode {
+        Opcode::AddU32 => l.checked_add(r).ok_or(overflow),
+        Opcode::SubU32 => l.checked_sub(r).ok_or(overflow),
+        Opcode::MulU32 => l.checked_mul(r).ok_or(overflow),
+        Opcode::DivU32 | Opcode::ModU32 => {
+            if r == 0 {
+                return Err(RuntimeError::Trap(RuntimeTrap::DivisionByZero));
+            }
+            Ok(if opcode == Opcode::DivU32 { l / r } else { l % r })
+        }
+        other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "{other:?} is not a u32 arithmetic opcode"
+        ))),
     }
 }
 
@@ -4233,6 +4316,13 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
         | Opcode::BoolOr
         | Opcode::CmpI32Lt
         | Opcode::CmpI32Le
+        | Opcode::CmpU32Lt
+        | Opcode::CmpU32Le
+        | Opcode::AddU32
+        | Opcode::SubU32
+        | Opcode::MulU32
+        | Opcode::DivU32
+        | Opcode::ModU32
         | Opcode::AddF64
         | Opcode::SubF64
         | Opcode::MulF64
@@ -4253,6 +4343,13 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
                 Opcode::BoolOr => "BOOL_OR",
                 Opcode::CmpI32Lt => "CMP_I32_LT",
                 Opcode::CmpI32Le => "CMP_I32_LE",
+                Opcode::CmpU32Lt => "CMP_U32_LT",
+                Opcode::CmpU32Le => "CMP_U32_LE",
+                Opcode::AddU32 => "ADD_U32",
+                Opcode::SubU32 => "SUB_U32",
+                Opcode::MulU32 => "MUL_U32",
+                Opcode::DivU32 => "DIV_U32",
+                Opcode::ModU32 => "MOD_U32",
                 Opcode::AddI32 => "ADD_I32",
                 Opcode::SubI32 => "SUB_I32",
                 Opcode::MulI32 => "MUL_I32",

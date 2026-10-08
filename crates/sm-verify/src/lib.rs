@@ -4171,6 +4171,15 @@ fn decode_operands(
         | Opcode::CmpNe
         | Opcode::CmpI32Lt
         | Opcode::CmpI32Le
+        // SHF-3A2 (#2008): plain-u32 family; header revision is gated
+        // generically by `Opcode::minimum_semcode_revision` (SEMCOD23+).
+        | Opcode::CmpU32Lt
+        | Opcode::CmpU32Le
+        | Opcode::AddU32
+        | Opcode::SubU32
+        | Opcode::MulU32
+        | Opcode::DivU32
+        | Opcode::ModU32
         | Opcode::AddF64
         | Opcode::SubF64
         | Opcode::MulF64

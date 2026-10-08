@@ -4,7 +4,7 @@ use crate::semcode_format::{
     header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
     AdtDescriptorTable, CallableValueFamily, Opcode, ACTIVATION_MODE_FRAME_ENTRY,
     ACTIVATION_MODE_STORE_VAR_SITE, MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14,
-    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC20, MAGIC21, MAGIC22, MAGIC3, MAGIC4, MAGIC5,
+    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC20, MAGIC21, MAGIC22, MAGIC23, MAGIC3, MAGIC4, MAGIC5,
     MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
@@ -309,6 +309,42 @@ pub enum IrInstr {
         rhs: u16,
     },
     ModI32 {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    // SHF-3A2 (#2008): plain-u32 arithmetic/ordering (`semantic.compiler.u32/0.1`).
+    CmpU32Lt {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    CmpU32Le {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    AddU32 {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    SubU32 {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    MulU32 {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    DivU32 {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    ModU32 {
         dst: u16,
         lhs: u16,
         rhs: u16,
@@ -1793,7 +1829,15 @@ fn emit_semcode(
     // which is purely additive over V20 (same OWN0 layout, same execution-site
     // grammar - see `HEADER_V21`'s doc comment) and therefore satisfies both
     // requirements at once.
-    if has_v21_sequence_ownership_events(funcs) || has_v21_adt_borrow_ownership_events(funcs) {
+    // SHF-3A2 (#2008): the plain-u32 arithmetic/ordering family needs
+    // HEADER_V23 (rev 24), the highest revision in this chain. V23 is purely
+    // additive over V22 (same capabilities, same ADT0/OWN0 layout), so it also
+    // satisfies every lower requirement. Programs without the family keep the
+    // V22 floor below - the new header is never emitted gratuitously.
+    if has_v23_u32_arith_instr(funcs) {
+        opcode_driven_magic = MAGIC23;
+        opcode_driven_require_ownership_section = true;
+    } else if has_v21_sequence_ownership_events(funcs) || has_v21_adt_borrow_ownership_events(funcs) {
         opcode_driven_magic = MAGIC21;
         opcode_driven_require_ownership_section = true;
     } else if has_v20_ownership_execution_anchor(funcs) {
@@ -2345,6 +2389,13 @@ fn encoded_size(instr: &IrInstr) -> Option<usize> {
         | IrInstr::MulI32 { .. }
         | IrInstr::DivI32 { .. }
         | IrInstr::ModI32 { .. }
+        | IrInstr::CmpU32Lt { .. }
+        | IrInstr::CmpU32Le { .. }
+        | IrInstr::AddU32 { .. }
+        | IrInstr::SubU32 { .. }
+        | IrInstr::MulU32 { .. }
+        | IrInstr::DivU32 { .. }
+        | IrInstr::ModU32 { .. }
         | IrInstr::AddF64 { .. }
         | IrInstr::SubF64 { .. }
         | IrInstr::MulF64 { .. }
@@ -2662,6 +2713,13 @@ fn emit_instr(
         IrInstr::MulI32 { dst, lhs, rhs } => emit_3reg(Opcode::MulI32, *dst, *lhs, *rhs, out),
         IrInstr::DivI32 { dst, lhs, rhs } => emit_3reg(Opcode::DivI32, *dst, *lhs, *rhs, out),
         IrInstr::ModI32 { dst, lhs, rhs } => emit_3reg(Opcode::ModI32, *dst, *lhs, *rhs, out),
+        IrInstr::CmpU32Lt { dst, lhs, rhs } => emit_3reg(Opcode::CmpU32Lt, *dst, *lhs, *rhs, out),
+        IrInstr::CmpU32Le { dst, lhs, rhs } => emit_3reg(Opcode::CmpU32Le, *dst, *lhs, *rhs, out),
+        IrInstr::AddU32 { dst, lhs, rhs } => emit_3reg(Opcode::AddU32, *dst, *lhs, *rhs, out),
+        IrInstr::SubU32 { dst, lhs, rhs } => emit_3reg(Opcode::SubU32, *dst, *lhs, *rhs, out),
+        IrInstr::MulU32 { dst, lhs, rhs } => emit_3reg(Opcode::MulU32, *dst, *lhs, *rhs, out),
+        IrInstr::DivU32 { dst, lhs, rhs } => emit_3reg(Opcode::DivU32, *dst, *lhs, *rhs, out),
+        IrInstr::ModU32 { dst, lhs, rhs } => emit_3reg(Opcode::ModU32, *dst, *lhs, *rhs, out),
         IrInstr::AddF64 { dst, lhs, rhs } => emit_3reg(Opcode::AddF64, *dst, *lhs, *rhs, out),
         IrInstr::SubF64 { dst, lhs, rhs } => emit_3reg(Opcode::SubF64, *dst, *lhs, *rhs, out),
         IrInstr::MulF64 { dst, lhs, rhs } => emit_3reg(Opcode::MulF64, *dst, *lhs, *rhs, out),
@@ -2847,6 +2905,23 @@ fn has_v7_clock_read_instr(funcs: &[IrFunction]) -> bool {
         f.instrs
             .iter()
             .any(|i| matches!(i, IrInstr::ClockRead { .. }))
+    })
+}
+
+fn has_v23_u32_arith_instr(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.instrs.iter().any(|i| {
+            matches!(
+                i,
+                IrInstr::CmpU32Lt { .. }
+                    | IrInstr::CmpU32Le { .. }
+                    | IrInstr::AddU32 { .. }
+                    | IrInstr::SubU32 { .. }
+                    | IrInstr::MulU32 { .. }
+                    | IrInstr::DivU32 { .. }
+                    | IrInstr::ModU32 { .. }
+            )
+        })
     })
 }
 
@@ -5578,6 +5653,36 @@ fn lower_expr_with_expected(
                     });
                     return Ok((dst, Type::Bool));
                 }
+                BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
+                    if lt == Type::U32 && rt == Type::U32 =>
+                {
+                    // SHF-3A2: unsigned ordering; `>`/`>=` swap operands onto
+                    // Lt/Le exactly like the i32 lowering below.
+                    match op {
+                        BinaryOp::Lt => out.push(IrInstr::CmpU32Lt {
+                            dst,
+                            lhs: lr,
+                            rhs: rr,
+                        }),
+                        BinaryOp::Le => out.push(IrInstr::CmpU32Le {
+                            dst,
+                            lhs: lr,
+                            rhs: rr,
+                        }),
+                        BinaryOp::Gt => out.push(IrInstr::CmpU32Lt {
+                            dst,
+                            lhs: rr,
+                            rhs: lr,
+                        }),
+                        BinaryOp::Ge => out.push(IrInstr::CmpU32Le {
+                            dst,
+                            lhs: rr,
+                            rhs: lr,
+                        }),
+                        _ => unreachable!("covered relational operator arms"),
+                    }
+                    return Ok((dst, Type::Bool));
+                }
                 BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
                     if lt != Type::I32 || rt != Type::I32 {
                         return Err(FrontendError {
@@ -5614,6 +5719,14 @@ fn lower_expr_with_expected(
                     return Ok((dst, Type::Bool));
                 }
                 BinaryOp::Add => {
+                    if lt == Type::U32 {
+                        out.push(IrInstr::AddU32 {
+                            dst,
+                            lhs: lr,
+                            rhs: rr,
+                        });
+                        return Ok((dst, Type::U32));
+                    }
                     if lt == Type::Text && rt == Type::Text {
                         out.push(IrInstr::ConcatText {
                             dst,
@@ -5660,6 +5773,14 @@ fn lower_expr_with_expected(
                     return Ok((dst, lt));
                 }
                 BinaryOp::Sub => {
+                    if lt == Type::U32 {
+                        out.push(IrInstr::SubU32 {
+                            dst,
+                            lhs: lr,
+                            rhs: rr,
+                        });
+                        return Ok((dst, Type::U32));
+                    }
                     if lt == Type::I32 {
                         out.push(IrInstr::SubI32 {
                             dst,
@@ -5698,6 +5819,14 @@ fn lower_expr_with_expected(
                     return Ok((dst, lt));
                 }
                 BinaryOp::Mul => {
+                    if lt == Type::U32 {
+                        out.push(IrInstr::MulU32 {
+                            dst,
+                            lhs: lr,
+                            rhs: rr,
+                        });
+                        return Ok((dst, Type::U32));
+                    }
                     if lt == Type::I32 {
                         out.push(IrInstr::MulI32 {
                             dst,
@@ -5738,6 +5867,22 @@ fn lower_expr_with_expected(
                     return Ok((dst, Type::F64));
                 }
                 BinaryOp::Div | BinaryOp::Mod => {
+                    if lt == Type::U32 {
+                        if *op == BinaryOp::Div {
+                            out.push(IrInstr::DivU32 {
+                                dst,
+                                lhs: lr,
+                                rhs: rr,
+                            });
+                        } else {
+                            out.push(IrInstr::ModU32 {
+                                dst,
+                                lhs: lr,
+                                rhs: rr,
+                            });
+                        }
+                        return Ok((dst, Type::U32));
+                    }
                     if lt == Type::I32 {
                         if *op == BinaryOp::Div {
                             out.push(IrInstr::DivI32 {

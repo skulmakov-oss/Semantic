@@ -3940,7 +3940,10 @@ fn infer_expr_type(
                     }
                 }
                 BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-                    if lt == Type::I32 && rt == Type::I32 {
+                    // SHF-3A2 (#2008): plain same-family u32 ordering is
+                    // unsigned (`semantic.compiler.u32/0.1`); measured u32 and
+                    // mixed families stay rejected below.
+                    if (lt == Type::I32 && rt == Type::I32) || (lt == Type::U32 && rt == Type::U32) {
                         Ok(Type::Bool)
                     } else if lt == rt {
                         Err(FrontendError {
@@ -4004,6 +4007,10 @@ fn infer_expr_type(
                                 "text concatenation currently admits only text + text operands"
                                     .to_string(),
                         });
+                    }
+                    if lt == Type::U32 && rt == Type::U32 {
+                        // SHF-3A2 (#2008): checked plain-u32 arithmetic.
+                        return Ok(Type::U32);
                     }
                     if lt == Type::I32 && rt == Type::I32 {
                         return match op {

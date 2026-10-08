@@ -127,6 +127,13 @@ pub(crate) fn is_crystalfold_barrier(instr: &IrInstr) -> bool {
         | IrInstr::CmpEq { .. }
         | IrInstr::CmpI32Le { .. }
         | IrInstr::CmpI32Lt { .. }
+        | IrInstr::CmpU32Le { .. }
+        | IrInstr::CmpU32Lt { .. }
+        | IrInstr::AddU32 { .. }
+        | IrInstr::SubU32 { .. }
+        | IrInstr::MulU32 { .. }
+        | IrInstr::DivU32 { .. }
+        | IrInstr::ModU32 { .. }
         | IrInstr::CmpNe { .. }
         | IrInstr::ConcatText { .. }
         | IrInstr::DivF64 { .. }
@@ -602,6 +609,142 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                     _ => {
                         cst.remove(&dst);
                         out.push(IrInstr::CmpI32Le { dst, lhs, rhs });
+                    }
+                }
+            }
+            IrInstr::CmpU32Lt { dst, lhs, rhs } => {
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::U32(a)), Some(ConstVal::U32(b))) => {
+                        rewrites = rewrites.saturating_add(1);
+                        cst.insert(dst, ConstVal::Bool(a < b));
+                        out.push(IrInstr::LoadBool { dst, val: a < b });
+                    }
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::CmpU32Lt { dst, lhs, rhs });
+                    }
+                }
+            }
+            IrInstr::CmpU32Le { dst, lhs, rhs } => {
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::U32(a)), Some(ConstVal::U32(b))) => {
+                        rewrites = rewrites.saturating_add(1);
+                        cst.insert(dst, ConstVal::Bool(a <= b));
+                        out.push(IrInstr::LoadBool { dst, val: a <= b });
+                    }
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::CmpU32Le { dst, lhs, rhs });
+                    }
+                }
+            }
+            IrInstr::AddU32 { dst, lhs, rhs } => {
+                // SHF-3A2: fold only when the checked result exists; an
+                // overflow / underflow / zero-divisor case is left to runtime
+                // so O1 raises exactly the trap O0 raises (never a value).
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::U32(a)), Some(ConstVal::U32(b))) => match a.checked_add(b) {
+                        Some(val) => {
+                            rewrites = rewrites.saturating_add(1);
+                            cst.insert(dst, ConstVal::U32(val));
+                            out.push(IrInstr::LoadU32 { dst, val });
+                        }
+                        None => {
+                            cst.remove(&dst);
+                            out.push(IrInstr::AddU32 { dst, lhs, rhs });
+                        }
+                    },
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::AddU32 { dst, lhs, rhs });
+                    }
+                }
+            }
+            IrInstr::SubU32 { dst, lhs, rhs } => {
+                // SHF-3A2: fold only when the checked result exists; an
+                // overflow / underflow / zero-divisor case is left to runtime
+                // so O1 raises exactly the trap O0 raises (never a value).
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::U32(a)), Some(ConstVal::U32(b))) => match a.checked_sub(b) {
+                        Some(val) => {
+                            rewrites = rewrites.saturating_add(1);
+                            cst.insert(dst, ConstVal::U32(val));
+                            out.push(IrInstr::LoadU32 { dst, val });
+                        }
+                        None => {
+                            cst.remove(&dst);
+                            out.push(IrInstr::SubU32 { dst, lhs, rhs });
+                        }
+                    },
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::SubU32 { dst, lhs, rhs });
+                    }
+                }
+            }
+            IrInstr::MulU32 { dst, lhs, rhs } => {
+                // SHF-3A2: fold only when the checked result exists; an
+                // overflow / underflow / zero-divisor case is left to runtime
+                // so O1 raises exactly the trap O0 raises (never a value).
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::U32(a)), Some(ConstVal::U32(b))) => match a.checked_mul(b) {
+                        Some(val) => {
+                            rewrites = rewrites.saturating_add(1);
+                            cst.insert(dst, ConstVal::U32(val));
+                            out.push(IrInstr::LoadU32 { dst, val });
+                        }
+                        None => {
+                            cst.remove(&dst);
+                            out.push(IrInstr::MulU32 { dst, lhs, rhs });
+                        }
+                    },
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::MulU32 { dst, lhs, rhs });
+                    }
+                }
+            }
+            IrInstr::DivU32 { dst, lhs, rhs } => {
+                // SHF-3A2: fold only when the checked result exists; an
+                // overflow / underflow / zero-divisor case is left to runtime
+                // so O1 raises exactly the trap O0 raises (never a value).
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::U32(a)), Some(ConstVal::U32(b))) => match a.checked_div(b) {
+                        Some(val) => {
+                            rewrites = rewrites.saturating_add(1);
+                            cst.insert(dst, ConstVal::U32(val));
+                            out.push(IrInstr::LoadU32 { dst, val });
+                        }
+                        None => {
+                            cst.remove(&dst);
+                            out.push(IrInstr::DivU32 { dst, lhs, rhs });
+                        }
+                    },
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::DivU32 { dst, lhs, rhs });
+                    }
+                }
+            }
+            IrInstr::ModU32 { dst, lhs, rhs } => {
+                // SHF-3A2: fold only when the checked result exists; an
+                // overflow / underflow / zero-divisor case is left to runtime
+                // so O1 raises exactly the trap O0 raises (never a value).
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::U32(a)), Some(ConstVal::U32(b))) => match a.checked_rem(b) {
+                        Some(val) => {
+                            rewrites = rewrites.saturating_add(1);
+                            cst.insert(dst, ConstVal::U32(val));
+                            out.push(IrInstr::LoadU32 { dst, val });
+                        }
+                        None => {
+                            cst.remove(&dst);
+                            out.push(IrInstr::ModU32 { dst, lhs, rhs });
+                        }
+                    },
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::ModU32 { dst, lhs, rhs });
                     }
                 }
             }

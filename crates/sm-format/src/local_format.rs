@@ -21,6 +21,7 @@ pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
 pub const MAGIC20: [u8; 8] = *b"SEMCOD20";
 pub const MAGIC21: [u8; 8] = *b"SEMCOD21";
 pub const MAGIC22: [u8; 8] = *b"SEMCOD22";
+pub const MAGIC23: [u8; 8] = *b"SEMCOD23";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -513,12 +514,31 @@ pub const HEADER_V22: SemcodeHeaderSpec = SemcodeHeaderSpec {
 /// `ADT0` section. Section presence is derived from this revision only.
 pub const SEMCODE_ADT_DESCRIPTOR_MIN_REVISION: u16 = HEADER_V22.rev;
 
+/// SHF-3A2 (#2008): the plain-`u32` arithmetic and ordering contract header
+/// (`semantic.compiler.u32/0.1`, `docs/spec/compiler_u32_v0.md`). It admits the
+/// `u32` opcode family (`CmpU32Lt` .. `ModU32`); nothing else changes, so its
+/// capabilities are inherited unchanged from `HEADER_V22`. Plain integer
+/// arithmetic is a language execution primitive, not a host capability, so no
+/// capability bit is added. The compiler emits it only for programs that use
+/// the family; every other artifact keeps the `HEADER_V22` floor.
+pub const HEADER_V23: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC23,
+    epoch: 0,
+    rev: 24,
+    capabilities: HEADER_V22.capabilities,
+};
+
+/// SHF-3A2 (#2008): the minimum header revision that admits the `u32`
+/// arithmetic/ordering opcode family. A `SEMCOD22` (rev 23) artifact carrying
+/// any of them is rejected, so the meaning of an existing header never widens.
+pub const SEMCODE_U32_ARITH_MIN_REVISION: u16 = HEADER_V23.rev;
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
         HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20, HEADER_V21,
-        HEADER_V22,
+        HEADER_V22, HEADER_V23,
     ]
 }
 
@@ -559,6 +579,14 @@ pub enum Opcode {
     CmpNe = 0x21,
     CmpI32Lt = 0x22,
     CmpI32Le = 0x23,
+    // SHF-3A2 (#2008): plain-u32 family, owner-approved bytes, SEMCOD23+.
+    CmpU32Lt = 0x24,
+    CmpU32Le = 0x25,
+    AddU32 = 0x26,
+    SubU32 = 0x27,
+    MulU32 = 0x28,
+    DivU32 = 0x29,
+    ModU32 = 0x2a,
     Jmp = 0x30,
     JmpIf = 0x31,
     Call = 0x40,
@@ -660,6 +688,13 @@ impl Opcode {
             x if x == Self::CmpNe as u8 => Ok(Self::CmpNe),
             x if x == Self::CmpI32Lt as u8 => Ok(Self::CmpI32Lt),
             x if x == Self::CmpI32Le as u8 => Ok(Self::CmpI32Le),
+            x if x == Self::CmpU32Lt as u8 => Ok(Self::CmpU32Lt),
+            x if x == Self::CmpU32Le as u8 => Ok(Self::CmpU32Le),
+            x if x == Self::AddU32 as u8 => Ok(Self::AddU32),
+            x if x == Self::SubU32 as u8 => Ok(Self::SubU32),
+            x if x == Self::MulU32 as u8 => Ok(Self::MulU32),
+            x if x == Self::DivU32 as u8 => Ok(Self::DivU32),
+            x if x == Self::ModU32 as u8 => Ok(Self::ModU32),
             x if x == Self::Jmp as u8 => Ok(Self::Jmp),
             x if x == Self::JmpIf as u8 => Ok(Self::JmpIf),
             x if x == Self::Call as u8 => Ok(Self::Call),
@@ -751,6 +786,16 @@ impl Opcode {
             // as the minimum revision. The only family currently assigned a
             // non-baseline minimum revision in this match.
             Self::QTruthAnd | Self::QTruthOr | Self::QTruthNot | Self::QTruthImpl => 19,
+
+            // SHF-3A2 (#2008): plain-u32 arithmetic/ordering, introduced with
+            // its own header (SEMCOD23) by explicit owner decision.
+            Self::CmpU32Lt
+            | Self::CmpU32Le
+            | Self::AddU32
+            | Self::SubU32
+            | Self::MulU32
+            | Self::DivU32
+            | Self::ModU32 => SEMCODE_U32_ARITH_MIN_REVISION,
 
             // Baseline loads / constants
             Self::LoadQ
@@ -1570,8 +1615,20 @@ mod adt_descriptor_tests {
         assert_eq!(ADT_DESCRIPTOR_SECTION_TAG, *b"ADT0");
         // D2-2: SEMCOD22 is supported; admission additionally requires a
         // strictly valid ADT0 section (see semcode_decode).
-        assert_eq!(supported_headers().last(), Some(&HEADER_V22));
+        assert!(supported_headers().contains(&HEADER_V22));
         assert_eq!(header_spec_from_magic(&MAGIC22), Some(HEADER_V22));
+    }
+
+    #[test]
+    fn shf3a2_u32_header_vocabulary_is_defined_and_admitted() {
+        assert_eq!(HEADER_V23.magic, *b"SEMCOD23");
+        assert_eq!(HEADER_V23.rev, 24);
+        assert_eq!(HEADER_V23.epoch, HEADER_V22.epoch);
+        assert_eq!(HEADER_V23.capabilities, HEADER_V22.capabilities);
+        assert_eq!(SEMCODE_U32_ARITH_MIN_REVISION, 24);
+        assert!(SEMCODE_U32_ARITH_MIN_REVISION > HEADER_V22.rev);
+        assert_eq!(supported_headers().last(), Some(&HEADER_V23));
+        assert_eq!(header_spec_from_magic(&MAGIC23), Some(HEADER_V23));
     }
 
     fn encoded(table: &AdtDescriptorTable) -> Vec<AdtDescriptor> {
