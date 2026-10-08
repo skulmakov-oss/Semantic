@@ -26,10 +26,11 @@ This contract covers:
 - The six core in-memory deterministic `Bytes` operations.
 - The persistence, immutability and indexing rules.
 - Boundaries, non-goals and deferred capabilities (endian helpers, file I/O, etc.).
-- Qualification plan for subsequent implementation (SHF-2A2).
+- Qualification requirements and SHF-2A2 evidence.
 
-This document is **contract only**. It changes no compiler frontend, typechecker, IR, SemCode
-emitter, verifier or VM execution code.
+The semantic rules in this document were frozen by SHF-2A1. SHF-2A2 has since implemented and
+qualified those rules across the frontend, IR, SemCode admission, verifier, and VM. This document
+remains the normative contract; implementation status does not widen its semantics.
 
 ## 2. Byte value domain and carrier
 
@@ -221,10 +222,12 @@ This contract strictly excludes the following, which are explicitly deferred to 
 7. **In-place mutable arrays:**
    - No mutable raw pointers, slices or shared memory buffers.
 
-## 10. Qualification plan (SHF-2A2)
+## 10. Qualification requirements and SHF-2A2 evidence
 
-Subsequent implementation under SHF-2A2 must qualify against the following test matrices across the
-complete verified pipeline (`smc` $\to$ `sm-verify` $\to$ `sm-vm`) at both `O0` and `O1`:
+These requirements formed the normative qualification matrix executed under SHF-2A2. SHF-2A2
+implementation and qualification is now complete (landed on `main` through PR #2017), represented by
+the qualification suite `tests/shf2a_bytes_qualification.rs` across the complete verified pipeline
+(`smc` $\to$ `sm-verify` $\to$ `sm-vm`) at both `O0` and `O1`:
 
 1. **Empty buffer:**
    - `bytes_empty()` has length `0`.
@@ -246,3 +249,7 @@ complete verified pipeline (`smc` $\to$ `sm-verify` $\to$ `sm-vm`) at both `O0` 
 6. **Optimizer parity and determinism:**
    - Identical execution results between `O0` and `O1`.
    - Constant folding (if implemented) preserves traps and values identically.
+
+All vectors above—along with raw non-UTF-8 octet preservation, `SEMCOD23` downgrade rejection,
+source operator rejection, runtime VM `CmpEq`/`CmpNe` fail-closed proofs, and all four mutation
+proofs—are verified in `tests/shf2a_bytes_qualification.rs`.
