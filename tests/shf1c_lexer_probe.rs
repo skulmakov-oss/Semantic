@@ -43,12 +43,19 @@ fn lexer_probe_scans_the_sample_in_semantic_at_o0_and_o1() {
         );
         results.push(format!("{result:?}"));
     }
-    assert_eq!(results[0], results[1], "O0 and O1 must observe the same result");
+    assert_eq!(
+        results[0], results[1],
+        "O0 and O1 must observe the same result"
+    );
 }
 
 #[test]
 fn lexer_probe_compilation_is_byte_identical_per_opt_level() {
     for opt in [OptLevel::O0, OptLevel::O1] {
-        assert_eq!(compile(opt), compile(opt), "{opt:?}: SemCode must be byte-identical");
+        assert_eq!(
+            compile(opt),
+            compile(opt),
+            "{opt:?}: SemCode must be byte-identical"
+        );
     }
 }
