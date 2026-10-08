@@ -230,8 +230,8 @@ provides on `main`.
 **Qualification (SHF-1C, #2010, on its PR branch).**
 
 - Probe: `tests/fixtures/shf1c_lexer_probe/probe.sm`, a Semantic program. It scans
-  `fn main() { alpha_1(é,€,🙂); }` (35 bytes) with `text_len`, `text_byte_at` and `text_slice`
-  only, and classifies 4 ASCII whitespace bytes, 13 ASCII identifier-class bytes and 9
+  `fn main() { alpha_1(é,€,🙂); }` (35 bytes) with `text_len`, `text_byte_at`, `text_slice` and
+  `text_is_empty` only, and classifies 4 ASCII whitespace bytes, 13 ASCII identifier-class bytes and 9
   punctuation bytes. It advances over 3 multi-byte scalars (2, 3 and 4 bytes) using
   leading-byte ranges, with no bitwise operations, and ends exactly at offset 35. Each scalar's
   start and end are proven to be scalar boundaries by `text_slice` returning `Some`. Starting an

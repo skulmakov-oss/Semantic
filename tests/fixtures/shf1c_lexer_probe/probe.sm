@@ -5,7 +5,8 @@
 // classes below exist only for this probe and do not freeze any future
 // Semantic identifier, whitespace or punctuation grammar.
 //
-// It inspects the sample only through text_len / text_byte_at / text_slice
+// It inspects the sample only through text_len / text_byte_at / text_slice /
+// text_is_empty
 // (SHF-1B) and advances a u32 byte offset with checked u32 arithmetic and
 // unsigned ordering (SHF-3A). No bitwise operations (SHF-3B) are used.
 //
