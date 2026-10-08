@@ -1,6 +1,7 @@
 <p align="center">
   <img src="assets/brand/semantic-logo.png" alt="Semantic Language" width="860">
 </p>
+<img width="902" height="817" alt="Screenshot 2026-10-09 015304" src="https://github.com/user-attachments/assets/454026e4-6667-4daa-9c74-b2a244252dec" />
 
 # Semantic Language
 
