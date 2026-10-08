@@ -1,37 +1,34 @@
 task:
-  id: SHF-1B-COMPILER-TEXT-IMPLEMENTATION
-  title: "Implement and qualify compiler-grade UTF-8 text primitives (SHF-1B)"
-  type: implementation_qualification
-  target: "Implement the seven operations frozen by docs/spec/compiler_text_v0.md (semantic.compiler.text/0.1) through the existing Call builtin path and qualify them through the verified pipeline (#2004), as SHF-1B of #1910. No new SemCode opcode."
+  id: SHF-3A1-U32-CONTRACT
+  title: "Freeze deterministic plain-u32 arithmetic and ordering contract (SHF-3A1)"
+  type: contract_documentation
+  target: "Freeze semantic.compiler.u32/0.1: checked plain-u32 + - * / %, unsigned ordering, preserved equality (#2006), as SHF-3A1 of #1910. Contract only; no implementation."
   mode: active
-  supersedes: SHF-1A-COMPILER-TEXT-CONTRACT
-  issues: [2004]
+  supersedes: SHF-1B-COMPILER-TEXT-IMPLEMENTATION
+  issues: [2006]
   must_remain_open: [1910]
-  base_sha: 5256cc07244b19f11df0b65a8bcffb2e0c447a9e
+  base_sha: 637c3ad226e6b831e8eb72c1042a35fe1f368814
   authorized_by: >-
-    Repository owner explicit authorization (2026-10-08, "OWNER TASK - SHF-1B
-    COMPILER-GRADE TEXT IMPLEMENTATION & QUALIFICATION"): controlled
-    governance-envelope transition to SHF-1B-COMPILER-TEXT-IMPLEMENTATION on its
-    dedicated branch. Paths limited to owners proven by discovery; no SemCode
-    format/opcode change; no merge without separate owner GO; #1910 stays open.
+    Repository owner explicit authorization (2026-10-08, "OWNER TASK - SHF-3A1
+    DETERMINISTIC u32 ARITHMETIC & ORDERING CONTRACT"): controlled
+    governance-envelope transition to SHF-3A1-U32-CONTRACT on its dedicated
+    branch. Contract/governance only; no implementation; no SemCode change;
+    no merge without separate owner GO; #1910 stays open.
 
 intent:
   summary: >-
-    Add text_len, text_byte_at, text_slice, text_starts_with, text_ends_with,
-    text_find and text_is_empty as reserved language-owned builtins on the
-    existing Call path under CAP_TEXT_VALUES, returning canonical Option values,
-    and qualify them end to end. SHF-1 overall stays open: the lexer probe is
-    blocked on SHF-3.
-  decision_record: docs/spec/compiler_text_v0.md
+    Add the normative compiler u32 contract (semantic.compiler.u32/0.1) and its
+    spec-index entry, without implementing or exposing any new operation.
+  decision_record: docs/spec/compiler_u32_v0.md
 
 governance_constraints:
-  compiler_implementation: true
-  language_implementation: true
-  runtime_implementation: true
-  verifier_changes: true
+  compiler_implementation: false
+  language_implementation: false
+  runtime_implementation: false
+  verifier_changes: false
   semcode_changes: false
   opcode_changes: false
-  builtin_changes: true
+  builtin_changes: false
   workflow_changes: false
   dependency_changes: false
   release_tag_changes: false
@@ -41,22 +38,14 @@ governance_constraints:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/sm-front/src/lib.rs
-    - crates/sm-front/src/typecheck.rs
-    - crates/sm-ir/src/legacy_lowering.rs
-    - crates/sm-verify/src/lib.rs
-    - crates/sm-vm/src/semcode_vm.rs
-    - tests/shf1b_compiler_text_qualification.rs
-    - docs/spec/compiler_text_v0.md
-    - docs/spec/foundation_stdlib_v0.md
+    - docs/spec/compiler_u32_v0.md
+    - docs/spec/index.md
 
   forbidden_paths:
-    - crates/sm-format/**
-    - crates/sm-emit/**
-    - crates/sm-runtime-core/**
-    - crates/prom-*/**
-    - crates/smc-cli/**
+    - crates/**
+    - tests/**
     - examples/**
+    - "**/*.sm"
     - src/**
     - apps/**
     - reports/**
@@ -71,11 +60,11 @@ scope:
     - prom-ui*
 
 authorization:
-  rust_implementation: true
-  language_implementation: true
-  documentation_addition: false
+  rust_implementation: false
+  language_implementation: false
+  documentation_addition: true
   documentation_correction: true
-  test_addition: true
+  test_addition: false
   workflow_changes: false
   dependency_changes: false
   github_issue_lifecycle: true
@@ -85,7 +74,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 5256cc07244b19f11df0b65a8bcffb2e0c447a9e
+  base_sha: 637c3ad226e6b831e8eb72c1042a35fe1f368814
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
@@ -101,7 +90,7 @@ constraints:
 # Standing cross-authority anchors carried forward from the sealed SSF
 # envelope (checked by tests/ssf_status_drift.rs against the immutable
 # dependency map / decision record). Historical reference only: they grant
-# no SSF authority to SHF-1B.
+# no SSF authority to SHF-3A1.
 ssf_reference:
   active_phase: SSF-12
   issue: 1583
