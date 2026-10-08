@@ -224,10 +224,9 @@ This contract strictly excludes the following, which are explicitly deferred to 
 
 ## 10. Qualification requirements and SHF-2A2 evidence
 
-These requirements formed the normative qualification matrix executed under SHF-2A2. SHF-2A2
-implementation and qualification is now complete (landed on `main` through PR #2017), represented by
-the qualification suite `tests/shf2a_bytes_qualification.rs` across the complete verified pipeline
-(`smc` $\to$ `sm-verify` $\to$ `sm-vm`) at both `O0` and `O1`:
+These requirements define the normative SHF-2A2 qualification matrix. SHF-2A2 implementation and
+qualification is complete and landed on `main` through PR #2017. Evidence is split between executable
+qualification tests, review-time mutation proofs, and direct inspection of the checked runtime boundary:
 
 1. **Empty buffer:**
    - `bytes_empty()` has length `0`.
@@ -250,7 +249,9 @@ the qualification suite `tests/shf2a_bytes_qualification.rs` across the complete
    - Identical execution results between `O0` and `O1`.
    - Constant folding (if implemented) preserves traps and values identically.
 
-The core qualification test suite is maintained in `tests/shf2a_bytes_qualification.rs` (including
-buffer emptiness, byte domain bounds, non-UTF-8 octet preservation, slicing, optimizer parity,
-`SEMCOD23` downgrade rejection, source operator compile-time rejection, and VM `CmpEq`/`CmpNe`
-runtime fail-closed proofs), with the four qualification mutation proofs verified during PR #2017 review.
+The executable qualification suite `tests/shf2a_bytes_qualification.rs` covers empty/value operations,
+byte-domain bounds, raw non-UTF-8 preservation, slicing, O0/O1 parity, `SEMCOD23` downgrade rejection,
+source comparison rejection, and direct VM `CmpEq`/`CmpNe` fail-closed proofs. The four mutation proofs
+were executed during PR #2017 review. The `u32::MAX` extension invariant is enforced by checked length
+arithmetic in the runtime; this document does not claim that the suite materializes a $> \text{u32::MAX}$
+Bytes allocation fixture.
