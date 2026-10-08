@@ -55,6 +55,10 @@ scope:
     - tests/shf3a_u32_qualification.rs
     - tests/bytecode_compat.rs
     - tests/ir_opt_boundaries.rs
+    # Owner-authorized narrow extension (2026-10-08): canonical header family
+    # gains HEADER_V23; the relational diagnostic stops claiming "only i32".
+    - tests/public_api_contracts.rs
+    - tests/pcc_text_negative.rs
     - tests/golden_snapshots/public_api/sm_ir_legacy_lowering.txt
     - tests/golden_snapshots/public_api/sm_format_local_format.txt
 

@@ -36,7 +36,7 @@ fn iterable_for_gap_message() -> &'static str {
 }
 
 fn first_wave_relational_gap_message() -> &'static str {
-    "relational operators are currently admitted only for same-family i32 operands in the first application-completeness wave"
+    "relational operators are currently admitted only for same-family i32 or plain (unmeasured) u32 operands in the first application-completeness wave"
 }
 
 fn iterable_for_impl_contract_message() -> &'static str {
@@ -3943,7 +3943,8 @@ fn infer_expr_type(
                     // SHF-3A2 (#2008): plain same-family u32 ordering is
                     // unsigned (`semantic.compiler.u32/0.1`); measured u32 and
                     // mixed families stay rejected below.
-                    if (lt == Type::I32 && rt == Type::I32) || (lt == Type::U32 && rt == Type::U32) {
+                    if (lt == Type::I32 && rt == Type::I32) || (lt == Type::U32 && rt == Type::U32)
+                    {
                         Ok(Type::Bool)
                     } else if lt == rt {
                         Err(FrontendError {

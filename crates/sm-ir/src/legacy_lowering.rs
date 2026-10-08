@@ -4,13 +4,13 @@ use crate::semcode_format::{
     header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
     AdtDescriptorTable, CallableValueFamily, Opcode, ACTIVATION_MODE_FRAME_ENTRY,
     ACTIVATION_MODE_STORE_VAR_SITE, MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14,
-    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC20, MAGIC21, MAGIC22, MAGIC23, MAGIC3, MAGIC4, MAGIC5,
-    MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
-    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
-    SEMCODE_ADT_DESCRIPTOR_MIN_REVISION, SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION,
-    SEMCODE_SIGNATURE_MIN_REVISION, SIGNATURE_SECTION_TAG, WRITE_EXECUTION_MODE_MAKE_RECORD_SITE,
-    WRITE_EXECUTION_MODE_STORE_VAR_SITE,
+    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC20, MAGIC21, MAGIC22, MAGIC23, MAGIC3, MAGIC4,
+    MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
+    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+    OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
+    OWNERSHIP_SECTION_TAG, SEMCODE_ADT_DESCRIPTOR_MIN_REVISION,
+    SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, SEMCODE_SIGNATURE_MIN_REVISION, SIGNATURE_SECTION_TAG,
+    WRITE_EXECUTION_MODE_MAKE_RECORD_SITE, WRITE_EXECUTION_MODE_STORE_VAR_SITE,
 };
 use sm_front::types::{
     AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
@@ -1837,7 +1837,8 @@ fn emit_semcode(
     if has_v23_u32_arith_instr(funcs) {
         opcode_driven_magic = MAGIC23;
         opcode_driven_require_ownership_section = true;
-    } else if has_v21_sequence_ownership_events(funcs) || has_v21_adt_borrow_ownership_events(funcs) {
+    } else if has_v21_sequence_ownership_events(funcs) || has_v21_adt_borrow_ownership_events(funcs)
+    {
         opcode_driven_magic = MAGIC21;
         opcode_driven_require_ownership_section = true;
     } else if has_v20_ownership_execution_anchor(funcs) {
@@ -5689,7 +5690,7 @@ fn lower_expr_with_expected(
                             detail: None,
                             pos: 0,
                             message:
-                                "relational lowering currently requires same-family i32 operands"
+                                "relational lowering currently requires same-family i32 or plain (unmeasured) u32 operands"
                                     .to_string(),
                         });
                     }

@@ -175,6 +175,19 @@ fn measured_u32_arithmetic_stays_rejected() {
         );
         compile_err(&src);
     }
+    // The ordering diagnostic names the admitted set honestly: plain u32 is
+    // admitted, measured u32 is not.
+    let err = compile_err("fn probe(a: u32[ms], b: u32[ms]) -> bool {
+    return a < b;
+}
+fn main() {
+    return;
+}
+");
+    assert!(
+        err.contains("same-family i32 or plain (unmeasured) u32 operands"),
+        "{err}"
+    );
 }
 
 #[test]
