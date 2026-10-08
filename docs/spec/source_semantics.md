@@ -920,10 +920,12 @@ Current honest limit:
   execution
 - division and modulo by zero currently surface as deterministic runtime
   failures in the benchmark-negative fixtures
-- broader numeric relational surfaces for `u32`, `f64`, `fx`, and measured
-  values remain outside the current application-completeness wave
-- broader integer arithmetic for `u32` and mixed numeric families remains
-  outside the current first arithmetic wave
+- plain same-family `u32` arithmetic (`+ - * / %`, checked) and ordering
+  (`< <= > >=`, unsigned) are admitted by SHF-3A2 (`compiler_u32_v0.md`)
+- broader numeric relational surfaces for `f64`, `fx`, and measured values
+  remain outside the current application-completeness wave
+- arithmetic across mixed numeric families remains outside the current first
+  arithmetic wave
 - iteration, `len`, `is_empty`, maps, sets, and collection protocol machinery
   remain outside the current `M8.3` first-wave contract
 - current `main` now also admits one first-wave closure family through the
