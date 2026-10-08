@@ -44,7 +44,7 @@ emitter, verifier or VM execution code.
      plain, unmeasured `u32` integers constrained to the domain $[0, 255]$.
 3. **Out-of-range enforcement:** When a `u32` value outside $[0, 255]$ is supplied to an operation
    expecting a byte, the operation fails deterministically (returning `None` or failing closed according
-   to its signature, §5.3). No truncation, modular reduction or wrapping (e.g. `val & 0xFF`) is
+   to its signature, §7.3). No truncation, modular reduction or wrapping (e.g. `val & 0xFF`) is
    permitted.
 
 ## 3. The `Bytes` semantic identity
