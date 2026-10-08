@@ -56,6 +56,8 @@ Current runtime values:
 
 - `Quad`
 - `Bool`
+- `Text`
+- `Bytes`
 - `I32`
 - `F64`
 - `U32`

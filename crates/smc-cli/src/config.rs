@@ -409,6 +409,7 @@ fn validate_value_against_type(
         | Type::RangeI32
         | Type::Unit
         | Type::QVec(_)
+        | Type::Bytes
         | Type::TypeVar(_) => diagnostics.push(type_mismatch(
             path,
             &format!(
@@ -498,6 +499,7 @@ fn display_config_type(ty: &Type, contract: &ConfigContract) -> String {
         Type::QVec(width) => format!("qvec({})", width),
         Type::Bool => "bool".to_string(),
         Type::Text => "text".to_string(),
+        Type::Bytes => "Bytes".to_string(),
         Type::I32 => "i32".to_string(),
         Type::U32 => "u32".to_string(),
         Type::Fx => "fx".to_string(),

@@ -711,6 +711,7 @@ fn render_type(arena: &AstArena, ty: &Type) -> String {
         Type::QVec(width) => format!("qvec{}", width),
         Type::Bool => "bool".to_string(),
         Type::Text => "text".to_string(),
+        Type::Bytes => "Bytes".to_string(),
         Type::Sequence(sequence) => format!("Sequence({})", render_type(arena, &sequence.item)),
         Type::Map(map) => format!(
             "Map({}, {})",

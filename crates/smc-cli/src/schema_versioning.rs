@@ -726,6 +726,7 @@ fn display_schema_compatibility_type(ty: &Type, arena: &AstArena) -> Result<Stri
         Type::QVec(width) => format!("qvec({})", width),
         Type::Bool => "bool".to_string(),
         Type::Text => "text".to_string(),
+        Type::Bytes => "Bytes".to_string(),
         Type::I32 => "i32".to_string(),
         Type::U32 => "u32".to_string(),
         Type::Fx => "fx".to_string(),

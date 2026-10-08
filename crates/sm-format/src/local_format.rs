@@ -22,6 +22,7 @@ pub const MAGIC20: [u8; 8] = *b"SEMCOD20";
 pub const MAGIC21: [u8; 8] = *b"SEMCOD21";
 pub const MAGIC22: [u8; 8] = *b"SEMCOD22";
 pub const MAGIC23: [u8; 8] = *b"SEMCOD23";
+pub const MAGIC24: [u8; 8] = *b"SEMCOD24";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -68,6 +69,9 @@ pub const CAP_OWNERSHIP_SEQUENCE_PATHS: u32 = 1 << 26;
 /// authorized promotion of `Write(AdtPayload)` must allocate its own
 /// capability, never reinterpret this one.
 pub const CAP_OWNERSHIP_ADT_BORROW_PATHS: u32 = 1 << 27;
+/// SHF-2A2 (#2015): explicit admission authority for deterministic `Bytes`
+/// value operations (`semantic.compiler.bytes/0.1`).
+pub const CAP_BYTES_VALUES: u32 = 1 << 28;
 
 pub const SIGNATURE_SECTION_TAG: [u8; 4] = *b"SIG0";
 
@@ -533,12 +537,27 @@ pub const HEADER_V23: SemcodeHeaderSpec = SemcodeHeaderSpec {
 /// any of them is rejected, so the meaning of an existing header never widens.
 pub const SEMCODE_U32_ARITH_MIN_REVISION: u16 = HEADER_V23.rev;
 
+/// SHF-2A2 (#2015): the deterministic `Bytes` value contract header
+/// (`semantic.compiler.bytes/0.1`, `docs/spec/compiler_bytes_v0.md`). It admits
+/// the six core `bytes_*` builtins and callable parameter value family `Bytes`.
+/// Capabilities inherit `HEADER_V23`'s capabilities plus `CAP_BYTES_VALUES`.
+pub const HEADER_V24: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC24,
+    epoch: 0,
+    rev: 25,
+    capabilities: HEADER_V23.capabilities | CAP_BYTES_VALUES,
+};
+
+/// SHF-2A2 (#2015): the minimum header revision that admits deterministic `Bytes`
+/// value operations and callable parameters.
+pub const SEMCODE_BYTES_MIN_REVISION: u16 = HEADER_V24.rev;
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
         HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20, HEADER_V21,
-        HEADER_V22, HEADER_V23,
+        HEADER_V22, HEADER_V23, HEADER_V24,
     ]
 }
 
@@ -905,6 +924,7 @@ pub enum CallableValueFamily {
     Record = 12,
     Adt = 13,
     Unit = 14,
+    Bytes = 15,
 }
 
 impl CallableValueFamily {
@@ -928,6 +948,7 @@ impl CallableValueFamily {
             x if x == Self::Record as u8 => Ok(Self::Record),
             x if x == Self::Adt as u8 => Ok(Self::Adt),
             x if x == Self::Unit as u8 => Ok(Self::Unit),
+            x if x == Self::Bytes as u8 => Ok(Self::Bytes),
             _ => Err(SemcodeFormatError::UnknownOpcode(v)),
         }
     }
@@ -1627,8 +1648,28 @@ mod adt_descriptor_tests {
         assert_eq!(HEADER_V23.capabilities, HEADER_V22.capabilities);
         assert_eq!(SEMCODE_U32_ARITH_MIN_REVISION, 24);
         const { assert!(SEMCODE_U32_ARITH_MIN_REVISION > HEADER_V22.rev) };
-        assert_eq!(supported_headers().last(), Some(&HEADER_V23));
+        assert!(supported_headers().contains(&HEADER_V23));
         assert_eq!(header_spec_from_magic(&MAGIC23), Some(HEADER_V23));
+    }
+
+    #[test]
+    fn shf2a2_bytes_header_vocabulary_is_defined_and_admitted() {
+        assert_eq!(HEADER_V24.magic, *b"SEMCOD24");
+        assert_eq!(HEADER_V24.rev, 25);
+        assert_eq!(HEADER_V24.epoch, HEADER_V23.epoch);
+        assert_eq!(
+            HEADER_V24.capabilities,
+            HEADER_V23.capabilities | CAP_BYTES_VALUES
+        );
+        assert_eq!(SEMCODE_BYTES_MIN_REVISION, 25);
+        const { assert!(SEMCODE_BYTES_MIN_REVISION > HEADER_V23.rev) };
+        assert_eq!(supported_headers().last(), Some(&HEADER_V24));
+        assert_eq!(header_spec_from_magic(&MAGIC24), Some(HEADER_V24));
+        assert_eq!(CallableValueFamily::Bytes.byte(), 15);
+        assert_eq!(
+            CallableValueFamily::from_byte(15),
+            Ok(CallableValueFamily::Bytes)
+        );
     }
 
     fn encoded(table: &AdtDescriptorTable) -> Vec<AdtDescriptor> {

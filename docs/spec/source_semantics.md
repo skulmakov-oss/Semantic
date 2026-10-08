@@ -959,6 +959,12 @@ Current builtin signatures:
 - `qtruth_or(quad, quad) -> quad`
 - `qtruth_not(quad) -> quad`
 - `qtruth_impl(quad, quad) -> quad`
+- `bytes_empty() -> Bytes`
+- `bytes_len(Bytes) -> u32`
+- `bytes_push(Bytes, u32) -> Option(Bytes)`
+- `bytes_extend(Bytes, Bytes) -> Bytes`
+- `bytes_get(Bytes, u32) -> Option(u32)`
+- `bytes_slice(Bytes, u32, u32) -> Option(Bytes)`
 
 ## Pipeline
 

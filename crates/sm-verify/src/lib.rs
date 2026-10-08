@@ -6,11 +6,11 @@ extern crate std;
 #[cfg(feature = "std")]
 use sm_format::semcode_format::{
     read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
-    SemcodeHeaderSpec, CAP_ARGS_READ, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS,
-    CAP_EVENT_POST, CAP_F64_MATH, CAP_FS_READ, CAP_FS_WRITE, CAP_FX_MATH, CAP_FX_VALUES,
-    CAP_GATE_SURFACE, CAP_MAP_VALUES, CAP_OWNERSHIP_ADT_BORROW_PATHS, CAP_OWNERSHIP_FIELD_PATHS,
-    CAP_OWNERSHIP_PATHS, CAP_OWNERSHIP_SEQUENCE_PATHS, CAP_PATH_INSPECT, CAP_PRNG,
-    CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE,
+    SemcodeHeaderSpec, CAP_ARGS_READ, CAP_BYTES_VALUES, CAP_CLOCK_READ, CAP_CLOSURE_VALUES,
+    CAP_DEBUG_SYMBOLS, CAP_EVENT_POST, CAP_F64_MATH, CAP_FS_READ, CAP_FS_WRITE, CAP_FX_MATH,
+    CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_MAP_VALUES, CAP_OWNERSHIP_ADT_BORROW_PATHS,
+    CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_OWNERSHIP_SEQUENCE_PATHS, CAP_PATH_INSPECT,
+    CAP_PRNG, CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE,
     CAP_STDERR_WRITE, CAP_STDIN_READ_TEXT, CAP_STDOUT, CAP_STDOUT_WRITE, CAP_TEXT_VALUES,
     CAP_TIME_DURATION,
 };
@@ -4347,6 +4347,9 @@ fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
         // SHF-1B (#2004): pure text mechanics, gated like every text value.
         "text_len" | "text_byte_at" | "text_slice" | "text_starts_with" | "text_ends_with"
         | "text_find" | "text_is_empty" => Some(CAP_TEXT_VALUES),
+        // SHF-2A2 (#2015): deterministic Bytes value mechanics, gated by CAP_BYTES_VALUES.
+        "bytes_empty" | "bytes_len" | "bytes_push" | "bytes_extend" | "bytes_get"
+        | "bytes_slice" => Some(CAP_BYTES_VALUES),
         "print" => Some(CAP_STDOUT),
         "args_read" => Some(CAP_ARGS_READ),
         "stdin_read_text" => Some(CAP_STDIN_READ_TEXT),

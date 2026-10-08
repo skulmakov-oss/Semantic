@@ -47,6 +47,7 @@ pub enum Value {
     Quad(QuadVal),
     Bool(bool),
     Text(String),
+    Bytes(Vec<u8>),
     Sequence(Vec<Value>),
     Map(Vec<(MapKey, Value)>),
     Closure(ClosureValue),
@@ -3025,6 +3026,9 @@ fn value_to_abi(value: Value) -> Result<AbiValue, RuntimeError> {
         Value::Text(_) => Err(RuntimeError::TypeMismatchRuntime(
             "text values are not part of the PROMETHEUS host ABI surface".to_string(),
         )),
+        Value::Bytes(_) => Err(RuntimeError::TypeMismatchRuntime(
+            "Bytes values are not part of the PROMETHEUS host ABI surface".to_string(),
+        )),
         Value::Sequence(_) => Err(RuntimeError::TypeMismatchRuntime(
             "sequence values are not part of the PROMETHEUS host ABI surface".to_string(),
         )),
@@ -3081,6 +3085,7 @@ fn value_family(value: &Value) -> CallableValueFamily {
         Value::Quad(_) => CallableValueFamily::Quad,
         Value::Bool(_) => CallableValueFamily::Bool,
         Value::Text(_) => CallableValueFamily::Text,
+        Value::Bytes(_) => CallableValueFamily::Bytes,
         Value::Sequence(_) => CallableValueFamily::Sequence,
         Value::Map(_) => CallableValueFamily::Map,
         Value::Closure(_) => CallableValueFamily::Closure,
@@ -3640,6 +3645,9 @@ fn value_eq(a: &Value, b: &Value) -> Result<bool, RuntimeError> {
         (Value::Quad(x), Value::Quad(y)) => Ok(x == y),
         (Value::Bool(x), Value::Bool(y)) => Ok(x == y),
         (Value::Text(x), Value::Text(y)) => Ok(x == y),
+        (Value::Bytes(_), Value::Bytes(_)) => Err(RuntimeError::TypeMismatchRuntime(
+            "Bytes values are not comparable with CmpEq/CmpNe".to_string(),
+        )),
         (Value::Sequence(xs), Value::Sequence(ys)) => {
             if xs.len() != ys.len() {
                 return Ok(false);
@@ -3727,6 +3735,8 @@ fn try_eval_builtin_call<'a, H: VmHostBridge>(
         "to_text" => Value::Text(value_to_text(expect_builtin_to_text_arg(name, args)?)?),
         "text_len" | "text_byte_at" | "text_slice" | "text_starts_with" | "text_ends_with"
         | "text_find" | "text_is_empty" => eval_compiler_text_builtin(name, args)?,
+        "bytes_empty" | "bytes_len" | "bytes_push" | "bytes_extend" | "bytes_get"
+        | "bytes_slice" => eval_compiler_bytes_builtin(name, args)?,
         "print" => {
             if args.len() != 1 {
                 return Err(RuntimeError::TypeMismatchRuntime(format!(
@@ -3854,6 +3864,94 @@ fn eval_compiler_text_builtin(name: &str, args: &[Value]) -> Result<Value, Runti
             return Err(RuntimeError::UnknownFunction(name.to_string()));
         }
     })
+}
+
+/// SHF-2A2 (#2015): the six `semantic.compiler.bytes/0.1` operations
+/// (`docs/spec/compiler_bytes_v0.md` §6). All indices are byte offsets;
+/// `None` results are canonical `Option` values, identical to `MakeAdt`'s.
+fn eval_compiler_bytes_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    match name {
+        "bytes_empty" => {
+            expect_builtin_arity(name, args, 0)?;
+            Ok(Value::Bytes(Vec::new()))
+        }
+        "bytes_len" => {
+            expect_builtin_arity(name, args, 1)?;
+            let bytes = compiler_bytes_arg(name, args, 0)?;
+            Ok(Value::U32(bytes_len_u32(bytes)?))
+        }
+        "bytes_push" => {
+            expect_builtin_arity(name, args, 2)?;
+            let bytes = compiler_bytes_arg(name, args, 0)?;
+            let val = compiler_u32_arg(name, args, 1)?;
+            if val <= 255 {
+                let current_len = bytes_len_u32(bytes)?;
+                let next_len = current_len
+                    .checked_add(1)
+                    .ok_or(RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))?;
+                let _ = next_len;
+                let mut new_bytes = bytes.to_vec();
+                new_bytes.push(val as u8);
+                Ok(option_value(Some(Value::Bytes(new_bytes))))
+            } else {
+                Ok(option_value(None))
+            }
+        }
+        "bytes_extend" => {
+            expect_builtin_arity(name, args, 2)?;
+            let a = compiler_bytes_arg(name, args, 0)?;
+            let b = compiler_bytes_arg(name, args, 1)?;
+            let len_a = bytes_len_u32(a)?;
+            let len_b = bytes_len_u32(b)?;
+            let _combined_len = len_a
+                .checked_add(len_b)
+                .ok_or(RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))?;
+            let mut result = Vec::with_capacity(a.len() + b.len());
+            result.extend_from_slice(a);
+            result.extend_from_slice(b);
+            Ok(Value::Bytes(result))
+        }
+        "bytes_get" => {
+            expect_builtin_arity(name, args, 2)?;
+            let bytes = compiler_bytes_arg(name, args, 0)?;
+            let index = compiler_u32_arg(name, args, 1)? as usize;
+            Ok(option_value(
+                bytes.get(index).map(|byte| Value::U32(u32::from(*byte))),
+            ))
+        }
+        "bytes_slice" => {
+            expect_builtin_arity(name, args, 3)?;
+            let bytes = compiler_bytes_arg(name, args, 0)?;
+            let start = compiler_u32_arg(name, args, 1)? as usize;
+            let end = compiler_u32_arg(name, args, 2)? as usize;
+            let valid = start <= end && end <= bytes.len();
+            Ok(option_value(
+                valid.then(|| Value::Bytes(bytes[start..end].to_vec())),
+            ))
+        }
+        _ => Err(RuntimeError::UnknownFunction(name.to_string())),
+    }
+}
+
+fn compiler_bytes_arg<'a>(
+    name: &str,
+    args: &'a [Value],
+    index: usize,
+) -> Result<&'a [u8], RuntimeError> {
+    match &args[index] {
+        Value::Bytes(bytes) => {
+            bytes_len_u32(bytes)?;
+            Ok(bytes.as_slice())
+        }
+        other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin '{name}' argument {} expects Bytes, got {other:?}",
+            index + 1
+        ))),
+    }
+}
+
+fn bytes_len_u32(bytes: &[u8]) -> Result<u32, RuntimeError> {
+    usize_to_u32_checked(bytes.len())
 }
 
 /// Every operation guards its text argument: a text whose byte length cannot

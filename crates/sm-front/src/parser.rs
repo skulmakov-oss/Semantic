@@ -3372,6 +3372,9 @@ impl<'a> Parser<'a> {
             } else if t == "text" {
                 let _ = self.advance();
                 Type::Text
+            } else if t == "Bytes" {
+                let _ = self.advance();
+                Type::Bytes
             } else {
                 let record_name = self.expect_symbol()?;
                 // If the name matches a type parameter in scope, emit TypeVar

@@ -1,37 +1,36 @@
 task:
-  id: SHF-2A1-COMPLETE-HOLD
-  title: "Record landed SHF-2A1 Bytes contract while holding implementation closed"
-  type: documentation_status_reconciliation
-  target: "Record that semantic.compiler.bytes/0.1 landed through PR #2013 at 16737de92ad88fb2a1795754d3914ed082926a8c and is now normative on main. SHF-2A1 is COMPLETE; SHF-2A2 implementation remains NOT STARTED."
+  id: SHF-2A2-BYTES-IMPLEMENTATION
+  title: "Implement and qualify deterministic Bytes value family (SHF-2A2)"
+  type: implementation_qualification
+  target: "Implement and qualify semantic.compiler.bytes/0.1 (#2015) as SHF-2A2 of #1910: Type::Bytes, Value::Bytes(Vec<u8>), six core builtins (bytes_empty, bytes_len, bytes_push, bytes_extend, bytes_get, bytes_slice), CAP_BYTES_VALUES, SEMCOD24 header, CallableValueFamily::Bytes=15, no comparison operators, O0/O1 parity."
   mode: active
-  supersedes: SHF-2A1-BYTES-CONTRACT
-  issues: []
+  supersedes: SHF-2A1-COMPLETE-HOLD
+  issues: [2015]
   must_remain_open: [1910]
-  base_sha: 16737de92ad88fb2a1795754d3914ed082926a8c
+  base_sha: 61faff23527205605b501b5f3468ccf22a00588b
   authorized_by: >-
-    Repository owner explicit task (2026-10-08, "OWNER TASK - SHF-2A1
-    POSTMERGE STATUS CLOSEOUT"): controlled governance-envelope transition to
-    SHF-2A1-COMPLETE-HOLD on its dedicated branch. Documentation/status
-    reconciliation only; no implementation; no SemCode change; no merge without
-    separate owner GO; #1910 stays open.
+    Repository owner explicit task (2026-10-08, "OWNER TASK - SHF-2A2 BYTES
+    IMPLEMENTATION & QUALIFICATION"): controlled governance-envelope transition
+    to SHF-2A2-BYTES-IMPLEMENTATION on dedicated branch shf2a/bytes-implementation.
+    Six core builtins, Bytes value family, CAP_BYTES_VALUES (1 << 28),
+    SEMCOD24 header (rev 25), CallableValueFamily::Bytes = 15. No new opcodes;
+    no SHF-2B; no SHF-2C; no merge without separate owner GO; #1910 stays open.
 
 intent:
   summary: >-
-    Record that semantic.compiler.bytes/0.1 landed through PR #2013 and is now
-    the normative SHF-2A1 contract on main. SHF-2A1 is COMPLETE. This
-    transition does NOT authorize SHF-2A2 implementation, runtime/compiler/frontend
-    work, SHF-2B, SHF-2C, SHF-3B, SHF-9, SHF-10, C0 repinning, BSF-101 promotion,
-    release/tag activity, or self-host compiler implementation.
+    Implement and qualify the deterministic Bytes value family and its six core
+    in-memory operations end to end across typecheck, IR lowering (call-dispatched),
+    verifier admission, and VM execution, matching semantic.compiler.bytes/0.1.
   decision_record: docs/spec/compiler_bytes_v0.md
 
 governance_constraints:
-  compiler_implementation: false
-  language_implementation: false
-  runtime_implementation: false
-  verifier_changes: false
-  semcode_changes: false
+  compiler_implementation: true
+  language_implementation: true
+  runtime_implementation: true
+  verifier_changes: true
+  semcode_changes: true
   opcode_changes: false
-  builtin_changes: false
+  builtin_changes: true
   workflow_changes: false
   dependency_changes: false
   release_tag_changes: false
@@ -41,14 +40,41 @@ governance_constraints:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
+    - crates/sm-format/src/local_format.rs
+    - crates/sm-format/src/lib.rs
+    - crates/sm-front/src/types.rs
+    - crates/sm-front/src/parser.rs
+    - crates/sm-front/src/typecheck.rs
+    - crates/sm-front/src/lib.rs
+    - crates/sm-ir/src/legacy_lowering.rs
+    - crates/sm-verify/src/lib.rs
+    - crates/sm-vm/src/semcode_vm.rs
+    - crates/sm-vm/src/lib.rs
+    - crates/sm-sema/src/std_adapters.rs
+    - crates/smc-cli/src/api_contract.rs
+    - crates/smc-cli/src/config.rs
+    - crates/smc-cli/src/executable_bundle.rs
+    - crates/smc-cli/src/schema_versioning.rs
+    - crates/smc-cli/src/wire_contract.rs
     - docs/spec/compiler_bytes_v0.md
-    - docs/spec/index.md
+    - docs/spec/semcode.md
+    - docs/spec/types.md
+    - docs/spec/source_semantics.md
+    - docs/spec/verifier.md
+    - docs/spec/vm.md
+    - tests/shf2a_bytes_qualification.rs
+    - tests/bytecode_compat.rs
+    - tests/public_api_contracts.rs
+    - tests/golden_snapshots/public_api/sm_format_local_format.txt
+    - tests/golden_snapshots/public_api/sm_front_lib.txt
+    - tests/golden_snapshots/public_api/sm_vm_semcode_vm.txt
+    - tests/support/executable_bundle_support.rs
 
   forbidden_paths:
-    - crates/**
-    - tests/**
+    - crates/prom-*/**
+    - crates/sm-emit/**
+    - crates/sm-runtime-core/**
     - examples/**
-    - "**/*.sm"
     - src/**
     - apps/**
     - reports/**
@@ -63,21 +89,21 @@ scope:
     - prom-ui*
 
 authorization:
-  rust_implementation: false
-  language_implementation: false
+  rust_implementation: true
+  language_implementation: true
   documentation_addition: false
   documentation_correction: true
-  test_addition: false
+  test_addition: true
   workflow_changes: false
   dependency_changes: false
-  github_issue_lifecycle: false
+  github_issue_lifecycle: true
   git_commit_push_pr: true
   merge_after_review_and_checks: false
   stable_promotion: false
 
 constraints:
   base_branch: main
-  base_sha: 16737de92ad88fb2a1795754d3914ed082926a8c
+  base_sha: 61faff23527205605b501b5f3468ccf22a00588b
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
@@ -93,7 +119,7 @@ constraints:
 # Standing cross-authority anchors carried forward from the sealed SSF
 # envelope (checked by tests/ssf_status_drift.rs against the immutable
 # dependency map / decision record). Historical reference only: they grant
-# no SSF authority to SHF-2A1.
+# no SSF authority to SHF-2A2.
 ssf_reference:
   active_phase: SSF-12
   issue: 1583

@@ -45,6 +45,7 @@ impl From<Type> for SemanticType {
             Type::QVec(n) => SemanticType::QVec(n),
             Type::Bool => SemanticType::Bool,
             Type::Text => SemanticType::Unknown,
+            Type::Bytes => SemanticType::Unknown,
             Type::Sequence(_) => SemanticType::Unknown,
             Type::Closure(_) => SemanticType::Unknown,
             Type::U32 => SemanticType::U32,
