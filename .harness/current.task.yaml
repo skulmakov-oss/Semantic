@@ -90,7 +90,7 @@ constraints:
 # Standing cross-authority anchors carried forward from the sealed SSF
 # envelope (checked by tests/ssf_status_drift.rs against the immutable
 # dependency map / decision record). Historical reference only: they grant
-# no SSF authority to SHF-1B.
+# no SSF authority to SHF-3A1.
 ssf_reference:
   active_phase: SSF-12
   issue: 1583

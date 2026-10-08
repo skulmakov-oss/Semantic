@@ -19,7 +19,9 @@ Current documents in this PR:
 - `foundation_stdlib_v0.md` - versioned language-owned Standard Library v0
   family index, deterministic semantics, and deferred APIs
 - `compiler_text_v0.md` - SHF-1A compiler-grade UTF-8 byte-inspection text contract
-  (`semantic.compiler.text/0.1`); semantics frozen, not implemented until SHF-1B
+  (`semantic.compiler.text/0.1`); implemented and qualified on `main` by SHF-1B, not in `v1.2.0`
+- `compiler_u32_v0.md` - SHF-3A1 deterministic plain-`u32` arithmetic and ordering contract
+  (`semantic.compiler.u32/0.1`); semantics frozen, not implemented until SHF-3A
 - `project_model_v0.md` - canonical manifest/layout, discovery, project command,
   path-containment, and identity boundary
 - `package_baseline_v0.md` - local-only dependency graph, deterministic
