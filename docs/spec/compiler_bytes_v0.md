@@ -1,7 +1,7 @@
 # Compiler Bytes Buffer Model and Byte Value Contract v0
 
-Status: normative semantics frozen (SHF-2A1, #2012). Implementation and qualification deferred to
-SHF-2A2. Not part of `v1.2.0`.
+Status: contract candidate (SHF-2A1, #2012) on this PR branch; becomes normative only if this PR lands.
+Implementation and qualification deferred to SHF-2A2. Not part of `v1.2.0`.
 
 Contract ID: `semantic.compiler.bytes/0.1`
 
@@ -175,15 +175,24 @@ The minimum core surface consists of exactly six deterministic operations:
   - Slicing operates at arbitrary byte granularity; unlike `text_slice`, there are no UTF-8 character
     boundary restrictions.
 
-## 8. Total equality and ordering
+## 8. Deferred comparison and non-admitted operations
 
-1. **Equality (`==`, `!=`):**
-   - Two `Bytes` values $A$ and $B$ are equal ($A == B$) if and only if:
-     $$\text{bytes\_len}(A) == \text{bytes\_len}(B) \quad \land \quad \forall i \in [0, \text{bytes\_len}(A)), \; \text{bytes\_get}(A, i) == \text{bytes\_get}(B, i)$$
-   - Structural byte-for-byte equality.
-2. **Total ordering (`<`, `<=`, `>`, `>=`):**
-   - Standard lexicographical order based on unsigned octet values ($0 ..= 255$).
-   - A shorter prefix is strictly less than a longer buffer sharing that prefix.
+SHF-2A1 freezes only the six core operations defined in §7. This contract does **NOT** admit or
+freeze:
+- Source-level `Bytes` equality operators (`==`, `!=`).
+- Source-level `Bytes` ordering operators (`<`, `<=`, `>`, `>=`).
+- Hashing of `Bytes` values.
+- Map-key eligibility for `Bytes`.
+- Substring/pattern search, `contains` or finding methods within `Bytes`.
+- Prepend, pop, insert, or remove operations.
+- Mutable-buffer or in-place modification APIs.
+- Capacity, allocation, or reserve manipulation APIs.
+
+Exact ordered-octet identity is mathematically defined by the finite sequence of octets
+($A = B \iff \text{bytes\_len}(A) == \text{bytes\_len}(B) \land \forall i, \text{bytes\_get}(A, i) == \text{bytes\_get}(B, i)$),
+but source-level comparison, operator admission, and search/container mechanics are explicitly
+deferred to separate future contracts. No builtin comparison functions or operator overloads are
+admitted or introduced by this contract.
 
 ## 9. Non-goals and deferred capabilities
 
