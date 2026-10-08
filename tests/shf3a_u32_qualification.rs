@@ -37,20 +37,32 @@ fn outcome(ret: &str, expr: &str) -> Result<Value, RuntimeError> {
     let src = source(ret, expr);
     let o0 = run(&compile(&src, OptLevel::O0));
     let o1 = run(&compile(&src, OptLevel::O1));
-    assert_eq!(format!("{o0:?}"), format!("{o1:?}"), "O0/O1 divergence for {expr}");
+    assert_eq!(
+        format!("{o0:?}"),
+        format!("{o1:?}"),
+        "O0/O1 divergence for {expr}"
+    );
     o0
 }
 
 #[track_caller]
 fn check_u32(expr: &str, expected: u32) {
     let got = outcome("u32", expr).unwrap_or_else(|e| panic!("{expr}: unexpected {e:?}"));
-    assert_eq!(format!("{got:?}"), format!("{:?}", Value::U32(expected)), "{expr}");
+    assert_eq!(
+        format!("{got:?}"),
+        format!("{:?}", Value::U32(expected)),
+        "{expr}"
+    );
 }
 
 #[track_caller]
 fn check_bool(expr: &str, expected: bool) {
     let got = outcome("bool", expr).unwrap_or_else(|e| panic!("{expr}: unexpected {e:?}"));
-    assert_eq!(format!("{got:?}"), format!("{:?}", Value::Bool(expected)), "{expr}");
+    assert_eq!(
+        format!("{got:?}"),
+        format!("{:?}", Value::Bool(expected)),
+        "{expr}"
+    );
 }
 
 #[track_caller]
@@ -118,7 +130,11 @@ fn arithmetic_and_ordering_compose_through_bindings_and_loops() {
     let src = "fn probe() -> u32 {\n    let n: u32 = 10u32;\n    let mut i: u32 = 0u32;\n    let mut acc: u32 = 0u32;\n    while i < n {\n        acc = acc + i * 3u32;\n        i = i + 1u32;\n    }\n    assert(i >= n);\n    assert(acc / 9u32 == 15u32);\n    assert(acc % 9u32 == 0u32);\n    return acc - 1u32;\n}\nfn main() {\n    return;\n}\n";
     for opt in [OptLevel::O0, OptLevel::O1] {
         let got = run(&compile(src, opt)).expect("run");
-        assert_eq!(format!("{got:?}"), format!("{:?}", Value::U32(134)), "{opt:?}");
+        assert_eq!(
+            format!("{got:?}"),
+            format!("{:?}", Value::U32(134)),
+            "{opt:?}"
+        );
     }
 }
 
@@ -160,7 +176,11 @@ fn mixed_families_unary_minus_and_unsuffixed_literals_are_rejected() {
     for (ret, expr) in cases {
         let src = source(ret, expr);
         let first = compile_err(&src);
-        assert_eq!(first, compile_err(&src), "{expr}: diagnostic must be deterministic");
+        assert_eq!(
+            first,
+            compile_err(&src),
+            "{expr}: diagnostic must be deterministic"
+        );
     }
     // A u32 binding plus an unsuffixed literal stays a type error: no
     // contextual literal coercion.
@@ -177,13 +197,15 @@ fn measured_u32_arithmetic_stays_rejected() {
     }
     // The ordering diagnostic names the admitted set honestly: plain u32 is
     // admitted, measured u32 is not.
-    let err = compile_err("fn probe(a: u32[ms], b: u32[ms]) -> bool {
+    let err = compile_err(
+        "fn probe(a: u32[ms], b: u32[ms]) -> bool {
     return a < b;
 }
 fn main() {
     return;
 }
-");
+",
+    );
     assert!(
         err.contains("same-family i32 or plain (unmeasured) u32 operands"),
         "{err}"
@@ -193,7 +215,11 @@ fn main() {
 #[test]
 fn only_programs_using_the_u32_family_require_semcod23() {
     let plain = compile(&source("i32", "1 + 2"), OptLevel::O0);
-    assert_eq!(&plain[0..8], &MAGIC22, "unrelated programs keep the V22 floor");
+    assert_eq!(
+        &plain[0..8],
+        &MAGIC22,
+        "unrelated programs keep the V22 floor"
+    );
     verify_semcode(&plain).expect("ordinary V22 artifact still admitted");
     let eq_only = compile(&source("bool", "1u32 == 2u32"), OptLevel::O0);
     assert_eq!(&eq_only[0..8], &MAGIC22, "u32 equality needs no new opcode");
@@ -255,7 +281,11 @@ fn hand_built_add_u32() -> Vec<u8> {
             instrs: vec![
                 IrInstr::LoadU32 { dst: 5, val: 1 },
                 IrInstr::LoadU32 { dst: 6, val: 2 },
-                IrInstr::AddU32 { dst: 7, lhs: 5, rhs: 6 },
+                IrInstr::AddU32 {
+                    dst: 7,
+                    lhs: 5,
+                    rhs: 6,
+                },
                 IrInstr::Ret { src: Some(7) },
             ],
             ownership_events: Vec::new(),
@@ -285,7 +315,10 @@ fn hand_built_u32_instruction_round_trips_and_malformed_forms_fail_closed() {
     // Unknown opcode in place of AddU32.
     let mut unknown = bytes.clone();
     unknown[at] = 0x2B;
-    assert!(verify_semcode(&unknown).is_err(), "unknown opcode must be rejected");
+    assert!(
+        verify_semcode(&unknown).is_err(),
+        "unknown opcode must be rejected"
+    );
 
     // Truncated AddU32: drop Ret and the rhs register, shrinking the code
     // length of the (only, last) function to match.
@@ -299,19 +332,29 @@ fn hand_built_u32_instruction_round_trips_and_malformed_forms_fail_closed() {
     let len_at = name_at + b"probe".len();
     let len = u32::from_le_bytes(truncated[len_at..len_at + 4].try_into().unwrap());
     truncated[len_at..len_at + 4].copy_from_slice(&(len - drop as u32).to_le_bytes());
-    assert!(verify_semcode(&truncated).is_err(), "truncated instruction must be rejected");
+    assert!(
+        verify_semcode(&truncated).is_err(),
+        "truncated instruction must be rejected"
+    );
 }
 
 #[test]
 fn compilation_is_byte_identical_and_execution_deterministic() {
     let src = format!("fn probe() -> u32 {{\n    let a: u32 = {I32_MAX_PLUS_1};\n    let b: u32 = 3u32;\n    let c: u32 = a / b + a % b * 2u32 - 1u32;\n    assert(c > b);\n    return c;\n}}\nfn main() {{\n    return;\n}}\n");
     for opt in [OptLevel::O0, OptLevel::O1] {
-        assert_eq!(compile(&src, opt), compile(&src, opt), "{opt:?}: SemCode must be byte-identical");
+        assert_eq!(
+            compile(&src, opt),
+            compile(&src, opt),
+            "{opt:?}: SemCode must be byte-identical"
+        );
     }
     let o0 = format!("{:?}", run(&compile(&src, OptLevel::O0)));
     let o1 = format!("{:?}", run(&compile(&src, OptLevel::O1)));
     assert_eq!(o0, o1);
-    assert_eq!(o0, format!("{:?}", Ok::<Value, RuntimeError>(Value::U32(715_827_885))));
+    assert_eq!(
+        o0,
+        format!("{:?}", Ok::<Value, RuntimeError>(Value::U32(715_827_885)))
+    );
 }
 
 #[test]
@@ -320,9 +363,16 @@ fn existing_behaviour_is_unchanged() {
     let i32_wrap = source("i32", "2147483647 + 1");
     for opt in [OptLevel::O0, OptLevel::O1] {
         let got = run(&compile(&i32_wrap, opt)).expect("i32 wraps");
-        assert_eq!(format!("{got:?}"), format!("{:?}", Value::I32(i32::MIN)), "{opt:?}");
+        assert_eq!(
+            format!("{got:?}"),
+            format!("{:?}", Value::I32(i32::MIN)),
+            "{opt:?}"
+        );
         let err = run(&compile(&source("i32", "1 / 0"), opt)).expect_err("i32 div zero");
-        assert!(matches!(err, RuntimeError::Trap(RuntimeTrap::DivisionByZero)));
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::DivisionByZero)
+        ));
     }
     // u32 equality and match are unchanged.
     check_bool("4294967295u32 == 4294967295u32", true);

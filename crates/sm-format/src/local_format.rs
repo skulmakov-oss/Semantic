@@ -1626,7 +1626,7 @@ mod adt_descriptor_tests {
         assert_eq!(HEADER_V23.epoch, HEADER_V22.epoch);
         assert_eq!(HEADER_V23.capabilities, HEADER_V22.capabilities);
         assert_eq!(SEMCODE_U32_ARITH_MIN_REVISION, 24);
-        assert!(SEMCODE_U32_ARITH_MIN_REVISION > HEADER_V22.rev);
+        const { assert!(SEMCODE_U32_ARITH_MIN_REVISION > HEADER_V22.rev) };
         assert_eq!(supported_headers().last(), Some(&HEADER_V23));
         assert_eq!(header_spec_from_magic(&MAGIC23), Some(HEADER_V23));
     }

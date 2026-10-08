@@ -2758,11 +2758,7 @@ where
                 set_reg(vm, frame_idx, dst, Value::Bool(out))?;
                 next_pc = cur - f.instr_start;
             }
-            Opcode::AddU32
-            | Opcode::SubU32
-            | Opcode::MulU32
-            | Opcode::DivU32
-            | Opcode::ModU32 => {
+            Opcode::AddU32 | Opcode::SubU32 | Opcode::MulU32 | Opcode::DivU32 | Opcode::ModU32 => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let rhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -3427,7 +3423,11 @@ fn u32_arith(opcode: Opcode, l: u32, r: u32) -> Result<u32, RuntimeError> {
             if r == 0 {
                 return Err(RuntimeError::Trap(RuntimeTrap::DivisionByZero));
             }
-            Ok(if opcode == Opcode::DivU32 { l / r } else { l % r })
+            Ok(if opcode == Opcode::DivU32 {
+                l / r
+            } else {
+                l % r
+            })
         }
         other => Err(RuntimeError::TypeMismatchRuntime(format!(
             "{other:?} is not a u32 arithmetic opcode"
