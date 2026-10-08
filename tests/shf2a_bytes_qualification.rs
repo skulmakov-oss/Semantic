@@ -303,9 +303,92 @@ fn test_source_comparison_operators_rejected_at_typecheck() {
 
 #[test]
 fn test_vm_cmpeq_on_bytes_fails_closed() {
-    let b1 = Value::Bytes(vec![1, 2, 3]);
-    let b2 = Value::Bytes(vec![1, 2, 3]);
-    let _ = (b1, b2);
+    let probe_fn = sm_ir::IrFunction {
+        name: "probe".to_string(),
+        instrs: vec![
+            sm_ir::IrInstr::Call {
+                dst: Some(0),
+                name: "bytes_empty".to_string(),
+                args: vec![],
+            },
+            sm_ir::IrInstr::Call {
+                dst: Some(1),
+                name: "bytes_empty".to_string(),
+                args: vec![],
+            },
+            sm_ir::IrInstr::CmpEq {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+            sm_ir::IrInstr::Ret { src: Some(2) },
+        ],
+        ownership_events: vec![],
+        params: vec![],
+    };
+
+    let semcode = sm_ir::emit_ir_to_semcode(&[probe_fn], false)
+        .expect("emit IR with bytes_empty and CmpEq to semcode");
+    assert_eq!(&semcode[0..8], &MAGIC24);
+    let token = verify_semcode_token(&semcode).expect("verify semcode");
+    let entry = token.require_entry("probe").expect("entry probe");
+    let err = run_verified_function_semcode_with_args(&entry, vec![])
+        .expect_err("CmpEq on Bytes in VM must fail closed");
+
+    match err {
+        RuntimeError::TypeMismatchRuntime(msg) => {
+            assert!(
+                msg.contains("Bytes values are not comparable with CmpEq/CmpNe"),
+                "unexpected mismatch message: {msg}"
+            );
+        }
+        other => panic!("expected TypeMismatchRuntime, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_vm_cmpne_on_bytes_fails_closed() {
+    let probe_fn = sm_ir::IrFunction {
+        name: "probe".to_string(),
+        instrs: vec![
+            sm_ir::IrInstr::Call {
+                dst: Some(0),
+                name: "bytes_empty".to_string(),
+                args: vec![],
+            },
+            sm_ir::IrInstr::Call {
+                dst: Some(1),
+                name: "bytes_empty".to_string(),
+                args: vec![],
+            },
+            sm_ir::IrInstr::CmpNe {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+            sm_ir::IrInstr::Ret { src: Some(2) },
+        ],
+        ownership_events: vec![],
+        params: vec![],
+    };
+
+    let semcode = sm_ir::emit_ir_to_semcode(&[probe_fn], false)
+        .expect("emit IR with bytes_empty and CmpNe to semcode");
+    assert_eq!(&semcode[0..8], &MAGIC24);
+    let token = verify_semcode_token(&semcode).expect("verify semcode");
+    let entry = token.require_entry("probe").expect("entry probe");
+    let err = run_verified_function_semcode_with_args(&entry, vec![])
+        .expect_err("CmpNe on Bytes in VM must fail closed");
+
+    match err {
+        RuntimeError::TypeMismatchRuntime(msg) => {
+            assert!(
+                msg.contains("Bytes values are not comparable with CmpEq/CmpNe"),
+                "unexpected mismatch message: {msg}"
+            );
+        }
+        other => panic!("expected TypeMismatchRuntime, got {other:?}"),
+    }
 }
 
 #[test]
