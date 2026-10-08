@@ -1,7 +1,7 @@
 # Compiler Bytes Buffer Model and Byte Value Contract v0
 
-Status: contract candidate (SHF-2A1, #2012) on this PR branch; becomes normative only if this PR lands.
-Implementation and qualification deferred to SHF-2A2. Not part of `v1.2.0`.
+Status: normative SHF-2A1 contract on main. Landed by PR #2013 at `16737de92ad88fb2a1795754d3914ed082926a8c`.
+SHF-2A1 is COMPLETE. Implementation and qualification are deferred to SHF-2A2. Not part of `v1.2.0`.
 
 Contract ID: `semantic.compiler.bytes/0.1`
 

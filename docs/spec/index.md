@@ -25,7 +25,7 @@ Current documents in this PR:
   (`semantic.compiler.u32/0.1`); contract and implementation landed and qualified on `main`,
   not in `v1.2.0`
 - `compiler_bytes_v0.md` - SHF-2A1 byte value domain and persistent `Bytes` buffer model contract
-  (`semantic.compiler.bytes/0.1`); contract candidate on this PR branch, implementation deferred to SHF-2A2; not in `v1.2.0`
+  (`semantic.compiler.bytes/0.1`); contract landed and normative on main, SHF-2A1 COMPLETE; implementation deferred to SHF-2A2; not in `v1.2.0`
 - `project_model_v0.md` - canonical manifest/layout, discovery, project command,
   path-containment, and identity boundary
 - `package_baseline_v0.md` - local-only dependency graph, deterministic
