@@ -2,7 +2,9 @@
 
 Status: normative semantics frozen (SHF-1A, #2002); SHF-1B (#2004) implements and qualifies
 the seven operations on `main` (§11). Landed on `main` is not published stable: this surface is
-not part of `v1.2.0`. SHF-1 overall remains open — the §9.4 lexer probe is blocked on SHF-3.
+not part of `v1.2.0`. SHF-3A has landed, so the probe's mechanical `u32` dependency is
+satisfied; SHF-1C (#2010) implements and qualifies the §9.4 lexer probe on its PR branch. SHF-1
+becomes complete only if that PR lands.
 
 Contract ID: `semantic.compiler.text/0.1`
 
@@ -78,8 +80,10 @@ defined below.
   possible through `text` and belongs to SHF-2.
 - **SHF-3 (integer / index / bit).** This contract only *produces* and *accepts* `u32` values.
   It does not admit `u32` arithmetic, ordering or bit operations. A lexer needs at least
-  `u32` increment and ordering to advance and bound an offset; those are SHF-3 work and are a
-  recorded dependency of the SHF-1B lexer probe (§9.4), not part of this contract.
+  `u32` increment and ordering to advance and bound an offset; those are SHF-3A work
+  (`compiler_u32_v0.md`), now landed on `main`, which satisfies the mechanical dependency of the
+  §9.4 lexer probe. Bit operations (SHF-3B) are not needed by the probe and are not part of this
+  contract.
 - **SHF-10 (lexer).** See §8.
 
 ## 6. Operations
@@ -220,9 +224,27 @@ SHF-1 completion requires a deliberately tiny Semantic program that scans a repr
 source sample using only these primitives and no host-side tokenization: ASCII whitespace,
 ASCII identifier byte classes, single-character punctuation, and correct advancement over
 multi-byte UTF-8 scalars. It is not a Semantic lexer and implements no Semantic grammar. Its
-offset advancement and bounds checks require `u32` increment and ordering, so the probe depends
-on SHF-3 admitting those operations (or an explicitly authorized interim decision); this
-dependency is recorded, not resolved, by this contract.
+offset advancement and bounds checks require `u32` increment and ordering, which SHF-3A
+provides on `main`.
+
+**Qualification (SHF-1C, #2010, on its PR branch).**
+
+- Probe: `tests/fixtures/shf1c_lexer_probe/probe.sm`, a Semantic program. It scans
+  `fn main() { alpha_1(é,€,🙂); }` (35 bytes) with `text_len`, `text_byte_at` and `text_slice`
+  only, and classifies 4 ASCII whitespace bytes, 13 ASCII identifier-class bytes and 9
+  punctuation bytes. It advances over 3 multi-byte scalars (2, 3 and 4 bytes) using
+  leading-byte ranges, with no bitwise operations, and ends exactly at offset 35. Each scalar's
+  start and end are proven to be scalar boundaries by `text_slice` returning `Some`. Starting an
+  iteration on a continuation byte fails a Semantic `assert`. All counts are asserted inside
+  the program, which returns the sentinel `1u32`.
+- Harness: `tests/shf1c_lexer_probe.rs`. It loads the probe and compiles it at `O0` and `O1`
+  (both `SEMCOD23`). It admits each artifact with `sm-verify`, runs the verified `probe` entry
+  in `sm-vm`, and compares the sentinel and byte-identical recompilation per level. It never
+  scans, classifies or decodes the sample: there is no host-side tokenization.
+- Offset advancement uses non-constant runtime `u32` increment and ordering inside the loop.
+  Forcing every multi-byte scalar to advance by `1u32` makes the qualification fail.
+- The byte classes are probe-local and freeze no future Semantic lexical grammar; this is not
+  the SHF-10 lexer.
 
 ## 10. Non-goals
 
@@ -256,4 +278,5 @@ Qualified on `main` by SHF-1B (#2004); not part of the published `v1.2.0` contou
   reserved-name rejection, the capability admission check, byte-identical recompilation, and
   the string-table ingress case. The `u32::MAX` boundary of §7 is exercised synthetically in
   `sm-vm` unit tests, because a >4 GiB text is not allocated in CI.
-- The §9.4 lexer probe is **not** executed: it is blocked on SHF-3 (`u32` increment and ordering).
+- The §9.4 lexer probe is executed and qualified by SHF-1C (#2010) on its PR branch (see §9.4);
+  it was formerly blocked on SHF-3, which has since landed (SHF-3A).
