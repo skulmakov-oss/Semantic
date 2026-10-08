@@ -7,7 +7,10 @@ Contract ID: `semantic.compiler.bytes/0.1`
 
 Parent: #1910 (SHF-2 — Compiler-grade Bytes and Endian Helpers) · Checkpoint issue: #2012
 
-Base library contract: `semantic.foundation.std/0.1`
+Adjacent stable library contract: `semantic.foundation.std/0.1`.
+
+`semantic.compiler.bytes/0.1` is an additive compiler-foundation contract and does not amend or
+widen `semantic.foundation.std/0.1`.
 
 ## 1. Authority and scope
 
@@ -148,8 +151,10 @@ The minimum core surface consists of exactly six deterministic operations:
   - Otherwise: returns a new `Bytes` value of length $L_1 + L_2$ containing the concatenation of all
     octets in $left$ followed by all octets in $right$.
 - **Invariants:**
-  - Associative: `bytes_extend(bytes_extend(a, b), c) == bytes_extend(a, bytes_extend(b, c))`.
-  - Identity: `bytes_extend(a, bytes_empty()) == a` and `bytes_extend(bytes_empty(), a) == a`.
+  - Associativity: both constructions (`bytes_extend(bytes_extend(a, b), c)` and `bytes_extend(a, bytes_extend(b, c))`)
+    produce `Bytes` values with exactly the same ordered octet sequence.
+  - Identity: extending a `Bytes` value with empty `Bytes` on either side (`bytes_extend(a, bytes_empty())`
+    or `bytes_extend(bytes_empty(), a)`) preserves exactly the original ordered octet sequence of `a`.
 
 ### 7.5 `BYTES-GET`
 - **Signature:** `bytes_get(bytes: Bytes, index: u32) -> Option(u32)`
