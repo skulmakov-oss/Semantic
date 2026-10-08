@@ -250,6 +250,7 @@ the qualification suite `tests/shf2a_bytes_qualification.rs` across the complete
    - Identical execution results between `O0` and `O1`.
    - Constant folding (if implemented) preserves traps and values identically.
 
-All vectors above—along with raw non-UTF-8 octet preservation, `SEMCOD23` downgrade rejection,
-source operator rejection, runtime VM `CmpEq`/`CmpNe` fail-closed proofs, and all four mutation
-proofs—are verified in `tests/shf2a_bytes_qualification.rs`.
+The core qualification test suite is maintained in `tests/shf2a_bytes_qualification.rs` (including
+buffer emptiness, byte domain bounds, non-UTF-8 octet preservation, slicing, optimizer parity,
+`SEMCOD23` downgrade rejection, source operator compile-time rejection, and VM `CmpEq`/`CmpNe`
+runtime fail-closed proofs), with the four qualification mutation proofs verified during PR #2017 review.
