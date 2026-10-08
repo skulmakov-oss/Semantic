@@ -12,6 +12,7 @@ pub enum Type {
     QVec(usize),
     Bool,
     Text,
+    Bytes,
     Sequence(SequenceType),
     Map(MapType),
     Closure(ClosureType),

@@ -155,6 +155,7 @@ Current supported header family:
 - `SEMCOD21`
 - `SEMCOD22`
 - `SEMCOD23`
+- `SEMCOD24`
 
 - `SEMCOD15`
 - `SEMCOD16`
@@ -187,6 +188,7 @@ Observed runtime support in the current toolchain:
 - `SEMCOD21`: epoch `0`, revision `22`
 - `SEMCOD22`: epoch `0`, revision `23`
 - `SEMCOD23`: epoch `0`, revision `24`
+- `SEMCOD24`: epoch `0`, revision `25`
 
 Header responsibilities:
 
@@ -516,6 +518,16 @@ at a callee before execution.
 - inherits the `SEMCOD22` capability set unchanged and adds no capability bit;
   same `ADT0`, function-envelope, `DBG0`, `OWN0` and `SIG0` layout
 
+`SEMCOD24`
+
+- deterministic `Bytes` value family and core operations contract (SHF-2A2, `compiler_bytes_v0.md`),
+  revision `25` (`SEMCODE_BYTES_MIN_REVISION`)
+- promoted contract used only when emitted program usage requires `Bytes` value mechanics
+  (family tag `15`, builtins `bytes_empty`, `bytes_len`, `bytes_push`, `bytes_extend`,
+  `bytes_get`, `bytes_slice`); every other artifact keeps the lower floor
+- adds capability bit `CAP_BYTES_VALUES` (`1 << 28`); inherits `SEMCOD23` capabilities;
+  same `ADT0`, function-envelope, `DBG0`, `OWN0` and `SIG0` layout
+
 ## Opcode Vocabulary And Header Identity
 
 SemCode header identity constrains the executable opcode vocabulary. Every
@@ -591,6 +603,7 @@ Current canonical capability families:
 - `CAP_OWNERSHIP_ADT_BORROW_PATHS`
 - `CAP_MAP_VALUES`
 - `CAP_DEBUG_SYMBOLS`
+- `CAP_BYTES_VALUES`
 
 Contract rule:
 

@@ -23,6 +23,18 @@ const COMPILER_TEXT_BUILTINS: &[&str] = &[
     "text_is_empty",
 ];
 
+/// SHF-2A2 (#2015): the `semantic.compiler.bytes/0.1` builtins
+/// (`docs/spec/compiler_bytes_v0.md`). Their signatures live in `builtin_sig`;
+/// this list only routes them to exact arity/family diagnostics.
+const COMPILER_BYTES_BUILTINS: &[&str] = &[
+    "bytes_empty",
+    "bytes_len",
+    "bytes_push",
+    "bytes_extend",
+    "bytes_get",
+    "bytes_slice",
+];
+
 fn fx_coercion_gap_message() -> &'static str {
     "fx coercion from non-literal numeric expressions is not implemented in the canonical Rust-like path yet"
 }
@@ -2259,6 +2271,7 @@ fn subst_apply(ty: &Type, subst: &BTreeMap<SymbolId, Type>) -> Type {
         | Type::QVec(_)
         | Type::Bool
         | Type::Text
+        | Type::Bytes
         | Type::I32
         | Type::U32
         | Type::Fx
@@ -2340,6 +2353,7 @@ fn ensure_typevars_declared(
         | Type::QVec(_)
         | Type::Bool
         | Type::Text
+        | Type::Bytes
         | Type::I32
         | Type::U32
         | Type::Fx
@@ -2494,6 +2508,7 @@ fn collect_generic_constraints(
         | Type::QVec(_)
         | Type::Bool
         | Type::Text
+        | Type::Bytes
         | Type::I32
         | Type::U32
         | Type::Fx
@@ -3440,6 +3455,55 @@ fn infer_expr_type(
                     if actual != *expected {
                         let family = if *expected == Type::Text {
                             "text"
+                        } else {
+                            "u32"
+                        };
+                        return Err(FrontendError {
+                            detail: None,
+                            pos: 0,
+                            message: format!(
+                                "builtin '{builtin}' argument {} must be {family}, got {:?}",
+                                index + 1,
+                                actual
+                            ),
+                        });
+                    }
+                }
+                return Ok(result);
+            }
+            if COMPILER_BYTES_BUILTINS.contains(&resolve_symbol_name(arena, *name)?) {
+                let builtin = resolve_symbol_name(arena, *name)?;
+                let FnSig {
+                    params,
+                    ret: result,
+                    ..
+                } = builtin_sig(builtin).expect("every compiler bytes builtin has a signature");
+                if args.len() != params.len() || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        detail: None,
+                        pos: 0,
+                        message: format!(
+                            "builtin '{builtin}' takes exactly {} positional argument{}",
+                            params.len(),
+                            if params.len() == 1 { "" } else { "s" }
+                        ),
+                    });
+                }
+                for (index, (arg, expected)) in args.iter().zip(params.iter()).enumerate() {
+                    let actual = infer_expr_type(
+                        arg.value,
+                        arena,
+                        env,
+                        table,
+                        record_table,
+                        adt_table,
+                        ret_ty.clone(),
+                        loop_stack,
+                        impl_list,
+                    )?;
+                    if actual != *expected {
+                        let family = if *expected == Type::Bytes {
+                            "Bytes"
                         } else {
                             "u32"
                         };
@@ -15497,6 +15561,7 @@ pub(crate) fn ensure_executable_type_supported(
         Type::Quad
         | Type::Bool
         | Type::Text
+        | Type::Bytes
         | Type::I32
         | Type::U32
         | Type::Fx
@@ -15659,6 +15724,7 @@ fn ensure_storage_type_supported(
         Type::Quad
         | Type::Bool
         | Type::Text
+        | Type::Bytes
         | Type::I32
         | Type::U32
         | Type::Fx
@@ -15855,6 +15921,7 @@ fn supports_stable_equality_type_inner(
         | Type::Fx
         | Type::F64
         | Type::Unit => Ok(true),
+        Type::Bytes => Ok(false),
         Type::Measured(base, _) => {
             supports_stable_equality_type_inner(base, record_table, adt_table, arena, active)
         }

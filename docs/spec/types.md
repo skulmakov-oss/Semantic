@@ -28,6 +28,7 @@ Current source-visible types:
 - `quad`
 - `bool`
 - `text`
+- `Bytes`
 - `i32`
 - `u32`
 - `f64`

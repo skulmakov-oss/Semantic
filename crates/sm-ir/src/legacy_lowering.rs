@@ -4,8 +4,8 @@ use crate::semcode_format::{
     header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
     AdtDescriptorTable, CallableValueFamily, Opcode, ACTIVATION_MODE_FRAME_ENTRY,
     ACTIVATION_MODE_STORE_VAR_SITE, MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14,
-    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC20, MAGIC21, MAGIC22, MAGIC23, MAGIC3, MAGIC4,
-    MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
+    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC20, MAGIC21, MAGIC22, MAGIC23, MAGIC24,
+    MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
     OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
     OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG, SEMCODE_ADT_DESCRIPTOR_MIN_REVISION,
@@ -647,6 +647,7 @@ fn callable_family_for_type(ty: &Type) -> Result<CallableValueFamily, CompilePip
         Type::Quad => Ok(CallableValueFamily::Quad),
         Type::Bool => Ok(CallableValueFamily::Bool),
         Type::Text => Ok(CallableValueFamily::Text),
+        Type::Bytes => Ok(CallableValueFamily::Bytes),
         Type::Sequence(_) => Ok(CallableValueFamily::Sequence),
         Type::Map(_) => Ok(CallableValueFamily::Map),
         Type::Closure(_) => Ok(CallableValueFamily::Closure),
@@ -1829,12 +1830,14 @@ fn emit_semcode(
     // which is purely additive over V20 (same OWN0 layout, same execution-site
     // grammar - see `HEADER_V21`'s doc comment) and therefore satisfies both
     // requirements at once.
-    // SHF-3A2 (#2008): the plain-u32 arithmetic/ordering family needs
-    // HEADER_V23 (rev 24), the highest revision in this chain. V23 is purely
-    // additive over V22 (same capabilities, same ADT0/OWN0 layout), so it also
-    // satisfies every lower requirement. Programs without the family keep the
-    // V22 floor below - the new header is never emitted gratuitously.
-    if has_v23_u32_arith_instr(funcs) {
+    // SHF-2A2 (#2015): the deterministic Bytes value family and its core
+    // operations require HEADER_V24 (rev 25, CAP_BYTES_VALUES), the highest
+    // revision in this chain. Programs without Bytes values keep the lower
+    // headers below - the new header is never emitted gratuitously.
+    if has_v24_bytes_instr(funcs) {
+        opcode_driven_magic = MAGIC24;
+        opcode_driven_require_ownership_section = true;
+    } else if has_v23_u32_arith_instr(funcs) {
         opcode_driven_magic = MAGIC23;
         opcode_driven_require_ownership_section = true;
     } else if has_v21_sequence_ownership_events(funcs) || has_v21_adt_borrow_ownership_events(funcs)
@@ -2906,6 +2909,24 @@ fn has_v7_clock_read_instr(funcs: &[IrFunction]) -> bool {
         f.instrs
             .iter()
             .any(|i| matches!(i, IrInstr::ClockRead { .. }))
+    })
+}
+
+fn has_v24_bytes_instr(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.params.contains(&CallableValueFamily::Bytes)
+            || f.instrs.iter().any(|i| match i {
+                IrInstr::Call { name, .. } => matches!(
+                    name.as_str(),
+                    "bytes_empty"
+                        | "bytes_len"
+                        | "bytes_push"
+                        | "bytes_extend"
+                        | "bytes_get"
+                        | "bytes_slice"
+                ),
+                _ => false,
+            })
     })
 }
 
