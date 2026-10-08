@@ -24,6 +24,8 @@ Current documents in this PR:
 - `compiler_u32_v0.md` - SHF-3A deterministic plain-`u32` arithmetic and ordering contract
   (`semantic.compiler.u32/0.1`); contract and implementation landed and qualified on `main`,
   not in `v1.2.0`
+- `compiler_bytes_v0.md` - SHF-2A1 byte value domain and persistent `Bytes` buffer model contract
+  (`semantic.compiler.bytes/0.1`); contract only, implementation deferred to SHF-2A2; not in `v1.2.0`
 - `project_model_v0.md` - canonical manifest/layout, discovery, project command,
   path-containment, and identity boundary
 - `package_baseline_v0.md` - local-only dependency graph, deterministic

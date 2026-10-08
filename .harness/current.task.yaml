@@ -1,26 +1,25 @@
 task:
-  id: SHF-1C-LEXER-PROBE-QUALIFICATION
-  title: "Qualify the compiler-text lexer probe and complete SHF-1"
-  type: qualification
-  target: "Qualify compiler_text_v0.md section 9.4 (#2010) as SHF-1C of #1910: a deliberately tiny Semantic scanner over a fixed sample, run through the verified pipeline at O0/O1. Not a lexer; no production code."
+  id: SHF-2A1-BYTES-CONTRACT
+  title: "Freeze byte value and Bytes buffer contract (SHF-2A1)"
+  type: contract_documentation
+  target: "Freeze semantic.compiler.bytes/0.1: byte value domain [0..255] on u32, persistent Bytes value family, six deterministic operations (#2012), as SHF-2A1 of #1910. Contract only; no implementation."
   mode: active
-  supersedes: SHF-3A2-U32-IMPLEMENTATION
-  issues: [2010]
+  supersedes: SHF-1C-LEXER-PROBE-QUALIFICATION
+  issues: [2012]
   must_remain_open: [1910]
-  base_sha: 50654be8f7b8e5cfcecbbb105881600f63afeca4
+  base_sha: 5193e90d024e2ec1190a2db27fac5cf4c92adb04
   authorized_by: >-
-    Repository owner explicit task (2026-10-08, "OWNER TASK - SHF-1C
-    COMPILER-TEXT LEXER PROBE QUALIFICATION"): controlled governance-envelope
-    transition to SHF-1C-LEXER-PROBE-QUALIFICATION. Probe fixture, Rust
-    integration-test harness and status docs only; no production crate, no
-    SemCode change; no merge without separate owner GO; #1910 stays open.
+    Repository owner explicit authorization (2026-10-08, "OWNER TASK - SHF-2A1
+    BYTE VALUE / BYTES MODEL CONTRACT"): controlled governance-envelope
+    transition to SHF-2A1-BYTES-CONTRACT on its dedicated branch.
+    Contract/governance only; no implementation; no SemCode change; no merge
+    without separate owner GO; #1910 stays open.
 
 intent:
   summary: >-
-    Prove that compiler-text byte scanning works in Semantic itself using the
-    landed SHF-1B text primitives and SHF-3A u32 arithmetic/order; the Rust test
-    only compiles, verifies, runs and compares the final sentinel.
-  decision_record: docs/spec/compiler_text_v0.md
+    Add the normative compiler bytes contract (semantic.compiler.bytes/0.1) and
+    its spec-index entry, without implementing or exposing any new operation.
+  decision_record: docs/spec/compiler_bytes_v0.md
 
 governance_constraints:
   compiler_implementation: false
@@ -39,35 +38,33 @@ governance_constraints:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - tests/shf1c_lexer_probe.rs
-    - tests/fixtures/shf1c_lexer_probe/probe.sm
-    - docs/spec/compiler_text_v0.md
-    - docs/spec/compiler_u32_v0.md
+    - docs/spec/compiler_bytes_v0.md
     - docs/spec/index.md
 
   forbidden_paths:
     - crates/**
-    - src/**
+    - tests/**
     - examples/**
-    - .github/**
-    - scripts/**
-    - tools/**
+    - "**/*.sm"
+    - src/**
+    - apps/**
     - reports/**
+    - tools/**
+    - scripts/**
+    - .github/**
     - Cargo.toml
     - Cargo.lock
-    - apps/**
     - experiments/**
     - third_party/**
     - ton618_legacy/**
     - prom-ui*
 
 authorization:
-  # Test-harness Rust only (path list above): no production source is writable.
-  rust_implementation: true
+  rust_implementation: false
   language_implementation: false
-  documentation_addition: false
+  documentation_addition: true
   documentation_correction: true
-  test_addition: true
+  test_addition: false
   workflow_changes: false
   dependency_changes: false
   github_issue_lifecycle: true
@@ -77,7 +74,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 50654be8f7b8e5cfcecbbb105881600f63afeca4
+  base_sha: 5193e90d024e2ec1190a2db27fac5cf4c92adb04
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
@@ -87,13 +84,13 @@ constraints:
   no_historical_document_rewrite: true
   one_logical_change_per_pr: true
   evidence_before_claims: true
-  no_production_code: true
+  no_new_semcode_opcode: true
   unrelated_fa_findings_out_of_scope: true
 
 # Standing cross-authority anchors carried forward from the sealed SSF
 # envelope (checked by tests/ssf_status_drift.rs against the immutable
 # dependency map / decision record). Historical reference only: they grant
-# no SSF authority to SHF-1C.
+# no SSF authority to SHF-2A1.
 ssf_reference:
   active_phase: SSF-12
   issue: 1583
