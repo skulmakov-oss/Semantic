@@ -211,6 +211,15 @@ const BUILTIN_NAMESPACE: &[(&str, BuiltinNamePolicy)] = &[
     ("map_set", BuiltinNamePolicy::Reserved),
     ("print", BuiltinNamePolicy::Reserved),
     ("to_text", BuiltinNamePolicy::Reserved),
+    // SHF-1B (#2004): compiler-grade UTF-8 byte inspection
+    // (`docs/spec/compiler_text_v0.md`), typechecked and lowered by name.
+    ("text_len", BuiltinNamePolicy::Reserved),
+    ("text_byte_at", BuiltinNamePolicy::Reserved),
+    ("text_slice", BuiltinNamePolicy::Reserved),
+    ("text_starts_with", BuiltinNamePolicy::Reserved),
+    ("text_ends_with", BuiltinNamePolicy::Reserved),
+    ("text_find", BuiltinNamePolicy::Reserved),
+    ("text_is_empty", BuiltinNamePolicy::Reserved),
     ("random_seed", BuiltinNamePolicy::Reserved),
     ("random_next_i32", BuiltinNamePolicy::Reserved),
     // Math: user-first resolution (#1653/#1750).
@@ -1373,6 +1382,55 @@ pub fn canonicalize_declared_type_generic(
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn builtin_sig(name: &str) -> Option<FnSig> {
     match name {
+        // SHF-1B (#2004): frozen `semantic.compiler.text/0.1` signatures.
+        "text_len" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::U32,
+        }),
+        "text_byte_at" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text, Type::U32],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Option(Box::new(Type::U32)),
+        }),
+        "text_slice" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text, Type::U32, Type::U32],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Option(Box::new(Type::Text)),
+        }),
+        "text_starts_with" | "text_ends_with" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text, Type::Text],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Bool,
+        }),
+        "text_find" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text, Type::Text],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Option(Box::new(Type::U32)),
+        }),
+        "text_is_empty" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Text],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Bool,
+        }),
         "sin" | "cos" | "tan" | "sqrt" | "abs" => Some(FnSig {
             type_params: Vec::new(),
             trait_bounds: Vec::new(),
@@ -1908,6 +1966,13 @@ fn main() {
             "map_set",
             "print",
             "to_text",
+            "text_len",
+            "text_byte_at",
+            "text_slice",
+            "text_starts_with",
+            "text_ends_with",
+            "text_find",
+            "text_is_empty",
             "random_seed",
             "random_next_i32",
             "stdout_write",

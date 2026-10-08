@@ -1,7 +1,8 @@
 # Compiler Text Inspection Contract v0
 
-Status: SHF-1A contract candidate — normative semantics frozen, **not implemented**
-(implementation and qualification are SHF-1B)
+Status: normative semantics frozen (SHF-1A, #2002); SHF-1B (#2004) implements and qualifies
+the seven operations on `main` (§11). Landed on `main` is not published stable: this surface is
+not part of `v1.2.0`. SHF-1 overall remains open — the §9.4 lexer probe is blocked on SHF-3.
 
 Contract ID: `semantic.compiler.text/0.1`
 
@@ -16,11 +17,10 @@ over the existing `text` type, sufficient for a lexer written in Semantic. It ex
 (`foundation_stdlib_v0.md`) and does not change any existing text behaviour: literals, equality,
 `text + text` and `to_text` keep their current contract.
 
-Until SHF-1B implements and qualifies these operations, none of them is source-visible, and
-`foundation_stdlib_v0.md` remains accurate in stating that `semantic.foundation.std/0.1` exposes
-no indexing, slicing, ordering or length API. On SHF-1B completion this contract becomes a new
-`std.text` revision; that revision is the only path by which these operations enter the public
-surface.
+SHF-1B makes these operations source-visible on `main` under the spellings in §11.
+`semantic.foundation.std/0.1` is unchanged and still exposes no indexing, slicing, ordering or
+length API (`foundation_stdlib_v0.md`). The new `std.text` revision that carries this contract
+into a published library contour, and its identity, remain a separate owner/release decision.
 
 Operation names below (`TEXT-LEN` …) are contract identifiers. Source spellings are fixed in
 SHF-1B under the existing builtin naming conventions and must not overload the `Sequence(T)`
@@ -172,7 +172,8 @@ longer than `t` gives `false`.
   this contract receives a text whose byte length exceeds `u32::MAX`, it must fail with a
   deterministic runtime trap; it must never truncate or wrap a length or offset. Whether to cap
   `text` length globally (affecting `text + text`) is outside this contract and is recorded as an
-  open owner decision.
+  open owner decision. SHF-1B uses the existing `RuntimeTrap::ArithmeticOverflow` class for this
+  trap (a checked `u32` conversion of a length or offset); no new trap taxonomy is introduced.
 
 ## 8. No host-side lexing
 
@@ -208,7 +209,10 @@ calls into Rust helpers are not evidence.
 Because `text` cannot hold invalid UTF-8, invalid input is qualified at ingress, not in the
 operations: a SemCode artifact whose string table holds invalid UTF-8 is rejected before
 execution; a host text read of invalid bytes fails with `InvalidInput`. SHF-1B records these as
-negative vectors of the ingress paths it relies on.
+negative vectors of the ingress paths it relies on: the string-table case in
+`tests/shf1b_compiler_text_qualification.rs`, and the host case in the existing
+`smc-cli` test `application_host::tests::text_budget_and_malformed_utf8_fail_closed`. SHF-1B adds
+no ingress path of its own.
 
 ### 9.4 Lexer probe
 
@@ -226,3 +230,30 @@ Regular expressions; locale behaviour; case folding; Unicode normalization; grap
 segmentation APIs; scalar-index APIs; text ordering; formatting or interpolation; escape
 decoding; byte values or buffers (SHF-2); general `u32` arithmetic, ordering or bit operations
 (SHF-3); the compiler lexer (SHF-10); any change to existing `std.text` behaviour.
+
+## 11. SHF-1B implementation status
+
+Qualified on `main` by SHF-1B (#2004); not part of the published `v1.2.0` contour.
+
+| Contract operation | Source spelling | Signature |
+|---|---|---|
+| `TEXT-LEN` | `text_len` | `(text) -> u32` |
+| `TEXT-BYTE-AT` | `text_byte_at` | `(text, u32) -> Option(u32)` |
+| `TEXT-SLICE` | `text_slice` | `(text, u32, u32) -> Option(text)` |
+| `TEXT-STARTS-WITH` | `text_starts_with` | `(text, text) -> bool` |
+| `TEXT-ENDS-WITH` | `text_ends_with` | `(text, text) -> bool` |
+| `TEXT-FIND` | `text_find` | `(text, text) -> Option(u32)` |
+| `TEXT-IS-EMPTY` | `text_is_empty` | `(text) -> bool` |
+
+- The spellings are reserved language-owned builtin names: a user function cannot take them.
+- They lower to the existing name-dispatched `Call` instruction; no SemCode opcode or format
+  change was made. Verifier admission requires `CAP_TEXT_VALUES` for a bare call, like
+  `to_text`.
+- `Option` results are the canonical runtime `Option` value (`None` tag 0, `Some` tag 1), the
+  same carrier `Option::Some` / `Option::None` produce, and are matched by ordinary `match`.
+- Qualification: `tests/shf1b_compiler_text_qualification.rs` runs every §9.2 vector from source
+  through `sm-verify` and verified `sm-vm` execution, plus wrong-arity / wrong-family diagnostics,
+  reserved-name rejection, the capability admission check, byte-identical recompilation, and
+  the string-table ingress case. The `u32::MAX` boundary of §7 is exercised synthetically in
+  `sm-vm` unit tests, because a >4 GiB text is not allocated in CI.
+- The §9.4 lexer probe is **not** executed: it is blocked on SHF-3 (`u32` increment and ordering).
