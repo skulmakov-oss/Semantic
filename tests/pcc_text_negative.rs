@@ -55,7 +55,7 @@ fn pcc_text_negative_fixtures_fail_with_expected_markers() {
             path: "tests/fixtures/pcc/text/fail/text_ordering.sm",
             expected_markers: &[
                 "E0201",
-                "relational operators are currently admitted only for same-family i32 operands",
+                "relational operators are currently admitted only for same-family i32 or plain (unmeasured) u32 operands",
             ],
         },
     ];

@@ -83,6 +83,13 @@ mod tests {
             Opcode::CmpNe => 0x21,
             Opcode::CmpI32Lt => 0x22,
             Opcode::CmpI32Le => 0x23,
+            Opcode::CmpU32Lt => 0x24,
+            Opcode::CmpU32Le => 0x25,
+            Opcode::AddU32 => 0x26,
+            Opcode::SubU32 => 0x27,
+            Opcode::MulU32 => 0x28,
+            Opcode::DivU32 => 0x29,
+            Opcode::ModU32 => 0x2a,
             Opcode::Jmp => 0x30,
             Opcode::JmpIf => 0x31,
             Opcode::Call => 0x40,
@@ -136,7 +143,7 @@ mod tests {
     fn test_opcode_byte_values_frozen() {
         use semcode_format::Opcode;
 
-        const ALL_OPCODES: [Opcode; 73] = [
+        const ALL_OPCODES: [Opcode; 80] = [
             Opcode::LoadQ,
             Opcode::LoadBool,
             Opcode::LoadI32,
@@ -164,6 +171,13 @@ mod tests {
             Opcode::CmpNe,
             Opcode::CmpI32Lt,
             Opcode::CmpI32Le,
+            Opcode::CmpU32Lt,
+            Opcode::CmpU32Le,
+            Opcode::AddU32,
+            Opcode::SubU32,
+            Opcode::MulU32,
+            Opcode::DivU32,
+            Opcode::ModU32,
             Opcode::Jmp,
             Opcode::JmpIf,
             Opcode::Call,
@@ -213,15 +227,15 @@ mod tests {
         ];
 
         // Independent cross-check that ALL_OPCODES itself wasn't
-        // transcribed with a missing or duplicated variant: 73 entries,
-        // all distinct. This 73 is a hand-typed literal, not derived from
+        // transcribed with a missing or duplicated variant: 80 entries,
+        // all distinct. This 80 is a hand-typed literal, not derived from
         // the real Opcode enum - if you're here because this assert just
         // failed after adding a new Opcode variant, update ALL_OPCODES
         // (and expected_opcode_byte above) to include it, then update this
         // literal to match.
         assert_eq!(
             ALL_OPCODES.len(),
-            73,
+            80,
             "ALL_OPCODES must list every Opcode variant exactly once - if you added a new \
              Opcode variant, add it to ALL_OPCODES and expected_opcode_byte, then update \
              this expected count"
@@ -270,6 +284,19 @@ mod tests {
             Opcode::QTruthImpl,
         ] {
             assert_eq!(op.minimum_semcode_revision(), 19, "{op:?} must be rev 19");
+        }
+
+        // SHF-3A2 (#2008): plain-u32 family, SEMCOD23 (rev 24) by owner decision
+        for op in [
+            Opcode::CmpU32Lt,
+            Opcode::CmpU32Le,
+            Opcode::AddU32,
+            Opcode::SubU32,
+            Opcode::MulU32,
+            Opcode::DivU32,
+            Opcode::ModU32,
+        ] {
+            assert_eq!(op.minimum_semcode_revision(), 24, "{op:?} must be rev 24");
         }
 
         // Baseline representatives, one per group

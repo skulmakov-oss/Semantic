@@ -1,7 +1,8 @@
 # Compiler u32 Arithmetic and Ordering Contract v0
 
-Status: SHF-3A1 contract candidate — normative semantics frozen, **not implemented**
-(frozen for SHF-3A implementation)
+Status: normative semantics frozen (SHF-3A1, #2006); SHF-3A2 (#2008) implementation candidate
+in review — implemented and qualified on its PR branch, not on `main` until that PR merges (§13).
+Not part of `v1.2.0`.
 
 Contract ID: `semantic.compiler.u32/0.1`
 
@@ -19,11 +20,9 @@ lengths (`compiler_text_v0.md`). It covers:
 | Ordering | `<` `<=` `>` `>=` |
 | Equality (existing, unchanged) | `==` `!=` |
 
-Until SHF-3A implements and qualifies these operators, the current-contour statements remain
-accurate: `u32` is limited to literals, equality and `match` (`foundation_source_profile_v1.md`,
-`types.md`), and `u32` arithmetic is deferred. Nothing in this document is source-visible on
-current `main`, and it does not change `semantic.foundation.std/0.1` or the published `v1.2.0`
-contour.
+SHF-3A2 implements these operators (§13). This does not change `semantic.foundation.std/0.1`,
+the `foundation_source_profile_v1.md` stable-candidate profile or the published `v1.2.0` contour:
+the surface is additive on current `main` once merged.
 
 Notation: `u32::MAX` in this document means the value `4294967295`; it is not source syntax.
 Source vectors spell it `4294967295u32`. `i32::MAX` likewise means `2147483647`.
@@ -183,3 +182,35 @@ Bitwise operators and shifts (`&` `|` `^` `~` `<<` `>>`, SHF-3B); integer conver
 families; measured `u32` arithmetic; `u32` literal coercion; byte values or buffers (SHF-2); the
 compiler lexer (SHF-10); any SemCode format or opcode change; any change to `i32` semantics,
 `v1.2.0`, `semantic.foundation.std/0.1` or the C0 pin.
+
+## 13. SHF-3A2 implementation status
+
+Implementation candidate (#2008), qualified on its PR branch; not part of `v1.2.0`.
+
+| Operation | Opcode | Byte | Minimum header |
+|---|---|---|---|
+| `a < b`, and `a > b` as `b < a` | `CmpU32Lt` | `0x24` | `SEMCOD23` (rev 24) |
+| `a <= b`, and `a >= b` as `b <= a` | `CmpU32Le` | `0x25` | `SEMCOD23` |
+| `a + b` | `AddU32` | `0x26` | `SEMCOD23` |
+| `a - b` | `SubU32` | `0x27` | `SEMCOD23` |
+| `a * b` | `MulU32` | `0x28` | `SEMCOD23` |
+| `a / b` | `DivU32` | `0x29` | `SEMCOD23` |
+| `a % b` | `ModU32` | `0x2A` | `SEMCOD23` |
+
+- `HEADER_V23` (`SEMCOD23`, revision 24) inherits the `SEMCOD22` capabilities unchanged; no
+  capability bit is added. The compiler emits it only for programs that use this opcode family;
+  every other artifact keeps the `SEMCOD22` floor. A `SEMCOD22` artifact carrying any of the
+  seven opcodes is rejected by the verifier (`Opcode::minimum_semcode_revision`).
+- `==` / `!=` still lower to the existing `CmpEq` / `CmpNe`.
+- The VM uses checked `u32` operations: `+ - *` outside `0 ..= u32::MAX` trap
+  `ArithmeticOverflow`; `/ %` by zero trap `DivisionByZero`. Comparisons use the `u32` values
+  directly, with no signed or widened reinterpretation.
+- CrystalFold folds a `u32` operation only when its checked result exists; overflow,
+  underflow and zero-divisor cases are left to runtime, so `O0` and `O1` agree on every
+  result and trap.
+- Typecheck admits exactly `u32` with `u32`; mixed families, measured `u32`, unary `-` and
+  unsuffixed (`i32`) literals stay rejected.
+- Qualification: `tests/shf3a_u32_qualification.rs` covers every §9 vector at `O0` and `O1`,
+  plus header selection, the `SEMCOD22` relabel attack, unknown and truncated instructions,
+  frozen opcode bytes, byte-identical recompilation and unchanged `i32`/equality/`match`.
+- The SHF-1 §9.4 lexer probe is not run by this change; it is a separate checkpoint.

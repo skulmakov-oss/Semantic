@@ -154,6 +154,7 @@ Current supported header family:
 - `SEMCOD19`
 - `SEMCOD21`
 - `SEMCOD22`
+- `SEMCOD23`
 
 - `SEMCOD15`
 - `SEMCOD16`
@@ -185,6 +186,7 @@ Observed runtime support in the current toolchain:
 - `SEMCOD19`: epoch `0`, revision `20`
 - `SEMCOD21`: epoch `0`, revision `22`
 - `SEMCOD22`: epoch `0`, revision `23`
+- `SEMCOD23`: epoch `0`, revision `24`
 
 Header responsibilities:
 
@@ -501,6 +503,19 @@ at a callee before execution.
 - is the floor of every artifact the current compiler emits (see
   `## Opcode Vocabulary And Header Identity`)
 
+`SEMCOD23`
+
+- plain-`u32` arithmetic and ordering contract (SHF-3A2, `compiler_u32_v0.md`),
+  revision `24` (`SEMCODE_U32_ARITH_MIN_REVISION`)
+- promoted contract used only when emitted program usage requires the `u32`
+  opcode family (`CmpU32Lt`, `CmpU32Le`, `AddU32`, `SubU32`, `MulU32`,
+  `DivU32`, `ModU32`, bytes `0x24`..`0x2A`); every other artifact keeps the
+  `SEMCOD22` floor
+- keeps `SEMCOD22` and older fixed: the family is not admitted under any older
+  header (`OpcodeRequiresNewerHeader`)
+- inherits the `SEMCOD22` capability set unchanged and adds no capability bit;
+  same `ADT0`, function-envelope, `DBG0`, `OWN0` and `SIG0` layout
+
 ## Opcode Vocabulary And Header Identity
 
 SemCode header identity constrains the executable opcode vocabulary. Every
@@ -522,8 +537,8 @@ capability bit, and since each header's capability set is fixed and
 cumulative per revision, the capability check already transitively enforces
 their minimum header. The opcode-vocabulary/header-identity invariant is
 only independently load-bearing for an opcode family that carries no
-capability bit at all - currently only `QTruth` (see #1732 / FA-05-002 for
-the full audit and rationale). See `docs/spec/verifier.md` for the
+capability bit at all - currently `QTruth` (see #1732 / FA-05-002 for
+the full audit and rationale) and the SHF-3A2 plain-`u32` family (`SEMCOD23`). See `docs/spec/verifier.md` for the
 enforcement mechanism.
 
 The descriptor-dependent ADT opcodes `MAKE_ADT`, `ADT_TAG`, and `ADT_GET`

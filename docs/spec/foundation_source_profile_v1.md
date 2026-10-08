@@ -230,8 +230,10 @@ SSF-05 and SSF-06 rather than by the parser/typechecker.
 | `fx` | Explicit fixed-point literals, equality/order, and the qualified same-family arithmetic contour. Cross-family and measured arithmetic remain excluded. |
 | `unit` | Function/result unit value and `return;`. |
 
-`i32` overflow policy is now frozen (see the table row above). u32 arithmetic
-policy, cross-family conversion, measured numeric forms, UTF-8 indexing,
+`i32` overflow policy is now frozen (see the table row above). Plain `u32`
+arithmetic and ordering are specified by `compiler_u32_v0.md` and implemented by SHF-3A2 as an
+additive surface outside this profile and outside `v1.2.0`; the `u32` row above is unchanged.
+Cross-family conversion, measured numeric forms, UTF-8 indexing,
 collection ordering, and advanced abstraction decisions remain owned by
 SSF-07; this contract does not fill those gaps by implication.
 

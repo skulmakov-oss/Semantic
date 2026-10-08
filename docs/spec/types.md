@@ -272,7 +272,11 @@ Current rules:
   admitted on current `main`
 - division and modulo by zero remain runtime failure edges exercised by the
   current benchmark-negative fixtures
-- `u32` remains equality-only in the current first application-completeness wave
+- plain same-family `u32` binary `+`, `-`, `*`, `/`, `%` and `<`, `<=`, `>`, `>=` are
+  admitted by SHF-3A2 (`compiler_u32_v0.md`): `+ - *` are checked (overflow and underflow
+  trap `ArithmeticOverflow`, unlike wrapping `i32`), `/ %` by zero trap `DivisionByZero`, and
+  ordering is unsigned; measured `u32` arithmetic/ordering and unary `-` on `u32` stay
+  rejected
 - implicit cross-family numeric coercion is not part of the current contract
 
 ## F64
