@@ -1,35 +1,34 @@
 task:
-  id: SHF-3A2-U32-IMPLEMENTATION
-  title: "Implement and qualify deterministic plain-u32 arithmetic and ordering (SHF-3A2)"
-  type: implementation_qualification
-  target: "Implement semantic.compiler.u32/0.1 (#2008) as SHF-3A2 of #1910: seven owner-approved opcodes (0x24-0x2A) gated by a new SEMCOD23 header, checked arithmetic, unsigned ordering, O0/O1 parity."
+  id: SHF-1C-LEXER-PROBE-QUALIFICATION
+  title: "Qualify the compiler-text lexer probe and complete SHF-1"
+  type: qualification
+  target: "Qualify compiler_text_v0.md section 9.4 (#2010) as SHF-1C of #1910: a deliberately tiny Semantic scanner over a fixed sample, run through the verified pipeline at O0/O1. Not a lexer; no production code."
   mode: active
-  supersedes: SHF-3A1-U32-CONTRACT
-  issues: [2008]
+  supersedes: SHF-3A2-U32-IMPLEMENTATION
+  issues: [2010]
   must_remain_open: [1910]
-  base_sha: 0f373890782abccd8dc21bb6d9eedf39d959ffaa
+  base_sha: 50654be8f7b8e5cfcecbbb105881600f63afeca4
   authorized_by: >-
-    Repository owner explicit authorization (2026-10-08, "OWNER TASK - SHF-3A2
-    U32 IMPLEMENTATION & QUALIFICATION"): controlled governance-envelope
-    transition to SHF-3A2-U32-IMPLEMENTATION, R3, including exactly the opcodes
-    CmpU32Lt=0x24, CmpU32Le=0x25, AddU32=0x26, SubU32=0x27, MulU32=0x28,
-    DivU32=0x29, ModU32=0x2A and header SEMCOD23 (rev 24, V22 capabilities).
-    No SHF-3B; no merge without separate owner GO; #1910 stays open.
+    Repository owner explicit task (2026-10-08, "OWNER TASK - SHF-1C
+    COMPILER-TEXT LEXER PROBE QUALIFICATION"): controlled governance-envelope
+    transition to SHF-1C-LEXER-PROBE-QUALIFICATION. Probe fixture, Rust
+    integration-test harness and status docs only; no production crate, no
+    SemCode change; no merge without separate owner GO; #1910 stays open.
 
 intent:
   summary: >-
-    Admit plain-u32 + - * / % and < <= > >= end to end (typecheck, IR, SemCode,
-    verifier, VM, CrystalFold) exactly as frozen by semantic.compiler.u32/0.1,
-    with SEMCOD23 required only by programs that use the new opcodes.
-  decision_record: docs/spec/compiler_u32_v0.md
+    Prove that compiler-text byte scanning works in Semantic itself using the
+    landed SHF-1B text primitives and SHF-3A u32 arithmetic/order; the Rust test
+    only compiles, verifies, runs and compares the final sentinel.
+  decision_record: docs/spec/compiler_text_v0.md
 
 governance_constraints:
-  compiler_implementation: true
-  language_implementation: true
-  runtime_implementation: true
-  verifier_changes: true
-  semcode_changes: true
-  opcode_changes: true
+  compiler_implementation: false
+  language_implementation: false
+  runtime_implementation: false
+  verifier_changes: false
+  semcode_changes: false
+  opcode_changes: false
   builtin_changes: false
   workflow_changes: false
   dependency_changes: false
@@ -40,50 +39,32 @@ governance_constraints:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/sm-front/src/typecheck.rs
-    - crates/sm-ir/src/legacy_lowering.rs
-    - crates/sm-ir/src/passes/crystalfold.rs
-    - crates/sm-format/src/local_format.rs
-    - crates/sm-format/src/lib.rs
-    - crates/sm-verify/src/lib.rs
-    - crates/sm-vm/src/semcode_vm.rs
+    - tests/shf1c_lexer_probe.rs
+    - tests/fixtures/shf1c_lexer_probe/probe.sm
+    - docs/spec/compiler_text_v0.md
     - docs/spec/compiler_u32_v0.md
-    - docs/spec/semcode.md
-    - docs/spec/types.md
-    - docs/spec/source_semantics.md
-    - docs/spec/foundation_source_profile_v1.md
-    - tests/shf3a_u32_qualification.rs
-    - tests/bytecode_compat.rs
-    - tests/ir_opt_boundaries.rs
-    # Owner-authorized narrow extension (2026-10-08): canonical header family
-    # gains HEADER_V23; the relational diagnostic stops claiming "only i32".
-    - tests/public_api_contracts.rs
-    - tests/pcc_text_negative.rs
-    - tests/golden_snapshots/public_api/sm_ir_legacy_lowering.txt
-    - tests/golden_snapshots/public_api/sm_format_local_format.txt
+    - docs/spec/index.md
 
   forbidden_paths:
-    - crates/prom-*/**
-    - crates/smc-cli/**
-    - crates/sm-emit/**
-    - crates/sm-runtime-core/**
-    - examples/**
+    - crates/**
     - src/**
-    - apps/**
-    - reports/**
-    - tools/**
-    - scripts/**
+    - examples/**
     - .github/**
+    - scripts/**
+    - tools/**
+    - reports/**
     - Cargo.toml
     - Cargo.lock
+    - apps/**
     - experiments/**
     - third_party/**
     - ton618_legacy/**
     - prom-ui*
 
 authorization:
+  # Test-harness Rust only (path list above): no production source is writable.
   rust_implementation: true
-  language_implementation: true
+  language_implementation: false
   documentation_addition: false
   documentation_correction: true
   test_addition: true
@@ -96,7 +77,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 0f373890782abccd8dc21bb6d9eedf39d959ffaa
+  base_sha: 50654be8f7b8e5cfcecbbb105881600f63afeca4
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
@@ -106,13 +87,13 @@ constraints:
   no_historical_document_rewrite: true
   one_logical_change_per_pr: true
   evidence_before_claims: true
-  approved_opcodes_only: true
+  no_production_code: true
   unrelated_fa_findings_out_of_scope: true
 
 # Standing cross-authority anchors carried forward from the sealed SSF
 # envelope (checked by tests/ssf_status_drift.rs against the immutable
 # dependency map / decision record). Historical reference only: they grant
-# no SSF authority to SHF-3A2.
+# no SSF authority to SHF-1C.
 ssf_reference:
   active_phase: SSF-12
   issue: 1583

@@ -1,8 +1,7 @@
 # Compiler u32 Arithmetic and Ordering Contract v0
 
-Status: normative semantics frozen (SHF-3A1, #2006); SHF-3A2 (#2008) implementation candidate
-in review — implemented and qualified on its PR branch, not on `main` until that PR merges (§13).
-Not part of `v1.2.0`.
+Status: normative semantics frozen (SHF-3A1, #2006); implemented and qualified on `main` by
+SHF-3A2 (#2008, PR #2009, §13). Not part of `v1.2.0`.
 
 Contract ID: `semantic.compiler.u32/0.1`
 
@@ -22,7 +21,7 @@ lengths (`compiler_text_v0.md`). It covers:
 
 SHF-3A2 implements these operators (§13). This does not change `semantic.foundation.std/0.1`,
 the `foundation_source_profile_v1.md` stable-candidate profile or the published `v1.2.0` contour:
-the surface is additive on current `main` once merged.
+the surface is additive on current `main`.
 
 Notation: `u32::MAX` in this document means the value `4294967295`; it is not source syntax.
 Source vectors spell it `4294967295u32`. `i32::MAX` likewise means `2147483647`.
@@ -162,8 +161,8 @@ produce the same result or the same trap for every vector.
 
 The SHF-1 §9.4 lexer probe (`compiler_text_v0.md`) needs at least `offset + 1u32` and
 `offset < text_len(source)`. SHF-3A implementation therefore unblocks the probe's mechanical
-requirements. This contract does not run the probe; after SHF-3A lands, the probe is a separate
-checkpoint.
+requirements. This contract does not run the probe. SHF-3A has landed, and the formerly blocked
+probe is qualified by SHF-1C (#2010) on its PR branch (`compiler_text_v0.md` §9.4).
 
 ## 11. Implementation strategy (not frozen here)
 
@@ -185,7 +184,7 @@ compiler lexer (SHF-10); any SemCode format or opcode change; any change to `i32
 
 ## 13. SHF-3A2 implementation status
 
-Implementation candidate (#2008), qualified on its PR branch; not part of `v1.2.0`.
+Implemented and qualified on `main` (#2008, PR #2009); not part of `v1.2.0`.
 
 | Operation | Opcode | Byte | Minimum header |
 |---|---|---|---|
@@ -213,4 +212,4 @@ Implementation candidate (#2008), qualified on its PR branch; not part of `v1.2.
 - Qualification: `tests/shf3a_u32_qualification.rs` covers every §9 vector at `O0` and `O1`,
   plus header selection, the `SEMCOD22` relabel attack, unknown and truncated instructions,
   frozen opcode bytes, byte-identical recompilation and unchanged `i32`/equality/`match`.
-- The SHF-1 §9.4 lexer probe is not run by this change; it is a separate checkpoint.
+- The SHF-1 §9.4 lexer probe is not run by this change; it is the separate SHF-1C checkpoint.

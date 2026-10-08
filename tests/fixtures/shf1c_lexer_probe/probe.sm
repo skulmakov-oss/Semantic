@@ -1,0 +1,141 @@
+// SHF-1C (#2010): compiler_text_v0.md section 9.4 lexer probe.
+//
+// A deliberately tiny byte-class scanner. It is NOT a Semantic lexer: no
+// tokens, keywords, grammar, comments, literals or diagnostics. The byte
+// classes below exist only for this probe and do not freeze any future
+// Semantic identifier, whitespace or punctuation grammar.
+//
+// It inspects the sample only through text_len / text_byte_at / text_slice /
+// text_is_empty
+// (SHF-1B) and advances a u32 byte offset with checked u32 arithmetic and
+// unsigned ordering (SHF-3A). No bitwise operations (SHF-3B) are used.
+//
+// Expected for the fixed sample (35 bytes): 4 whitespace bytes, 13 ASCII
+// identifier-class bytes, 9 punctuation bytes, 3 multi-byte scalars
+// (2 + 3 + 4 = 9 bytes); the scan must end exactly at byte offset 35.
+
+fn is_whitespace(b: u32) -> bool {
+    return b == 32u32;
+}
+
+fn in_range(b: u32, lo: u32, hi: u32) -> bool {
+    return lo <= b && b <= hi;
+}
+
+fn is_identifier_byte(b: u32) -> bool {
+    if in_range(b, 65u32, 90u32) {
+        return true;
+    }
+    if in_range(b, 97u32, 122u32) {
+        return true;
+    }
+    if in_range(b, 48u32, 57u32) {
+        return true;
+    }
+    return b == 95u32;
+}
+
+// ( ) { } , ;
+fn is_punctuation(b: u32) -> bool {
+    if b == 40u32 {
+        return true;
+    }
+    if b == 41u32 {
+        return true;
+    }
+    if b == 123u32 {
+        return true;
+    }
+    if b == 125u32 {
+        return true;
+    }
+    if b == 44u32 {
+        return true;
+    }
+    return b == 59u32;
+}
+
+// Width of the UTF-8 scalar starting with leading byte `b` (b >= 128), or 0
+// for a byte that cannot start a scalar (continuation byte or invalid lead).
+fn utf8_scalar_width(b: u32) -> u32 {
+    if in_range(b, 194u32, 223u32) {
+        return 2u32;
+    }
+    if in_range(b, 224u32, 239u32) {
+        return 3u32;
+    }
+    if in_range(b, 240u32, 244u32) {
+        return 4u32;
+    }
+    return 0u32;
+}
+
+fn byte_at(source: text, offset: u32) -> u32 {
+    let b: u32 = match text_byte_at(source, offset) {
+        Option::Some(v) => { v }
+        Option::None => { 256u32 }
+    };
+    // In bounds, text_byte_at must always produce a byte.
+    assert(b < 256u32);
+    return b;
+}
+
+fn is_scalar_slice(source: text, start: u32, end: u32) -> bool {
+    return match text_slice(source, start, end) {
+        Option::Some(s) => { !text_is_empty(s) }
+        Option::None => { false }
+    };
+}
+
+fn probe() -> u32 {
+    let source: text = "fn main() { alpha_1(é,€,🙂); }";
+    let len: u32 = text_len(source);
+    assert(len == 35u32);
+
+    let mut offset: u32 = 0u32;
+    let mut whitespace_count: u32 = 0u32;
+    let mut identifier_byte_count: u32 = 0u32;
+    let mut punctuation_count: u32 = 0u32;
+    let mut unicode_scalar_count: u32 = 0u32;
+    let mut unicode_byte_count: u32 = 0u32;
+
+    while offset < len {
+        let b: u32 = byte_at(source, offset);
+        if b < 128u32 {
+            if is_whitespace(b) {
+                whitespace_count = whitespace_count + 1u32;
+            } else {
+                if is_identifier_byte(b) {
+                    identifier_byte_count = identifier_byte_count + 1u32;
+                } else {
+                    assert(is_punctuation(b));
+                    punctuation_count = punctuation_count + 1u32;
+                }
+            }
+            offset = offset + 1u32;
+        } else {
+            // Must never begin an iteration on a continuation byte.
+            let width: u32 = utf8_scalar_width(b);
+            assert(width > 0u32);
+            let next: u32 = offset + width;
+            assert(next <= len);
+            // The computed start/end are real UTF-8 scalar boundaries.
+            assert(is_scalar_slice(source, offset, next));
+            unicode_scalar_count = unicode_scalar_count + 1u32;
+            unicode_byte_count = unicode_byte_count + width;
+            offset = next;
+        }
+    }
+
+    assert(whitespace_count == 4u32);
+    assert(identifier_byte_count == 13u32);
+    assert(punctuation_count == 9u32);
+    assert(unicode_scalar_count == 3u32);
+    assert(unicode_byte_count == 9u32);
+    assert(offset == len);
+    return 1u32;
+}
+
+fn main() {
+    return;
+}
