@@ -68,6 +68,7 @@ scope:
     - tests/golden_snapshots/public_api/sm_format_local_format.txt
     - tests/golden_snapshots/public_api/sm_front_lib.txt
     - tests/golden_snapshots/public_api/sm_vm_semcode_vm.txt
+    - tests/support/executable_bundle_support.rs
 
   forbidden_paths:
     - crates/prom-*/**
