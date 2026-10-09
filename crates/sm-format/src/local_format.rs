@@ -23,6 +23,7 @@ pub const MAGIC21: [u8; 8] = *b"SEMCOD21";
 pub const MAGIC22: [u8; 8] = *b"SEMCOD22";
 pub const MAGIC23: [u8; 8] = *b"SEMCOD23";
 pub const MAGIC24: [u8; 8] = *b"SEMCOD24";
+pub const MAGIC25: [u8; 8] = *b"SEMCOD25";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -72,6 +73,8 @@ pub const CAP_OWNERSHIP_ADT_BORROW_PATHS: u32 = 1 << 27;
 /// SHF-2A2 (#2015): explicit admission authority for deterministic `Bytes`
 /// value operations (`semantic.compiler.bytes/0.1`).
 pub const CAP_BYTES_VALUES: u32 = 1 << 28;
+/// SHF-2B: pure fixed-width little-endian helpers (`semantic.compiler.endian/0.1`).
+pub const CAP_BYTES_ENDIAN: u32 = 1 << 29;
 
 pub const SIGNATURE_SECTION_TAG: [u8; 4] = *b"SIG0";
 
@@ -552,12 +555,21 @@ pub const HEADER_V24: SemcodeHeaderSpec = SemcodeHeaderSpec {
 /// value operations and callable parameters.
 pub const SEMCODE_BYTES_MIN_REVISION: u16 = HEADER_V24.rev;
 
+/// SHF-2B: admits the six endian builtins without widening older headers.
+/// No opcode, value-family tag or binary section layout changes.
+pub const HEADER_V25: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC25,
+    epoch: 0,
+    rev: 26,
+    capabilities: HEADER_V24.capabilities | CAP_BYTES_ENDIAN,
+};
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
         HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20, HEADER_V21,
-        HEADER_V22, HEADER_V23, HEADER_V24,
+        HEADER_V22, HEADER_V23, HEADER_V24, HEADER_V25,
     ]
 }
 
@@ -1663,7 +1675,7 @@ mod adt_descriptor_tests {
         );
         assert_eq!(SEMCODE_BYTES_MIN_REVISION, 25);
         const { assert!(SEMCODE_BYTES_MIN_REVISION > HEADER_V23.rev) };
-        assert_eq!(supported_headers().last(), Some(&HEADER_V24));
+        assert_eq!(supported_headers().get(24), Some(&HEADER_V24));
         assert_eq!(header_spec_from_magic(&MAGIC24), Some(HEADER_V24));
         assert_eq!(CallableValueFamily::Bytes.byte(), 15);
         assert_eq!(

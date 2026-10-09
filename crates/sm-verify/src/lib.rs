@@ -6,9 +6,9 @@ extern crate std;
 #[cfg(feature = "std")]
 use sm_format::semcode_format::{
     read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
-    SemcodeHeaderSpec, CAP_ARGS_READ, CAP_BYTES_VALUES, CAP_CLOCK_READ, CAP_CLOSURE_VALUES,
-    CAP_DEBUG_SYMBOLS, CAP_EVENT_POST, CAP_F64_MATH, CAP_FS_READ, CAP_FS_WRITE, CAP_FX_MATH,
-    CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_MAP_VALUES, CAP_OWNERSHIP_ADT_BORROW_PATHS,
+    SemcodeHeaderSpec, CAP_ARGS_READ, CAP_BYTES_ENDIAN, CAP_BYTES_VALUES, CAP_CLOCK_READ,
+    CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS, CAP_EVENT_POST, CAP_F64_MATH, CAP_FS_READ, CAP_FS_WRITE,
+    CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_MAP_VALUES, CAP_OWNERSHIP_ADT_BORROW_PATHS,
     CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_OWNERSHIP_SEQUENCE_PATHS, CAP_PATH_INSPECT,
     CAP_PRNG, CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE,
     CAP_STDERR_WRITE, CAP_STDIN_READ_TEXT, CAP_STDOUT, CAP_STDOUT_WRITE, CAP_TEXT_VALUES,
@@ -4350,6 +4350,8 @@ fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
         // SHF-2A2 (#2015): deterministic Bytes value mechanics, gated by CAP_BYTES_VALUES.
         "bytes_empty" | "bytes_len" | "bytes_push" | "bytes_extend" | "bytes_get"
         | "bytes_slice" => Some(CAP_BYTES_VALUES),
+        "write_u16_le" | "write_u32_le" | "write_i32_le" | "read_u16_le" | "read_u32_le"
+        | "read_i32_le" => Some(CAP_BYTES_VALUES | CAP_BYTES_ENDIAN),
         "print" => Some(CAP_STDOUT),
         "args_read" => Some(CAP_ARGS_READ),
         "stdin_read_text" => Some(CAP_STDIN_READ_TEXT),

@@ -23,8 +23,8 @@ const COMPILER_TEXT_BUILTINS: &[&str] = &[
     "text_is_empty",
 ];
 
-/// SHF-2A2 (#2015): the `semantic.compiler.bytes/0.1` builtins
-/// (`docs/spec/compiler_bytes_v0.md`). Their signatures live in `builtin_sig`;
+/// The Bytes and fixed-width endian builtins (`compiler_bytes_v0.md`,
+/// `compiler_endian_v0.md`). Their signatures live in `builtin_sig`;
 /// this list only routes them to exact arity/family diagnostics.
 const COMPILER_BYTES_BUILTINS: &[&str] = &[
     "bytes_empty",
@@ -33,6 +33,12 @@ const COMPILER_BYTES_BUILTINS: &[&str] = &[
     "bytes_extend",
     "bytes_get",
     "bytes_slice",
+    "write_u16_le",
+    "write_u32_le",
+    "write_i32_le",
+    "read_u16_le",
+    "read_u32_le",
+    "read_i32_le",
 ];
 
 fn fx_coercion_gap_message() -> &'static str {
@@ -3502,10 +3508,10 @@ fn infer_expr_type(
                         impl_list,
                     )?;
                     if actual != *expected {
-                        let family = if *expected == Type::Bytes {
-                            "Bytes"
-                        } else {
-                            "u32"
+                        let family = match expected {
+                            Type::Bytes => "Bytes",
+                            Type::I32 => "i32",
+                            _ => "u32",
                         };
                         return Err(FrontendError {
                             detail: None,

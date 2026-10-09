@@ -222,6 +222,10 @@ Current builtin names in the Rust-like surface are:
 - `qtruth_not`
 - `qtruth_impl`
 
+The compiler Bytes and endian builtins are also reserved. Their exact signatures
+are listed under Builtin Math Calls below and in `compiler_bytes_v0.md` and
+`compiler_endian_v0.md`; they use the same ordinary positional call syntax.
+
 Current named-argument call semantics:
 
 - named arguments are currently supported only for ordinary user-defined
@@ -965,6 +969,17 @@ Current builtin signatures:
 - `bytes_extend(Bytes, Bytes) -> Bytes`
 - `bytes_get(Bytes, u32) -> Option(u32)`
 - `bytes_slice(Bytes, u32, u32) -> Option(Bytes)`
+- `write_u16_le(u32) -> Option(Bytes)`
+- `write_u32_le(u32) -> Bytes`
+- `write_i32_le(i32) -> Bytes`
+- `read_u16_le(Bytes, u32) -> Option(u32)`
+- `read_u32_le(Bytes, u32) -> Option(u32)`
+- `read_i32_le(Bytes, u32) -> Option(i32)`
+
+Endian writes construct new fixed-width little-endian buffers; reads use byte
+offsets and return `None` for missing or overflowing ranges. The u16 carrier is
+plain `u32`, with values above 65535 rejected without truncation. See the additive
+versioned contract `semantic.compiler.endian/0.1` in `compiler_endian_v0.md`.
 
 ## Pipeline
 

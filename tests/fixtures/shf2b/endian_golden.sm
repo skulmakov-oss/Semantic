@@ -1,0 +1,47 @@
+fn probe() -> Bytes {
+    let b0 = bytes_empty();
+    let b1 = match bytes_push(b0, 0u32) { Option::Some(v) => { v } Option::None => { b0 } };
+    let b2 = match bytes_push(b1, 1u32) { Option::Some(v) => { v } Option::None => { b1 } };
+    let b3 = match bytes_push(b2, 127u32) { Option::Some(v) => { v } Option::None => { b2 } };
+    let b4 = match bytes_push(b3, 128u32) { Option::Some(v) => { v } Option::None => { b3 } };
+    let b5 = match bytes_push(b4, 255u32) { Option::Some(v) => { v } Option::None => { b4 } };
+    let b6 = match bytes_push(b5, 192u32) { Option::Some(v) => { v } Option::None => { b5 } };
+    let raw = match bytes_push(b6, 175u32) { Option::Some(v) => { v } Option::None => { b6 } };
+    assert(bytes_len(raw) == 7u32);
+    assert(match bytes_get(raw, 0u32) { Option::Some(v) => { v == 0u32 } Option::None => { false } });
+    assert(match bytes_get(raw, 1u32) { Option::Some(v) => { v == 1u32 } Option::None => { false } });
+    assert(match bytes_get(raw, 2u32) { Option::Some(v) => { v == 127u32 } Option::None => { false } });
+    assert(match bytes_get(raw, 3u32) { Option::Some(v) => { v == 128u32 } Option::None => { false } });
+    assert(match bytes_get(raw, 4u32) { Option::Some(v) => { v == 255u32 } Option::None => { false } });
+    assert(match bytes_get(raw, 5u32) { Option::Some(v) => { v == 192u32 } Option::None => { false } });
+    assert(match bytes_get(raw, 6u32) { Option::Some(v) => { v == 175u32 } Option::None => { false } });
+
+    let u16_bytes = match write_u16_le(0x1234u32) {
+        Option::Some(v) => { v }
+        Option::None => { assert(false); bytes_empty() }
+    };
+    let minimum = -2147483647 - 1;
+    let a = bytes_extend(raw, u16_bytes);
+    let b = bytes_extend(a, write_u32_le(0x01020304u32));
+    let c = bytes_extend(b, write_i32_le(-1));
+    let d = bytes_extend(c, write_i32_le(minimum));
+    let result = bytes_extend(d, write_i32_le(2147483647));
+
+    assert(match read_u16_le(result, 7u32) { Option::Some(v) => { v == 0x1234u32 } Option::None => { false } });
+    assert(match read_u32_le(result, 9u32) { Option::Some(v) => { v == 0x01020304u32 } Option::None => { false } });
+    assert(match read_i32_le(result, 13u32) { Option::Some(v) => { v == -1 } Option::None => { false } });
+    assert(match read_i32_le(result, 17u32) { Option::Some(v) => { v == minimum } Option::None => { false } });
+    assert(match read_i32_le(result, 21u32) { Option::Some(v) => { v == 2147483647 } Option::None => { false } });
+    assert(match read_u32_le(result, 22u32) { Option::Some(_) => { false } Option::None => { true } });
+    assert(match read_u16_le(result, 4294967295u32) { Option::Some(_) => { false } Option::None => { true } });
+    assert(match write_u16_le(65536u32) { Option::Some(_) => { false } Option::None => { true } });
+    assert(bytes_len(raw) == 7u32);
+    assert(match bytes_get(raw, 6u32) { Option::Some(v) => { v == 175u32 } Option::None => { false } });
+    return result;
+}
+
+fn main() {
+    let result = probe();
+    assert(bytes_len(result) == 25u32);
+    return;
+}
