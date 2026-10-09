@@ -1,30 +1,33 @@
 task:
-  id: SHF-2A2-COMPLETE-HOLD
-  title: "Record landed SHF-2A2 Bytes implementation while holding subsequent work closed"
-  type: documentation_status_reconciliation
+  id: FOUNDATION-GOVERNANCE-MIGRATION
+  title: "One-Time Foundation Trust-Root Bootstrap Authorization"
+  type: governance_migration
   target: >-
-    Record that semantic.compiler.bytes/0.1 implementation and qualification
-    landed through PR #2017 at 3000a943ccc39f635795d328361e2c7e55df0d01.
-    SHF-2A1 and SHF-2A2 are COMPLETE.
-    SHF-2B and SHF-2C remain NOT STARTED.
+    U0a only: authorize the one-time U0b installation of trusted base-side
+    Harness enforcement for future Semantic Foundation work. This temporary
+    governance envelope does not authorize technical Foundation implementation
+    and must not become the ordinary SHF delivery profile.
   mode: active
-  supersedes: SHF-2A2-BYTES-IMPLEMENTATION
-  issues: []
+  supersedes: SHF-2A2-COMPLETE-HOLD
+  issues: [1910]
   must_remain_open: [1910]
-  base_sha: 3000a943ccc39f635795d328361e2c7e55df0d01
+  base_sha: 35f0c21a900061e76e52a7584fa1aa27230da6c7
   authorized_by: >-
-    Repository owner explicit task (2026-10-09, "OWNER TASK - SHF-2A2 POST-MERGE
-    GOVERNANCE CLOSEOUT"): transition from SHF-2A2-BYTES-IMPLEMENTATION to
-    SHF-2A2-COMPLETE-HOLD on dedicated branch shf2a/postmerge-closeout. Record
-    landed implementation and qualification of semantic.compiler.bytes/0.1;
-    reconcile documentation and status; hold all subsequent work closed.
+    Repository owner correction (2026-10-09, "OWNER CORRECTION — Semantic PR
+    #2020 / Revised Phase U0"): repurpose PR #2020 as U0a only. Authorize
+    U0b solely to install the trusted Harness checker and hosted base-side
+    enforcement, its focused adversarial regression suite, and minimal
+    documentation of that trust model. U0a itself is a one-time bootstrap
+    exception protected by owner authorization, exact one-file scope, exact-head
+    review, existing hosted CI, and a separate OWNER MERGE GO.
 
 intent:
   summary: >-
-    Record landed implementation and qualification of semantic.compiler.bytes/0.1
-    (#2015 / PR #2017), reconcile spec documentation, and hold all subsequent
-    implementation work strictly closed.
-  decision_record: docs/spec/compiler_bytes_v0.md
+    Authorize only the U0b trust-root installation PR after this envelope-only
+    U0a transition. No compiler, language, runtime, verifier, SemCode, or other
+    technical SHF implementation is authorized. No release or tag work is
+    authorized. Issue #1910 must remain open and no merge is authorized here.
+  decision_record: docs/agents/WORKFLOW.md
 
 governance_constraints:
   compiler_implementation: false
@@ -34,7 +37,7 @@ governance_constraints:
   semcode_changes: false
   opcode_changes: false
   builtin_changes: false
-  workflow_changes: false
+  workflow_changes: true
   dependency_changes: false
   release_tag_changes: false
   self_hosting_started: false
@@ -43,21 +46,19 @@ governance_constraints:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - docs/spec/compiler_bytes_v0.md
-    - docs/spec/index.md
+    - scripts/harness-check.ps1
+    - .github/workflows/harness-trusted.yml
+    - tests/harness_scope_enforcement.ps1
+    - docs/agents/WORKFLOW.md
 
   forbidden_paths:
     - crates/**
-    - tests/**
-    - examples/**
-    - src/**
-    - apps/**
-    - reports/**
-    - tools/**
-    - scripts/**
-    - .github/**
     - Cargo.toml
     - Cargo.lock
+    - apps/**
+    - examples/**
+    - reports/**
+    - tools/**
     - experiments/**
     - third_party/**
     - ton618_legacy/**
@@ -66,10 +67,10 @@ scope:
 authorization:
   rust_implementation: false
   language_implementation: false
-  documentation_addition: false
+  documentation_addition: true
   documentation_correction: true
-  test_addition: false
-  workflow_changes: false
+  test_addition: true
+  workflow_changes: true
   dependency_changes: false
   github_issue_lifecycle: false
   git_commit_push_pr: true
@@ -78,7 +79,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 3000a943ccc39f635795d328361e2c7e55df0d01
+  base_sha: 35f0c21a900061e76e52a7584fa1aa27230da6c7
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
@@ -94,7 +95,7 @@ constraints:
 # Standing cross-authority anchors carried forward from the sealed SSF
 # envelope (checked by tests/ssf_status_drift.rs against the immutable
 # dependency map / decision record). Historical reference only: they grant
-# no SSF authority to SHF-2A2.
+# no SSF authority to Foundation tasks.
 ssf_reference:
   active_phase: SSF-12
   issue: 1583
