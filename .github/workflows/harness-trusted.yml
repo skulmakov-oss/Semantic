@@ -2,6 +2,7 @@ name: Trusted Harness
 
 on:
   pull_request_target:
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
@@ -9,6 +10,7 @@ permissions:
 
 jobs:
   trusted-scope:
+    if: github.repository == 'skulmakov-oss/Semantic' && github.event.pull_request.base.repo.full_name == 'skulmakov-oss/Semantic' && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -21,11 +23,19 @@ jobs:
       - name: Inspect candidate objects using the base checker
         shell: pwsh
         env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($env:BASE_REF -cne 'main' -or
+              $env:BASE_REPOSITORY -cne 'skulmakov-oss/Semantic' -or
+              $env:REPOSITORY -cne 'skulmakov-oss/Semantic') {
+            throw 'Noncanonical trusted base repository or branch'
+          }
           if ($env:BASE_SHA -cnotmatch '^[0-9a-f]{40}$' -or
               $env:HEAD_SHA -cnotmatch '^[0-9a-f]{40}$' -or
               $env:PR_NUMBER -cnotmatch '^[1-9][0-9]*$') {

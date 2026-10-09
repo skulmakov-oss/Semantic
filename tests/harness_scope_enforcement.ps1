@@ -2,6 +2,7 @@ param([string]$CheckerPath = (Join-Path $PSScriptRoot '../scripts/harness-check.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $checker = [IO.File]::ReadAllText($CheckerPath).Replace("`r`n", "`n")
+$workflowText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../.github/workflows/harness-trusted.yml')).Replace("`r`n", "`n")
 $gitExecutable = (Get-Command git -CommandType Application | Select-Object -First 1).Source
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('semantic-harness-' + [guid]::NewGuid().ToString('N'))
 $results = [Collections.Generic.List[object]]::new()
@@ -49,7 +50,8 @@ constraints:
 
 function Case([string]$Name, [string]$BaseEnvelope, [hashtable]$Changes, [bool]$Pass,
               [string]$Reason = '', [switch]$WrongBase, [switch]$Repeat,
-              [switch]$Replacement, [string]$UnsafePath) {
+              [switch]$Replacement, [string]$UnsafePath, [switch]$Workflow,
+              [string]$BaseBranch = 'main', [string]$BaseRepository = 'skulmakov-oss/Semantic') {
     if ($CaseNames.Count -and $Name -cnotin $CaseNames) { return }
     $root = Join-Path $sandbox $Name
     [IO.Directory]::CreateDirectory($root) | Out-Null
@@ -60,6 +62,7 @@ function Case([string]$Name, [string]$BaseEnvelope, [hashtable]$Changes, [bool]$
     Git $root @('config', 'core.ignorecase', 'false') | Out-Null
     Write-FixtureFile $root '.harness/current.task.yaml' $BaseEnvelope
     Write-FixtureFile $root 'scripts/harness-check.ps1' $checker
+    Write-FixtureFile $root '.github/workflows/harness-trusted.yml' $workflowText
     Write-FixtureFile $root 'crates/sm-vm/src/lib.rs' 'base'
     Write-FixtureFile $root 'Cargo.toml' 'base'
     Git $root @('add', '.') | Out-Null
@@ -100,8 +103,36 @@ function Case([string]$Name, [string]$BaseEnvelope, [hashtable]$Changes, [bool]$
     }
     if ($Replacement) { Git $root @('replace', $head, $base) | Out-Null }
     if ($WrongBase) { $base = $head }
-    $output = (& pwsh -NoProfile -File $trusted -RepositoryPath $root -BaseSha $base -HeadSha $head 2>&1 | Out-String).Trim()
-    $exitCode = $LASTEXITCODE
+    if ($Workflow) {
+        Git $root @('update-ref', 'refs/pull/1/head', $head) | Out-Null
+        $checkout = Join-Path $sandbox ('_hosted/' + $Name)
+        Git $root @('clone', '-q', '--no-checkout', $root, $checkout) | Out-Null
+        Git $checkout @('config', 'core.autocrlf', 'false') | Out-Null
+        Git $checkout @('checkout', '-q', '--detach', $base) | Out-Null
+        $lines = (Git $root @('show', ($base + ':.github/workflows/harness-trusted.yml'))) -split "`n"
+        $run = [Array]::IndexOf($lines, '        run: |')
+        if ($run -lt 0) { throw 'trusted workflow run block missing' }
+        $program = ($lines[($run + 1)..($lines.Length - 1)] | ForEach-Object { $_.Substring(10) }) -join "`n"
+        Write-FixtureFile $sandbox ('_trusted/' + $Name + '-workflow.ps1') $program
+        $environment = @{ BASE_REF = $BaseBranch; BASE_REPOSITORY = $BaseRepository; REPOSITORY = 'skulmakov-oss/Semantic'; BASE_SHA = $base; HEAD_SHA = $head; PR_NUMBER = '1' }
+        $saved = @{}
+        foreach ($variable in $environment.Keys) {
+            $saved[$variable] = [Environment]::GetEnvironmentVariable($variable)
+            [Environment]::SetEnvironmentVariable($variable, $environment[$variable])
+        }
+        Push-Location $checkout
+        try {
+            $output = (& pwsh -NoProfile -File (Join-Path $sandbox ('_trusted/' + $Name + '-workflow.ps1')) 2>&1 | Out-String).Trim()
+            $exitCode = $LASTEXITCODE
+            if ((Git $checkout @('rev-parse', 'HEAD')) -cne $base) { throw 'workflow checked out candidate' }
+        } finally {
+            Pop-Location
+            foreach ($variable in $saved.Keys) { [Environment]::SetEnvironmentVariable($variable, $saved[$variable]) }
+        }
+    } else {
+        $output = (& pwsh -NoProfile -File $trusted -RepositoryPath $root -BaseSha $base -HeadSha $head 2>&1 | Out-String).Trim()
+        $exitCode = $LASTEXITCODE
+    }
     $actual = $exitCode -eq 0
     if ($actual -ne $Pass -or ($Reason -and $output -notlike "*$Reason*")) {
         throw "$Name expected=$Pass actual=$actual exit=$exitCode reason=$Reason`n$output"
@@ -154,6 +185,10 @@ try {
     Case 'removed-evidence' $migration @{'.harness/current.task.yaml' = $stable.Replace('  evidence_before_claims: true', '')} $false 'evidence_before_claims'
     Case 'unknown-release-authority' $migration @{'.harness/current.task.yaml' = $stable.Replace('authorization:', "authorization:`n  release: true")} $false 'unexpected-authorization'
     Case 'invalid-task-scalar' $migration @{'.harness/current.task.yaml' = $stable.Replace('id: FIXTURE', 'id: true')} $false 'missing-task-field'
+    Case 'hosted-base-fetch' $stable @{'crates/sm-vm/src/lib.rs' = 'allowed'} $true -Workflow
+    Case 'hosted-noncanonical-branch' $stable @{'crates/sm-vm/src/lib.rs' = 'allowed'} $false 'Noncanonical' -Workflow -BaseBranch 'contributor-controlled'
+    Case 'hosted-noncanonical-repository' $stable @{'crates/sm-vm/src/lib.rs' = 'allowed'} $false 'Noncanonical' -Workflow -BaseRepository 'untrusted/fork'
+    if ($results.Count -eq 0) { throw 'no regression cases selected' }
     $results | Format-Table -AutoSize
     Write-Output "[harness-tests] $($results.Count) cases matched expectations"
 } finally {
