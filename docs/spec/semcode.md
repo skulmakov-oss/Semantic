@@ -156,6 +156,7 @@ Current supported header family:
 - `SEMCOD22`
 - `SEMCOD23`
 - `SEMCOD24`
+- `SEMCOD25`
 
 - `SEMCOD15`
 - `SEMCOD16`
@@ -189,6 +190,7 @@ Observed runtime support in the current toolchain:
 - `SEMCOD22`: epoch `0`, revision `23`
 - `SEMCOD23`: epoch `0`, revision `24`
 - `SEMCOD24`: epoch `0`, revision `25`
+- `SEMCOD25`: epoch `0`, revision `26`
 
 Header responsibilities:
 
@@ -528,6 +530,21 @@ at a callee before execution.
 - adds capability bit `CAP_BYTES_VALUES` (`1 << 28`); inherits `SEMCOD23` capabilities;
   same `ADT0`, function-envelope, `DBG0`, `OWN0` and `SIG0` layout
 
+`SEMCOD25`
+
+- pure fixed-width little-endian integer helpers (SHF-2B U1,
+  `semantic.compiler.endian/0.1`, `compiler_endian_v0.md`), revision `26`
+- admits ordinary `Call` targets `write_u16_le`, `write_u32_le`, `write_i32_le`,
+  `read_u16_le`, `read_u32_le`, `read_i32_le`; adds no opcode or value-family tag
+- inherits `HEADER_V24` and adds only `CAP_BYTES_ENDIAN` (`1 << 29`); calls require
+  both that capability and `CAP_BYTES_VALUES`
+- emitted only for endian builtin usage; core Bytes-only artifacts retain
+  `SEMCOD24` and other artifacts retain their existing header floor
+- keeps all older headers and bits fixed: an endian call relabeled as `SEMCOD24`
+  or older rejects with `CapabilityViolation` before a verified token is issued
+- preserves the `ADT0`, function-envelope, `DBG0`, `OWN0` and `SIG0` layouts;
+  grants no filesystem effect or compiler-owned SemCode construction policy
+
 ## Opcode Vocabulary And Header Identity
 
 SemCode header identity constrains the executable opcode vocabulary. Every
@@ -604,6 +621,7 @@ Current canonical capability families:
 - `CAP_MAP_VALUES`
 - `CAP_DEBUG_SYMBOLS`
 - `CAP_BYTES_VALUES`
+- `CAP_BYTES_ENDIAN`
 
 Contract rule:
 

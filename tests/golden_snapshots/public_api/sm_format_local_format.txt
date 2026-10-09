@@ -24,6 +24,7 @@ pub const MAGIC21: [u8; 8] = *b"SEMCOD21";
 pub const MAGIC22: [u8; 8] = *b"SEMCOD22";
 pub const MAGIC23: [u8; 8] = *b"SEMCOD23";
 pub const MAGIC24: [u8; 8] = *b"SEMCOD24";
+pub const MAGIC25: [u8; 8] = *b"SEMCOD25";
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
 pub const CAP_GATE_SURFACE: u32 = 1 << 2;
@@ -53,6 +54,7 @@ pub const CAP_TIME_DURATION: u32 = 1 << 25;
 pub const CAP_OWNERSHIP_SEQUENCE_PATHS: u32 = 1 << 26;
 pub const CAP_OWNERSHIP_ADT_BORROW_PATHS: u32 = 1 << 27;
 pub const CAP_BYTES_VALUES: u32 = 1 << 28;
+pub const CAP_BYTES_ENDIAN: u32 = 1 << 29;
 pub const SIGNATURE_SECTION_TAG: [u8; 4] = *b"SIG0";
 pub const ADT_DESCRIPTOR_SECTION_TAG: [u8; 4] = *b"ADT0";
 pub const OWNERSHIP_SECTION_TAG: [u8; 4] = *b"OWN0";
@@ -104,6 +106,7 @@ pub const HEADER_V23: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC23, ep
 pub const SEMCODE_U32_ARITH_MIN_REVISION: u16 = HEADER_V23.rev;
 pub const HEADER_V24: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC24, epoch: 0, rev: 25, capabilities: HEADER_V23.capabilities | CAP_BYTES_VALUES, };
 pub const SEMCODE_BYTES_MIN_REVISION: u16 = HEADER_V24.rev;
+pub const HEADER_V25: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC25, epoch: 0, rev: 26, capabilities: HEADER_V24.capabilities | CAP_BYTES_ENDIAN, };
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
 pub fn header_spec_from_magic(magic: &[u8; 8]) -> Option<SemcodeHeaderSpec> {
 #[repr(u8)]

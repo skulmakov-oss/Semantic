@@ -103,6 +103,18 @@ Current ownership-specific structural checks for ownership transport include:
   unconditionally, before and independent of capability accounting (#1718)
 - header/capability consistency for ownership transport
 
+## Endian Builtin Admission (SHF-2B)
+
+The six fixed-width little-endian calls in `compiler_endian_v0.md` require
+`CAP_BYTES_VALUES | CAP_BYTES_ENDIAN`. Only `SEMCOD25` (revision 26) and later
+support that envelope; older headers remain fixed. Even a bare endian call with
+no Bytes parameter or other Bytes instruction rejects with `CapabilityViolation`
+under `SEMCOD24` or older. This check precedes issuing `VerifiedSemCode`.
+
+No new opcode or structural section is introduced. As with other builtins,
+source arguments are checked by the frontend and runtime arity/value families
+are checked by the VM; builtin calls are not internal `SIG0` call targets.
+
 ## Canonical Operand Value Domains
 
 Operand shape validity is not only "a byte is present" — for fields with a

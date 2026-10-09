@@ -3737,6 +3737,8 @@ fn try_eval_builtin_call<'a, H: VmHostBridge>(
         | "text_find" | "text_is_empty" => eval_compiler_text_builtin(name, args)?,
         "bytes_empty" | "bytes_len" | "bytes_push" | "bytes_extend" | "bytes_get"
         | "bytes_slice" => eval_compiler_bytes_builtin(name, args)?,
+        "write_u16_le" | "write_u32_le" | "write_i32_le" | "read_u16_le" | "read_u32_le"
+        | "read_i32_le" => eval_compiler_endian_builtin(name, args)?,
         "print" => {
             if args.len() != 1 {
                 return Err(RuntimeError::TypeMismatchRuntime(format!(
@@ -3931,6 +3933,59 @@ fn eval_compiler_bytes_builtin(name: &str, args: &[Value]) -> Result<Value, Runt
         }
         _ => Err(RuntimeError::UnknownFunction(name.to_string())),
     }
+}
+
+/// Only fixed-width integer mechanics; no compiler-owned serialization policy.
+fn eval_compiler_endian_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    match name {
+        "write_u16_le" => {
+            expect_builtin_arity(name, args, 1)?;
+            let value = compiler_u32_arg(name, args, 0)?;
+            Ok(option_value(
+                u16::try_from(value)
+                    .ok()
+                    .map(|value| Value::Bytes(value.to_le_bytes().to_vec())),
+            ))
+        }
+        "write_u32_le" => {
+            expect_builtin_arity(name, args, 1)?;
+            let value = compiler_u32_arg(name, args, 0)?;
+            Ok(Value::Bytes(value.to_le_bytes().to_vec()))
+        }
+        "write_i32_le" => {
+            expect_builtin_arity(name, args, 1)?;
+            let Value::I32(value) = args[0] else {
+                return Err(RuntimeError::TypeMismatchRuntime(format!(
+                    "builtin '{name}' argument 1 expects i32, got {:?}",
+                    args[0]
+                )));
+            };
+            Ok(Value::Bytes(value.to_le_bytes().to_vec()))
+        }
+        "read_u16_le" | "read_u32_le" | "read_i32_le" => {
+            expect_builtin_arity(name, args, 2)?;
+            let bytes = compiler_bytes_arg(name, args, 0)?;
+            let offset = compiler_u32_arg(name, args, 1)?;
+            let value = match name {
+                "read_u16_le" => read_compiler_octets(bytes, offset)
+                    .map(|octets| Value::U32(u32::from(u16::from_le_bytes(octets)))),
+                "read_u32_le" => read_compiler_octets(bytes, offset)
+                    .map(|octets| Value::U32(u32::from_le_bytes(octets))),
+                _ => read_compiler_octets(bytes, offset)
+                    .map(|octets| Value::I32(i32::from_le_bytes(octets))),
+            };
+            Ok(option_value(value))
+        }
+        _ => Err(RuntimeError::UnknownFunction(name.to_string())),
+    }
+}
+
+fn read_compiler_octets<const WIDTH: usize>(bytes: &[u8], offset: u32) -> Option<[u8; WIDTH]> {
+    // Check the source offset domain before converting either endpoint to a host index.
+    let end = offset.checked_add(u32::try_from(WIDTH).ok()?)?;
+    let start = usize::try_from(offset).ok()?;
+    let end = usize::try_from(end).ok()?;
+    bytes.get(start..end)?.try_into().ok()
 }
 
 fn compiler_bytes_arg<'a>(

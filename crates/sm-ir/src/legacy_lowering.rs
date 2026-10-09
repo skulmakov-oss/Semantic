@@ -5,7 +5,7 @@ use crate::semcode_format::{
     AdtDescriptorTable, CallableValueFamily, Opcode, ACTIVATION_MODE_FRAME_ENTRY,
     ACTIVATION_MODE_STORE_VAR_SITE, MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14,
     MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC20, MAGIC21, MAGIC22, MAGIC23, MAGIC24,
-    MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
+    MAGIC25, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
     OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
     OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG, SEMCODE_ADT_DESCRIPTOR_MIN_REVISION,
@@ -1830,11 +1830,12 @@ fn emit_semcode(
     // which is purely additive over V20 (same OWN0 layout, same execution-site
     // grammar - see `HEADER_V21`'s doc comment) and therefore satisfies both
     // requirements at once.
-    // SHF-2A2 (#2015): the deterministic Bytes value family and its core
-    // operations require HEADER_V24 (rev 25, CAP_BYTES_VALUES), the highest
-    // revision in this chain. Programs without Bytes values keep the lower
-    // headers below - the new header is never emitted gratuitously.
-    if has_v24_bytes_instr(funcs) {
+    // Endian calls need their own admission authority; core Bytes programs
+    // retain V24 and every other program retains its previous header floor.
+    if has_v25_endian_instr(funcs) {
+        opcode_driven_magic = MAGIC25;
+        opcode_driven_require_ownership_section = true;
+    } else if has_v24_bytes_instr(funcs) {
         opcode_driven_magic = MAGIC24;
         opcode_driven_require_ownership_section = true;
     } else if has_v23_u32_arith_instr(funcs) {
@@ -2909,6 +2910,23 @@ fn has_v7_clock_read_instr(funcs: &[IrFunction]) -> bool {
         f.instrs
             .iter()
             .any(|i| matches!(i, IrInstr::ClockRead { .. }))
+    })
+}
+
+fn has_v25_endian_instr(funcs: &[IrFunction]) -> bool {
+    let internal_names = funcs
+        .iter()
+        .map(|function| function.name.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    funcs.iter().any(|f| {
+        f.instrs.iter().any(|i| {
+            matches!(i,
+                IrInstr::Call { name, .. } if matches!(name.as_str(),
+                    "write_u16_le" | "write_u32_le" | "write_i32_le"
+                    | "read_u16_le" | "read_u32_le" | "read_i32_le"
+                ) && !internal_names.contains(name.as_str())
+            )
+        })
     })
 }
 

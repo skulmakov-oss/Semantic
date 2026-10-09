@@ -208,6 +208,10 @@ This contract strictly excludes the following, which are explicitly deferred to 
 1. **SHF-2B Endian helpers:**
    - Multi-byte encoding/decoding (`u16`, `u32`, `u64`, `i32`) in little-endian or big-endian order
      (e.g. `bytes_push_u32_le`, `bytes_get_u32_le`) are deferred to SHF-2B.
+   - The separate additive `semantic.compiler.endian/0.1` contract in
+     `compiler_endian_v0.md` defines SHF-2B U1's six fixed-width little-endian
+     u16/u32/i32 helpers. It does not alter the six core operations frozen here;
+     u64 and big-endian helpers remain deferred.
 2. **SHF-2C Binary filesystem I/O:**
    - Reading binary files into `Bytes` or writing `Bytes` directly to disk (`fs.read_bytes`,
      `fs.write_bytes`) are deferred to SHF-2C.
