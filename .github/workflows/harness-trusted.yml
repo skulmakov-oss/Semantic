@@ -1,0 +1,57 @@
+name: Trusted Harness
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  trusted-scope:
+    if: github.repository == 'skulmakov-oss/Semantic' && github.event.pull_request.base.repo.full_name == 'skulmakov-oss/Semantic' && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout immutable trusted base
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Inspect candidate objects using the base checker
+        shell: pwsh
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:BASE_REF -cne 'main' -or
+              $env:BASE_REPOSITORY -cne 'skulmakov-oss/Semantic' -or
+              $env:REPOSITORY -cne 'skulmakov-oss/Semantic') {
+            throw 'Noncanonical trusted base repository or branch'
+          }
+          if ($env:BASE_SHA -cnotmatch '^[0-9a-f]{40}$' -or
+              $env:HEAD_SHA -cnotmatch '^[0-9a-f]{40}$' -or
+              $env:PR_NUMBER -cnotmatch '^[1-9][0-9]*$') {
+            throw 'Invalid immutable PR identity'
+          }
+          $checkedOutSha = git --no-replace-objects rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $checkedOutSha -cne $env:BASE_SHA) {
+            throw 'Checkout does not match event base SHA'
+          }
+          # The base repository exposes this ref for same-repo and fork PRs.
+          # Fetch objects only: never checkout, source, or execute the PR head.
+          git --no-replace-objects fetch --no-tags --no-recurse-submodules origin "refs/pull/$($env:PR_NUMBER)/head"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot retrieve PR candidate objects' }
+          $fetchedSha = git --no-replace-objects rev-parse FETCH_HEAD
+          if ($LASTEXITCODE -ne 0 -or $fetchedSha -cne $env:HEAD_SHA) {
+            throw 'PR head moved or fetched objects do not match event head SHA'
+          }
+          & ./scripts/harness-check.ps1 -BaseSha $env:BASE_SHA -HeadSha $env:HEAD_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
