@@ -155,6 +155,18 @@ try {
     Case 'N5' $stable @{'scripts/harness-check.ps1' = 'exit 0'; 'crates/sm-vm/src/lib.rs' = 'allowed'} $false 'checker-immutable'
     Case 'N6' $migration @{'.harness/current.task.yaml' = $stable; 'crates/sm-vm/src/lib.rs' = 'payload'} $false 'transition-envelope-only'
     Case 'P2' $migration @{'.harness/current.task.yaml' = $stable} $true -Repeat
+    $stableTests = Envelope $false @('tests/**') @('tests/harness_scope_enforcement.ps1')
+    Case 'P3' $migration @{'.harness/current.task.yaml' = $stableTests} $true -Repeat
+    Case 'N10' $migration @{'.harness/current.task.yaml' = (Envelope $false @('tests/**'))} $false 'control-plane-authority'
+    Case 'N11' $stableTests @{'tests/harness_scope_enforcement.ps1' = 'candidate data'} $false 'forbidden-path'
+    Case 'P4' $stableTests @{'tests/some_foundation_test.rs' = 'ordinary test'} $true
+    Case 'docs-carve-out' $migration @{'.harness/current.task.yaml' = (Envelope $false @('docs/**') @('docs/agents/WORKFLOW.md'))} $true
+    Case 'docs-unprotected' $migration @{'.harness/current.task.yaml' = (Envelope $false @('docs/**'))} $false 'control-plane-authority'
+    Case 'workflow-carve-out' $migration @{'.harness/current.task.yaml' = (Envelope $false @('.github/**', 'tests/**') @('.github/**', 'tests/harness_scope_enforcement.ps1'))} $true
+    Case 'workflow-root-only-denial' $migration @{'.harness/current.task.yaml' = (Envelope $false @('.github/**') @('.github'))} $false 'control-plane-authority'
+    Case 'workflow-child-only-denial' $migration @{'.harness/current.task.yaml' = (Envelope $false @('.github/**') @('.github/workflows/**'))} $false 'control-plane-authority'
+    Case 'tests-carve-out-case' $migration @{'.harness/current.task.yaml' = (Envelope $false @('tests/**') @('tests/HARNESS_scope_enforcement.ps1'))} $false 'control-plane-authority'
+    Case 'tests-carve-out-adjacent' $migration @{'.harness/current.task.yaml' = (Envelope $false @('tests/**') @('tests/harness_scope_enforcement.ps1.bak'))} $false 'control-plane-authority'
     Case 'N7' $migration @{'.harness/current.task.yaml' = $stable.Replace('merge_after_review_and_checks: false', 'merge_after_review_and_checks: true')} $false 'merge_after_review_and_checks'
     Case 'N8' $migration @{'.harness/current.task.yaml' = $stable.Replace('no_release_or_tag: true', 'no_release_or_tag: false')} $false 'no_release_or_tag'
     foreach ($path in @('.github-malicious/x', 'scripts/harness-check.ps1.bak', 'Cargo.toml.old')) {
@@ -171,7 +183,7 @@ try {
     Case 'deny-precedence' (Envelope $false @('crates/**') @('crates/prom-*/**')) @{'crates/prom-foo/src/lib.rs' = 'deny'} $false 'forbidden-path'
     Case 'duplicates' (Envelope $false @('crates/sm-vm/**', 'crates/sm-vm/**')) @{'crates/sm-vm/src/lib.rs' = 'allow'} $true
     Case 'transition-control-plane' $migration @{'.harness/current.task.yaml' = (Envelope $false @('scripts/**'))} $false 'control-plane-authority'
-    Case 'transition-conflict' $migration @{'.harness/current.task.yaml' = (Envelope $false @('crates/**') @('crates/prom-*/**'))} $false 'contradictory-scope'
+    Case 'transition-deny-precedence' $migration @{'.harness/current.task.yaml' = (Envelope $false @('crates/**') @('crates/prom-*/**'))} $true
     Case 'transition-duplicate-key' $migration @{'.harness/current.task.yaml' = $stable.Replace('  no_release_or_tag: true', "  no_release_or_tag: true`n  no_release_or_tag: false")} $false 'duplicate-key'
     Case 'wrong-base-provenance' $stable @{'scripts/harness-check.ps1' = 'exit 0'} $false 'checker-provenance' -WrongBase
     Case 'literal-shell-path' $stable @{'crates/sm-vm/src/$(throw evil).rs' = 'data'} $true

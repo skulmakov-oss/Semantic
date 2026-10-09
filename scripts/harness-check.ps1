@@ -104,8 +104,7 @@ function Matches-Path([string]$Path, $Patterns) {
     return $false
 }
 
-# Exact patterns are decidable; overlapping wildcard prefixes are rejected
-# conservatively rather than claiming disjoint authority on ambiguous globs.
+# Exact patterns are decidable; wildcard prefix overlap is conservative.
 function May-Overlap([string]$Left, [string]$Right) {
     if (-not $Left.Contains('*')) { return Matches-Path $Left @($Right) }
     if (-not $Right.Contains('*')) { return Matches-Path $Right @($Left) }
@@ -132,14 +131,20 @@ function Validate-Transition($Base, $Candidate) {
         if (-not $Base['authorization'].ContainsKey($key) -or $Candidate['authorization'][$key] -isnot [bool]) { throw "unexpected-authorization key=$key" }
     }
     foreach ($allow in $Candidate['scope']['allowed_paths']) {
-        foreach ($deny in $Candidate['scope']['forbidden_paths']) {
-            if (May-Overlap $allow $deny) { throw "contradictory-scope allow=$allow deny=$deny" }
-        }
         if ($Candidate['task']['type'] -ceq 'governance_migration') {
             if ($allow -cnotin $Base['scope']['allowed_paths'] -or -not (Matches-Path $allow $controlPlane)) { throw "governance-class-expansion pattern=$allow" }
         } else {
             foreach ($protected in $controlPlane) {
-                if (May-Overlap $allow $protected) { throw "control-plane-authority pattern=$allow protected=$protected" }
+                if (-not (May-Overlap $allow $protected)) { continue }
+                $denied = $false
+                if ($protected.EndsWith('/**', [StringComparison]::Ordinal)) {
+                    # A root-only or child-only denial cannot protect a whole subtree.
+                    $root = $protected.Substring(0, $protected.Length - 3)
+                    foreach ($deny in $Candidate['scope']['forbidden_paths']) {
+                        if ($deny.EndsWith('/**', [StringComparison]::Ordinal) -and (Matches-Path $root @($deny))) { $denied = $true; break }
+                    }
+                } else { $denied = Matches-Path $protected $Candidate['scope']['forbidden_paths'] }
+                if (-not $denied) { throw "control-plane-authority pattern=$allow protected=$protected" }
             }
         }
     }
