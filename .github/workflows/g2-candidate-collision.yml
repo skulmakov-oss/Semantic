@@ -1,0 +1,16 @@
+name: G2 candidate check-name collision diagnostic
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions: {}
+jobs:
+  trusted-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Publish candidate-controlled same-name diagnostic
+        shell: bash
+        run: |
+          sleep 30
+          echo 'G2 candidate-controlled SUCCESS diagnostic; DO NOT MERGE'
