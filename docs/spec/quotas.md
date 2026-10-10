@@ -179,6 +179,10 @@ time-safety measure. Larger maxima require, at minimum:
 `Calls` counts every admitted non-root call over the whole execution, not
 the stack depth.
 
+The figures below are informative, not normative. They come from the SHF-R
+R0 measurements of MiniLang workloads on Windows x64 at base
+`327c0b6d9b70c73d0f674d0499e7b5803856e07e` (#2030 evidence).
+
 - The SHF-R measurements on MiniLang workloads issue `Call` opcodes at about
   6.5-7 % of steps. Its lexer makes about 9 calls per source byte.
 - Under the trusted-compiler envelope with `--max-steps 200000000`, the

@@ -4730,7 +4730,6 @@ fn run_application(
     metrics: &mut RunMetricsRecorder,
 ) -> Result<(), String> {
     let input = options.input.as_str();
-    reject_leading_unknown_flag(input)?;
     let input_path = Path::new(input);
     let root = if input_path.is_dir() {
         resolve_project_root_check_entry(input_path)?
@@ -5029,6 +5028,9 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
         return Err(application_run_usage());
     }
     let input = args[0].clone();
+    // An option in the input position is an argument error: report it
+    // before any metrics recorder exists (SHF-R).
+    reject_leading_unknown_flag(&input)?;
     let mut profile = None;
     let mut root = None;
     let mut duration_millis = None;

@@ -341,10 +341,14 @@ this order:
    `--max-frames must be between 1 and 1024`
 8. an override without `--envelope trusted-compiler`:
    `--max-steps requires --envelope trusted-compiler` (likewise `--max-frames`)
-9. the pre-existing `--profile`, `--root` and `--duration-ms` rules
+9. the pre-existing rules: an option in the input position, an unknown
+   `--profile` value and an invalid `--duration-ms` value; then a missing
+   `--profile` or `--root`
 
-Rules 1-6 are applied while scanning options in command-line order; rules
-7-9 after the scan.
+Rules 1-6, and the value errors of rule 9, are applied while scanning
+options in command-line order, so the first offending option wins. Rules 7
+and 8 follow the scan, and a missing `--profile` or `--root` is reported
+last.
 
 ### `--metrics json`
 

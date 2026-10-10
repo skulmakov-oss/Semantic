@@ -126,9 +126,12 @@ fn q01_default_run_emits_no_metrics_and_keeps_verified_local() {
         "busy.sm",
         "fn main() {\n    let mut i: i32 = 0;\n    while i < 100000 { i = i + 1; }\n    return;\n}\n",
     );
-    let output = smc_run(&dir, &busy, "pure", &[], &[]);
-    assert_exit(&output, 1);
-    assert!(stderr_of(&output).contains("quota exceeded: Steps limit=100000 used=100001"));
+    // Q-03: the trusted-compiler envelope without overrides behaves the same
+    for extra in [&[][..], &["--envelope", "trusted-compiler"][..]] {
+        let output = smc_run(&dir, &busy, "pure", extra, &[]);
+        assert_exit(&output, 1);
+        assert!(stderr_of(&output).contains("quota exceeded: Steps limit=100000 used=100001"));
+    }
 }
 
 #[test]
@@ -497,17 +500,36 @@ fn q22_verifier_rejection_through_the_register_budget_has_null_counters() {
         "regs.sm",
         &format!("fn main() {{\n    let v: i32 = {expression};\n    return;\n}}\n"),
     );
-    let output = smc_run(&dir, &program, "pure", &["--metrics", "json"], &[]);
-    assert_exit(&output, 1);
-    let m = metrics(&output);
-    assert_eq!(m["outcome"], "verify_rejected");
-    assert_eq!(m["phase_reached"], "verify");
-    assert_eq!(m["execution_started"], false);
-    assert!(m["counters"].is_null());
-    assert!(m["error"]
-        .as_str()
-        .unwrap()
-        .contains("register budget of 4096"));
+    // Q-16: admission is identical under every envelope, because the
+    // admission-relevant quota fields are never overridden.
+    let mut errors = Vec::new();
+    for extra in [
+        &["--metrics", "json"][..],
+        &[
+            "--envelope",
+            "trusted-compiler",
+            "--max-steps",
+            "200000000",
+            "--max-frames",
+            "1024",
+            "--metrics",
+            "json",
+        ][..],
+    ] {
+        let output = smc_run(&dir, &program, "pure", extra, &[]);
+        assert_exit(&output, 1);
+        let m = metrics(&output);
+        assert_eq!(m["outcome"], "verify_rejected");
+        assert_eq!(m["phase_reached"], "verify");
+        assert_eq!(m["execution_started"], false);
+        assert!(m["counters"].is_null());
+        assert!(m["error"]
+            .as_str()
+            .unwrap()
+            .contains("register budget of 4096"));
+        errors.push(m["error"].clone());
+    }
+    assert_eq!(errors[0], errors[1]);
 }
 
 #[test]
@@ -746,4 +768,18 @@ fn q28_smc_test_output_is_unchanged() {
         String::from_utf8_lossy(&output.stdout),
         "ok tests/one.sm\ntest result: ok. 1 passed\n"
     );
+}
+
+#[test]
+fn option_in_the_input_position_is_an_argument_error_without_metrics() {
+    let dir = mk_temp_dir();
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .args(["run", "--foo", "--profile", "pure", "--root"])
+        .arg(&dir)
+        .args(["--metrics", "json"])
+        .output()
+        .expect("run smc");
+    assert_exit(&output, 1);
+    assert!(stderr_of(&output).contains("unknown flag '--foo'"));
+    assert!(metrics_lines(&output).is_empty());
 }
