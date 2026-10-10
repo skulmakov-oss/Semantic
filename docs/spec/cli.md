@@ -68,6 +68,7 @@ Current accepted usage forms are:
 - `smc verify <input.smc|project-root>`
 - `smc test <project-root>`
 - `smc run <input.sm|project-root>`
+- `smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--metrics json] [-- <application-args...>]`
 - `smc run-smc <input.smc>`
 - `smc disasm <input.smc>`
 - `smc 7hell <input.sm> [--json]`
@@ -288,6 +289,117 @@ Public rule:
 
 - persisted `.smc` execution must not bypass verification
 - `smc run` is a source-execution workflow command, not the persisted artifact admission path
+
+## Application Run Execution Envelope And Metrics
+
+Status: SHF-R (#2030). Applies only to the application-mode form
+`smc run <input> --profile ... --root ...`. The one-argument
+`smc run <input>` and `smc run-smc <input.smc>` controlled-observation forms
+are unchanged and do not accept these options.
+
+### Envelope
+
+- `--envelope <verified-local|trusted-compiler>` selects the execution
+  envelope; the default is `verified-local`.
+- Both envelopes execute under `ExecutionContext::VerifiedLocal`.
+- `verified-local`, and `trusted-compiler` without overrides, use exactly
+  `RuntimeQuotas::verified_local()`.
+- `--max-steps <N>` (1..=200000000) and `--max-frames <N>` (1..=1024) are
+  accepted only together with `--envelope trusted-compiler`.
+  `--max-frames` also sets `max_stack_depth`.
+- `max_calls` (16384), `max_effect_calls`, `max_registers`,
+  `max_symbol_table` and `max_debug_symbols_per_function` are never changed
+  by the envelope. There is no `--max-calls` option.
+- The capability manifest is selected by `--profile` alone; the envelope
+  never grants capabilities.
+- One `ExecutionConfig` is constructed after argument validation and is
+  used unchanged for verifier admission (`verify_semcode_token_with_quotas`,
+  with the default `VerificationLimits` profile), for execution and for
+  metrics.
+- `trusted-compiler` limits are experimental contract candidates for
+  explicitly selected local execution. They provide no aggregate heap bound
+  and no wall-clock bound; see `docs/spec/quotas.md`.
+
+### Argument validation
+
+Validation happens before source resolution or compilation. A failure
+exits non-zero, emits no metrics line, and reports the first failing rule in
+this order:
+
+1. unknown option: `unknown run option '<option>'` followed by usage
+2. option without a value: usage
+3. repeated `--envelope`, `--max-steps`, `--max-frames` or `--metrics`:
+   `duplicate run option '<option>'`
+4. unknown envelope:
+   `unknown execution envelope '<value>'; expected verified-local or trusted-compiler`
+5. unknown metrics format: `unsupported metrics format '<value>'; expected json`
+6. a value that is not plain ASCII decimal digits (empty, sign, whitespace,
+   prefix, exponent or non-ASCII digits):
+   `--max-steps must be a decimal integer` (likewise `--max-frames`)
+7. zero, a value above the maximum, or a value that overflows `u64`:
+   `--max-steps must be between 1 and 200000000`,
+   `--max-frames must be between 1 and 1024`
+8. an override without `--envelope trusted-compiler`:
+   `--max-steps requires --envelope trusted-compiler` (likewise `--max-frames`)
+9. the pre-existing `--profile`, `--root` and `--duration-ms` rules
+
+Rules 1-6 are applied while scanning options in command-line order; rules
+7-9 after the scan.
+
+### `--metrics json`
+
+`--metrics json` is independent of `--envelope`. After argument validation
+succeeds, exactly one line is written to stderr for every outcome, after the
+application audit records and before the error text of a failing command.
+stdout carries only application output. The exit status is unchanged by the
+option.
+
+The line is a JSON object serialized with `serde_json`:
+
+| Field | Meaning |
+|---|---|
+| `schema` | `"semantic.run.metrics/0.1"` |
+| `envelope` | `"verified-local"` or `"trusted-compiler"` |
+| `effective_quotas` | `max_steps`, `max_calls`, `max_frames`, `max_stack_depth`, `max_effect_calls` of the one effective configuration |
+| `phase_reached` | `"compile"` (source resolution and compilation), `"verify"`, `"entry"`, `"host_init"` or `"execute"` |
+| `execution_started` | `true` exactly when a VM was constructed for the run |
+| `outcome` | see below |
+| `counters` | `null` when execution never started; otherwise `steps`, `calls`, `peak_frames`, `effect_calls` read from the VM at termination |
+| `quota_exceeded` | `{kind, limit, used}` exactly as `RuntimeError::QuotaExceeded`, else `null` |
+| `error` | the command's error text, else `null` |
+| `nondeterministic` | `{wall_ms}`; excluded from every determinism comparison |
+
+Outcomes:
+
+| `outcome` | Condition | `counters` | Exit |
+|---|---|---|---|
+| `ok` | execution succeeded | measured | 0 |
+| `compile_error` | source resolution or compilation failed | `null` | non-zero |
+| `verify_rejected` | verifier admission rejected the artifact | `null` | non-zero |
+| `entry_missing` | `main` not found in the admitted artifact | `null` | non-zero |
+| `host_init_error` | the application host could not be created (for example an invalid `--root`) | `null` | non-zero |
+| `quota_exceeded` | `RuntimeError::QuotaExceeded` (`Steps`, `Calls`, `Frames`, `Registers`, `EffectCalls`) | measured | non-zero |
+| `capability_denied` | `RuntimeError::CapabilityDenied` | measured | non-zero |
+| `trap` | `RuntimeError::Trap` (for example a failed `assert`) | measured | non-zero |
+| `runtime_error` | any other runtime failure, including `StackOverflow` (the documented `StackDepth` remap) and host ABI errors | measured | non-zero |
+
+Counter meaning:
+
+- `steps` and `calls` are the `Steps` and `Calls` charge counters (#1759).
+  On `quota_exceeded`, `used` reports the failing attempted charge and
+  `counters` report the committed value.
+- `peak_frames` is the call-stack high-water mark including the root frame.
+- `effect_calls` is application-host effect calls plus VM-charged
+  gate/state effect calls.
+- A zero count is never substituted for a phase that did not run.
+
+Currently unreachable through this command:
+
+- `entry_missing`, because the compiler rejects programs without `main`.
+- `StackOverflow`, because `max_stack_depth` always equals `max_frames`, so
+  `Frames` is reported first.
+
+The schema still defines both for completeness.
 
 ## Source Admission Rule
 
