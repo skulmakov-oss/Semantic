@@ -6,6 +6,7 @@ on:
 permissions: {}
 jobs:
   trusted-scope:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
