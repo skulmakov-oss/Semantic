@@ -40,10 +40,12 @@ use sm_sema::{
     check_file_with_provider_and_profile, check_rustlike_program, check_source_with_profile,
     DiagLevel, ModuleProvider, SemanticDiagnostic, SemanticError,
 };
-use sm_verify::{verify_semcode, verify_semcode_token, verify_semcode_token_with_quotas};
+use sm_verify::{verify_semcode, verify_semcode_token_with_quotas};
 use sm_vm::{
     disasm_semcode, run_semcode_collecting_hello_observations_with_config,
-    run_verified_entry_semcode_with_application_host_and_capabilities_and_config, RuntimeError,
+    run_verified_entry_semcode_with_application_host_and_capabilities_and_config,
+    run_verified_entry_semcode_with_application_host_and_capabilities_and_config_metered,
+    RuntimeError,
 };
 use std::collections::HashSet;
 use std::env;
@@ -4712,8 +4714,22 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         return cmd_run_controlled_observation(&args[0]);
     }
     let options = parse_application_run_options(args)?;
+    let started = Instant::now();
+    let mut metrics = RunMetricsRecorder::new(&options);
+    let result = run_application(&options, &mut metrics);
+    if options.metrics_json {
+        eprintln!("{}", metrics.finish(&result, started.elapsed()));
+    }
+    result
+}
+
+/// Application-mode `smc run` after argument validation. `metrics` records
+/// the furthest phase reached and, once a VM exists, its counters.
+fn run_application(
+    options: &ApplicationRunOptions,
+    metrics: &mut RunMetricsRecorder,
+) -> Result<(), String> {
     let input = options.input.as_str();
-    reject_leading_unknown_flag(input)?;
     let input_path = Path::new(input);
     let root = if input_path.is_dir() {
         resolve_project_root_check_entry(input_path)?
@@ -4723,22 +4739,33 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let parser_profile = cli_profile();
     let src = effective_rustlike_source(&root, &parser_profile)?;
     let bytes = compile_program_to_semcode(&src).map_err(|e| e.to_string())?;
-    let token = verify_semcode_token(&bytes).map_err(|error| error.to_string())?;
+    // #1762 / SHF-R: the same ExecutionConfig governs admission, execution
+    // and metrics; admission keeps VerificationLimits::default_profile().
+    let config = options.execution_config;
+    metrics.phase = RunPhase::Verify;
+    let token = verify_semcode_token_with_quotas(&bytes, config.quotas)
+        .map_err(|error| error.to_string())?;
+    metrics.phase = RunPhase::Entry;
     let entry = token
         .require_entry("main")
         .map_err(|error| error.to_string())?;
     let capabilities = CapabilityManifest::for_application_profile(options.profile);
+    metrics.phase = RunPhase::HostInit;
     let mut host = CliApplicationHost::new(
         &options.root,
-        options.application_args,
+        options.application_args.clone(),
         options.duration_millis,
     )?;
-    let result = run_verified_entry_semcode_with_application_host_and_capabilities_and_config(
+    metrics.phase = RunPhase::Execute;
+    let run = run_verified_entry_semcode_with_application_host_and_capabilities_and_config_metered(
         &entry,
         &mut host,
         &capabilities,
-        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        config,
     );
+    metrics.counters = run.counters;
+    metrics.runtime_error = run.result.as_ref().err().map(classify_runtime_error);
+    let result = run.result;
     match &result {
         Err(RuntimeError::CapabilityDenied(denied)) => {
             if let Some(call) = denied.call {
@@ -4752,6 +4779,184 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         eprintln!("{}", record.render());
     }
     result.map_err(|error| error.to_string())
+}
+
+/// SHF-R (#2030): furthest phase reached by application-mode `smc run`.
+/// `Compile` covers source resolution and compilation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunPhase {
+    Compile,
+    Verify,
+    Entry,
+    HostInit,
+    Execute,
+}
+
+impl RunPhase {
+    fn name(self) -> &'static str {
+        match self {
+            RunPhase::Compile => "compile",
+            RunPhase::Verify => "verify",
+            RunPhase::Entry => "entry",
+            RunPhase::HostInit => "host_init",
+            RunPhase::Execute => "execute",
+        }
+    }
+
+    /// Outcome name for a failure that stopped in this phase before a VM ran.
+    fn failure_outcome(self) -> &'static str {
+        match self {
+            RunPhase::Compile => "compile_error",
+            RunPhase::Verify => "verify_rejected",
+            RunPhase::Entry => "entry_missing",
+            RunPhase::HostInit => "host_init_error",
+            RunPhase::Execute => "runtime_error",
+        }
+    }
+}
+
+/// Runtime failure classification for metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeErrorClass {
+    QuotaExceeded(sm_runtime_core::QuotaExceeded),
+    CapabilityDenied,
+    Trap,
+    Other,
+}
+
+fn classify_runtime_error(error: &RuntimeError) -> RuntimeErrorClass {
+    match error {
+        RuntimeError::QuotaExceeded(exceeded) => RuntimeErrorClass::QuotaExceeded(*exceeded),
+        RuntimeError::CapabilityDenied(_) => RuntimeErrorClass::CapabilityDenied,
+        RuntimeError::Trap(_) => RuntimeErrorClass::Trap,
+        // StackOverflow (the documented StackDepth remap), HostAbi and every
+        // other runtime failure.
+        _ => RuntimeErrorClass::Other,
+    }
+}
+
+struct RunMetricsRecorder {
+    envelope: RunEnvelope,
+    quotas: sm_runtime_core::RuntimeQuotas,
+    phase: RunPhase,
+    counters: Option<sm_vm::ExecutionCounters>,
+    runtime_error: Option<RuntimeErrorClass>,
+}
+
+#[derive(serde::Serialize)]
+struct RunMetricsQuotas {
+    max_steps: u64,
+    max_calls: u64,
+    max_frames: u64,
+    max_stack_depth: u64,
+    max_effect_calls: u64,
+}
+
+#[derive(serde::Serialize)]
+struct RunMetricsCounters {
+    steps: u64,
+    calls: u64,
+    peak_frames: u64,
+    effect_calls: u64,
+}
+
+#[derive(serde::Serialize)]
+struct RunMetricsQuotaExceeded {
+    kind: &'static str,
+    limit: u64,
+    used: u64,
+}
+
+#[derive(serde::Serialize)]
+struct RunMetricsNondeterministic {
+    wall_ms: f64,
+}
+
+#[derive(serde::Serialize)]
+struct RunMetrics {
+    schema: &'static str,
+    envelope: &'static str,
+    effective_quotas: RunMetricsQuotas,
+    phase_reached: &'static str,
+    execution_started: bool,
+    outcome: &'static str,
+    counters: Option<RunMetricsCounters>,
+    quota_exceeded: Option<RunMetricsQuotaExceeded>,
+    error: Option<String>,
+    nondeterministic: RunMetricsNondeterministic,
+}
+
+fn quota_kind_name(kind: sm_runtime_core::QuotaKind) -> &'static str {
+    use sm_runtime_core::QuotaKind;
+    match kind {
+        QuotaKind::Steps => "Steps",
+        QuotaKind::Calls => "Calls",
+        QuotaKind::StackDepth => "StackDepth",
+        QuotaKind::Frames => "Frames",
+        QuotaKind::Registers => "Registers",
+        QuotaKind::SymbolTable => "SymbolTable",
+        QuotaKind::EffectCalls => "EffectCalls",
+    }
+}
+
+impl RunMetricsRecorder {
+    fn new(options: &ApplicationRunOptions) -> Self {
+        Self {
+            envelope: options.envelope,
+            quotas: options.execution_config.quotas,
+            phase: RunPhase::Compile,
+            counters: None,
+            runtime_error: None,
+        }
+    }
+
+    /// Renders the single `semantic.run.metrics/0.1` JSON line.
+    fn finish(&self, result: &Result<(), String>, elapsed: Duration) -> String {
+        let execution_started = self.counters.is_some();
+        let outcome = match (result, self.runtime_error) {
+            (Ok(()), _) => "ok",
+            (Err(_), Some(RuntimeErrorClass::QuotaExceeded(_))) => "quota_exceeded",
+            (Err(_), Some(RuntimeErrorClass::CapabilityDenied)) => "capability_denied",
+            (Err(_), Some(RuntimeErrorClass::Trap)) => "trap",
+            (Err(_), Some(RuntimeErrorClass::Other)) => "runtime_error",
+            (Err(_), None) => self.phase.failure_outcome(),
+        };
+        let quota_exceeded = match self.runtime_error {
+            Some(RuntimeErrorClass::QuotaExceeded(exceeded)) => Some(RunMetricsQuotaExceeded {
+                kind: quota_kind_name(exceeded.kind),
+                limit: exceeded.limit as u64,
+                used: exceeded.used as u64,
+            }),
+            _ => None,
+        };
+        let q = self.quotas;
+        let metrics = RunMetrics {
+            schema: "semantic.run.metrics/0.1",
+            envelope: self.envelope.name(),
+            effective_quotas: RunMetricsQuotas {
+                max_steps: q.max_steps as u64,
+                max_calls: q.max_calls as u64,
+                max_frames: q.max_frames as u64,
+                max_stack_depth: q.max_stack_depth as u64,
+                max_effect_calls: q.max_effect_calls as u64,
+            },
+            phase_reached: self.phase.name(),
+            execution_started,
+            outcome,
+            counters: self.counters.map(|c| RunMetricsCounters {
+                steps: c.steps as u64,
+                calls: c.calls as u64,
+                peak_frames: c.peak_frames as u64,
+                effect_calls: c.effect_calls as u64,
+            }),
+            quota_exceeded,
+            error: result.as_ref().err().cloned(),
+            nondeterministic: RunMetricsNondeterministic {
+                wall_ms: elapsed.as_secs_f64() * 1000.0,
+            },
+        };
+        serde_json::to_string(&metrics).expect("metrics serialize to JSON")
+    }
 }
 
 fn cmd_run_controlled_observation(input: &str) -> Result<(), String> {
@@ -4772,12 +4977,50 @@ fn cmd_run_controlled_observation(input: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// SHF-R (#2030): the execution envelope selected for application-mode
+/// `smc run`. Both envelopes use `ExecutionContext::VerifiedLocal`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunEnvelope {
+    VerifiedLocal,
+    TrustedCompiler,
+}
+
+impl RunEnvelope {
+    fn name(self) -> &'static str {
+        match self {
+            RunEnvelope::VerifiedLocal => "verified-local",
+            RunEnvelope::TrustedCompiler => "trusted-compiler",
+        }
+    }
+}
+
 struct ApplicationRunOptions {
     input: String,
     profile: ApplicationCapabilityProfile,
     root: PathBuf,
     duration_millis: Option<u32>,
     application_args: Vec<String>,
+    envelope: RunEnvelope,
+    /// The one effective configuration for admission, execution and metrics.
+    execution_config: ExecutionConfig,
+    metrics_json: bool,
+}
+
+/// Parses a plain ASCII decimal quota value. Returns `Ok(None)` when the
+/// digits overflow `u64`, which the caller reports as out of range.
+fn parse_quota_decimal(flag: &str, value: &str) -> Result<Option<u64>, String> {
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!("{flag} must be a decimal integer"));
+    }
+    Ok(value.parse::<u64>().ok())
+}
+
+fn quota_range_error(flag: &str) -> String {
+    let max = match flag {
+        "--max-steps" => sm_runtime_core::TRUSTED_COMPILER_MAX_STEPS,
+        _ => sm_runtime_core::TRUSTED_COMPILER_MAX_FRAMES,
+    };
+    format!("{flag} must be between 1 and {max}")
 }
 
 fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOptions, String> {
@@ -4785,13 +5028,64 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
         return Err(application_run_usage());
     }
     let input = args[0].clone();
+    // An option in the input position is an argument error: report it
+    // before any metrics recorder exists (SHF-R).
+    reject_leading_unknown_flag(&input)?;
     let mut profile = None;
     let mut root = None;
     let mut duration_millis = None;
     let mut application_args = Vec::new();
+    let mut envelope = None;
+    // Outer Option: flag seen. Inner Option: None means the digits overflowed u64.
+    let mut max_steps: Option<Option<u64>> = None;
+    let mut max_frames: Option<Option<u64>> = None;
+    let mut metrics_json = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
+            "--envelope" => {
+                if envelope.is_some() {
+                    return Err("duplicate run option '--envelope'".to_string());
+                }
+                index += 1;
+                let value = args.get(index).ok_or_else(application_run_usage)?;
+                envelope = Some(match value.as_str() {
+                    "verified-local" => RunEnvelope::VerifiedLocal,
+                    "trusted-compiler" => RunEnvelope::TrustedCompiler,
+                    other => {
+                        return Err(format!(
+                            "unknown execution envelope '{other}'; expected verified-local or trusted-compiler"
+                        ))
+                    }
+                });
+            }
+            "--max-steps" | "--max-frames" => {
+                let flag = args[index].clone();
+                let slot = if flag == "--max-steps" {
+                    &mut max_steps
+                } else {
+                    &mut max_frames
+                };
+                if slot.is_some() {
+                    return Err(format!("duplicate run option '{flag}'"));
+                }
+                index += 1;
+                let value = args.get(index).ok_or_else(application_run_usage)?;
+                *slot = Some(parse_quota_decimal(&flag, value)?);
+            }
+            "--metrics" => {
+                if metrics_json.is_some() {
+                    return Err("duplicate run option '--metrics'".to_string());
+                }
+                index += 1;
+                let value = args.get(index).ok_or_else(application_run_usage)?;
+                if value != "json" {
+                    return Err(format!(
+                        "unsupported metrics format '{value}'; expected json"
+                    ));
+                }
+                metrics_json = Some(true);
+            }
             "--profile" => {
                 index += 1;
                 let value = args.get(index).ok_or_else(application_run_usage)?;
@@ -4835,17 +5129,54 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
         }
         index += 1;
     }
+    // Range before envelope membership (contract §3.4, orders 7 and 8).
+    let max_steps = match max_steps {
+        Some(Some(v)) if (1..=sm_runtime_core::TRUSTED_COMPILER_MAX_STEPS).contains(&v) => Some(v),
+        Some(_) => return Err(quota_range_error("--max-steps")),
+        None => None,
+    };
+    let max_frames = match max_frames {
+        Some(Some(v)) if (1..=sm_runtime_core::TRUSTED_COMPILER_MAX_FRAMES).contains(&v) => Some(v),
+        Some(_) => return Err(quota_range_error("--max-frames")),
+        None => None,
+    };
+    let envelope = envelope.unwrap_or(RunEnvelope::VerifiedLocal);
+    if envelope != RunEnvelope::TrustedCompiler {
+        if max_steps.is_some() {
+            return Err("--max-steps requires --envelope trusted-compiler".to_string());
+        }
+        if max_frames.is_some() {
+            return Err("--max-frames requires --envelope trusted-compiler".to_string());
+        }
+    }
+    let quotas = match envelope {
+        RunEnvelope::VerifiedLocal => sm_runtime_core::RuntimeQuotas::verified_local(),
+        RunEnvelope::TrustedCompiler => sm_runtime_core::RuntimeQuotas::trusted_compiler(
+            max_steps, max_frames,
+        )
+        .map_err(|error| match error {
+            sm_runtime_core::QuotaOverrideError::StepsOutOfRange { .. } => {
+                quota_range_error("--max-steps")
+            }
+            sm_runtime_core::QuotaOverrideError::FramesOutOfRange { .. } => {
+                quota_range_error("--max-frames")
+            }
+        })?,
+    };
     Ok(ApplicationRunOptions {
         input,
         profile: profile.ok_or_else(application_run_usage)?,
         root: root.ok_or_else(application_run_usage)?,
         duration_millis,
         application_args,
+        envelope,
+        execution_config: ExecutionConfig::new(ExecutionContext::VerifiedLocal, quotas),
+        metrics_json: metrics_json.unwrap_or(false),
     })
 }
 
 fn application_run_usage() -> String {
-    "usage: smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [-- <application-args...>]".to_string()
+    "usage: smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--metrics json] [-- <application-args...>]".to_string()
 }
 
 fn cmd_verify(args: &[String]) -> Result<(), String> {
@@ -4903,7 +5234,9 @@ fn cmd_test(args: &[String]) -> Result<(), String> {
             .map_err(|error| format!("failed to read test '{}': {error}", test.display()))?;
         let bytes = compile_program_to_semcode(&source)
             .map_err(|error| format!("test '{}' failed to compile: {error}", test.display()))?;
-        let token = verify_semcode_token(&bytes)
+        // #1762 / SHF-R: one ExecutionConfig for admission and execution.
+        let execution_config = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
+        let token = verify_semcode_token_with_quotas(&bytes, execution_config.quotas)
             .map_err(|error| format!("test '{}' failed verification: {error}", test.display()))?;
         let entry = token
             .require_entry("main")
@@ -4913,7 +5246,7 @@ fn cmd_test(args: &[String]) -> Result<(), String> {
             &entry,
             &mut host,
             &CapabilityManifest::for_application_profile(ApplicationCapabilityProfile::Pure),
-            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+            execution_config,
         )
         .map_err(|error| format!("test '{}' failed: {error}", test.display()))?;
         let relative = test
