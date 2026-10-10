@@ -54,6 +54,9 @@ scope:
     - docs/architecture/**
     - README.md
     - CONTRIBUTING.md
+    - crates/prom-abi/src/lib.rs
+    - crates/prom-cap/src/lib.rs
+    - crates/prom-audit/src/lib.rs
 
   forbidden_paths:
     - .harness/current.task.yaml
@@ -68,7 +71,6 @@ scope:
     - Cargo.lock
     - crates/*/Cargo.toml
     - crates/*/Cargo.lock
-    - crates/prom-*/**
     - apps/**
     - examples/**
     - reports/**
