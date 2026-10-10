@@ -126,5 +126,3 @@ ssf_reference:
   issue: 1583
   ownership_position: A
   no_rust_equivalent_lifetime_region_claim: true
-
-# G2 diagnostic only: changed HEAD must invalidate prior successful admission.
