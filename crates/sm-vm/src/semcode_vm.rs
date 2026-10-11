@@ -2079,15 +2079,40 @@ where
     H: VmHostBridge,
     P: OpcodeProfileSink,
 {
+    // SHF-RF B1 (#2037): one immutable snapshot of the function table per
+    // execution session. The dispatch loop reads the current function by
+    // reference from this snapshot instead of deep-cloning its
+    // `FunctionBytecode` on every instruction.
+    //
+    // `vm.functions` itself is never moved out or emptied: it stays owned by
+    // the VM and intact for the whole session, so every other reader
+    // (`push_frame`, `Opcode::Call` callee precedence) sees the real program.
+    // The function table is not mutated during execution, so the snapshot
+    // and `vm.functions` hold the same definitions for the whole session.
+    let functions = vm.functions.clone();
+    exec_loop_on(vm, &functions, host, observation, profile)
+}
+
+/// The dispatch loop. `functions` is an immutable view of the session's
+/// function table (see `exec_loop_with_profile`); the loop never mutates it.
+fn exec_loop_on<'a, H, P>(
+    vm: &mut VM,
+    functions: &HashMap<String, FunctionBytecode>,
+    host: &mut H,
+    observation: &mut HelloObservationRuntime<'a>,
+    profile: &mut P,
+) -> Result<Value, RuntimeError>
+where
+    H: VmHostBridge,
+    P: OpcodeProfileSink,
+{
     loop {
         let Some(frame_idx) = vm.callstack.len().checked_sub(1) else {
             return Ok(Value::Unit);
         };
         let func_name = vm.callstack[frame_idx].func.clone();
-        let f = vm
-            .functions
+        let f = functions
             .get(&func_name)
-            .cloned()
             .ok_or_else(|| RuntimeError::UnknownFunction(func_name.clone()))?;
         let pc = vm.callstack[frame_idx].pc;
         let instr_rel_len = f.code.len().saturating_sub(f.instr_start);
@@ -10056,5 +10081,336 @@ mod tests {
         let err = eval_compiler_text_builtin("text_slice", &[Value::Text("a".to_string())])
             .expect_err("arity");
         assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+    }
+
+    /// SHF-RF B1 (#2037): regression coverage for removing the per-instruction
+    /// `FunctionBytecode` deep clone. The dispatch loop now reads functions
+    /// from one immutable per-session snapshot; `vm.functions` stays owned by
+    /// the VM and intact. These tests pin observable behaviour (results,
+    /// counters, error classes) and the integrity of the function table on
+    /// success and on every failure path. Expected counters are derived from
+    /// program structure or measured inside the test, never hard-coded.
+    mod shf_rf_b1_tests {
+        use super::*;
+
+        /// Order-independent fingerprint of a function table: name, code
+        /// bytes, string constants and instruction start of every function.
+        fn table_fingerprint(
+            functions: &HashMap<String, FunctionBytecode>,
+        ) -> Vec<(String, Vec<u8>, Vec<String>, usize)> {
+            let mut out: Vec<_> = functions
+                .iter()
+                .map(|(k, f)| (k.clone(), f.code.clone(), f.strings.clone(), f.instr_start))
+                .collect();
+            out.sort();
+            out
+        }
+
+        /// Runs `main` and asserts the VM still owns the complete, unchanged
+        /// function table afterwards, whatever the outcome.
+        fn run_main_keeping_table(
+            bytes: &[u8],
+            config: ExecutionConfig,
+        ) -> (VM, Result<(), RuntimeError>) {
+            let expected = table_fingerprint(&parse_semcode(bytes).expect("parse").functions);
+            let (vm, result) = run_semcode_for_test(bytes, config);
+            assert_eq!(
+                table_fingerprint(&vm.functions),
+                expected,
+                "vm.functions must stay owned and intact after {result:?}"
+            );
+            (vm, result)
+        }
+
+        fn local_config() -> ExecutionConfig {
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal)
+        }
+
+        fn generous_config() -> ExecutionConfig {
+            let mut config = local_config();
+            config.quotas.max_steps = 10_000_000;
+            config.quotas.max_calls = 1_000_000;
+            config
+        }
+
+        // R-B1-01: ordinary execution and returned values are unchanged.
+        #[test]
+        fn b1_basic_execution_and_return_values() {
+            let src = r#"
+                fn twice(x: i32) -> i32 { return x * 2; }
+                fn main() {
+                    let a: i32 = twice(21);
+                    assert(a == 42);
+                    let t: text = "ab";
+                    assert(text_len(t + "cd") == 4u32);
+                    return;
+                }
+            "#;
+            let bytes = compile_program_to_semcode(src).expect("compile");
+            let (vm, result) = run_main_keeping_table(&bytes, local_config());
+            assert_eq!(result, Ok(()));
+            assert_eq!(vm.calls, 1, "one non-root call to `twice`");
+        }
+
+        // R-B1-02: nested calls resolve through the intact table; Calls are
+        // charged once per non-root frame push.
+        #[test]
+        fn b1_nested_calls_resolve_and_charge_calls() {
+            let src = r#"
+                fn c(x: i32) -> i32 { return x + 1; }
+                fn b(x: i32) -> i32 { return c(x) + 1; }
+                fn a(x: i32) -> i32 { return b(x) + 1; }
+                fn main() {
+                    let mut i: i32 = 0;
+                    let mut acc: i32 = 0;
+                    while i < 10 {
+                        acc = acc + a(0);
+                        i = i + 1;
+                    }
+                    assert(acc == 30);
+                    return;
+                }
+            "#;
+            let bytes = compile_program_to_semcode(src).expect("compile");
+            let (vm, result) = run_main_keeping_table(&bytes, local_config());
+            assert_eq!(result, Ok(()));
+            assert_eq!(vm.calls, 30, "10 iterations x (a, b, c)");
+            assert!(vm.callstack.is_empty());
+        }
+
+        // R-B1-03: closure calls resolve their target function, use captured
+        // values, and go through the same push_frame path (Calls charged).
+        #[test]
+        fn b1_closure_call_resolves_target_and_captures() {
+            let src = r#"
+                fn main() {
+                    let offset: i32 = 5;
+                    let add: Closure(i32 -> i32) = (x => x + offset);
+                    assert(add(2) == 7);
+                    assert(add(10) == 15);
+                    return;
+                }
+            "#;
+            let bytes = compile_program_to_semcode(src).expect("compile");
+            let (vm, result) = run_main_keeping_table(&bytes, local_config());
+            assert_eq!(result, Ok(()));
+            assert_eq!(vm.calls, 2, "each closure invocation pushes one frame");
+        }
+
+        // R-B1-04: exact Steps boundary - success at the measured count,
+        // QuotaExceeded{Steps, S-1, S} one below it, committed counter S-1.
+        #[test]
+        fn b1_steps_exact_boundary_is_unchanged() {
+            let src = r#"
+                fn inc(x: u32) -> u32 { return x + 1u32; }
+                fn main() {
+                    let mut i: u32 = 0u32;
+                    while i < 20u32 { i = inc(i); }
+                    return;
+                }
+            "#;
+            let bytes = compile_program_to_semcode(src).expect("compile");
+            let (measured, ok) = run_main_keeping_table(&bytes, generous_config());
+            assert_eq!(ok, Ok(()));
+            let steps = measured.steps;
+            assert!(steps > 1);
+
+            let mut exact = generous_config();
+            exact.quotas.max_steps = steps;
+            let (vm, result) = run_main_keeping_table(&bytes, exact);
+            assert_eq!(result, Ok(()));
+            assert_eq!(vm.steps, steps);
+
+            let mut below = generous_config();
+            below.quotas.max_steps = steps - 1;
+            let (vm, result) = run_main_keeping_table(&bytes, below);
+            assert_eq!(
+                result,
+                Err(RuntimeError::QuotaExceeded(QuotaExceeded {
+                    kind: QuotaKind::Steps,
+                    limit: steps - 1,
+                    used: steps,
+                }))
+            );
+            assert_eq!(vm.steps, steps - 1, "the rejected opcode is not committed");
+        }
+
+        // R-B1-05: cumulative Calls boundary, root-call exemption and the
+        // Frames boundary are unchanged.
+        #[test]
+        fn b1_calls_and_frames_boundaries_are_unchanged() {
+            let calls_src = r#"
+                fn f() { return; }
+                fn main() {
+                    let mut i: i32 = 0;
+                    while i < 7 { f(); i = i + 1; }
+                    return;
+                }
+            "#;
+            let bytes = compile_program_to_semcode(calls_src).expect("compile");
+            let (vm, ok) = run_main_keeping_table(&bytes, local_config());
+            assert_eq!(ok, Ok(()));
+            assert_eq!(vm.calls, 7, "root frame is exempt; 7 calls to f");
+            let mut limited = local_config();
+            limited.quotas.max_calls = 6;
+            let (_, result) = run_main_keeping_table(&bytes, limited);
+            assert_eq!(
+                result,
+                Err(RuntimeError::QuotaExceeded(QuotaExceeded {
+                    kind: QuotaKind::Calls,
+                    limit: 6,
+                    used: 7,
+                }))
+            );
+
+            let root_only = compile_program_to_semcode("fn main() { return; }").expect("compile");
+            let (vm, ok) = run_main_keeping_table(&root_only, local_config());
+            assert_eq!(ok, Ok(()));
+            assert_eq!(vm.calls, 0, "the root/entry frame never charges Calls");
+
+            // down(5) needs main + down(5) .. down(0) = 7 frames.
+            let frames_src = r#"
+                fn down(n: i32) -> i32 { if n == 0 { return 0; } return 1 + down(n - 1); }
+                fn main() { assert(down(5) == 5); return; }
+            "#;
+            let bytes = compile_program_to_semcode(frames_src).expect("compile");
+            let mut exact = local_config();
+            exact.quotas.max_frames = 7;
+            exact.quotas.max_stack_depth = 7;
+            let (_, ok) = run_main_keeping_table(&bytes, exact);
+            assert_eq!(ok, Ok(()));
+            let mut below = exact;
+            below.quotas.max_frames = 6;
+            below.quotas.max_stack_depth = 6;
+            let (_, result) = run_main_keeping_table(&bytes, below);
+            assert_eq!(
+                result,
+                Err(RuntimeError::QuotaExceeded(QuotaExceeded {
+                    kind: QuotaKind::Frames,
+                    limit: 6,
+                    used: 7,
+                }))
+            );
+        }
+
+        // R-B1-06: write-site borrow conflicts still trap deterministically
+        // (write-site metadata is now read through the borrowed function).
+        #[test]
+        fn b1_ownership_conflict_trap_is_unchanged() {
+            let bytes = ownership_write_overlap_bytes(&[0], &[0]);
+            let (_, result) = run_main_keeping_table(&bytes, local_config());
+            let err = result.expect_err("overlapping write must fail");
+            assert!(matches!(
+                err,
+                RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
+            ));
+            assert_eq!(format!("{err}"), "write path overlaps active borrow");
+        }
+
+        // R-B1-07: a failing host effect propagates its error, keeps effect
+        // charging (capability check, then charge, then host call) and leaves
+        // the function table intact.
+        #[test]
+        fn b1_host_failure_propagates_and_keeps_table() {
+            let src = r#"
+                fn main() {
+                    let a: text = args_read(0u32);
+                    return;
+                }
+            "#;
+            let bytes = compile_program_to_semcode(src).expect("compile");
+            let program = parse_semcode(&bytes).expect("parse");
+            let expected = table_fingerprint(&program.functions);
+            let mut vm = VM {
+                functions: program.functions,
+                callstack: Vec::new(),
+                config: local_config(),
+                effect_calls: 0,
+                steps: 0,
+                calls: 0,
+                symbols: program.runtime_symbols,
+                prng_state: 0,
+            };
+            let capabilities = prom_cap::CapabilityManifest::for_application_profile(
+                prom_cap::ApplicationCapabilityProfile::CliReadOnly,
+            );
+            let mut host = ScriptedApplicationHost {
+                read_ok: false,
+                writes: Vec::new(),
+            };
+            let quotas = vm.config.quotas;
+            let mut bridge = ApplicationVmHost {
+                host: &mut host,
+                capabilities: &capabilities,
+                observed: false,
+                quotas,
+                effect_calls: 0,
+            };
+            let result = push_frame(&mut vm, "main", Vec::new(), None).and_then(|()| {
+                let mut observation = HelloObservationRuntime::discard();
+                exec_loop(&mut vm, &mut bridge, &mut observation).map(|_| ())
+            });
+            match result {
+                Err(RuntimeError::HostAbi(abi)) => {
+                    assert_eq!(abi.call, HostCallId::ArgsRead);
+                    assert_eq!(abi.kind, AbiFailureKind::Unavailable);
+                }
+                other => panic!("expected HostAbi(ArgsRead), got {other:?}"),
+            }
+            assert_eq!(
+                bridge.effect_calls, 1,
+                "the effect is charged before the host call"
+            );
+            assert_eq!(table_fingerprint(&vm.functions), expected);
+        }
+
+        // R-B1-08: the function table is never detached - it is intact after
+        // success, after Result::Err from a quota, and after Result::Err from
+        // a trap. (No RAII restoration exists or is needed in this design.)
+        #[test]
+        fn b1_function_table_is_never_detached() {
+            let src = r#"
+                fn helper(x: i32) -> i32 { return x + 1; }
+                fn main() { assert(helper(1) == 3); return; }
+            "#;
+            let bytes = compile_program_to_semcode(src).expect("compile");
+            let (_, trapped) = run_main_keeping_table(&bytes, local_config());
+            assert!(matches!(trapped, Err(RuntimeError::Trap(_))));
+
+            let mut no_steps = local_config();
+            no_steps.quotas.max_steps = 0;
+            let (_, rejected) = run_main_keeping_table(&bytes, no_steps);
+            assert!(matches!(rejected, Err(RuntimeError::QuotaExceeded(_))));
+
+            let ok_src = compile_program_to_semcode(
+                "fn helper(x: i32) -> i32 { return x + 1; } fn main() { assert(helper(1) == 2); return; }",
+            )
+            .expect("compile");
+            let (_, ok) = run_main_keeping_table(&ok_src, local_config());
+            assert_eq!(ok, Ok(()));
+        }
+
+        // R-B1-09: the profiled entry point shares the dispatch loop and
+        // records exactly the Steps the ordinary path commits.
+        #[cfg(feature = "vm-profile")]
+        #[test]
+        fn b1_profiled_path_matches_ordinary_steps() {
+            let src = r#"
+                fn inc(x: u32) -> u32 { return x + 1u32; }
+                fn main() {
+                    let mut i: u32 = 0u32;
+                    while i < 5u32 { i = inc(i); }
+                    return;
+                }
+            "#;
+            let bytes = compile_program_to_semcode(src).expect("compile");
+            let (vm, ok) = run_main_keeping_table(&bytes, local_config());
+            assert_eq!(ok, Ok(()));
+            let token = sm_verify::verify_semcode_token(&bytes).expect("verify");
+            let entry = token.require_entry("main").expect("main");
+            let profile = run_verified_entry_semcode_with_profile(&entry, local_config())
+                .expect("profiled run");
+            assert_eq!(profile.total_instructions(), vm.steps as u64);
+        }
     }
 }
