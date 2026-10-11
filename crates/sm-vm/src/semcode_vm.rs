@@ -2079,24 +2079,68 @@ where
     H: VmHostBridge,
     P: OpcodeProfileSink,
 {
-    // SHF-RF B1 (#2037): one immutable snapshot of the function table per
-    // execution session. The dispatch loop reads the current function by
-    // reference from this snapshot instead of deep-cloning its
-    // `FunctionBytecode` on every instruction.
-    //
-    // `vm.functions` itself is never moved out or emptied: it stays owned by
-    // the VM and intact for the whole session, so every other reader
-    // (`push_frame`, `Opcode::Call` callee precedence) sees the real program.
-    // The function table is not mutated during execution, so the snapshot
-    // and `vm.functions` hold the same definitions for the whole session.
-    let functions = vm.functions.clone();
-    exec_loop_on(vm, &functions, host, observation, profile)
+    // SHF-RF Z2 (#2037): split the VM into a shared borrow of its function
+    // table and an exclusive view of the remaining execution state. The table
+    // stays owned by the VM and in place for the whole session (no clone, no
+    // move); the loop reads the current function by reference instead of
+    // deep-cloning its `FunctionBytecode` on every instruction.
+    let (functions, mut state) = split_vm(vm);
+    exec_loop_on(&mut state, functions, host, observation, profile)
 }
 
-/// The dispatch loop. `functions` is an immutable view of the session's
-/// function table (see `exec_loop_with_profile`); the loop never mutates it.
+/// SHF-RF Z2 (#2037): the mutable execution state of a `VM`, without its
+/// function table.
+///
+/// Built only by `split_vm`, which destructures the `VM` so that
+/// `VM.functions` is borrowed shared while these fields are borrowed
+/// exclusively. Code holding an `ExecState` therefore has no path to
+/// `VM.functions`, and the borrow checker rejects any mutation of the table
+/// for as long as the shared borrow handed out next to it is alive.
+struct ExecState<'vm> {
+    callstack: &'vm mut Vec<Frame>,
+    config: &'vm ExecutionConfig,
+    effect_calls: &'vm mut usize,
+    steps: &'vm mut usize,
+    calls: &'vm mut usize,
+    // Read only by the test-build terminal observation in the `Ret` arm; kept
+    // so the split stays exhaustive over `VM`'s fields.
+    #[cfg_attr(not(test), allow(dead_code))]
+    symbols: &'vm RuntimeSymbolTable,
+    prng_state: &'vm mut u64,
+}
+
+/// Splits a `VM` into its immutable function table and its mutable execution
+/// state. The destructuring pattern is exhaustive, so adding a field to `VM`
+/// fails to compile here until the field is assigned to one side.
+fn split_vm(vm: &mut VM) -> (&HashMap<String, FunctionBytecode>, ExecState<'_>) {
+    let VM {
+        functions,
+        callstack,
+        config,
+        effect_calls,
+        steps,
+        calls,
+        symbols,
+        prng_state,
+    } = vm;
+    (
+        functions,
+        ExecState {
+            callstack,
+            config,
+            effect_calls,
+            steps,
+            calls,
+            symbols,
+            prng_state,
+        },
+    )
+}
+
+/// The dispatch loop. `vm` is the split execution state and `functions` the
+/// shared borrow of the VM's own function table (see `split_vm`).
 fn exec_loop_on<'a, H, P>(
-    vm: &mut VM,
+    vm: &mut ExecState<'_>,
     functions: &HashMap<String, FunctionBytecode>,
     host: &mut H,
     observation: &mut HelloObservationRuntime<'a>,
@@ -2132,7 +2176,7 @@ where
         // malformed opcode byte charges no Step. No refund on a later
         // failure within this same dispatch - see
         // ssf08_1759_steps_calls_contract_decision.md §2-§3.
-        vm.steps = charge_counter(vm.steps, vm.config.quotas.max_steps, QuotaKind::Steps)?;
+        *vm.steps = charge_counter(*vm.steps, vm.config.quotas.max_steps, QuotaKind::Steps)?;
         profile.record_opcode(opcode);
         // #1891 Checkpoint W2F: check every Write path attached to this
         // exact PC against the frame's currently active borrows BEFORE the
@@ -2620,7 +2664,7 @@ where
                 // Map i32 seed to a non-zero u64.  seed==0 becomes 1 to avoid
                 // the xorshift64 zero fixed-point.
                 let raw = seed as u64;
-                vm.prng_state = if raw == 0 { 1 } else { raw };
+                *vm.prng_state = if raw == 0 { 1 } else { raw };
                 set_reg(vm, frame_idx, dst, Value::Unit)?;
                 next_pc = cur - f.instr_start;
             }
@@ -2643,7 +2687,7 @@ where
                 // Compute range through i64 to handle the full i32 span without
                 // overflow (e.g. lo=i32::MIN, hi=i32::MAX gives range=4294967295).
                 let range = i64::from(hi) - i64::from(lo);
-                let raw = xorshift64_step(&mut vm.prng_state);
+                let raw = xorshift64_step(&mut *vm.prng_state);
                 let offset = (raw % (range as u64)) as i64;
                 let result = i64::from(lo) + offset;
                 let result = i32::try_from(result)
@@ -2890,12 +2934,18 @@ where
                     let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                     args.push(get_reg(vm, frame_idx, r)?);
                 }
-                if vm.functions.contains_key(&callee) {
+                if functions.contains_key(&callee) {
                     // Argument validation happens inside `push_frame` itself
                     // (#1773 / FA-09-005) - see `validate_call_arguments`'s
                     // doc comment.
                     vm.callstack[frame_idx].pc = cur - f.instr_start;
-                    push_frame(vm, &callee, args, if has_dst { Some(dst) } else { None })?;
+                    push_frame_in(
+                        vm,
+                        functions,
+                        &callee,
+                        args,
+                        if has_dst { Some(dst) } else { None },
+                    )?;
                     continue;
                 } else if let Some(result) =
                     try_eval_builtin_call(host, observation, &callee, &args)?
@@ -2910,7 +2960,13 @@ where
                     // (RuntimeError::UnknownFunction) is unchanged from
                     // pre-fix behavior.
                     vm.callstack[frame_idx].pc = cur - f.instr_start;
-                    push_frame(vm, &callee, args, if has_dst { Some(dst) } else { None })?;
+                    push_frame_in(
+                        vm,
+                        functions,
+                        &callee,
+                        args,
+                        if has_dst { Some(dst) } else { None },
+                    )?;
                     continue;
                 }
             }
@@ -2928,8 +2984,9 @@ where
                 let mut args = closure.captures;
                 args.push(get_reg(vm, frame_idx, arg_reg)?);
                 vm.callstack[frame_idx].pc = cur - f.instr_start;
-                push_frame(
+                push_frame_in(
                     vm,
+                    functions,
                     &closure.function_name,
                     args,
                     if has_dst { Some(dst) } else { None },
@@ -3181,14 +3238,29 @@ fn validate_call_arguments(
     Ok(())
 }
 
+/// Frame admission for callers outside the dispatch loop (entry setup).
+/// Delegates to the single authoritative implementation, `push_frame_in`.
 fn push_frame(
     vm: &mut VM,
     func_name: &str,
     args: Vec<Value>,
     return_dst: Option<u16>,
 ) -> Result<(), RuntimeError> {
-    let f = vm
-        .functions
+    let (functions, mut state) = split_vm(vm);
+    push_frame_in(&mut state, functions, func_name, args, return_dst)
+}
+
+/// The one authoritative frame-admission path: callee resolution, argument
+/// validation, Frames/StackDepth/Registers admission, Calls charging and frame
+/// construction, in that order (#1759, #1773).
+fn push_frame_in(
+    vm: &mut ExecState<'_>,
+    functions: &HashMap<String, FunctionBytecode>,
+    func_name: &str,
+    args: Vec<Value>,
+    return_dst: Option<u16>,
+) -> Result<(), RuntimeError> {
+    let f = functions
         .get(func_name)
         .ok_or_else(|| RuntimeError::UnknownFunction(func_name.to_string()))?;
     validate_call_arguments(func_name, f.signature.as_ref(), &args)?;
@@ -3214,7 +3286,7 @@ fn push_frame(
     // frame, push" is one combined final step that comes entirely after
     // the Calls charge, not interleaved with it.
     if !vm.callstack.is_empty() {
-        vm.calls = charge_counter(vm.calls, vm.config.quotas.max_calls, QuotaKind::Calls)?;
+        *vm.calls = charge_counter(*vm.calls, vm.config.quotas.max_calls, QuotaKind::Calls)?;
     }
     let mut regs = vec![RegisterSlot::Uninitialized; initial_reg_count];
     for (i, v) in args.into_iter().enumerate() {
@@ -3316,7 +3388,7 @@ fn lookup_symbol(f: &FunctionBytecode, sid: u16) -> Result<SymbolId, RuntimeErro
         .ok_or(RuntimeError::InvalidStringId(sid))
 }
 
-fn get_reg(vm: &VM, frame_idx: usize, r: u16) -> Result<Value, RuntimeError> {
+fn get_reg(vm: &ExecState<'_>, frame_idx: usize, r: u16) -> Result<Value, RuntimeError> {
     match vm
         .callstack
         .get(frame_idx)
@@ -3331,7 +3403,7 @@ fn get_reg(vm: &VM, frame_idx: usize, r: u16) -> Result<Value, RuntimeError> {
     }
 }
 
-fn set_reg(vm: &mut VM, frame_idx: usize, r: u16, v: Value) -> Result<(), RuntimeError> {
+fn set_reg(vm: &mut ExecState<'_>, frame_idx: usize, r: u16, v: Value) -> Result<(), RuntimeError> {
     if let Some(frame) = vm.callstack.get_mut(frame_idx) {
         write_reg(frame, r as usize, v, &vm.config.quotas)?;
     }
@@ -3393,9 +3465,9 @@ fn charge_counter(used: usize, limit: usize, kind: QuotaKind) -> Result<usize, R
 /// builds once the counter neared `usize::MAX`. Call sites, ordering
 /// relative to capability checks, and host dispatch are unchanged - this
 /// only replaces how the counter itself is incremented.
-fn bump_effect_calls(vm: &mut VM) -> Result<(), RuntimeError> {
+fn bump_effect_calls(vm: &mut ExecState<'_>) -> Result<(), RuntimeError> {
     let limit = vm.config.quotas.max_effect_calls;
-    vm.effect_calls = charge_counter(vm.effect_calls, limit, QuotaKind::EffectCalls)?;
+    *vm.effect_calls = charge_counter(*vm.effect_calls, limit, QuotaKind::EffectCalls)?;
     Ok(())
 }
 
@@ -7350,14 +7422,14 @@ mod tests {
     #[test]
     fn bump_effect_calls_admits_under_limit() {
         let mut vm = vm_for_effect_calls_test(2, 4);
-        bump_effect_calls(&mut vm).expect("must admit");
+        bump_effect_calls(&mut split_vm(&mut vm).1).expect("must admit");
         assert_eq!(vm.effect_calls, 3);
     }
 
     #[test]
     fn bump_effect_calls_rejects_at_zero_limit() {
         let mut vm = vm_for_effect_calls_test(0, 0);
-        let err = bump_effect_calls(&mut vm).unwrap_err();
+        let err = bump_effect_calls(&mut split_vm(&mut vm).1).unwrap_err();
         assert_eq!(
             err,
             RuntimeError::QuotaExceeded(QuotaExceeded {
@@ -7376,7 +7448,7 @@ mod tests {
     #[test]
     fn bump_effect_calls_fails_closed_at_usize_max_with_usize_max_limit() {
         let mut vm = vm_for_effect_calls_test(usize::MAX, usize::MAX);
-        let err = bump_effect_calls(&mut vm).unwrap_err();
+        let err = bump_effect_calls(&mut split_vm(&mut vm).1).unwrap_err();
         assert_eq!(
             err,
             RuntimeError::QuotaExceeded(QuotaExceeded {
@@ -7398,7 +7470,7 @@ mod tests {
     #[test]
     fn bump_effect_calls_fails_closed_at_usize_max_with_distinct_limit() {
         let mut vm = vm_for_effect_calls_test(usize::MAX, 5);
-        let err = bump_effect_calls(&mut vm).unwrap_err();
+        let err = bump_effect_calls(&mut split_vm(&mut vm).1).unwrap_err();
         assert_eq!(
             err,
             RuntimeError::QuotaExceeded(QuotaExceeded {
@@ -10083,10 +10155,11 @@ mod tests {
         assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
     }
 
-    /// SHF-RF B1 (#2037): regression coverage for removing the per-instruction
-    /// `FunctionBytecode` deep clone. The dispatch loop now reads functions
-    /// from one immutable per-session snapshot; `vm.functions` stays owned by
-    /// the VM and intact. These tests pin observable behaviour (results,
+    /// SHF-RF B1/Z2 (#2037): regression coverage for removing the per-instruction
+    /// `FunctionBytecode` deep clone. The dispatch loop borrows the VM's own
+    /// function table (shared) next to its split execution state; the table is
+    /// never cloned or moved and stays owned by the VM. These tests pin
+    /// observable behaviour (results,
     /// counters, error classes) and the integrity of the function table on
     /// success and on every failure path. Expected counters are derived from
     /// program structure or measured inside the test, never hard-coded.
@@ -10364,9 +10437,9 @@ mod tests {
             assert_eq!(table_fingerprint(&vm.functions), expected);
         }
 
-        // R-B1-08: the function table is never detached - it is intact after
-        // success, after Result::Err from a quota, and after Result::Err from
-        // a trap. (No RAII restoration exists or is needed in this design.)
+        // R-B1-08: the function table is never detached or replaced - it is
+        // intact after success, after Result::Err from a quota, and after
+        // Result::Err from a trap. There is no restoration step in this design.
         #[test]
         fn b1_function_table_is_never_detached() {
             let src = r#"
