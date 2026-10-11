@@ -2188,7 +2188,7 @@ where
         // (`pending_site_borrows`, checked further below only after the
         // write commits) cannot retroactively conflict with the write that
         // introduced it.
-        check_write_execution_site(&f, pc, &vm.callstack[frame_idx].active_borrowed_paths)?;
+        check_write_execution_site(f, pc, &vm.callstack[frame_idx].active_borrowed_paths)?;
         let next_pc: usize;
 
         match opcode {
@@ -2292,7 +2292,7 @@ where
             Opcode::LoadText => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let value = decode_text_literal(lookup_str(&f, sid)?);
+                let value = decode_text_literal(lookup_str(f, sid)?);
                 set_reg(vm, frame_idx, dst, Value::Text(value))?;
                 next_pc = cur - f.instr_start;
             }
@@ -2320,7 +2320,7 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
-                let function_name = lookup_str(&f, sid)?.to_string();
+                let function_name = lookup_str(f, sid)?.to_string();
                 let mut captures = Vec::with_capacity(count);
                 for _ in 0..count {
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -2352,7 +2352,7 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
-                let type_name = lookup_str(&f, sid)?.to_string();
+                let type_name = lookup_str(f, sid)?.to_string();
                 let mut slots = Vec::with_capacity(count);
                 for _ in 0..count {
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -2372,8 +2372,8 @@ where
                 let variant_sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let tag = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
-                let type_name = lookup_str(&f, sid)?.to_string();
-                let variant_name = lookup_str(&f, variant_sid)?.to_string();
+                let type_name = lookup_str(f, sid)?.to_string();
+                let variant_name = lookup_str(f, variant_sid)?.to_string();
                 let mut payload = Vec::with_capacity(count);
                 for _ in 0..count {
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -2396,7 +2396,7 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let expected_name = lookup_str(&f, sid)?.to_string();
+                let expected_name = lookup_str(f, sid)?.to_string();
                 let adt = get_reg(vm, frame_idx, src)?;
                 let Value::Adt(adt) = adt else {
                     return Err(RuntimeError::TypeMismatchRuntime(
@@ -2417,7 +2417,7 @@ where
                 let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let index = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
-                let expected_name = lookup_str(&f, sid)?.to_string();
+                let expected_name = lookup_str(f, sid)?.to_string();
                 let adt = get_reg(vm, frame_idx, src)?;
                 let Value::Adt(adt) = adt else {
                     return Err(RuntimeError::TypeMismatchRuntime(
@@ -2441,7 +2441,7 @@ where
                 let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let index = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
-                let expected_name = lookup_str(&f, sid)?.to_string();
+                let expected_name = lookup_str(f, sid)?.to_string();
                 let record = get_reg(vm, frame_idx, src)?;
                 let Value::Record(record) = record else {
                     return Err(RuntimeError::TypeMismatchRuntime(
@@ -2698,13 +2698,13 @@ where
             Opcode::LoadVar => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let symbol = lookup_symbol(&f, sid)?;
+                let symbol = lookup_symbol(f, sid)?;
                 let val = vm.callstack[frame_idx]
                     .locals
                     .get(&symbol)
                     .cloned()
                     .ok_or_else(|| {
-                        let name = lookup_str(&f, sid).unwrap_or("<unknown>");
+                        let name = lookup_str(f, sid).unwrap_or("<unknown>");
                         RuntimeError::UnknownVariable(name.to_string())
                     })?;
                 set_reg(vm, frame_idx, dst, val)?;
@@ -2713,7 +2713,7 @@ where
             Opcode::StoreVar => {
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let symbol = lookup_symbol(&f, sid)?;
+                let symbol = lookup_symbol(f, sid)?;
                 let val = get_reg(vm, frame_idx, src)?;
                 // #1891 Checkpoint W2F: the exact-PC write check above
                 // (`check_write_execution_site`) already ran before this
@@ -2928,7 +2928,7 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let callee_sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let argc = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
-                let callee = lookup_str(&f, callee_sid)?.to_string();
+                let callee = lookup_str(f, callee_sid)?.to_string();
                 let mut args = Vec::with_capacity(argc);
                 for _ in 0..argc {
                     let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -3031,7 +3031,7 @@ where
             Opcode::PulseEmit => {
                 bump_effect_calls(vm)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let signal = lookup_str(&f, sid)?;
+                let signal = lookup_str(f, sid)?;
                 host.pulse_emit(signal)?;
                 next_pc = cur - f.instr_start;
             }
@@ -3039,7 +3039,7 @@ where
                 bump_effect_calls(vm)?;
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let key = lookup_str(&f, sid)?;
+                let key = lookup_str(f, sid)?;
                 let value = host.state_query(key)?;
                 set_reg(vm, frame_idx, dst, value)?;
                 next_pc = cur - f.instr_start;
@@ -3048,7 +3048,7 @@ where
                 bump_effect_calls(vm)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let key = lookup_str(&f, sid)?;
+                let key = lookup_str(f, sid)?;
                 let value = get_reg(vm, frame_idx, src)?;
                 host.state_update(key, value)?;
                 next_pc = cur - f.instr_start;
@@ -3056,7 +3056,7 @@ where
             Opcode::EventPost => {
                 bump_effect_calls(vm)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let signal = lookup_str(&f, sid)?;
+                let signal = lookup_str(f, sid)?;
                 host.event_post(signal)?;
                 next_pc = cur - f.instr_start;
             }
@@ -3084,7 +3084,7 @@ where
                     #[cfg(test)]
                     {
                         let observable =
-                            vm_test_format_terminal_observable(&ret_val, &finished, &vm.symbols);
+                            vm_test_format_terminal_observable(&ret_val, &finished, vm.symbols);
                         vm_test_store_terminal_observation(VmTestObservation {
                             status: VmTestStatus::Completed,
                             observable: Some(observable),
