@@ -3580,6 +3580,10 @@ impl ConsumptionPlan {
 
     #[inline]
     fn site(&self, func: &str, pc: usize) -> Option<ConsumeSite> {
+        // Programs without an accepted triple pay no per-instruction lookup.
+        if self.sites.is_empty() {
+            return None;
+        }
         self.sites.get(func).and_then(|s| s.get(&pc)).copied()
     }
 }
