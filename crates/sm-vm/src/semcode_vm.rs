@@ -1515,7 +1515,15 @@ fn map_format_err(err: SemcodeFormatError) -> RuntimeError {
     }
 }
 
-fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> {
+/// The canonical structural walk over a function's instruction stream, shared by
+/// load-time validation and by the SHF-P3 consumption planner. When `operands`
+/// is given, every instruction start and every `u16` operand read is recorded;
+/// validation behaviour (reads, errors, order) is identical either way. Returns
+/// the jump targets of the function.
+fn scan_function_bytecode(
+    f: &FunctionBytecode,
+    mut operands: Option<&mut Vec<InstrOperands>>,
+) -> Result<Vec<usize>, RuntimeError> {
     if f.instr_start > f.code.len() {
         return Err(RuntimeError::BadFormat(format!(
             "invalid instr_start in '{}'",
@@ -1527,51 +1535,61 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
     let mut jumps: Vec<usize> = Vec::new();
     while cur < f.code.len() {
         starts.insert(cur - f.instr_start);
+        if let Some(ops) = operands.as_deref_mut() {
+            ops.push(InstrOperands {
+                pc: cur - f.instr_start,
+                opcode: None,
+                u16s: Vec::new(),
+            });
+        }
         let opcode = Opcode::from_byte(read_u8(&f.code, &mut cur).map_err(map_format_err)?)
             .map_err(map_format_err)?;
+        if let Some(last) = operands.as_deref_mut().and_then(|ops| ops.last_mut()) {
+            last.opcode = Some(opcode);
+        }
         match opcode {
             Opcode::LoadQ => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_u8(&f.code, &mut cur).map_err(map_format_err)?;
             }
             Opcode::LoadBool => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_u8(&f.code, &mut cur).map_err(map_format_err)?;
             }
             Opcode::LoadI32 => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_i32_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
             Opcode::AddI32 => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::SubI32 | Opcode::MulI32 | Opcode::DivI32 | Opcode::ModI32 => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::LoadU32 => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_u32_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
             Opcode::LoadF64 => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_f64_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
             Opcode::LoadFx => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_i32_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
             Opcode::AddFx | Opcode::SubFx | Opcode::MulFx | Opcode::DivFx => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::MakeTuple => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let count = read_u16_operand(&f.code, &mut cur, &mut operands)? as usize;
                 if count < 2 {
                     return Err(RuntimeError::BadFormat(format!(
                         "tuple literal arity must be at least 2 in '{}'",
@@ -1579,28 +1597,28 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                     )));
                 }
                 for _ in 0..count {
-                    let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                    let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 }
             }
             Opcode::MakeSequence => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let count = read_u16_operand(&f.code, &mut cur, &mut operands)? as usize;
                 for _ in 0..count {
-                    let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                    let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 }
             }
             Opcode::MakeClosure => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let count = read_u16_operand(&f.code, &mut cur, &mut operands)? as usize;
                 for _ in 0..count {
-                    let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                    let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 }
             }
             Opcode::MakeRecord => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let count = read_u16_operand(&f.code, &mut cur, &mut operands)? as usize;
                 if count == 0 {
                     return Err(RuntimeError::BadFormat(format!(
                         "record literal slot count must be at least 1 in '{}'",
@@ -1608,118 +1626,118 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                     )));
                 }
                 for _ in 0..count {
-                    let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                    let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 }
             }
             Opcode::MakeAdt => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let count = read_u16_operand(&f.code, &mut cur, &mut operands)? as usize;
                 for _ in 0..count {
-                    let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                    let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 }
             }
             Opcode::AdtTag => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::AdtGet => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::RecordGet => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::TupleGet => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::SequenceGet => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::SequenceLen => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::SequenceIsEmpty => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::SequenceContains | Opcode::SequencePush | Opcode::SequencePrepend => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::SequencePop => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::MapEmpty => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::MapContains => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::MapGet => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::MapSet => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::RngSeed => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::RngNextI32 => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::ClosureCall => {
                 let _ = read_u8(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::LoadVar => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::StoreVar => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::QNot | Opcode::BoolNot | Opcode::QTruthNot => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::LoadText => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::ConcatText => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::QAnd
             | Opcode::QOr
@@ -1744,62 +1762,62 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
             | Opcode::SubF64
             | Opcode::MulF64
             | Opcode::DivF64 => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::Jmp => {
                 let addr = read_u32_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 jumps.push(addr);
             }
             Opcode::JmpIf => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let addr = read_u32_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 jumps.push(addr);
             }
             Opcode::Call => {
                 let _ = read_u8(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let argc = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let argc = read_u16_operand(&f.code, &mut cur, &mut operands)? as usize;
                 for _ in 0..argc {
-                    let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                    let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 }
             }
             Opcode::Assert => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::GateRead => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::GateWrite => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::PulseEmit => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::StateQuery => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::StateUpdate => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::EventPost => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::ClockRead => {
-                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::Ret => {
                 let has_src = read_u8(&f.code, &mut cur).map_err(map_format_err)? != 0;
                 if has_src {
-                    let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                    let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 }
             }
         }
@@ -1829,7 +1847,7 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
             )));
         }
     }
-    for addr in jumps {
+    for &addr in jumps.iter() {
         if addr >= instr_len {
             return Err(RuntimeError::BadFormat(format!(
                 "jump out of range in '{}': {}",
@@ -1843,7 +1861,33 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
             )));
         }
     }
-    Ok(())
+    Ok(jumps)
+}
+
+fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> {
+    scan_function_bytecode(f, None).map(|_| ())
+}
+
+/// One instruction as seen by `scan_function_bytecode`: its frame-relative pc,
+/// its opcode and every `u16` operand in encoding order (registers, symbol ids,
+/// counts and other small immediates alike).
+#[derive(Debug, Clone)]
+struct InstrOperands {
+    pc: usize,
+    opcode: Option<Opcode>,
+    u16s: Vec<u16>,
+}
+
+fn read_u16_operand(
+    code: &[u8],
+    cur: &mut usize,
+    operands: &mut Option<&mut Vec<InstrOperands>>,
+) -> Result<u16, RuntimeError> {
+    let v = read_u16_le(code, cur).map_err(map_format_err)?;
+    if let Some(last) = operands.as_deref_mut().and_then(|ops| ops.last_mut()) {
+        last.u16s.push(v);
+    }
+    Ok(v)
 }
 
 trait VmHostBridge {
@@ -2176,7 +2220,8 @@ where
     // move); the loop reads the current function by reference instead of
     // deep-cloning its `FunctionBytecode` on every instruction.
     let (functions, mut state) = split_vm(vm);
-    exec_loop_on(&mut state, functions, host, observation, profile)
+    let plan = ConsumptionPlan::build(functions);
+    exec_loop_on(&mut state, functions, &plan, host, observation, profile)
 }
 
 /// SHF-RF Z2 (#2037): the mutable execution state of a `VM`, without its
@@ -2236,6 +2281,7 @@ fn split_vm(vm: &mut VM) -> (&HashMap<String, FunctionBytecode>, ExecState<'_>) 
 fn exec_loop_on<'a, H, P>(
     vm: &mut ExecState<'_>,
     functions: &HashMap<String, FunctionBytecode>,
+    plan: &ConsumptionPlan,
     host: &mut H,
     observation: &mut HelloObservationRuntime<'a>,
     profile: &mut P,
@@ -2640,7 +2686,11 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let seq_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let val_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let sequence = get_reg(vm, frame_idx, seq_reg)?;
+                let sequence = if plan.site(&func_name, pc) == Some(ConsumeSite::SequenceOperand) {
+                    take_reg(vm, frame_idx, seq_reg)?
+                } else {
+                    get_reg(vm, frame_idx, seq_reg)?
+                };
                 let Value::Sequence(items) = sequence else {
                     return Err(RuntimeError::TypeMismatchRuntime(
                         "SEQUENCE_PUSH first argument must be sequence".to_string(),
@@ -2793,14 +2843,24 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let symbol = lookup_symbol(f, sid)?;
-                let val = vm.callstack[frame_idx]
-                    .locals
-                    .get(&symbol)
-                    .cloned()
-                    .ok_or_else(|| {
-                        let name = lookup_str(f, sid).unwrap_or("<unknown>");
-                        RuntimeError::UnknownVariable(name.to_string())
-                    })?;
+                let unknown = || {
+                    let name = lookup_str(f, sid).unwrap_or("<unknown>");
+                    RuntimeError::UnknownVariable(name.to_string())
+                };
+                // SHF-P3: an accepted accumulator triple moves the local into the
+                // register; it is restored by the triple's STORE_VAR. Same error if absent.
+                let val = if plan.site(&func_name, pc) == Some(ConsumeSite::Local) {
+                    vm.callstack[frame_idx]
+                        .locals
+                        .remove(&symbol)
+                        .ok_or_else(unknown)?
+                } else {
+                    vm.callstack[frame_idx]
+                        .locals
+                        .get(&symbol)
+                        .cloned()
+                        .ok_or_else(unknown)?
+                };
                 set_reg(vm, frame_idx, dst, val)?;
                 next_pc = cur - f.instr_start;
             }
@@ -2808,7 +2868,11 @@ where
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let symbol = lookup_symbol(f, sid)?;
-                let val = get_reg(vm, frame_idx, src)?;
+                let val = if plan.site(&func_name, pc) == Some(ConsumeSite::StoreSource) {
+                    take_reg(vm, frame_idx, src)?
+                } else {
+                    get_reg(vm, frame_idx, src)?
+                };
                 // #1891 Checkpoint W2F: the exact-PC write check above
                 // (`check_write_execution_site`) already ran before this
                 // match started, using `pc` and `active_borrowed_paths` as
@@ -3481,6 +3545,139 @@ fn lookup_symbol(f: &FunctionBytecode, sid: u16) -> Result<SymbolId, RuntimeErro
         .get(sid as usize)
         .copied()
         .ok_or(RuntimeError::InvalidStringId(sid))
+}
+
+/// SHF-P3 (#2037) verified consumption: where an already-admitted instruction may
+/// move a value instead of copying it. Built once per execution from the same
+/// function table the execution runs (owned by that execution; never global,
+/// never thread-local), so it cannot go stale or leak across programs, VM
+/// instances or threads. It never decides admission: a site that is not proven
+/// safe simply keeps the ordinary copying path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConsumeSite {
+    /// `LOAD_VAR rX, S` of an accepted accumulator triple: move `S` into `rX`.
+    Local,
+    /// `SEQUENCE_PUSH rZ, rX, rV`: move the sequence out of `rX`.
+    SequenceOperand,
+    /// `STORE_VAR S, rZ`: move the result out of `rZ` back into `S`.
+    StoreSource,
+}
+
+#[derive(Debug, Default)]
+struct ConsumptionPlan {
+    sites: HashMap<String, HashMap<usize, ConsumeSite>>,
+}
+
+impl ConsumptionPlan {
+    fn build(functions: &HashMap<String, FunctionBytecode>) -> Self {
+        let sites = functions
+            .iter()
+            .map(|(name, f)| (name.clone(), plan_function(f)))
+            .filter(|(_, s)| !s.is_empty())
+            .collect();
+        Self { sites }
+    }
+
+    #[inline]
+    fn site(&self, func: &str, pc: usize) -> Option<ConsumeSite> {
+        self.sites.get(func).and_then(|s| s.get(&pc)).copied()
+    }
+}
+
+/// Accepts an accumulator triple
+///   a: `LOAD_VAR rX, S` ... b: `SEQUENCE_PUSH rZ, rX, rV`  c: `STORE_VAR S, rZ`
+/// only when every condition holds (anything else keeps the copying path):
+///  C1 `rX` appears as an operand in no instruction except `a` and `b`;
+///  C2 `rZ` appears as an operand in no instruction except `b` and `c`;
+///     every `u16` operand counts (registers, symbol ids, counts, immediates):
+///     a collision can only reject an optimization, never enable one;
+///  C3 `c` immediately follows `b`; no `JMP`/`JMP_IF`/`RET` strictly between `a` and `b`;
+///  C4 no jump target `t` with `a < t <= c`: `b` and `c` only run right after `a`;
+///  C5 no other `LOAD_VAR`/`STORE_VAR` of `S` strictly between `a` and `c`;
+///  C6 no borrowed path of the function is rooted at `S`;
+///  and the registers do not overlap (`rX != rZ`, `rV` distinct from both).
+fn plan_function(f: &FunctionBytecode) -> HashMap<usize, ConsumeSite> {
+    let mut sites = HashMap::new();
+    let mut instrs = Vec::new();
+    let Ok(jumps) = scan_function_bytecode(f, Some(&mut instrs)) else {
+        return sites;
+    };
+    let symbol_of =
+        |sid: Option<&u16>| sid.and_then(|sid| f.symbol_ids.get(*sid as usize).copied());
+    let used_elsewhere = |reg: u16, allowed: [usize; 2]| {
+        instrs
+            .iter()
+            .any(|i| !allowed.contains(&i.pc) && i.u16s.contains(&reg))
+    };
+    for (bi, b) in instrs.iter().enumerate() {
+        if b.opcode != Some(Opcode::SequencePush) {
+            continue;
+        }
+        let [rz, rx, rv] = b.u16s[..] else { continue };
+        let Some(c) = instrs.get(bi + 1) else {
+            continue;
+        };
+        if c.opcode != Some(Opcode::StoreVar) || c.u16s.get(1) != Some(&rz) {
+            continue;
+        }
+        let Some(ai) = (0..bi).rev().find(|&k| {
+            instrs[k].opcode == Some(Opcode::LoadVar) && instrs[k].u16s.first() == Some(&rx)
+        }) else {
+            continue;
+        };
+        let a = &instrs[ai];
+        let (Some(local), Some(stored)) = (symbol_of(a.u16s.get(1)), symbol_of(c.u16s.first()))
+        else {
+            continue;
+        };
+        let accepted = local == stored
+            && rx != rz
+            && rv != rx
+            && rv != rz
+            && !used_elsewhere(rx, [a.pc, b.pc])
+            && !used_elsewhere(rz, [b.pc, c.pc])
+            && !instrs[ai + 1..bi].iter().any(|i| {
+                matches!(
+                    i.opcode,
+                    Some(Opcode::Jmp) | Some(Opcode::JmpIf) | Some(Opcode::Ret)
+                )
+            })
+            && !jumps.iter().any(|&t| t > a.pc && t <= c.pc)
+            && !instrs[ai + 1..bi].iter().any(|i| match i.opcode {
+                Some(Opcode::LoadVar) => symbol_of(i.u16s.get(1)) == Some(local),
+                Some(Opcode::StoreVar) => symbol_of(i.u16s.first()) == Some(local),
+                _ => false,
+            })
+            && !f.borrowed_paths.iter().any(|bp| bp.path.root == local);
+        if accepted {
+            sites.insert(a.pc, ConsumeSite::Local);
+            sites.insert(b.pc, ConsumeSite::SequenceOperand);
+            sites.insert(c.pc, ConsumeSite::StoreSource);
+        }
+    }
+    sites
+}
+
+/// Moves a value out of a register, leaving it `Uninitialized` (never
+/// `Value::Unit`). Same errors, in the same order, as `get_reg`.
+fn take_reg(vm: &mut ExecState<'_>, frame_idx: usize, r: u16) -> Result<Value, RuntimeError> {
+    match vm
+        .callstack
+        .get_mut(frame_idx)
+        .and_then(|fr| fr.regs.get_mut(r as usize))
+    {
+        Some(slot @ RegisterSlot::Value(_)) => {
+            match std::mem::replace(slot, RegisterSlot::Uninitialized) {
+                RegisterSlot::Value(v) => Ok(v),
+                RegisterSlot::Uninitialized => unreachable!("matched Value above"),
+            }
+        }
+        Some(RegisterSlot::Uninitialized) => Err(RuntimeError::BadFormat(format!(
+            "read uninitialized reg r{}",
+            r
+        ))),
+        None => Err(RuntimeError::BadFormat(format!("read invalid reg r{}", r))),
+    }
 }
 
 fn get_reg(vm: &ExecState<'_>, frame_idx: usize, r: u16) -> Result<Value, RuntimeError> {
@@ -10708,6 +10905,167 @@ mod tests {
                 c,
                 Value::Sequence(Arc::new(vec![Value::I32(1), Value::I32(2), Value::I32(3)]))
             );
+        }
+    }
+
+    /// SHF-P3 (#2037): verified consumption. The plan is checked directly, and every
+    /// program is executed twice - with the plan and with an empty plan - under every
+    /// Steps limit, so a failure lands on every instruction including the ones between
+    /// a consumption and its restoring STORE_VAR. Outcome and counters must match.
+    mod shf_p3_consume_tests {
+        use super::*;
+
+        fn compile(src: &str) -> Vec<u8> {
+            compile_program_to_semcode(src).expect("compile")
+        }
+
+        fn plan_sites(src: &str) -> Vec<(String, usize, ConsumeSite)> {
+            let program = parse_semcode(&compile(src)).expect("parse");
+            let plan = ConsumptionPlan::build(&program.functions);
+            let mut out: Vec<_> = plan
+                .sites
+                .iter()
+                .flat_map(|(n, s)| s.iter().map(move |(pc, k)| (n.clone(), *pc, *k)))
+                .collect();
+            out.sort_by_key(|(n, pc, _)| (n.clone(), *pc));
+            out
+        }
+
+        fn run_with(
+            bytes: &[u8],
+            config: ExecutionConfig,
+            planned: bool,
+        ) -> (Result<(), RuntimeError>, usize, usize, usize) {
+            let program = parse_semcode(bytes).expect("parse");
+            let mut vm = VM {
+                functions: program.functions,
+                callstack: Vec::new(),
+                config,
+                effect_calls: 0,
+                steps: 0,
+                calls: 0,
+                symbols: program.runtime_symbols,
+                prng_state: 0,
+                peak_frames: 0,
+            };
+            let result = push_frame(&mut vm, "main", Vec::new(), None).and_then(|()| {
+                let (functions, mut state) = split_vm(&mut vm);
+                let plan = if planned {
+                    ConsumptionPlan::build(functions)
+                } else {
+                    ConsumptionPlan::default()
+                };
+                let mut host = UnavailableVmHost;
+                let mut observation = HelloObservationRuntime::discard();
+                let mut profile = NoopOpcodeProfile;
+                exec_loop_on(
+                    &mut state,
+                    functions,
+                    &plan,
+                    &mut host,
+                    &mut observation,
+                    &mut profile,
+                )
+                .map(|_| ())
+            });
+            (result, vm.steps, vm.calls, vm.peak_frames)
+        }
+
+        fn config(steps: usize) -> ExecutionConfig {
+            let mut c = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
+            c.quotas.max_steps = steps;
+            c
+        }
+
+        /// Planned and unplanned execution agree at every Steps limit (and unlimited).
+        fn assert_equivalent_under_every_steps_limit(src: &str, expect_ok: bool) {
+            let bytes = compile(src);
+            let full = run_with(&bytes, config(10_000_000), false);
+            assert_eq!(
+                full.0.is_ok(),
+                expect_ok,
+                "unplanned reference outcome: {:?}",
+                full.0
+            );
+            assert_eq!(
+                run_with(&bytes, config(10_000_000), true),
+                full,
+                "planned run must equal unplanned run"
+            );
+            for limit in 1..=full.1 + 1 {
+                assert_eq!(
+                    run_with(&bytes, config(limit), true),
+                    run_with(&bytes, config(limit), false),
+                    "planned and unplanned runs differ at max_steps = {limit}"
+                );
+            }
+        }
+
+        const LOOP: &str = "fn main() {\n    let mut xs: Sequence(i32) = [];\n    let mut i: i32 = 0;\n    while i < 12 {\n        xs = push(xs, i * 2);\n        i = i + 1;\n    }\n    assert(len(xs) == 12);\n    assert(xs[11] == 22);\n    return;\n}\n";
+
+        #[test]
+        fn accumulator_triple_is_planned() {
+            let sites = plan_sites(LOOP);
+            let kinds: Vec<_> = sites.iter().map(|(_, _, k)| *k).collect();
+            assert_eq!(
+                kinds,
+                vec![
+                    ConsumeSite::Local,
+                    ConsumeSite::SequenceOperand,
+                    ConsumeSite::StoreSource
+                ]
+            );
+        }
+
+        #[test]
+        fn returned_push_is_not_planned() {
+            assert!(plan_sites("fn f(xs: Sequence(i32)) -> Sequence(i32) {\n    return push(xs, 1);\n}\nfn main() {\n    let a: Sequence(i32) = f([]);\n    assert(len(a) == 1);\n    return;\n}\n").is_empty());
+        }
+
+        #[test]
+        fn self_referencing_value_is_not_planned() {
+            assert!(plan_sites("fn main() {\n    let mut xs: Sequence(i32) = [5];\n    xs = push(xs, len(xs));\n    xs = push(xs, xs[0]);\n    assert(len(xs) == 3);\n    return;\n}\n").is_empty());
+        }
+
+        #[test]
+        fn loop_accumulation_is_equivalent_at_every_failure_point() {
+            assert_equivalent_under_every_steps_limit(LOOP, true);
+        }
+
+        #[test]
+        fn aliasing_and_history_are_equivalent_at_every_failure_point() {
+            assert_equivalent_under_every_steps_limit(
+                "fn main() {\n    let a: Sequence(i32) = [1, 2, 3];\n    let mut b: Sequence(i32) = a;\n    b = push(b, 4);\n    let mut hist: Sequence(Sequence(i32)) = [];\n    hist = push(hist, b);\n    b = push(b, 5);\n    assert(len(a) == 3 && len(b) == 5);\n    let h: Sequence(i32) = hist[0];\n    assert(len(h) == 4);\n    return;\n}\n",
+                true,
+            );
+        }
+
+        #[test]
+        fn call_inside_pushed_value_is_equivalent_at_every_failure_point() {
+            assert_equivalent_under_every_steps_limit(
+                "fn sq(i: i32) -> i32 { return i * i; }\nfn main() {\n    let mut xs: Sequence(i32) = [];\n    let mut i: i32 = 0;\n    while i < 8 {\n        xs = push(xs, sq(i));\n        i = i + 1;\n    }\n    assert(xs[7] == 49);\n    return;\n}\n",
+                true,
+            );
+        }
+
+        #[test]
+        fn trap_between_consumption_and_restore_is_equivalent() {
+            assert_equivalent_under_every_steps_limit(
+                "fn v(i: i32) -> i32 {\n    assert(i != 5);\n    return i;\n}\nfn main() {\n    let mut xs: Sequence(i32) = [];\n    let mut i: i32 = 0;\n    while i < 9 {\n        xs = push(xs, v(i));\n        i = i + 1;\n    }\n    return;\n}\n",
+                false,
+            );
+        }
+
+        #[test]
+        fn plan_is_scoped_to_its_own_program() {
+            // Two different programs with the same entry name run back to back in one
+            // thread: each execution builds its own plan from its own function table.
+            let a = compile(LOOP);
+            let b = compile("fn main() {\n    let mut ys: Sequence(i32) = [3];\n    ys = push(ys, len(ys));\n    assert(ys[1] == 1);\n    return;\n}\n");
+            for _ in 0..3 {
+                assert_eq!(run_with(&a, config(10_000_000), true).0, Ok(()));
+                assert_eq!(run_with(&b, config(10_000_000), true).0, Ok(()));
+            }
         }
     }
 }
