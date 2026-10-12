@@ -73,6 +73,13 @@ pub const fn verified_local() -> Self {
 pub const fn pure_compute() -> Self {
 pub const fn kernel_bound() -> Self {
 pub fn exceed(self, kind: QuotaKind, used: usize) -> Option<QuotaExceeded> {
+pub const TRUSTED_COMPILER_MAX_STEPS: u64 = 200_000_000;
+pub const TRUSTED_COMPILER_MAX_FRAMES: u64 = 1_024;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaOverrideError {
+StepsOutOfRange { value: u64 },
+FramesOutOfRange { value: u64 },
+pub fn trusted_compiler( max_steps: Option<u64>, max_frames: Option<u64>, ) -> Result<Self, QuotaOverrideError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionConfig {
 pub context: ExecutionContext,

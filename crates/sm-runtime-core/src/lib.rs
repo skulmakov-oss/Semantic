@@ -232,6 +232,58 @@ impl Default for RuntimeQuotas {
     }
 }
 
+/// SHF-R (#2030): upper bound for an explicit `max_steps` override in the
+/// opt-in `trusted-compiler` envelope. Experimental contract candidate for
+/// explicitly selected local execution; it bounds instruction count only,
+/// not heap usage or wall-clock time (see `docs/spec/quotas.md`).
+pub const TRUSTED_COMPILER_MAX_STEPS: u64 = 200_000_000;
+
+/// SHF-R (#2030): upper bound for an explicit `max_frames` override in the
+/// opt-in `trusted-compiler` envelope. `max_stack_depth` follows the frame
+/// override.
+pub const TRUSTED_COMPILER_MAX_FRAMES: u64 = 1_024;
+
+/// A rejected `trusted-compiler` quota override. Carries the offending
+/// value so callers can render a deterministic diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaOverrideError {
+    StepsOutOfRange { value: u64 },
+    FramesOutOfRange { value: u64 },
+}
+
+impl RuntimeQuotas {
+    /// SHF-R (#2030): the `trusted-compiler` envelope.
+    ///
+    /// Starts from `verified_local()` and applies only the explicit
+    /// overrides: `max_steps`, and `max_frames` together with
+    /// `max_stack_depth`. With no overrides the result equals
+    /// `verified_local()` exactly. Every other field - in particular
+    /// `max_calls`, `max_effect_calls` and the admission-relevant
+    /// `max_registers` / `max_symbol_table` /
+    /// `max_debug_symbols_per_function` - is never changed, so verifier
+    /// admission of the same bytes is identical under this envelope.
+    pub fn trusted_compiler(
+        max_steps: Option<u64>,
+        max_frames: Option<u64>,
+    ) -> Result<Self, QuotaOverrideError> {
+        let mut quotas = Self::verified_local();
+        if let Some(value) = max_steps {
+            if value == 0 || value > TRUSTED_COMPILER_MAX_STEPS {
+                return Err(QuotaOverrideError::StepsOutOfRange { value });
+            }
+            quotas.max_steps = value as usize;
+        }
+        if let Some(value) = max_frames {
+            if value == 0 || value > TRUSTED_COMPILER_MAX_FRAMES {
+                return Err(QuotaOverrideError::FramesOutOfRange { value });
+            }
+            quotas.max_frames = value as usize;
+            quotas.max_stack_depth = value as usize;
+        }
+        Ok(quotas)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionConfig {
     pub context: ExecutionContext,
@@ -468,5 +520,62 @@ mod tests {
         let config = ExecutionConfig::for_context(ExecutionContext::KernelBound);
         assert_eq!(config.context, ExecutionContext::KernelBound);
         assert_eq!(config.quotas.max_effect_calls, 4_096);
+    }
+
+    #[test]
+    fn trusted_compiler_without_overrides_is_exactly_verified_local() {
+        assert_eq!(
+            RuntimeQuotas::trusted_compiler(None, None),
+            Ok(RuntimeQuotas::verified_local())
+        );
+    }
+
+    #[test]
+    fn trusted_compiler_steps_override_changes_only_steps() {
+        let quotas = RuntimeQuotas::trusted_compiler(Some(TRUSTED_COMPILER_MAX_STEPS), None)
+            .expect("maximum is admitted");
+        let expected = RuntimeQuotas {
+            max_steps: 200_000_000,
+            ..RuntimeQuotas::verified_local()
+        };
+        assert_eq!(quotas, expected);
+        // max_calls is never coupled to max_steps (SHF-R contract v2.1).
+        assert_eq!(quotas.max_calls, 16_384);
+    }
+
+    #[test]
+    fn trusted_compiler_frames_override_couples_stack_depth_only() {
+        let quotas = RuntimeQuotas::trusted_compiler(None, Some(TRUSTED_COMPILER_MAX_FRAMES))
+            .expect("maximum is admitted");
+        let expected = RuntimeQuotas {
+            max_frames: 1_024,
+            max_stack_depth: 1_024,
+            ..RuntimeQuotas::verified_local()
+        };
+        assert_eq!(quotas, expected);
+    }
+
+    #[test]
+    fn trusted_compiler_admits_values_below_the_default() {
+        let quotas = RuntimeQuotas::trusted_compiler(Some(1), Some(1)).expect("1 is admitted");
+        assert_eq!(quotas.max_steps, 1);
+        assert_eq!(quotas.max_frames, 1);
+        assert_eq!(quotas.max_stack_depth, 1);
+    }
+
+    #[test]
+    fn trusted_compiler_rejects_zero_and_values_past_the_maximum() {
+        for value in [0, TRUSTED_COMPILER_MAX_STEPS + 1, u64::MAX] {
+            assert_eq!(
+                RuntimeQuotas::trusted_compiler(Some(value), None),
+                Err(QuotaOverrideError::StepsOutOfRange { value })
+            );
+        }
+        for value in [0, TRUSTED_COMPILER_MAX_FRAMES + 1, u64::MAX] {
+            assert_eq!(
+                RuntimeQuotas::trusted_compiler(None, Some(value)),
+                Err(QuotaOverrideError::FramesOutOfRange { value })
+            );
+        }
     }
 }

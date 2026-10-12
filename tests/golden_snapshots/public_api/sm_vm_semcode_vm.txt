@@ -67,6 +67,7 @@ pub steps: usize,
 pub calls: usize,
 pub symbols: RuntimeSymbolTable,
 pub prng_state: u64,
+pub peak_frames: usize,
 #[cfg(feature = "vm-profile")]
 #[derive(Debug, Clone)]
 pub struct VmOpcodeProfile {
@@ -106,6 +107,17 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config< H: Prometheus
 pub fn run_verified_semcode_with_application_host_and_capabilities_and_config< H: ApplicationHostAbi, C: CapabilityChecker, >( bytes: &[u8], entry: &str, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config< H: PrometheusHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_config< H: ApplicationHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionCounters {
+pub steps: usize,
+pub calls: usize,
+pub peak_frames: usize,
+pub effect_calls: usize,
+#[derive(Debug)]
+pub struct MeteredRun {
+pub result: Result<(), RuntimeError>,
+pub counters: Option<ExecutionCounters>,
+pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_config_metered< H: ApplicationHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> MeteredRun {
 pub fn run_verified_entry_semcode( token: &VerifiedEntrySemCode<'_, '_>, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_collecting_hello_observations( token: &VerifiedEntrySemCode<'_, '_>, ) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
 pub fn run_verified_entry_semcode_with_config( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
