@@ -2177,6 +2177,7 @@ struct ExecState<'vm> {
     effect_calls: &'vm mut usize,
     steps: &'vm mut usize,
     calls: &'vm mut usize,
+    peak_frames: &'vm mut usize,
     // Read only by the test-build terminal observation in the `Ret` arm; kept
     // so the split stays exhaustive over `VM`'s fields.
     #[cfg_attr(not(test), allow(dead_code))]
@@ -2195,6 +2196,7 @@ fn split_vm(vm: &mut VM) -> (&HashMap<String, FunctionBytecode>, ExecState<'_>) 
         effect_calls,
         steps,
         calls,
+        peak_frames,
         symbols,
         prng_state,
     } = vm;
@@ -2206,6 +2208,7 @@ fn split_vm(vm: &mut VM) -> (&HashMap<String, FunctionBytecode>, ExecState<'_>) 
             effect_calls,
             steps,
             calls,
+            peak_frames,
             symbols,
             prng_state,
         },
@@ -3398,7 +3401,7 @@ fn push_frame_in(
         return_dst,
     };
     vm.callstack.push(frame);
-    vm.peak_frames = vm.peak_frames.max(vm.callstack.len());
+    *vm.peak_frames = (*vm.peak_frames).max(vm.callstack.len());
     Ok(())
 }
 
@@ -10451,6 +10454,50 @@ mod tests {
             );
         }
 
+        // M2 (#2036 x Z2): `peak_frames` is observed once, after a successful
+        // push in the single admission path `push_frame_in`. The root frame
+        // counts, returns never lower the high-water mark, and a frame rejected
+        // by the Frames quota is never counted.
+        #[test]
+        fn b1_peak_frames_is_recorded_by_push_frame_in() {
+            let root_only = compile_program_to_semcode("fn main() { return; }").expect("compile");
+            let (vm, ok) = run_main_keeping_table(&root_only, local_config());
+            assert_eq!(ok, Ok(()));
+            assert_eq!(vm.peak_frames, 1, "the root frame counts toward the peak");
+
+            // down(5) needs main + down(5) .. down(0) = 7 frames.
+            let frames_src = r#"
+                fn down(n: i32) -> i32 { if n == 0 { return 0; } return 1 + down(n - 1); }
+                fn main() { assert(down(5) == 5); return; }
+            "#;
+            let bytes = compile_program_to_semcode(frames_src).expect("compile");
+            let (vm, ok) = run_main_keeping_table(&bytes, local_config());
+            assert_eq!(ok, Ok(()));
+            assert_eq!(
+                vm.peak_frames, 7,
+                "returns must not lower the high-water mark"
+            );
+            assert_eq!(vm.callstack.len(), 0);
+
+            let mut limited = local_config();
+            limited.quotas.max_frames = 6;
+            limited.quotas.max_stack_depth = 6;
+            let (vm, result) = run_main_keeping_table(&bytes, limited);
+            assert_eq!(
+                result,
+                Err(RuntimeError::QuotaExceeded(QuotaExceeded {
+                    kind: QuotaKind::Frames,
+                    limit: 6,
+                    used: 7,
+                }))
+            );
+            assert_eq!(vm.peak_frames, 6, "a rejected frame is never counted");
+            assert_eq!(
+                vm.calls, 5,
+                "only the five admitted non-root frames charge Calls"
+            );
+        }
+
         // R-B1-06: write-site borrow conflicts still trap deterministically
         // (write-site metadata is now read through the borrowed function).
         #[test]
@@ -10486,6 +10533,7 @@ mod tests {
                 effect_calls: 0,
                 steps: 0,
                 calls: 0,
+                peak_frames: 0,
                 symbols: program.runtime_symbols,
                 prng_state: 0,
             };
