@@ -193,6 +193,10 @@ pub struct VM {
     pub symbols: RuntimeSymbolTable,
     /// PRNG state for random_seed / random_next_i32 (xorshift64; 0 = unseeded).
     pub prng_state: u64,
+    /// SHF-R (#2030): high-water mark of the call stack length, updated in
+    /// `push_frame` after every quota check for the new frame has passed.
+    /// Observation only; never consulted by quota enforcement.
+    pub peak_frames: usize,
 }
 
 #[cfg(test)]
@@ -892,6 +896,7 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
         calls: 0,
         symbols: program.runtime_symbols,
         prng_state: 0,
+        peak_frames: 0,
     };
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
     let mut bridge = PrometheusVmHost { host, capabilities };
@@ -908,7 +913,61 @@ pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_con
     capabilities: &C,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    let program = prepare_verified_execution(token)?;
+    run_verified_entry_semcode_with_application_host_and_capabilities_and_config_metered(
+        token,
+        host,
+        capabilities,
+        config,
+    )
+    .result
+}
+
+/// SHF-R (#2030): deterministic execution counters read from the VM at
+/// termination, whether execution succeeded or failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionCounters {
+    /// Charged `Steps` (decoded opcodes) - the `VM.steps` counter.
+    pub steps: usize,
+    /// Charged non-root `Calls` - the `VM.calls` counter.
+    pub calls: usize,
+    /// Call-stack high-water mark, including the root frame.
+    pub peak_frames: usize,
+    /// Charged effect calls: application-host effects plus VM-charged
+    /// gate/state effects.
+    pub effect_calls: usize,
+}
+
+/// SHF-R (#2030): outcome of a metered run. `counters` is `None` exactly
+/// when execution never started (the verified program could not be
+/// prepared, so no VM existed); it is never a fabricated zero record.
+#[derive(Debug)]
+pub struct MeteredRun {
+    pub result: Result<(), RuntimeError>,
+    pub counters: Option<ExecutionCounters>,
+}
+
+/// Metered variant of
+/// `run_verified_entry_semcode_with_application_host_and_capabilities_and_config`.
+/// Identical execution semantics; additionally returns the counters at
+/// termination. A failure is never turned into success.
+pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_config_metered<
+    H: ApplicationHostAbi,
+    C: CapabilityChecker,
+>(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    host: &mut H,
+    capabilities: &C,
+    config: ExecutionConfig,
+) -> MeteredRun {
+    let program = match prepare_verified_execution(token) {
+        Ok(program) => program,
+        Err(error) => {
+            return MeteredRun {
+                result: Err(error),
+                counters: None,
+            }
+        }
+    };
     let mut vm = VM {
         functions: program.functions,
         callstack: Vec::new(),
@@ -918,17 +977,30 @@ pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_con
         calls: 0,
         symbols: program.runtime_symbols,
         prng_state: 0,
+        peak_frames: 0,
     };
-    push_frame(&mut vm, token.entry(), Vec::new(), None)?;
+    let quotas = vm.config.quotas;
     let mut bridge = ApplicationVmHost {
         host,
         capabilities,
         observed: false,
-        quotas: vm.config.quotas,
+        quotas,
         effect_calls: 0,
     };
-    let mut observation = HelloObservationRuntime::discard();
-    exec_loop(&mut vm, &mut bridge, &mut observation).map(|_| ())
+    let result = push_frame(&mut vm, token.entry(), Vec::new(), None).and_then(|()| {
+        let mut observation = HelloObservationRuntime::discard();
+        exec_loop(&mut vm, &mut bridge, &mut observation).map(|_| ())
+    });
+    let counters = ExecutionCounters {
+        steps: vm.steps,
+        calls: vm.calls,
+        peak_frames: vm.peak_frames,
+        effect_calls: vm.effect_calls.saturating_add(bridge.effect_calls),
+    };
+    MeteredRun {
+        result,
+        counters: Some(counters),
+    }
 }
 
 /// Canonical verified token execution path.
@@ -1019,6 +1091,7 @@ pub fn run_verified_function_semcode_with_args_and_config(
         calls: 0,
         symbols: program.runtime_symbols,
         prng_state: 0,
+        peak_frames: 0,
     };
     // Argument validation happens inside `push_frame` itself (#1773 /
     // FA-09-005) - see `validate_call_arguments`'s doc comment.
@@ -1049,6 +1122,7 @@ pub fn run_verified_entry_semcode_with_profile(
         calls: 0,
         symbols: program.runtime_symbols,
         prng_state: 0,
+        peak_frames: 0,
     };
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
     let mut host = prom_abi::RecordingHostAbi::default();
@@ -1114,6 +1188,7 @@ fn run_vm_program_view_with_entry_and_config_with_observation_runtime<'a>(
         calls: 0,
         symbols: program.runtime_symbols,
         prng_state: 0,
+        peak_frames: 0,
     };
     push_frame(&mut vm, entry, Vec::new(), None)?;
     let mut host = UnavailableVmHost;
@@ -3226,6 +3301,7 @@ fn push_frame(
         return_dst,
     };
     vm.callstack.push(frame);
+    vm.peak_frames = vm.peak_frames.max(vm.callstack.len());
     Ok(())
 }
 
@@ -5676,6 +5752,7 @@ mod tests {
             calls: 0,
             symbols: program.runtime_symbols,
             prng_state: 0,
+            peak_frames: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
@@ -5723,6 +5800,7 @@ mod tests {
             calls: 0,
             symbols: program.runtime_symbols,
             prng_state: 0,
+            peak_frames: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push main");
@@ -5763,6 +5841,7 @@ mod tests {
             calls: 0,
             symbols: program.runtime_symbols,
             prng_state: 0,
+            peak_frames: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
@@ -5793,6 +5872,7 @@ mod tests {
             calls: 0,
             symbols: program.runtime_symbols,
             prng_state: 0,
+            peak_frames: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push main");
@@ -6780,6 +6860,7 @@ mod tests {
             calls: 0,
             symbols: program.runtime_symbols,
             prng_state: 0,
+            peak_frames: 0,
         };
         let result = push_frame(&mut vm, "main", Vec::new(), None).and_then(|()| {
             let mut host = UnavailableVmHost;
@@ -7264,6 +7345,7 @@ mod tests {
             calls: 0,
             symbols: program.runtime_symbols,
             prng_state: 0,
+            peak_frames: 0,
         };
         let result = push_frame(&mut vm, entry_token.entry(), Vec::new(), None).and_then(|()| {
             let mut bridge = PrometheusVmHost { host, capabilities };
@@ -7319,6 +7401,7 @@ mod tests {
             calls: 0,
             symbols: RuntimeSymbolTable::new(),
             prng_state: 0,
+            peak_frames: 0,
         }
     }
 
@@ -7606,6 +7689,7 @@ mod tests {
             calls: 0,
             symbols: program.runtime_symbols,
             prng_state: 0,
+            peak_frames: 0,
         };
         push_frame(&mut vm, entry, args, None)?;
         let mut host = UnavailableVmHost;
@@ -9696,6 +9780,7 @@ mod tests {
             calls: 0,
             symbols: program.runtime_symbols,
             prng_state: 0,
+            peak_frames: 0,
         };
         push_frame(&mut vm, entry_token.entry(), Vec::new(), None).expect("push main frame");
         let mut bridge = PrometheusVmHost { host, capabilities };

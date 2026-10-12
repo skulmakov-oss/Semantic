@@ -125,6 +125,75 @@ Contract rule:
 - context selection is explicit through `ExecutionConfig`
 - default execution for standard verified runs is `VerifiedLocal`
 
+## Trusted-Compiler Envelope
+
+Status: SHF-R (#2030). It is an experimental contract candidate for
+explicitly selected local execution, exposed only by application-mode
+`smc run --envelope trusted-compiler` (see `docs/spec/cli.md`).
+
+### Quotas
+
+`RuntimeQuotas::trusted_compiler(max_steps, max_frames)` starts from
+`verified_local()` and applies only explicit overrides:
+
+| Field | Without overrides | Override |
+|---|---|---|
+| `max_steps` | 100000 | `--max-steps`, 1 ..= `TRUSTED_COMPILER_MAX_STEPS` (200000000) |
+| `max_frames` | 256 | `--max-frames`, 1 ..= `TRUSTED_COMPILER_MAX_FRAMES` (1024) |
+| `max_stack_depth` | 256 | follows `--max-frames` |
+| `max_calls` | 16384 | not overridable |
+| `max_effect_calls` | 1024 | not overridable |
+| `max_registers`, `max_symbol_table`, `max_debug_symbols_per_function` | as `verified_local` | not overridable |
+
+- The context stays `ExecutionContext::VerifiedLocal`. This is a custom
+  envelope under the "Execution Envelope Provenance Rule" below.
+- The admission-relevant fields never change, so verifier admission of the
+  same bytes is identical with and without the envelope.
+- The CLI reports the effective quotas in `--metrics json`.
+
+### Non-claims
+
+Quota values bound counts, not cost:
+
+- `Steps` counts decoded opcodes. A single step may clone a composite value
+  (`Sequence`, `Tuple`, `Record`, `Map`, `Text`) whose size is unbounded,
+  because register and variable reads copy values. CPU time and allocation
+  traffic are therefore not bounded by `max_steps`.
+  - SHF-R R0 measured `push`, `len`, indexing, field reads, record update
+    and tuple passing at a constant step count but with wall time growing
+    linearly in the size of the touched value.
+- Frames are heap-allocated, and each frame may hold up to `max_registers`
+  values of unbounded size. No quota accounts for bytes; there is no
+  aggregate heap bound.
+- No quota bounds wall-clock time.
+
+Raising `max_steps` or `max_frames` is therefore not a memory-safety or
+time-safety measure. Larger maxima require, at minimum:
+
+- an aggregate heap or allocation bound, or a proven bound on per-step cost;
+- Windows and Linux measurements at the proposed limit;
+- a revision of this contract.
+
+### Known compiler-workload blocker: `max_calls`
+
+`Calls` counts every admitted non-root call over the whole execution, not
+the stack depth.
+
+The figures below are informative, not normative. They come from the SHF-R
+R0 measurements of MiniLang workloads on Windows x64 at base
+`327c0b6d9b70c73d0f674d0499e7b5803856e07e` (#2030 evidence).
+
+- The SHF-R measurements on MiniLang workloads issue `Call` opcodes at about
+  6.5-7 % of steps. Its lexer makes about 9 calls per source byte.
+- Under the trusted-compiler envelope with `--max-steps 200000000`, the
+  lexer stops with `Calls limit=16384 used=16385` on inputs of 2880 bytes
+  and above. Its practical ceiling is about 1.8 KB of source, independent of
+  `max_steps`.
+
+Raising `Steps` alone therefore does not make self-hosted compiler
+workloads practical. Any change to `max_calls` requires a separately
+approved, independently bounded mechanism.
+
 ## Execution Envelope Provenance Rule
 
 Frozen and implemented (#1762, FA-08-004,
