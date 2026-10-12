@@ -21,6 +21,7 @@ use sm_verify::{
     VerifiedEntrySemCode,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 /// Scalar key type for Map values.
 ///
@@ -48,7 +49,11 @@ pub enum Value {
     Bool(bool),
     Text(String),
     Bytes(Vec<u8>),
-    Sequence(Vec<Value>),
+    /// Sequence storage is shared copy-on-write (#2037, SHF-P3): a logical copy of a
+    /// `Value::Sequence` shares the buffer, and every update goes through
+    /// `Arc::make_mut`, which copies the buffer only while it is still shared. Programs
+    /// therefore keep independent value semantics; only physical storage is shared.
+    Sequence(Arc<Vec<Value>>),
     Map(Vec<(MapKey, Value)>),
     Closure(ClosureValue),
     I32(i32),
@@ -59,6 +64,17 @@ pub enum Value {
     Record(RecordCarrier<Value>),
     Adt(AdtCarrier<Value>),
     Unit,
+}
+
+/// SHF-P3 (#2037): the public runtime types must stay `Send + Sync` after the
+/// switch to shared sequence storage (`Arc`, never `Rc`). Compile-time only.
+#[allow(dead_code)]
+fn assert_public_runtime_types_are_send_sync() {
+    fn check<T: Send + Sync>() {}
+    check::<Value>();
+    check::<ClosureValue>();
+    check::<Frame>();
+    check::<VM>();
 }
 
 /// A single register slot.
@@ -2391,7 +2407,7 @@ where
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                     items.push(get_reg(vm, frame_idx, src)?);
                 }
-                set_reg(vm, frame_idx, dst, Value::Sequence(items))?;
+                set_reg(vm, frame_idx, dst, Value::Sequence(Arc::new(items)))?;
                 next_pc = cur - f.instr_start;
             }
             Opcode::MakeClosure => {
@@ -2632,7 +2648,7 @@ where
                 };
                 let new_val = get_reg(vm, frame_idx, val_reg)?;
                 let mut new_items = items;
-                new_items.push(new_val);
+                Arc::make_mut(&mut new_items).push(new_val);
                 set_reg(vm, frame_idx, dst, Value::Sequence(new_items))?;
                 next_pc = cur - f.instr_start;
             }
@@ -2649,8 +2665,8 @@ where
                 let new_val = get_reg(vm, frame_idx, val_reg)?;
                 let mut new_items = Vec::with_capacity(items.len() + 1);
                 new_items.push(new_val);
-                new_items.extend(items);
-                set_reg(vm, frame_idx, dst, Value::Sequence(new_items))?;
+                new_items.extend(Arc::unwrap_or_clone(items));
+                set_reg(vm, frame_idx, dst, Value::Sequence(Arc::new(new_items)))?;
                 next_pc = cur - f.instr_start;
             }
             Opcode::SequencePop => {
@@ -2667,8 +2683,8 @@ where
                         "SEQUENCE_POP source must be non-empty".to_string(),
                     ));
                 }
-                let mut new_items = items.clone();
-                new_items.pop();
+                let mut new_items = items;
+                Arc::make_mut(&mut new_items).pop();
                 set_reg(vm, frame_idx, dst, Value::Sequence(new_items))?;
                 next_pc = cur - f.instr_start;
             }
@@ -10617,6 +10633,81 @@ mod tests {
             let profile = run_verified_entry_semcode_with_profile(&entry, local_config())
                 .expect("profiled run");
             assert_eq!(profile.total_instructions(), vm.steps as u64);
+        }
+    }
+
+    /// SHF-P3 (#2037): copy-on-write sequence storage keeps independent value
+    /// semantics. Every program asserts its own expected values; a failed
+    /// `assert` traps and fails the test.
+    mod shf_p3_cow_tests {
+        use super::*;
+
+        fn run_ok(src: &str) -> VM {
+            let bytes = compile_program_to_semcode(src).expect("compile");
+            let mut config = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
+            config.quotas.max_steps = 10_000_000;
+            let (vm, result) = run_semcode_for_test(&bytes, config);
+            assert_eq!(result, Ok(()), "program must run to completion");
+            vm
+        }
+
+        #[test]
+        fn copy_then_push_leaves_the_original_unchanged() {
+            run_ok(
+                "fn main() {\n    let a: Sequence(i32) = [1, 2, 3];\n    let mut b: Sequence(i32) = a;\n    b = push(b, 4);\n    assert(len(a) == 3);\n    assert(a[0] == 1 && a[1] == 2 && a[2] == 3);\n    assert(len(b) == 4);\n    assert(b[3] == 4);\n    return;\n}\n",
+            );
+        }
+
+        #[test]
+        fn retained_historical_versions_stay_intact() {
+            run_ok(
+                "fn main() {\n    let mut xs: Sequence(i32) = [];\n    let mut hist: Sequence(Sequence(i32)) = [];\n    let mut i: i32 = 0;\n    while i < 20 {\n        xs = push(xs, i);\n        hist = push(hist, xs);\n        i = i + 1;\n    }\n    let h0: Sequence(i32) = hist[0];\n    let h19: Sequence(i32) = hist[19];\n    assert(len(h0) == 1 && h0[0] == 0);\n    assert(len(h19) == 20 && h19[19] == 19);\n    return;\n}\n",
+            );
+        }
+
+        #[test]
+        fn nested_sequences_are_independent_after_inner_update() {
+            run_ok(
+                "fn main() {\n    let mut inner: Sequence(i32) = [1];\n    let mut outer: Sequence(Sequence(i32)) = [];\n    outer = push(outer, inner);\n    inner = push(inner, 2);\n    let first: Sequence(i32) = outer[0];\n    assert(len(first) == 1);\n    assert(len(inner) == 2);\n    let snapshot: Sequence(Sequence(i32)) = outer;\n    outer = push(outer, [9]);\n    assert(len(snapshot) == 1);\n    assert(len(outer) == 2);\n    return;\n}\n",
+            );
+        }
+
+        #[test]
+        fn function_boundaries_and_closures_see_independent_values() {
+            run_ok(
+                "fn grow(xs: Sequence(i32)) -> Sequence(i32) {\n    let mut ys: Sequence(i32) = xs;\n    ys = push(ys, 7);\n    return ys;\n}\nfn main() {\n    let a: Sequence(i32) = [1];\n    let b: Sequence(i32) = grow(a);\n    assert(len(a) == 1);\n    assert(len(b) == 2 && b[1] == 7);\n    let n: i32 = len(a);\n    let f: Closure(i32 -> i32) = (x => x + n);\n    let c: Sequence(i32) = grow(b);\n    assert(f(0) == 1);\n    assert(len(b) == 2 && len(c) == 3);\n    return;\n}\n",
+            );
+        }
+
+        #[test]
+        fn pop_and_prepend_on_shared_values_do_not_mutate_the_source() {
+            run_ok(
+                "fn main() {\n    let a: Sequence(i32) = [1, 2, 3];\n    let b: Sequence(i32) = pop(a);\n    let c: Sequence(i32) = prepend(a, 0);\n    assert(len(a) == 3 && a[2] == 3);\n    assert(len(b) == 2);\n    assert(len(c) == 4 && c[0] == 0 && c[3] == 3);\n    return;\n}\n",
+            );
+        }
+
+        #[test]
+        fn shared_storage_is_physically_shared_but_logically_equal() {
+            // Direct Value-level check: cloning shares the buffer; an update via
+            // make_mut on a shared buffer leaves the other owner untouched.
+            let a = Value::Sequence(Arc::new(vec![Value::I32(1), Value::I32(2)]));
+            let b = a.clone();
+            if let (Value::Sequence(x), Value::Sequence(y)) = (&a, &b) {
+                assert!(Arc::ptr_eq(x, y), "a logical copy shares storage");
+            }
+            let Value::Sequence(mut buf) = b else {
+                unreachable!()
+            };
+            Arc::make_mut(&mut buf).push(Value::I32(3));
+            let c = Value::Sequence(buf);
+            assert_eq!(
+                a,
+                Value::Sequence(Arc::new(vec![Value::I32(1), Value::I32(2)]))
+            );
+            assert_eq!(
+                c,
+                Value::Sequence(Arc::new(vec![Value::I32(1), Value::I32(2), Value::I32(3)]))
+            );
         }
     }
 }
