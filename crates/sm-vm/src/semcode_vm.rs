@@ -3612,6 +3612,14 @@ fn plan_function(f: &FunctionBytecode) -> HashMap<usize, ConsumeSite> {
     let Ok(mut jumps) = scan_function_bytecode(f, Some(&mut instrs)) else {
         return sites;
     };
+    // SHF-P3-FIX2: without a SEQUENCE_PUSH there is no candidate, so the loop
+    // below could never insert a site; skip building its indexes.
+    if !instrs
+        .iter()
+        .any(|i| i.opcode == Some(Opcode::SequencePush))
+    {
+        return sites;
+    }
     jumps.sort_unstable();
     let symbol_of =
         |sid: Option<&u16>| sid.and_then(|sid| f.symbol_ids.get(*sid as usize).copied());
@@ -11518,6 +11526,63 @@ mod tests {
                 "fn sq(i: i32) -> i32 { return i * i; }\nfn main() {\n    let mut xs: Sequence(i32) = [];\n    let mut i: i32 = 0;\n    while i < 8 {\n        xs = push(xs, sq(i));\n        i = i + 1;\n    }\n    assert(xs[7] == 49);\n    return;\n}\n",
                 true,
             );
+        }
+
+        /// SHF-P3-FIX2: a function without SEQUENCE_PUSH returns the empty plan
+        /// before any index is built; every function's site map still equals the
+        /// reference planner's, and admitted programs run identically planned and
+        /// unplanned under every Steps limit.
+        #[test]
+        fn functions_without_push_plan_empty_and_match_reference() {
+            let has_push = |f: &FunctionBytecode| {
+                let mut instrs = Vec::new();
+                scan_function_bytecode(f, Some(&mut instrs)).expect("decode");
+                instrs
+                    .iter()
+                    .any(|i| i.opcode == Some(Opcode::SequencePush))
+            };
+            let check = |bytes: &[u8], expect_ok: bool| {
+                assert!(verify_semcode_token(bytes).is_ok(), "not admitted");
+                let program = parse_semcode(bytes).expect("parse");
+                for (name, f) in &program.functions {
+                    let fast = plan_function(f);
+                    assert_eq!(
+                        fast,
+                        plan_function_reference(f),
+                        "planners differ in {name}"
+                    );
+                    if !has_push(f) {
+                        assert!(fast.is_empty(), "{name} has no push but planned sites");
+                    }
+                }
+                let full = run_with(bytes, config(10_000_000), false);
+                assert_eq!(full.0.is_ok(), expect_ok, "{:?}", full.0);
+                for limit in 1..=full.1 + 1 {
+                    assert_eq!(
+                        run_with(bytes, config(limit), true),
+                        run_with(bytes, config(limit), false),
+                        "planned and unplanned runs differ at max_steps = {limit}"
+                    );
+                }
+                assert_planners_agree(bytes)
+            };
+            // minimal valid function
+            let minimal = ir_main(vec![IrInstr::Ret { src: None }]).expect("emit");
+            assert_eq!(check(&minimal, true), 0);
+            // functions without SEQUENCE_PUSH, one called
+            let no_push = "fn f(x: i32) -> i32 {\n    let mut y: i32 = x;\n    y = y + 1;\n    return y;\n}\nfn main() {\n    assert(f(1) == 2);\n    return;\n}\n";
+            assert_eq!(check(&compile(no_push), true), 0);
+            // many uncalled no-push functions, push functions with and without
+            // accepted triples, and a called mixed main
+            let uncalled: String = (0..40)
+                .map(|j| format!("fn idle{j}(x: i32) -> i32 {{\n    let mut y: i32 = x;\n    y = y * {j};\n    return y;\n}}\n"))
+                .collect();
+            let mixed = format!(
+                "{uncalled}fn no_triple() -> i32 {{\n    let mut xs: Sequence(i32) = [];\n    xs = push([7], 1);\n    xs = push(xs, len(xs));\n    return len(xs);\n}}\n\
+                 fn with_triple(n: i32) -> i32 {{\n    let mut xs: Sequence(i32) = [];\n    let mut i: i32 = 0;\n    while i < n {{\n        xs = push(xs, i);\n        i = i + 1;\n    }}\n    return len(xs);\n}}\n\
+                 fn main() {{\n    assert(idle3(2) == 6);\n    assert(no_triple() == 3);\n    assert(with_triple(6) == 6);\n    return;\n}}\n"
+            );
+            assert_eq!(check(&compile(&mixed), true), 1);
         }
 
         #[test]
