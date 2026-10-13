@@ -11196,12 +11196,20 @@ mod tests {
                 ("fn main() {\n    let mut pair: (i32, i32) = (1, 2);\n    let mut xs: Sequence(i32) = [];\n    xs = push(xs, 1);\n    let (ref left, _) = pair;\n    xs = push(xs, left);\n    pair = (3, 4);\n    return;\n}\n".to_string(), 2),
             ];
             for (src, expect) in cases {
-                assert_eq!(assert_planners_agree(&compile(&src)), expect, "{src}");
+                let bytes = compile(&src);
+                assert!(verify_semcode_token(&bytes).is_ok(), "not admitted: {src}");
+                assert_eq!(assert_planners_agree(&bytes), expect, "{src}");
             }
         }
 
+        /// Shaped instruction streams. Every case is a planner-oracle check (exact
+        /// site maps on the decoded stream). Only cases that pass explicit verifier
+        /// admission are additionally executed planned vs unplanned; the cases in
+        /// `PLANNER_ONLY` read a register before it is defined and are rejected by
+        /// the verifier, so they establish planner equivalence only.
         #[test]
         fn indexed_planner_matches_reference_on_shaped_bytecode() {
+            const PLANNER_ONLY: [usize; 2] = [2, 3];
             use IrInstr as I;
             let lv = |dst, n: &str| I::LoadVar {
                 dst,
@@ -11310,8 +11318,36 @@ mod tests {
                     ],
                     2,
                 ),
+                // admitted form of case 2: rX read by another instruction after a
+                (
+                    vec![
+                        lv(11, "s"),
+                        I::MakeSequence {
+                            dst: 5,
+                            items: vec![11],
+                        },
+                        push(12, 11, 19),
+                        sv("s", 12),
+                    ],
+                    0,
+                ),
+                // admitted form of case 3: a backward jump targets b, with no
+                // barrier between a and b (C4 alone rejects)
+                (
+                    vec![
+                        lv(11, "s"),
+                        label("m"),
+                        push(12, 11, 19),
+                        sv("s", 12),
+                        I::JmpIf {
+                            cond: 19,
+                            label: "m".into(),
+                        },
+                    ],
+                    0,
+                ),
             ];
-            for (body, expect) in cases {
+            for (i, (body, expect)) in cases.into_iter().enumerate() {
                 let mut instrs = vec![
                     I::MakeSequence {
                         dst: 0,
@@ -11324,12 +11360,25 @@ mod tests {
                 instrs.extend(body);
                 instrs.push(I::Ret { src: None });
                 let bytes = ir_main(instrs).expect("emit");
-                assert_eq!(assert_planners_agree(&bytes), expect);
+                let admitted = verify_semcode_token(&bytes).is_ok();
+                assert_eq!(admitted, !PLANNER_ONLY.contains(&i), "case {i} admission");
+                assert_eq!(assert_planners_agree(&bytes), expect, "case {i}");
+                if admitted {
+                    for limit in 1..=64 {
+                        assert_eq!(
+                            run_with(&bytes, config(limit), true),
+                            run_with(&bytes, config(limit), false),
+                            "case {i} differs at max_steps = {limit}"
+                        );
+                    }
+                }
             }
         }
 
         /// Deterministic random instruction streams over a tiny register, local
-        /// and label pool, so operand collisions and jumps are frequent.
+        /// and label pool, so operand collisions and jumps are frequent. These are
+        /// planner-oracle checks on decoded streams only: verifier admission is not
+        /// checked and no stream is executed.
         #[test]
         fn indexed_planner_matches_reference_on_random_streams() {
             use IrInstr as I;
