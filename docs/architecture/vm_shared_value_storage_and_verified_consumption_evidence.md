@@ -167,3 +167,40 @@ Memory levels off after the first runs, with no growth trend from 10 to 40 runs:
 - **Noise:** the A/B spread was ±70%, and the sample ranges overlap.
 
 A slowdown of up to about 8% on this Map-heavy microbenchmark is therefore **possible but not resolvable above noise**. The bisect points at the `Arc` representation commit rather than the consumption plan. `record_with_loop`, also not optimized, improves by 7–10%. The item is reported for OWNER review.
+
+## SHF-P3-FIX1: planner startup qualification (Windows 11, native)
+
+**Setup.**
+- Release builds from identical SemCode.
+- Variants: `pristine` (`0373bec5`), `p3_orig` (`08637f9`, before FIX1) and `fix1`.
+- 7 interleaved rounds; median wall time per process, including verify, plan and run.
+- Synthetic workloads run with `--steps 1`.
+
+**Planner time.** The `plan ms` columns come from separate, scratch-instrumented builds of the same trees. They are noisy and are **not** additive to wall time.
+
+**Earlier sections.** The tables above were measured on the pre-FIX1 tree and are kept as historical evidence.
+
+| Workload | Instructions | Accepted triples (orig = fix1) | pristine ms | p3_orig ms | fix1 ms [min-max] | fix1 / pristine | p3_orig / fix1 | plan ms orig → fix1 (instr.) | Outcomes identical |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| acc_400x1 --steps 1 | 1,606 | 400 | 33.9 | 36.2 | 35.7 [31-40] | ×1.06 | ×1.01 | 3.1 → 0.8 | yes |
+| acc_1300x1 --steps 1 | 5,206 | 1300 | 30.4 | 66.3 | 32.1 [31-36] | ×1.06 | ×2.06 | 29.7 → 1.9 | yes |
+| acc_1300x16 --steps 1 | 83,281 | 20800 | 79.9 | 580.0 | 114.2 [112-202] | ×1.43 | ×5.08 | 781.5 → 117.2 | yes |
+| acc_1300x64 --steps 1 | 333,121 | 83200 | 294.1 | 3400.0 | 383.8 [331-689] | ×1.30 | ×8.86 | 3186.2 → 166.5 | yes |
+| rejected_1300x16 --steps 1 | 104,081 | 0 | 71.9 | 70.4 | 70.7 [69-73] | ×0.98 | ×1.00 | 0.0 → 0.0 | yes |
+| nopush_2000x16 --steps 1 | 128,065 | 0 | 89.4 | 88.9 | 89.7 [86-92] | ×1.00 | ×0.99 | 0.0 → 0.0 | yes |
+| acc_1300x64_repeat10 --steps 1 --repeat 10 | 333,121 | 832000 | 3515.0 | 32030.5 | 5339.5 [4327-5672] | ×1.52 | ×6.00 | 1994.5 → 138.3 | yes |
+| small_copy_by_value  | 64 | 1 | 42.2 | 42.8 | 44.7 [28-49] | ×1.06 | ×0.96 | 0.0 → 0.1 | yes |
+| lexer_46080B  | 1,187 | 5 | 153437.9 | 2516.4 | 2501.2 [1458-3924] | ×0.02 | ×1.01 | 0.2 → 0.5 | yes |
+| b_parse_32_orig  | 2,292 | 10 | 1437.1 | 70.8 | 69.1 [66-113] | ×0.05 | ×1.03 | 0.6 → 1.5 | yes |
+| b_eval_loop_40_orig  | 5,244 | 18 | 113.1 | 92.0 | 91.6 [89-100] | ×0.81 | ×1.01 | 1.6 → 3.3 | yes |
+| map_set_loop  | 26 | 0 | 104.0 | 109.3 | 98.4 [92-106] | ×0.95 | ×1.11 | 0.0 → 0.0 | yes |
+
+**Reading.**
+- **Startup amplification removed.** The largest case went from ×11.6 of pristine to ×1.30.
+- **Linear growth.** fix1's wall time over pristine grows linearly with code size: about 2 ms at 5k instructions, 34 ms at 83k and 90 ms at 333k.
+- **Instrumented planner times** are noisy and only indicative.
+- **Small functions are a little slower to plan.** On small, ordinary functions the indexed planner's fixed setup cost (hash indexes) makes the instrumented plan time about 2× the old planner's: under 2 ms per execution, for example 0.6 → 1.5 ms on `b_parse_32`. This is not visible in wall time.
+- **Counts in the `repeat10` row** are summed over 10 executions in one process.
+- **No regression elsewhere.** No-push and rejected-candidate programs show no planner overhead. Lexer, parser, evaluator and `map_set_loop` are unchanged within noise.
+- **Small programs.** The difference is inside the sample spread: inconclusive.
+- **Accepted sites** are identical in every row. The 224-fixture corpus plus 26 red-team artifacts (114,768 accepted triples) give identical site maps under both planners (scratch oracle run).
