@@ -100,6 +100,60 @@ Read-only uses (`items.len()`, `items.iter()`, `items[i]`, pattern matching) com
 
 **Authority.** The plan never decides admission. The verifier (`sm-verify`) remains the only admission authority, and the plan only chooses a faster implementation of already-admitted code.
 
+### 7.1 SHF-P3-FIX1: linear-time planning
+
+**Defect (original planner, `08637f9`).** For every `SEQUENCE_PUSH` candidate, `plan_function` ran:
+- two whole-function operand scans (C1/C2);
+- a backward search for the matching `LOAD_VAR`;
+- a scan of all jump targets (C4);
+- range scans for C3/C5;
+- a scan of all borrowed paths (C6).
+
+That is O(candidates × instructions) per function. The plan is built before any Step is charged and again on every execution.
+
+The defect was found by source inspection (ChatGPT, Codex R2) and reproduced by Claude Code on ordinary compiler-generated, verifier-admitted programs. With `max_steps = 1`, 64 functions × 1,300 pushes (3.0 MB) took **3.4 s against 0.29 s pristine (×11.6)**.
+
+A hand-crafted variant that reuses registers was proposed. It remains **UNTESTED**; it is a hypothesis, not a reproduced result.
+
+**Algorithm (FIX1).** One canonical decode (`scan_function_bytecode`), then:
+1. **Register-use index.** For every decoded `u16` value, record its distinct instruction PCs, up to three. A fourth distinct PC saturates the entry to "used elsewhere".
+   - Three are enough: any value at three distinct PCs occurs outside every two-PC allowance.
+   - Repeats of a value within one instruction count once, which is exactly the "any instruction other than `a`, `b`" rule.
+   - Every `u16` still counts (registers, symbol ids, counts, immediates), so a collision can only reject.
+2. **Jump targets** are sorted once. C4 (`a < t ≤ c`) is a binary search.
+3. **Borrowed roots** are collected once into a set (C6).
+4. **One forward pass** keeps state that, at candidate `b`, describes exactly the instructions strictly before `b`:
+   - the last `LOAD_VAR` index per destination register: the nearest preceding `LOAD_VAR rX`, as before;
+   - the last `LOAD_VAR`/`STORE_VAR` index per resolved `SymbolId` (C5);
+   - the last `JMP`/`JMP_IF`/`RET` index (C3).
+
+   State is updated only after the candidate at the current index has been evaluated.
+
+**Equivalence to C1–C6** (source argument, mirrored by tests):
+- **C1/C2:** the old `any(pc ∉ allowed ∧ u16s ∋ r)` equals "some recorded distinct PC ∉ allowed, or more than three distinct PCs".
+- **C3:** the old "barrier in `(a, b)`" equals "the last barrier before `b` is after `a`". `a` is a `LOAD_VAR`, so it is never a barrier itself.
+- **C4:** unchanged predicate, evaluated by binary search.
+- **C5:** the old "access of `S` in `(a, b)`" equals "the last access of `S` before `b` is not `a`". `a` accesses `S`. `b` is a `SEQUENCE_PUSH` and `c` is adjacent, so `(a, c)` and `(a, b)` contain the same accesses.
+- **C6 and register overlap:** unchanged.
+- **Fail-closed:** a failed decode, a missing symbol or a missing index entry gives no site.
+
+**Complexity.** O(I + U + B + J log J) time and O(I + U + B + J) space per function, for:
+- `I` decoded instructions;
+- `U` decoded `u16` operands;
+- `B` borrowed paths;
+- `J` jump targets.
+
+Planning is linear in total code size apart from the jump-target sort. No step traverses all instructions or all candidates per candidate.
+
+**Scope.** Indexes live only inside `plan_function` during plan construction. The plan stays execution-scoped, as in §7.
+
+**Oracle.** The pre-FIX1 planner is kept verbatim as the test-only `plan_function_reference`. Tests compare the exact site maps on:
+- a source corpus;
+- shaped bytecode (register reuse, `rX == rV`, operand collisions, jumps into the triple, barriers, backward jumps, intervening accesses);
+- 3,000 deterministic random instruction streams.
+
+**Rollback.** Revert the FIX1 commit. The previous planner returns, with identical accepted sites.
+
 ## 8. Exception-safety guarantees (revalidated on the current code)
 
 | Path | Validated before the transfer | Commit point | What can fail afterwards |
@@ -188,5 +242,7 @@ There is no semantic mismatch with the reference. The only exception is a refere
 
 - **Copy-on-write covers `Sequence` only.** Text, Bytes, Tuple, Record, Map, Adt and closure captures still copy deeply on logical copy. In the lexer, quadratic **text** copying (about 2.18 GB at 23 KB in research) is now the dominant remaining cost.
 - **The plan is conservative.** In research fixtures it accepted about 79% of candidate sites. Rejected: `return push(…)`, self-referencing values such as `push(xs, len(xs))`, and register-number collisions.
+- **Planning still runs before Steps are charged** (FIX1 made it linear, not metered). On the largest compiler-generated case it adds about 30% to startup over pristine (§7.1; evidence document, FIX1 section).
+- **The hand-crafted register-reuse planning case was never executed (UNTESTED).** FIX1 removes the per-candidate scans that hypothesis relied on.
 - **Transaction safety assumes terminal errors.** A future catch or recover feature would require an explicit restore strategy for consumed locals.
 - **Platforms:** qualification ran on Windows 11 native and Ubuntu 24.04 under WSL2. Native Linux evidence is limited to the curator's independent Debian 13 run (research scope).
