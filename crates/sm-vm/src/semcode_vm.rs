@@ -3600,7 +3600,141 @@ impl ConsumptionPlan {
 ///  C5 no other `LOAD_VAR`/`STORE_VAR` of `S` strictly between `a` and `c`;
 ///  C6 no borrowed path of the function is rooted at `S`;
 ///  and the registers do not overlap (`rX != rZ`, `rV` distinct from both).
+///
+/// Complexity (SHF-P3-FIX1): one canonical decode, one pass building a register-use
+/// index, one sort of the jump targets and one forward pass that answers every
+/// condition from indexes instead of rescanning the function per candidate:
+/// O(I + U + B + J log J) time and O(I + U + B + J) space for `I` instructions,
+/// `U` decoded `u16` operands, `B` borrowed paths and `J` jump targets.
 fn plan_function(f: &FunctionBytecode) -> HashMap<usize, ConsumeSite> {
+    let mut sites = HashMap::new();
+    let mut instrs = Vec::new();
+    let Ok(mut jumps) = scan_function_bytecode(f, Some(&mut instrs)) else {
+        return sites;
+    };
+    jumps.sort_unstable();
+    let symbol_of =
+        |sid: Option<&u16>| sid.and_then(|sid| f.symbol_ids.get(*sid as usize).copied());
+    // C1/C2: up to three distinct PCs per u16 value (`None` = more than three).
+    // Three suffice: a value used at three distinct PCs is used outside any
+    // two-PC allowance.
+    let mut uses: HashMap<u16, Option<Vec<usize>>> = HashMap::new();
+    for i in &instrs {
+        for &v in &i.u16s {
+            let entry = uses.entry(v).or_insert_with(|| Some(Vec::new()));
+            if let Some(pcs) = entry {
+                if pcs.last() != Some(&i.pc) {
+                    if pcs.len() == 3 {
+                        *entry = None;
+                    } else {
+                        pcs.push(i.pc);
+                    }
+                }
+            }
+        }
+    }
+    let used_elsewhere = |reg: u16, allowed: [usize; 2]| match uses.get(&reg) {
+        Some(Some(pcs)) => pcs.iter().any(|pc| !allowed.contains(pc)),
+        Some(None) => true,
+        None => false,
+    };
+    // C4: is there a jump target `t` with `lo < t <= hi`?
+    let jump_target_in = |lo: usize, hi: usize| {
+        let k = jumps.partition_point(|&t| t <= lo);
+        jumps.get(k).is_some_and(|&t| t <= hi)
+    };
+    let borrowed_roots: HashSet<SymbolId> =
+        f.borrowed_paths.iter().map(|bp| bp.path.root).collect();
+    // Forward-pass state, always describing instructions strictly before `bi`.
+    let mut last_load_into: HashMap<u16, usize> = HashMap::new();
+    let mut last_access_of: HashMap<SymbolId, usize> = HashMap::new();
+    let mut last_barrier: Option<usize> = None;
+    for (bi, b) in instrs.iter().enumerate() {
+        if b.opcode == Some(Opcode::SequencePush) {
+            if let Some(ai) = accept_candidate(
+                &instrs,
+                bi,
+                &last_load_into,
+                &last_access_of,
+                last_barrier,
+                &symbol_of,
+                &used_elsewhere,
+                &jump_target_in,
+                &borrowed_roots,
+            ) {
+                sites.insert(instrs[ai].pc, ConsumeSite::Local);
+                sites.insert(b.pc, ConsumeSite::SequenceOperand);
+                sites.insert(instrs[bi + 1].pc, ConsumeSite::StoreSource);
+            }
+        }
+        match b.opcode {
+            Some(Opcode::LoadVar) => {
+                if let Some(&dst) = b.u16s.first() {
+                    last_load_into.insert(dst, bi);
+                }
+                if let Some(sym) = symbol_of(b.u16s.get(1)) {
+                    last_access_of.insert(sym, bi);
+                }
+            }
+            Some(Opcode::StoreVar) => {
+                if let Some(sym) = symbol_of(b.u16s.first()) {
+                    last_access_of.insert(sym, bi);
+                }
+            }
+            Some(Opcode::Jmp) | Some(Opcode::JmpIf) | Some(Opcode::Ret) => {
+                last_barrier = Some(bi);
+            }
+            _ => {}
+        }
+    }
+    sites
+}
+
+/// One candidate of `plan_function`, answered from its indexes; returns the
+/// index of `a` when C1-C6 and register non-overlap all hold.
+#[allow(clippy::too_many_arguments)]
+fn accept_candidate(
+    instrs: &[InstrOperands],
+    bi: usize,
+    last_load_into: &HashMap<u16, usize>,
+    last_access_of: &HashMap<SymbolId, usize>,
+    last_barrier: Option<usize>,
+    symbol_of: &impl Fn(Option<&u16>) -> Option<SymbolId>,
+    used_elsewhere: &impl Fn(u16, [usize; 2]) -> bool,
+    jump_target_in: &impl Fn(usize, usize) -> bool,
+    borrowed_roots: &HashSet<SymbolId>,
+) -> Option<usize> {
+    let b = &instrs[bi];
+    let [rz, rx, rv] = b.u16s[..] else {
+        return None;
+    };
+    let c = instrs.get(bi + 1)?;
+    if c.opcode != Some(Opcode::StoreVar) || c.u16s.get(1) != Some(&rz) {
+        return None;
+    }
+    // Nearest preceding `LOAD_VAR` whose destination is `rX`.
+    let ai = *last_load_into.get(&rx)?;
+    let a = &instrs[ai];
+    let local = symbol_of(a.u16s.get(1))?;
+    let stored = symbol_of(c.u16s.first())?;
+    let accepted = local == stored
+        && rx != rz
+        && rv != rx
+        && rv != rz
+        && !used_elsewhere(rx, [a.pc, b.pc])
+        && !used_elsewhere(rz, [b.pc, c.pc])
+        // C3: no barrier strictly between `a` and `b` (`a` itself is a LOAD_VAR).
+        && last_barrier.is_none_or(|k| k < ai)
+        && !jump_target_in(a.pc, c.pc)
+        // C5: `a` is the last access of `S` before `b` (`b` accesses no local).
+        && last_access_of.get(&local) == Some(&ai)
+        && !borrowed_roots.contains(&local);
+    accepted.then_some(ai)
+}
+
+/// Pre-FIX1 planner, kept verbatim as the equivalence oracle for tests.
+#[cfg(test)]
+fn plan_function_reference(f: &FunctionBytecode) -> HashMap<usize, ConsumeSite> {
     let mut sites = HashMap::new();
     let mut instrs = Vec::new();
     let Ok(jumps) = scan_function_bytecode(f, Some(&mut instrs)) else {
@@ -11006,6 +11140,291 @@ mod tests {
         }
 
         const LOOP: &str = "fn main() {\n    let mut xs: Sequence(i32) = [];\n    let mut i: i32 = 0;\n    while i < 12 {\n        xs = push(xs, i * 2);\n        i = i + 1;\n    }\n    assert(len(xs) == 12);\n    assert(xs[11] == 22);\n    return;\n}\n";
+
+        /// SHF-P3-FIX1: the indexed planner accepts exactly the sites of the
+        /// pre-FIX1 planner (`plan_function_reference`) for every function.
+        fn assert_planners_agree(bytes: &[u8]) -> usize {
+            let program = parse_semcode(bytes).expect("parse");
+            let mut accepted = 0;
+            for (name, f) in &program.functions {
+                let fast = plan_function(f);
+                assert_eq!(
+                    fast,
+                    plan_function_reference(f),
+                    "planners differ in {name}"
+                );
+                accepted += fast.len() / 3;
+            }
+            accepted
+        }
+
+        fn ir_main(instrs: Vec<IrInstr>) -> Result<Vec<u8>, String> {
+            let main = IrFunction {
+                name: "main".to_string(),
+                instrs,
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            };
+            emit_ir_to_semcode(&[main], false).map_err(|e| format!("{e:?}"))
+        }
+
+        #[test]
+        fn indexed_planner_matches_reference_on_source_corpus() {
+            let accumulate = |k: usize| {
+                let body: String = (0..k)
+                    .map(|i| format!("    xs = push(xs, {i});\n"))
+                    .collect();
+                format!(
+                    "fn g() -> i32 {{\n    let mut xs: Sequence(i32) = [];\n{body}    return len(xs);\n}}\n\
+                     fn h() -> i32 {{\n    let mut xs: Sequence(i32) = [];\n{body}    return len(xs);\n}}\n\
+                     fn main() {{\n    return;\n}}\n"
+                )
+            };
+            let rejected = |k: usize| {
+                let body: String = (0..k)
+                    .map(|i| format!("    xs = push([7], {i});\n"))
+                    .collect();
+                format!("fn main() {{\n    let mut xs: Sequence(i32) = [];\n{body}    assert(len(xs) == 2);\n    return;\n}}\n")
+            };
+            let cases: Vec<(String, usize)> = vec![
+                (LOOP.to_string(), 1),
+                (accumulate(300), 600),
+                (rejected(300), 0),
+                ("fn f(xs: Sequence(i32)) -> Sequence(i32) {\n    return push(xs, 1);\n}\nfn main() {\n    let a: Sequence(i32) = f([]);\n    assert(len(a) == 1);\n    return;\n}\n".to_string(), 0),
+                ("fn main() {\n    let mut xs: Sequence(i32) = [5];\n    xs = push(xs, len(xs));\n    xs = push(xs, xs[0]);\n    assert(len(xs) == 3);\n    return;\n}\n".to_string(), 0),
+                ("fn main() {\n    let mut xs: Sequence(i32) = [];\n    let mut i: i32 = 0;\n    while i < 9 {\n        if i % 2 == 0 { xs = push(xs, i); } else { xs = push(xs, 0 - i); }\n        i = i + 1;\n    }\n    let ys: Sequence(i32) = xs;\n    xs = push(xs, 1);\n    assert(len(ys) == 9);\n    return;\n}\n".to_string(), 3),
+                ("fn main() {\n    let mut pair: (i32, i32) = (1, 2);\n    let mut xs: Sequence(i32) = [];\n    xs = push(xs, 1);\n    let (ref left, _) = pair;\n    xs = push(xs, left);\n    pair = (3, 4);\n    return;\n}\n".to_string(), 2),
+            ];
+            for (src, expect) in cases {
+                assert_eq!(assert_planners_agree(&compile(&src)), expect, "{src}");
+            }
+        }
+
+        #[test]
+        fn indexed_planner_matches_reference_on_shaped_bytecode() {
+            use IrInstr as I;
+            let lv = |dst, n: &str| I::LoadVar {
+                dst,
+                name: n.to_string(),
+            };
+            let sv = |n: &str, src| I::StoreVar {
+                name: n.to_string(),
+                src,
+                activation_site: None,
+                write_site: None,
+            };
+            let push = |dst, seq, val| I::SequencePush { dst, seq, val };
+            let label = |n: &str| I::Label {
+                name: n.to_string(),
+            };
+            let cases: Vec<(Vec<IrInstr>, usize)> = vec![
+                // registers reused by two accumulators: C1/C2 reject both
+                (
+                    vec![
+                        lv(11, "s"),
+                        push(12, 11, 19),
+                        sv("s", 12),
+                        lv(11, "s"),
+                        push(12, 11, 19),
+                        sv("s", 12),
+                    ],
+                    0,
+                ),
+                // rX == rV inside one instruction
+                (vec![lv(11, "s"), push(12, 11, 11), sv("s", 12)], 0),
+                // rX also read by another instruction
+                (
+                    vec![
+                        I::MakeSequence {
+                            dst: 5,
+                            items: vec![11],
+                        },
+                        lv(11, "s"),
+                        push(12, 11, 19),
+                        sv("s", 12),
+                    ],
+                    0,
+                ),
+                // jump target inside (a, c]
+                (
+                    vec![
+                        I::Jmp { label: "m".into() },
+                        lv(11, "s"),
+                        label("m"),
+                        push(12, 11, 19),
+                        sv("s", 12),
+                    ],
+                    0,
+                ),
+                // barrier between a and b
+                (
+                    vec![
+                        lv(11, "s"),
+                        I::JmpIf {
+                            cond: 19,
+                            label: "e".into(),
+                        },
+                        push(12, 11, 19),
+                        sv("s", 12),
+                        label("e"),
+                    ],
+                    0,
+                ),
+                // backward jump to before a
+                (
+                    vec![
+                        label("top"),
+                        lv(11, "s"),
+                        push(12, 11, 19),
+                        sv("s", 12),
+                        I::JmpIf {
+                            cond: 19,
+                            label: "top".into(),
+                        },
+                    ],
+                    1,
+                ),
+                // intervening read / write of the local
+                (
+                    vec![lv(11, "s"), lv(13, "s"), push(12, 11, 19), sv("s", 12)],
+                    0,
+                ),
+                (
+                    vec![lv(11, "s"), sv("s", 19), push(12, 11, 19), sv("s", 12)],
+                    0,
+                ),
+                // the nearest LOAD_VAR into rX loads another local
+                (
+                    vec![lv(11, "s"), lv(11, "t"), push(12, 11, 19), sv("s", 12)],
+                    0,
+                ),
+                // independent accumulators on distinct registers
+                (
+                    vec![
+                        lv(11, "s"),
+                        push(12, 11, 19),
+                        sv("s", 12),
+                        lv(13, "s"),
+                        push(14, 13, 19),
+                        sv("s", 14),
+                    ],
+                    2,
+                ),
+            ];
+            for (body, expect) in cases {
+                let mut instrs = vec![
+                    I::MakeSequence {
+                        dst: 0,
+                        items: vec![],
+                    },
+                    sv("s", 0),
+                    sv("t", 0),
+                    I::LoadI32 { dst: 19, val: 1 },
+                ];
+                instrs.extend(body);
+                instrs.push(I::Ret { src: None });
+                let bytes = ir_main(instrs).expect("emit");
+                assert_eq!(assert_planners_agree(&bytes), expect);
+            }
+        }
+
+        /// Deterministic random instruction streams over a tiny register, local
+        /// and label pool, so operand collisions and jumps are frequent.
+        #[test]
+        fn indexed_planner_matches_reference_on_random_streams() {
+            use IrInstr as I;
+            let mut seed: u64 = 0x5EED_F1C5;
+            let mut next = |n: u64| {
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((seed >> 33) % n) as u16
+            };
+            let names = ["s", "t"];
+            let (mut programs, mut accepted) = (0, 0);
+            for _ in 0..3000 {
+                let mut instrs = vec![I::MakeSequence {
+                    dst: 0,
+                    items: vec![],
+                }];
+                let mut fresh = 100;
+                for _ in 0..4 + next(28) {
+                    // an accumulator triple on fresh registers, sometimes reusing
+                    // the previous triple's registers or a pool register as rV
+                    if next(3) == 0 {
+                        if next(4) != 0 {
+                            fresh += 2;
+                        }
+                        let n: String = names[next(2) as usize].into();
+                        instrs.push(I::LoadVar {
+                            dst: fresh,
+                            name: n.clone(),
+                        });
+                        instrs.push(I::SequencePush {
+                            dst: fresh + 1,
+                            seq: fresh,
+                            val: 10 + next(6),
+                        });
+                        instrs.push(I::StoreVar {
+                            name: n,
+                            src: fresh + 1,
+                            activation_site: None,
+                            write_site: None,
+                        });
+                    }
+                    instrs.push(match next(9) {
+                        0 | 1 => I::LoadVar {
+                            dst: 10 + next(6),
+                            name: names[next(2) as usize].into(),
+                        },
+                        2 | 3 => I::StoreVar {
+                            name: names[next(2) as usize].into(),
+                            src: 10 + next(6),
+                            activation_site: None,
+                            write_site: None,
+                        },
+                        4 | 5 => I::SequencePush {
+                            dst: 10 + next(6),
+                            seq: 10 + next(6),
+                            val: 10 + next(6),
+                        },
+                        6 => I::Jmp {
+                            label: format!("l{}", next(3)),
+                        },
+                        7 => I::JmpIf {
+                            cond: 10 + next(6),
+                            label: format!("l{}", next(3)),
+                        },
+                        _ => I::LoadI32 {
+                            dst: 10 + next(6),
+                            val: next(8) as i32,
+                        },
+                    });
+                    if next(5) == 0 {
+                        let at = next(instrs.len() as u64) as usize + 1;
+                        instrs.insert(at.min(instrs.len()), I::Ret { src: None });
+                    }
+                }
+                // labels at random positions, each exactly once
+                for l in 0..3 {
+                    let at = next(instrs.len() as u64) as usize + 1;
+                    instrs.insert(
+                        at.min(instrs.len()),
+                        I::Label {
+                            name: format!("l{l}"),
+                        },
+                    );
+                }
+                instrs.push(I::Ret { src: None });
+                let Ok(bytes) = ir_main(instrs) else { continue };
+                programs += 1;
+                accepted += assert_planners_agree(&bytes);
+            }
+            assert!(
+                programs > 2000 && accepted > 100,
+                "{programs} programs, {accepted} accepted"
+            );
+        }
 
         #[test]
         fn accumulator_triple_is_planned() {
