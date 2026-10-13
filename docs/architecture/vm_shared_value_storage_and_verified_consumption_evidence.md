@@ -186,8 +186,8 @@ A slowdown of up to about 8% on this Map-heavy microbenchmark is therefore **pos
 | acc_1300x1 --steps 1 | 5,206 | 1300 | 30.4 | 66.3 | 32.1 [31-36] | ×1.06 | ×2.06 | 29.7 → 1.9 | yes |
 | acc_1300x16 --steps 1 | 83,281 | 20800 | 79.9 | 580.0 | 114.2 [112-202] | ×1.43 | ×5.08 | 781.5 → 117.2 | yes |
 | acc_1300x64 --steps 1 | 333,121 | 83200 | 294.1 | 3400.0 | 383.8 [331-689] | ×1.30 | ×8.86 | 3186.2 → 166.5 | yes |
-| rejected_1300x16 --steps 1 | 104,081 | 0 | 71.9 | 70.4 | 70.7 [69-73] | ×0.98 | ×1.00 | 0.0 → 0.0 | yes |
-| nopush_2000x16 --steps 1 | 128,065 | 0 | 89.4 | 88.9 | 89.7 [86-92] | ×1.00 | ×0.99 | 0.0 → 0.0 | yes |
+| rejected_1300x16 --steps 1 — **VERIFY REJECTED** (r5202 > 4,096-register budget; Steps/Calls/Frames 0; planner never ran) | 104,081 | n/a | 71.9 | 70.4 | 70.7 [69-73] | ×0.98 | ×1.00 | 0.0 → 0.0 | yes |
+| nopush_2000x16 --steps 1 — **VERIFY REJECTED** (r6001 > 4,096-register budget; Steps/Calls/Frames 0; planner never ran) | 128,065 | n/a | 89.4 | 88.9 | 89.7 [86-92] | ×1.00 | ×0.99 | 0.0 → 0.0 | yes |
 | acc_1300x64_repeat10 --steps 1 --repeat 10 | 333,121 | 832000 | 3515.0 | 32030.5 | 5339.5 [4327-5672] | ×1.52 | ×6.00 | 1994.5 → 138.3 | yes |
 | small_copy_by_value  | 64 | 1 | 42.2 | 42.8 | 44.7 [28-49] | ×1.06 | ×0.96 | 0.0 → 0.1 | yes |
 | lexer_46080B  | 1,187 | 5 | 153437.9 | 2516.4 | 2501.2 [1458-3924] | ×0.02 | ×1.01 | 0.2 → 0.5 | yes |
@@ -201,6 +201,66 @@ A slowdown of up to about 8% on this Map-heavy microbenchmark is therefore **pos
 - **Instrumented planner times** are noisy and only indicative.
 - **Small functions are a little slower to plan.** On small, ordinary functions the indexed planner's fixed setup cost (hash indexes) makes the instrumented plan time about 2× the old planner's: under 2 ms per execution, for example 0.6 → 1.5 ms on `b_parse_32`. This is not visible in wall time.
 - **Counts in the `repeat10` row** are summed over 10 executions in one process.
-- **No regression elsewhere.** No-push and rejected-candidate programs show no planner overhead. Lexer, parser, evaluator and `map_set_loop` are unchanged within noise.
+- **Correction (SHF-P3-E1):** the earlier claim that "no-push and rejected-candidate programs show no planner overhead" is **withdrawn**.
+  - Both of those rows were rejected by the verifier, so the VM and the planner never ran on them. Their wall times measure verification rejection only, and they are kept here for traceability.
+  - Admitted replacement controls are in the E1 section below.
+- **Real workloads:** lexer, parser, evaluator and `map_set_loop` are unchanged within noise.
 - **Small programs.** The difference is inside the sample spread: inconclusive.
 - **Accepted sites** are identical in every row. The 224-fixture corpus plus 26 red-team artifacts (114,768 accepted triples) give identical site maps under both planners (scratch oracle run).
+
+## SHF-P3-E1: corrected negative controls (Windows 11, native)
+
+**Context.** Codex R2's FIX1 re-review showed that the two original negative controls above were verifier-rejected. This section replaces them with admitted controls.
+
+**Setup:**
+- **Builds:** matched release builds (rustc 1.97.0):
+  - pristine (`0373bec5`);
+  - pre-FIX1 (the `08637f9` code);
+  - FIX1 (`96a31d9`, rebuilt from the committed tree).
+- **Instrumentation:** the planner-time builds are scratch-instrumented copies of the same two trees. Planner time is reported separately and is not additive to wall time.
+- **Protocol:** benchmarks ran sequentially with no other heavy task; one warm-up, then 15 interleaved rounds.
+- **Quotas:** the same trusted-compiler envelope for all variants (4,096 registers), with `--steps 1`.
+- **Artifacts:** compiled with the P3-R1 `smc` build. The two replacement controls are byte-identical to Codex R2's (SHA-256 below).
+
+Binary SHA-256: pristine `a7f612b546ef9038…`, pre_fix1 `3fd9276497c31b6a…`, fix1 `6598035059946435…`, diag_pre_fix1 `dccbf118ca262e82…`, diag_fix1 `56c4d1c2e2fb4477…`.
+
+| Workload | Artifact SHA-256 | Admission / outcome (all variants) | Accepted triples | pristine wall ms | pre-FIX1 wall ms | FIX1 wall ms | Planner ms pre-FIX1 (instr.) | Planner ms FIX1 (instr.) |
+|---|---|---|---:|---|---|---|---|---|
+| rejected_800x16 | `3deea6dbd25f0b20…` | admitted; `ok`, Steps 1, Calls 0, Frames 1 | 0 | 69.2 [67.5–75.7] | 93.2 [91.2–140.6] | 88.5 [86.0–92.5] | 24.5 [23.1–27.0] | 20.3 [18.3–29.2] |
+| nopush_1000x16 | `107ce35a1120e7ad…` | admitted; `ok`, Steps 1, Calls 0, Frames 1 | 0 | 70.8 [66.9–113.7] | 81.7 [75.5–158.7] | 93.0 [86.3–152.7] | 7.9 [7.3–9.8] | 20.1 [19.5–22.6] |
+| rejected_1300x16 (VERIFY REJECTED) | `e81aa3fb52ad8535…` | **VERIFY REJECTED** (register budget); Steps/Calls/Frames 0 | n/a | 44.8 [43.1–46.5] | 43.8 [42.9–46.4] | 44.8 [42.9–48.0] | not run (rejected) | not run (rejected) |
+| nopush_2000x16 (VERIFY REJECTED) | `3a092253bf110953…` | **VERIFY REJECTED** (register budget); Steps/Calls/Frames 0 | n/a | 56.6 [54.4–58.5] | 54.8 [52.8–62.6] | 55.7 [54.1–60.2] | not run (rejected) | not run (rejected) |
+| acc_1300x16 | `0dfee3c80f7840f0…` | admitted; `ok`, Steps 1, Calls 0, Frames 1 | 20800 | 138.2 [83.6–152.5] | 973.9 [584.1–1043.9] | 196.8 [115.4–206.3] | 822.0 [812.8–847.1] | 56.2 [53.2–61.3] |
+
+**Second, independent reproduction: planner scaling on no-push code** (instrumented builds only, 25 interleaved samples each):
+
+| Artifact | SHA-256 | Instructions | Planner ms pre-FIX1 median [min–max] | Planner ms FIX1 median [min–max] | Extra µs per instruction |
+|---|---|---:|---|---|---:|
+| nopush_250x16.smc | `0eccfe5e563ef138…` | 16,065 | 2.02 [1.93–2.37] | 4.47 [3.99–4.98] | 0.15 |
+| nopush_500x16.smc | `5bec114059ff8e0c…` | 32,065 | 4.49 [3.80–7.12] | 11.54 [9.58–15.98] | 0.22 |
+| nopush_1000x16.smc | `107ce35a1120e7ad…` | 64,065 | 8.36 [7.28–27.51] | 21.30 [19.18–39.29] | 0.20 |
+| nopush_1000x4.smc | `93230f80fe218293…` | 16,017 | 2.73 [2.50–5.65] | 5.19 [4.92–7.54] | 0.15 |
+| nopush_1000x1.smc | `40fc2199678ce745…` | 4,005 | 0.84 [0.68–1.84] | 1.69 [1.36–3.48] | 0.21 |
+
+**Findings:**
+
+**E1-F1 — CONFIRMED, constant-factor planner regression on code without `SEQUENCE_PUSH`.**
+- **Measurement.** On the admitted `nopush_1000x16` control, the FIX1 planner takes 20.1 ms against 7.9 ms before FIX1. In this run the sample ranges are disjoint. A second run reproduced the medians (8.4 against 21.3 ms); there the ranges overlap only because of one pre-FIX1 outlier at 27.5 ms.
+- **Scaling.** Across 4k–64k instructions the extra cost is linear, about 0.15–0.22 µs per instruction, giving 2.0–2.6× the old planner's time.
+- **Wall time.** FIX1 93.0 ms against 81.7 ms before FIX1 and 70.8 ms pristine (medians). The minimum samples are separated, but the maxima overlap.
+- **Cause, from source.** FIX1 builds the register-use index over every decoded operand of every function. That includes functions with no `SEQUENCE_PUSH`, where the old planner did no candidate work.
+- **Disposition.** It is linear and bounded, so it is **not** a new quadratic or unbounded defect. Whether it is material is an OWNER decision. A follow-up, such as skipping index construction in functions without a `SEQUENCE_PUSH`, would be a production change that E1 does not authorise; **none was made**.
+
+**Rejected-candidate control (`rejected_800x16`).**
+- The FIX1 planner is not slower here: 20.3 ms against 24.5 ms before FIX1.
+- Wall medians: FIX1 88.5, pre-FIX1 93.2, pristine 69.2 ms.
+- No accepted sites, in either planner.
+
+**Wall-time verdict for the negative controls:** **INCONCLUSIVE — MATERIAL REGRESSION NOT ESTABLISHED.** Wall samples still overlap at the maxima. The isolated planner measurements establish E1-F1 as a reproducible but small, linear cost.
+
+**Codex R2's independent measurements** of the same controls are recorded in the R2 FIX1 re-review (no-push: pristine 98.39, pre-FIX1 101.86, FIX1 121.85 ms, with overlapping ranges). Its repeat-10 cell timed out and remains **INCOMPLETE**.
+
+**Evidence files (scratch, outside the repository):**
+- `D:\shf-impl\fix1\e1\bench_e1.json`
+- `D:\shf-impl\fix1\e1\scale_nopush.json`
+- generators `bench_e1.py` and `scale_nopush.py`

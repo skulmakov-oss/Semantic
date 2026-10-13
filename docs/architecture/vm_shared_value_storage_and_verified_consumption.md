@@ -135,22 +135,53 @@ A hand-crafted variant that reuses registers was proposed. It remains **UNTESTED
 - **C4:** unchanged predicate, evaluated by binary search.
 - **C5:** the old "access of `S` in `(a, b)`" equals "the last access of `S` before `b` is not `a`". `a` accesses `S`. `b` is a `SEQUENCE_PUSH` and `c` is adjacent, so `(a, c)` and `(a, b)` contain the same accesses.
 - **C6 and register overlap:** unchanged.
-- **Fail-closed:** a failed decode, a missing symbol or a missing index entry gives no site.
+- **Fail-closed, precisely:**
+  - A failed decode gives no site.
+  - A missing nearest `LOAD_VAR` into `rX` gives no site, and so does an unresolved symbol for `a` or `c`.
+  - A local whose last access before `b` is not `a` gives no site (C5).
+- **Register-use index, not fail-closed:** a *missing register-use entry* is not a rejection. `used_elsewhere` then returns `false`, which is exactly what the old full scan returns when it finds no use. For a candidate this cannot happen, because `rX` and `rZ` are operands of the decoded `SEQUENCE_PUSH` itself, and the index is fully built from every decoded operand before any candidate is evaluated. Each of them therefore always has an entry containing at least `b.pc`.
 
-**Complexity.** O(I + U + B + J log J) time and O(I + U + B + J) space per function, for:
-- `I` decoded instructions;
-- `U` decoded `u16` operands;
-- `B` borrowed paths;
-- `J` jump targets.
+**Complexity** (SHF-P3-E1 precision; Codex R2 FIX1 re-review). Per function, the explicit operation count is
 
-Planning is linear in total code size apart from the jump-target sort. No step traverses all instructions or all candidates per candidate.
+`O(I + U + B + G + J log(J+1) + Q log(J+1))` time and `O(I + U + B + J)` auxiliary space,
+
+where:
+- `I`: decoded instructions;
+- `U`: decoded `u16` operands;
+- `B`: borrowed paths;
+- `G`: debug-metadata records checked by the canonical scanner, unchanged from before FIX1;
+- `J`: jump targets;
+- `Q`: candidates that reach the C4 jump-target query, each one binary search.
+
+**Why the coarse form `O(I + U + B + J log J)` is defensible for this format:**
+- `u16` operands range over a finite domain `D = 65,536`. The register-use index therefore has at most `min(U, D)` entries, each holding at most three PCs.
+- A candidate reaches C4 only after C1/C2 hold, which needs `rX` and `rZ` used nowhere else. Two such candidates can never share a register, so `Q ≤ min(candidates, D/2)`, and at most 2,048 under the 4,096-register admission profile.
+- Canonical decoding caps functions at 1,024 per artifact.
+
+These are format caps, not a variable-domain guarantee.
+
+**Three kinds of claim must be kept apart:**
+1. **Expected and amortised cost.** All of the above assumes expected-constant `HashMap`/`HashSet` operations and amortised `Vec` growth.
+2. **Strict worst case.** Under adversarial hash collisions these structures degrade, and so does the canonical scanner's instruction-boundary set, which is unchanged from before FIX1. The doc therefore does **not** claim deterministic worst-case linear time. No collision attack was attempted or reproduced.
+3. **Measured behaviour.** On compiler-generated workloads, wall-time overhead grows linearly with code size (evidence document, FIX1 and E1 sections).
+
+No step traverses all instructions or all candidates per candidate.
+
+**Work outside this bound:**
+- `ConsumptionPlan::build` plans **every** function on **every** execution, including functions that never run.
+- It runs before any Step is charged.
+- It builds the full register-use index even for functions with no `SEQUENCE_PUSH`. This is the confirmed constant-factor cost in E1-F1, in the evidence document.
 
 **Scope.** Indexes live only inside `plan_function` during plan construction. The plan stays execution-scoped, as in §7.
 
-**Oracle.** The pre-FIX1 planner is kept verbatim as the test-only `plan_function_reference`. Tests compare the exact site maps on:
-- a source corpus;
-- shaped bytecode (register reuse, `rX == rV`, operand collisions, jumps into the triple, barriers, backward jumps, intervening accesses);
-- 3,000 deterministic random instruction streams.
+**Oracle.** The pre-FIX1 planner is kept verbatim as the test-only `plan_function_reference`. Tests compare the exact site maps in two categories:
+- **A. Planner-equivalence checks on decoded streams** (verifier admission not required):
+  - all shaped-bytecode cases;
+  - 3,000 deterministic random instruction streams. Their admission is not checked, and they are never executed.
+- **B. Verifier-admitted checks:**
+  - every source-corpus program passes explicit `verify_semcode_token` admission;
+  - the shaped-bytecode test asserts which cases are admitted. Two cases, "`rX` read before its `LOAD_VAR`" and "jump directly to `b` from before `a`", read a register before defining it. They are verifier-rejected and kept as planner-only controls.
+  - Admitted variants of both scenarios were added. Every admitted shaped case is also executed planned and unplanned under every Steps limit from 1 to 64, with identical outcomes and counters.
 
 **Rollback.** Revert the FIX1 commit. The previous planner returns, with identical accepted sites.
 
@@ -242,7 +273,16 @@ There is no semantic mismatch with the reference. The only exception is a refere
 
 - **Copy-on-write covers `Sequence` only.** Text, Bytes, Tuple, Record, Map, Adt and closure captures still copy deeply on logical copy. In the lexer, quadratic **text** copying (about 2.18 GB at 23 KB in research) is now the dominant remaining cost.
 - **The plan is conservative.** In research fixtures it accepted about 79% of candidate sites. Rejected: `return push(…)`, self-referencing values such as `push(xs, len(xs))`, and register-number collisions.
-- **Planning still runs before Steps are charged** (FIX1 made it linear, not metered). On the largest compiler-generated case it adds about 30% to startup over pristine (§7.1; evidence document, FIX1 section).
-- **The hand-crafted register-reuse planning case was never executed (UNTESTED).** FIX1 removes the per-candidate scans that hypothesis relied on.
+- **Residual risks of the consumption planner** (§7.1; evidence document, FIX1 and E1 sections):
+  1. **Planning is not metered.** It runs before any Step is charged. FIX1 made it linear, not metered.
+  2. **It plans every function,** including functions the execution never calls.
+  3. **It repeats on every execution;** there is no cache.
+  4. **`ConsumptionPlan::site()` hashes the function name** on every lookup while the plan is non-empty. This is an advisory, unchanged.
+  5. **The hand-crafted register-reuse hypothesis was never executed** (UNTESTED). FIX1 removes the per-candidate scans it relied on; that is a source argument, not a measurement.
+  6. **`map_set_loop` is still noisy:** a possible slowdown of up to about 8% (§12).
+  7. **Windows `append_100000`:** the pristine reference times out, so the row stays INCOMPLETE.
+  8. **The repeat-10 cell of Codex R2's independent reproduction** timed out and stays INCOMPLETE.
+  9. **Not every planner-oracle fixture is verifier-admitted.** The shaped and random streams are planner-equivalence checks; see "Oracle" in §7.1.
+  10. **E1-F1, CONFIRMED:** the indexed planner costs about 2.0–2.6× the old planner's instrumented time on code with **no** `SEQUENCE_PUSH`. It is linear, at about 0.15–0.22 µs per instruction. It was measured on verifier-admitted controls. Whether this is acceptable, or a follow-up is authorized, is an OWNER decision; no production change was made in E1.
 - **Transaction safety assumes terminal errors.** A future catch or recover feature would require an explicit restore strategy for consumed locals.
 - **Platforms:** qualification ran on Windows 11 native and Ubuntu 24.04 under WSL2. Native Linux evidence is limited to the curator's independent Debian 13 run (research scope).
