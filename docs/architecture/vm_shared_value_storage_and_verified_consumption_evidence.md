@@ -264,3 +264,44 @@ Binary SHA-256: pristine `a7f612b546ef9038…`, pre_fix1 `3fd9276497c31b6a…`, 
 - `D:\shf-impl\fix1\e1\bench_e1.json`
 - `D:\shf-impl\fix1\e1\scale_nopush.json`
 - generators `bench_e1.py` and `scale_nopush.py`
+
+## SHF-P3-FIX2: early exit for functions without `SEQUENCE_PUSH` (Windows 11, native)
+
+**Setup:**
+- **Builds:** matched release builds (rustc 1.97.0):
+  - pristine (`0373bec5`);
+  - pre-FIX1 (the `08637f9` code);
+  - FIX1 (`96a31d9`/`0524cee` code);
+  - FIX2 (this change).
+- **Instrumentation:** planner times come from scratch-instrumented copies of the same three trees, are reported separately, and are not additive to wall time.
+- **Admission:** only verifier-admitted artifacts are used.
+- **Protocol:** sequential runs; one warm-up, then 11 interleaved rounds.
+- **Quotas:** the same quota envelope for all variants.
+- **Earlier sections:** the FIX1 and E1 measurements above are historical and unchanged.
+
+Binary SHA-256: pristine `a7f612b546ef9038…`, pre_fix1 `3fd9276497c31b6a…`, fix1 `6598035059946435…`, fix2 `cbb08a15accaf845…`, diag_pre_fix1 `dccbf118ca262e82…`, diag_fix1 `56c4d1c2e2fb4477…`, diag_fix2 `82121d48e8d48aef…`.
+
+| Workload | Args | Artifact SHA-256 | Outcome (identical in all variants) | Accepted triples (pre-FIX1 / FIX1 / FIX2) | Wall ms pristine | Wall ms pre-FIX1 | Wall ms FIX1 | Wall ms FIX2 | Planner ms pre-FIX1 | Planner ms FIX1 | Planner ms FIX2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| nopush_250x16 | `--steps 1` | `0eccfe5e563ef138…` | `ok` Steps 1, Calls 0, Frames 1 | 0 / 0 / 0 | 36.2 [34.0–39.3] | 38.0 [36.8–39.2] | 40.9 [40.4–43.7] | 39.1 [36.1–41.8] | 2.0 [1.9–3.3] | 4.8 [4.3–5.5] | 2.1 [2.0–2.4] |
+| nopush_500x16 | `--steps 1` | `5bec114059ff8e0c…` | `ok` Steps 1, Calls 0, Frames 1 | 0 / 0 / 0 | 48.0 [45.3–48.8] | 51.8 [49.8–56.1] | 58.2 [56.0–62.5] | 52.2 [49.0–52.8] | 4.3 [3.8–5.5] | 10.3 [9.8–12.3] | 4.0 [3.7–5.7] |
+| nopush_1000x16 | `--steps 1` | `107ce35a1120e7ad…` | `ok` Steps 1, Calls 0, Frames 1 | 0 / 0 / 0 | 68.7 [67.2–71.8] | 79.0 [76.1–81.0] | 89.6 [88.5–825.7] | 77.4 [74.0–82.8] | 8.2 [7.2–15.4] | 25.3 [19.9–35.2] | 8.8 [7.8–15.5] |
+| rejected_800x16 | `--steps 1` | `3deea6dbd25f0b20…` | `ok` Steps 1, Calls 0, Frames 1 | 0 / 0 / 0 | 114.3 [109.3–126.2] | 157.7 [150.5–177.9] | 148.5 [143.9–157.3] | 149.4 [141.9–161.8] | 40.9 [39.5–45.6] | 32.1 [30.9–36.0] | 34.1 [30.8–37.9] |
+| acc_1300x1 | `--steps 1` | `787a4053e9b7e7ac…` | `ok` Steps 1, Calls 0, Frames 1 | 1300 / 1300 / 1300 | 51.0 [49.2–54.4] | 104.1 [101.8–108.6] | 54.6 [52.1–57.2] | 54.0 [52.2–55.6] | 52.2 [50.3–57.8] | 3.4 [3.2–4.4] | 3.6 [3.2–5.1] |
+| acc_1300x16 | `--steps 1` | `0dfee3c80f7840f0…` | `ok` Steps 1, Calls 0, Frames 1 | 20800 / 20800 / 20800 | 84.3 [81.0–160.8] | 596.1 [569.3–999.0] | 120.6 [117.9–202.8] | 120.9 [116.4–207.3] | 499.0 [480.2–884.8] | 35.2 [33.1–56.7] | 34.4 [33.1–62.9] |
+| acc_1300x64 | `--steps 1` | `3fd3e3252fde6af6…` | `ok` Steps 1, Calls 0, Frames 1 | 83200 / 83200 / 83200 | 391.0 [235.4–407.8] | 3786.0 [2225.4–3846.2] | 389.6 [337.4–605.0] | 394.4 [337.4–613.9] | 2103.9 [1929.3–3378.3] | 132.9 [107.2–188.3] | 122.8 [103.5–210.3] |
+| lexer_2880B | `-` | `3b31b50fd432e1f2…` | `ok` Steps 313,802, Calls 882, Frames 3 | 5 / 5 / 5 | 453.1 [418.4–910.0] | 96.1 [88.8–160.5] | 91.2 [85.7–144.6] | 94.4 [90.0–153.0] | 0.3 [0.2–0.5] | 0.4 [0.4–0.7] | 0.3 [0.3–0.7] |
+| b_parse_32_orig | `-` | `ae84ba99ece64ce9…` | `ok` Steps 140,068, Calls 7979, Frames 11 | 10 / 10 / 10 | 2373.8 [1425.3–2479.6] | 116.1 [70.6–123.2] | 114.6 [70.7–119.5] | 116.6 [67.4–121.2] | 0.4 [0.4–0.6] | 0.9 [0.8–1.7] | 0.5 [0.5–0.8] |
+| b_eval_loop_40_orig | `-` | `159c947c76f29c2d…` | `ok` Steps 60,276, Calls 3857, Frames 13 | 18 / 18 / 18 | 68.3 [67.0–72.8] | 54.1 [53.1–58.0] | 55.1 [53.4–59.5] | 55.5 [53.2–70.0] | 0.9 [0.8–1.0] | 1.8 [1.6–2.6] | 1.3 [1.2–2.6] |
+
+**Reading:**
+
+- **E1-F1 removed.** No-push planner time is back to the pre-FIX1 level on all three sizes. For `nopush_1000x16`: FIX2 8.8 ms, FIX1 25.3 ms, pre-FIX1 8.2 ms.
+  - Wall medians follow the same order (FIX2 77.4, FIX1 89.6, pre-FIX1 79.0 ms), but wall ranges overlap.
+- **Accepted-push workloads:** unchanged against FIX1. Accepted triples (1,300 / 20,800 / 83,200) and outcomes are identical. Planner and wall differences between FIX1 and FIX2 are within the sample spread, and the quadratic pre-FIX1 cost stays removed.
+- **Rejected-candidate control (`rejected_800x16`):** contains `SEQUENCE_PUSH`, so it still runs the FIX1 algorithm. FIX1 and FIX2 are within noise of each other.
+- **Lexer, parser and evaluator:** outcomes and accepted sites are identical. Planner time is slightly lower than at FIX1. Wall differences are within noise. No material regression was observed.
+- **Pristine wall times** in this run are higher than in earlier sections (for example `b_parse_32_orig`). Desktop load varied between campaigns, so compare variants only within a single row.
+- **Planner oracle:** a scratch run over 262 artifacts (the qualification fixtures, red-team artifacts, and the FIX1/E1 workloads) compared FIX2 with the reference planner. It found **0 differences**: 220,468 accepted triples, and 2,482 functions without `SEQUENCE_PUSH`, all with empty plans.
+
+**Evidence files (scratch, outside the repository):** `D:\shf-impl\fix1\fix2_bench.json`, produced by `fix2_bench.py`.

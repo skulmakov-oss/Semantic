@@ -170,7 +170,13 @@ No step traverses all instructions or all candidates per candidate.
 **Work outside this bound:**
 - `ConsumptionPlan::build` plans **every** function on **every** execution, including functions that never run.
 - It runs before any Step is charged.
-- It builds the full register-use index even for functions with no `SEQUENCE_PUSH`. This is the confirmed constant-factor cost in E1-F1, in the evidence document.
+- Until FIX2 it also built the full register-use index for functions with no `SEQUENCE_PUSH`: the confirmed constant-factor cost E1-F1. FIX2 removes this; such functions now cost only the canonical decode and an opcode check.
+
+**SHF-P3-FIX2: early exit.**
+- **What changed.** After a successful canonical decode, `plan_function` returns the empty plan if the function has no `SEQUENCE_PUSH`. It skips the jump sort, the register-use index, the borrowed-root set and the forward pass.
+- **Why the result is identical.** Every site is inserted inside the `SEQUENCE_PUSH` branch of the forward pass. A function without a `SEQUENCE_PUSH` therefore always had an empty plan.
+- **What is unchanged.** Functions that contain a `SEQUENCE_PUSH` run the FIX1 algorithm exactly. Decode failure still returns no sites.
+- **Cost.** For no-push functions the planner cost drops to the canonical decode plus one O(I) opcode check. This removes E1-F1 (evidence document, FIX2 section).
 
 **Scope.** Indexes live only inside `plan_function` during plan construction. The plan stays execution-scoped, as in §7.
 
@@ -283,6 +289,6 @@ There is no semantic mismatch with the reference. The only exception is a refere
   7. **Windows `append_100000`:** the pristine reference times out, so the row stays INCOMPLETE.
   8. **The repeat-10 cell of Codex R2's independent reproduction** timed out and stays INCOMPLETE.
   9. **Not every planner-oracle fixture is verifier-admitted.** The shaped and random streams are planner-equivalence checks; see "Oracle" in §7.1.
-  10. **E1-F1, CONFIRMED:** the indexed planner costs about 2.0–2.6× the old planner's instrumented time on code with **no** `SEQUENCE_PUSH`. It is linear, at about 0.15–0.22 µs per instruction. It was measured on verifier-admitted controls. Whether this is acceptable, or a follow-up is authorized, is an OWNER decision; no production change was made in E1.
+  10. **E1-F1: CONFIRMED at FIX1, ADDRESSED by FIX2.** At FIX1 the planner cost about 2.0–2.6× the old planner's instrumented time on code with no `SEQUENCE_PUSH`. FIX2's early exit returns it to the pre-FIX1 level (evidence document, FIX2 section). Independent closeout is still pending.
 - **Transaction safety assumes terminal errors.** A future catch or recover feature would require an explicit restore strategy for consumed locals.
 - **Platforms:** qualification ran on Windows 11 native and Ubuntu 24.04 under WSL2. Native Linux evidence is limited to the curator's independent Debian 13 run (research scope).
