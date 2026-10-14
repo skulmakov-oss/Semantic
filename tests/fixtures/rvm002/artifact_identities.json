@@ -1,0 +1,62 @@
+{
+  "build-1024.smc": {
+    "sha256": "6f8265801c4a24fba4742b8296f6ad150286c254a624a5eca324feaade043ade",
+    "reference_identical": true
+  },
+  "build-128.smc": {
+    "sha256": "066301554a1a34abf2c5ecacb14d1710626c50346f0c1812be051a45e450f56c",
+    "reference_identical": true
+  },
+  "build-16.smc": {
+    "sha256": "6abf062bbdb6f590c11a1a9e4d4e0975d0bc3bb375db9a0d7cecc7485248f895",
+    "reference_identical": true
+  },
+  "build-16384.smc": {
+    "sha256": "0a0bbefd62722270cb868aa90063185f4e9b3fb114653f3a9152b8413f5a9ac3",
+    "reference_identical": true
+  },
+  "build-32768.smc": {
+    "sha256": "d500024cf1f62bd90242df8c2ac700ec264dd3ddd8c620abd99d31ded79b87fb",
+    "reference_identical": true
+  },
+  "build-4096.smc": {
+    "sha256": "7cadb4dc29d72f7338886b4fb2b8e703251248d3bd6c9474733d7475d7048462",
+    "reference_identical": true
+  },
+  "build-8192.smc": {
+    "sha256": "6a807524a1979b17f02eafa44688881515b29f86f312800463c881e41dcc7275",
+    "reference_identical": true
+  },
+  "replace-1024.smc": {
+    "sha256": "b1623e1dafa85503f0c90c00cdf3389f9b3c71940c6e66c7fc8b11c5597e275c",
+    "reference_identical": true
+  },
+  "replace-128.smc": {
+    "sha256": "38970a68eb6b72efbae1bde12b6f07e50fa7df35a8bea8dd676f459f4ea5e195",
+    "reference_identical": true
+  },
+  "replace-16.smc": {
+    "sha256": "dc1252bfd0cf05bfd68d420d45894cb736141de0aace9d8ce40d6e612b7b1b9e",
+    "reference_identical": true
+  },
+  "replace-16384.smc": {
+    "sha256": "8abf3f0c8e6dd78e474e1a25ca2dded38e7e5e508dd3a1ec66e8dfaf39f31c87",
+    "reference_identical": false
+  },
+  "replace-32768.smc": {
+    "sha256": "5b46d626dde2ff3d7859246b958b42a33f2998a8194c6f724bb1a7e1fa5c98e4",
+    "reference_identical": false
+  },
+  "replace-4096.smc": {
+    "sha256": "571ac089ed3dd77edf50739a5c03cc0ba939202d5f64e32bd0b33b55add19356",
+    "reference_identical": true
+  },
+  "replace-8192.smc": {
+    "sha256": "0b3976e48844d844832097f2a6daa2bf6329707cf5a58044e32666cd08d471a9",
+    "reference_identical": true
+  },
+  "snapshot-4096.smc": {
+    "sha256": "d3dde1969fe492923337cbd44367f251f82aa98998917365c28441cd404bf8ab",
+    "reference_identical": true
+  }
+}
