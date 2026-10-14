@@ -1,4 +1,5 @@
 source: crates/sm-vm/src/semcode_vm.rs
+pub use crate::sem_map::{Iter as SemMapIter, SemMap};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MapKey {
 I32(i32),
@@ -17,7 +18,7 @@ Bool(bool),
 Text(String),
 Bytes(Vec<u8>),
 Sequence(Arc<Vec<Value>>),
-Map(Vec<(MapKey, Value)>),
+Map(SemMap),
 Closure(ClosureValue),
 I32(i32),
 F64(f64),

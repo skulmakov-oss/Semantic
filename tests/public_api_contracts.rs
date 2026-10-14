@@ -169,6 +169,10 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/sm_vm_semcode_vm.txt",
     ),
     (
+        "crates/sm-vm/src/sem_map.rs",
+        "tests/golden_snapshots/public_api/sm_vm_sem_map.txt",
+    ),
+    (
         "crates/prom-abi/src/lib.rs",
         "tests/golden_snapshots/public_api/prom_abi_lib.txt",
     ),
