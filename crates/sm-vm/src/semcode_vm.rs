@@ -2747,7 +2747,7 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let map_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let key_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let map_val = get_reg(vm, frame_idx, map_reg)?;
+                let map_val = get_reg_ref(vm, frame_idx, map_reg)?;
                 let Value::Map(pairs) = map_val else {
                     return Err(RuntimeError::TypeMismatchRuntime(
                         "MAP_CONTAINS first argument must be a map".to_string(),
@@ -2763,7 +2763,7 @@ where
                 let map_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let key_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let default_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let map_val = get_reg(vm, frame_idx, map_reg)?;
+                let map_val = get_reg_ref(vm, frame_idx, map_reg)?;
                 let Value::Map(pairs) = map_val else {
                     return Err(RuntimeError::TypeMismatchRuntime(
                         "MAP_GET first argument must be a map".to_string(),
@@ -2782,7 +2782,7 @@ where
                 let map_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let key_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let val_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let map_val = get_reg(vm, frame_idx, map_reg)?;
+                let map_val = get_reg_ref(vm, frame_idx, map_reg)?;
                 let Value::Map(pairs) = map_val else {
                     return Err(RuntimeError::TypeMismatchRuntime(
                         "MAP_SET first argument must be a map".to_string(),
@@ -2790,9 +2790,7 @@ where
                 };
                 let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
                 let val = get_reg(vm, frame_idx, val_reg)?;
-                let mut new_pairs: Vec<(MapKey, Value)> =
-                    pairs.iter().filter(|(k, _)| k != &key).cloned().collect();
-                new_pairs.push((key, val));
+                let new_pairs = map_updated_pairs(pairs, key, val);
                 set_reg(vm, frame_idx, dst, Value::Map(new_pairs))?;
                 next_pc = cur - f.instr_start;
             }
@@ -3827,18 +3825,33 @@ fn take_reg(vm: &mut ExecState<'_>, frame_idx: usize, r: u16) -> Result<Value, R
 }
 
 fn get_reg(vm: &ExecState<'_>, frame_idx: usize, r: u16) -> Result<Value, RuntimeError> {
+    get_reg_ref(vm, frame_idx, r).cloned()
+}
+
+fn get_reg_ref<'a>(
+    vm: &'a ExecState<'_>,
+    frame_idx: usize,
+    r: u16,
+) -> Result<&'a Value, RuntimeError> {
     match vm
         .callstack
         .get(frame_idx)
         .and_then(|fr| fr.regs.get(r as usize))
     {
-        Some(RegisterSlot::Value(v)) => Ok(v.clone()),
+        Some(RegisterSlot::Value(v)) => Ok(v),
         Some(RegisterSlot::Uninitialized) => Err(RuntimeError::BadFormat(format!(
             "read uninitialized reg r{}",
             r
         ))),
         None => Err(RuntimeError::BadFormat(format!("read invalid reg r{}", r))),
     }
+}
+
+fn map_updated_pairs(pairs: &[(MapKey, Value)], key: MapKey, val: Value) -> Vec<(MapKey, Value)> {
+    // Preserve replacement-at-end order and remove every occurrence of the key.
+    let mut updated: Vec<_> = pairs.iter().filter(|(k, _)| k != &key).cloned().collect();
+    updated.push((key, val));
+    updated
 }
 
 fn set_reg(vm: &mut ExecState<'_>, frame_idx: usize, r: u16, v: Value) -> Result<(), RuntimeError> {
@@ -8120,6 +8133,59 @@ mod tests {
         let token = verify_semcode_token(bytes).expect("verifier must accept: default_reg is a legal in-budget register reference regardless of physical materialization");
         let entry = token.require_entry("main").expect("entry");
         run_verified_function_semcode_with_args(&entry, vec![])
+    }
+
+    #[test]
+    fn map_borrowed_read_keeps_storage_and_register_errors() {
+        let bytes = build_map_get_test_program(vec![IrInstr::Ret { src: None }]);
+        let (mut vm, _) = run_semcode_for_test(
+            &bytes,
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        );
+        push_frame(&mut vm, "main", vec![], None).unwrap();
+        let map = Value::Map(vec![(
+            MapKey::Text("key".into()),
+            Value::Text("value".into()),
+        )]);
+        write_reg(&mut vm.callstack[0], 0, map, &vm.config.quotas).unwrap();
+        let (_, state) = split_vm(&mut vm);
+        let first = get_reg_ref(&state, 0, 0).unwrap();
+        assert!(std::ptr::eq(first, get_reg_ref(&state, 0, 0).unwrap()));
+        assert_eq!(get_reg(&state, 0, 0).unwrap(), *first);
+        assert_eq!(
+            get_reg_ref(&state, 0, 1).unwrap_err(),
+            get_reg(&state, 0, 1).unwrap_err()
+        );
+        assert_eq!(
+            get_reg_ref(&state, 0, 100).unwrap_err(),
+            get_reg(&state, 0, 100).unwrap_err()
+        );
+    }
+
+    #[test]
+    fn map_update_preserves_order_duplicates_and_nested_isolation() {
+        let key = MapKey::Text("a".into());
+        let original = vec![
+            (key.clone(), Value::I32(1)),
+            (
+                MapKey::Text("b".into()),
+                Value::Map(vec![(MapKey::Bool(true), Value::Text("old".into()))]),
+            ),
+            (key.clone(), Value::I32(2)),
+        ];
+        let mut updated = map_updated_pairs(&original, key.clone(), Value::I32(3));
+        assert_eq!(updated, vec![original[1].clone(), (key, Value::I32(3))]);
+        if let Value::Map(nested) = &mut updated[0].1 {
+            nested[0].1 = Value::Text("new".into());
+        }
+        assert_eq!(
+            original[1].1,
+            Value::Map(vec![(MapKey::Bool(true), Value::Text("old".into()))])
+        );
+        assert_ne!(
+            Value::Map(original.clone()),
+            Value::Map(original.into_iter().rev().collect())
+        );
     }
 
     /// #1756 (FA-07-016): raw/unverified execution with caller-supplied
