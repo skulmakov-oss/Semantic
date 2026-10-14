@@ -166,8 +166,10 @@ suite remains NOT RUN pending the approved public contract and implementation.
 All files are experiment data under `tests/fixtures/rvm002`; no production
 module imports them. Use disposable clones only. `prepare_vm_prototype.py`
 records the exact three Map opcode/payload transformations and copies the frozen
-tree. Its recorded local paths must be adapted to an explicitly isolated clone;
-do not run it against an ordinary working directory. The baseline must be
+tree. Pass the path of a dedicated pristine clone at the exact #2042 HEAD:
+`python3 prepare_vm_prototype.py <disposable-clone>`. It validates Git identity
+and tracked cleanliness before writing; do not run it against an ordinary
+working directory. The baseline must be
 checked out at the exact reference SHA, with the same map_scale example copied
 into its crate examples directory. Build both with
 `cargo +1.97.1 build -p sm-vm --example map_scale --release`.
