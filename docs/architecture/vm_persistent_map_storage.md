@@ -102,7 +102,63 @@ New snapshot `tests/golden_snapshots/public_api/sm_vm_sem_map.txt`, registered i
 
 No other workspace crate constructs or destructures `Value::Map`.
 
-**Behavioural note.** `Debug` keeps the previous shape: a list of `(key, value)` pairs. The pairs are now listed in ascending key order instead of last-write order. `Debug` output of a map is not part of any Semantic-visible contract: no admitted program can make the VM format a map.
+### 6.1 Behaviour matrix (Semantic-visible vs Rust-visible)
+
+| Behaviour | Before (`Vec<(MapKey, Value)>`) | After (`SemMap`) | Semantic-visible? |
+|---|---|---|---|
+| `MAP_SET` on an existing key | removes every matching pair, appends the new pair | replaces the binding | no difference: lookup result identical |
+| `MAP_GET` hit / miss | first matching pair / default register | the single binding / default register | identical |
+| `MAP_GET` default register | read only on a miss | read only on a miss (same `match` arm) | identical; an uninitialized default register still errors only on a miss |
+| Operand decode order, key conversion, errors | `map_key_from_value` after the map type check | unchanged, line by line | identical |
+| Snapshot isolation (old versions, arguments, record fields) | deep copies | structural sharing; shared nodes never mutated | identical (tests) |
+| Duplicate keys | representable when built by Rust code; never produced by the VM | not representable; `FromIterator` is last-wins; `.rev().collect()` reproduces the old first-match lookup | not reachable from Semantic |
+| Rust iteration / `Debug` order | last-write order (replacement moves to the end) | ascending `MapKey` order | not observable: no map iteration, printing or serialization in the language |
+| Rust `Value::PartialEq` on maps | pairwise in vector order: same bindings in a different insertion order compare **unequal** | bindings in key order: same bindings compare **equal** regardless of insertion order | not observable: `value_eq` on maps is `TypeMismatchRuntime("Map values are not comparable with == / !=")`, unchanged |
+| NaN values | `F64(NaN)` makes map equality non-reflexive | unchanged: element-wise `Value::eq`, no `Arc::ptr_eq` shortcut | test `nan_values_keep_equality_non_reflexive` |
+| Ordinal / order index | none | none (no replacement-order index, so no ordinal-exhaustion policy is needed) | — |
+
+`Debug` keeps the previous shape: a list of `(key, value)` pairs, now in ascending key order. A map's `Debug` text could only reach an error message through malformed but verifier-admitted bytecode that passes a map where a scalar key is expected (`map_key_from_value`). The message wording is unchanged; only the pair order inside it differs.
+
+### 6.2 Downstream callers
+
+No other workspace crate constructs, destructures or iterates `Value::Map`. The only uses are the four handlers in `sm-vm`, plus `value_eq` and the ABI conversion, which match `Value::Map(_)`. Out-of-tree Rust code is source-incompatible at three points:
+- construction: `Value::Map(vec)` → `Value::Map(vec.into_iter().collect())`, or `.rev().collect()` to keep first-match semantics for a vector with duplicates;
+- pattern matching on the `Vec`: use `SemMap::{get, contains_key, iter, len}` instead;
+- reliance on insertion-order equality or iteration order.
+
+This is a forward-only change at the public enum payload, gated by the OWNER contract decision.
+
+## 6A. Relation to the Codex drafts #2041 and #2042
+
+**#2041** (SEM-RVM-001 architecture research) recommends a structurally shared deterministic balanced ordered tree. This PR implements that family, with these differences:
+
+| | #2041 recommendation | This PR |
+|---|---|---|
+| Structure | persistent B-tree (prototype: `im` 15.1.0, external) | in-tree persistent AVL, std only: no dependency change (dependency changes are forbidden by the envelope) |
+| Replacement order | retained via a second persistent tree keyed by an update ordinal (checked `u64`, panics at exhaustion in the probe) | not retained. Rust iteration is key order. No ordinal, so no exhaustion policy |
+| Duplicates | duplicate-preserving import requested as an open decision | duplicates not representable; last-wins import plus a documented first-match migration path |
+| Equality | ordered logical pairs, no root shortcut | key-ordered pairs, no root shortcut (NaN test) |
+| Evidence | storage prototype only, sizes 16/128/1024; explicitly no VM integration | integrated in the VM; end-to-end `smc run` A/B on 50 + 3 workloads up to 128k entries; counters identical |
+
+- **Advantages of AVL here:**
+  - no dependency;
+  - a small auditable implementation (about 260 lines including documentation, plus tests);
+  - an O(1) clone;
+  - simple invariants checked in tests.
+- **Disadvantages:**
+  - a binary tree has more nodes and pointer hops than a B-tree, so lookups are cache-unfriendly at large n;
+  - an insert allocates one node per level when the path is shared.
+- **Remaining risks:**
+  - The OWNER may require insertion-order iteration for Rust callers. That would need an order index, which reopens #2041's ordinal question.
+  - Memory for many retained versions is O(versions × log n) extra nodes. This was not measured here beyond peak RSS.
+
+**#2042** (compatible copy elision) borrows the map register (`get_reg_ref`) in `MAP_GET`/`MAP_CONTAINS`/`MAP_SET` and clones surviving pairs once.
+- With this PR, a map clone is one `Arc` increment, so the borrowed read saves only a refcount operation. `MAP_SET` must own a handle anyway in order to path-copy.
+- #2042's map-handler changes edit the same lines and are **superseded** by this PR if both are accepted. Whichever lands second needs a trivial conflict resolution in favour of `SemMap`.
+- #2042's test `map_update_preserves_order_duplicates_and_nested_isolation` asserts `Vec` payload semantics and would need to be retired with it.
+- The generic `get_reg_ref` helper is independent of map storage and is worth retaining separately. Borrowed reads for `RECORD_GET` and other read-only consumers are relevant to P2 (#2046).
+
+This PR does not modify #2041 or #2042.
 
 ## 7. Evidence
 
@@ -118,6 +174,8 @@ Native Linux x86-64 (Intel Xeon @ 2.10 GHz, 4 vCPU, container), rustc 1.97.1, re
 | `state_record_map`: `c = c with { syms: map_set(c.syms, text, id) }` | 400 034 | 111 682 ms | 58.6 ms | ×1 904 | 40.6 → 13.2 MB |
 | non-map controls (`seq_push`, `seq_read`, `record_with`, `text_scan`, `lex_calls`, `state_record_seq`) | — | — | — | ×0.87–×1.49 (noise) | unchanged |
 
+**Small-map control** (5 rounds; 20 000 iterations × (k `map_set` + k `map_get`) on a fresh map): k = 2: ×1.05 (noise), k = 8: ×1.26, k = 32: ×1.99. Counters are identical, so there is no small-map regression.
+
 **Scaling of P1** (1 round, n = 64k → 128k; Steps exponent 1.00 everywhere):
 
 | Family | n = 128 000 | time exponent |
@@ -130,7 +188,7 @@ Native Linux x86-64 (Intel Xeon @ 2.10 GHz, 4 vCPU, container), rustc 1.97.1, re
 Base exponents for the same map families were 1.9–2.0. `state_record_seq` (P2) is unchanged by design (×0.92–×1.41, noise).
 
 **Gates.**
-- `cargo test -p sm-vm --lib`: 195 passed, including 7 new `sem_map` tests.
+- `cargo test -p sm-vm --lib`: 197 passed, including 9 new `sem_map` tests.
 - `tests/shf_p1_persistent_map.rs`: counters pinned to `main`.
 - `public_api_contracts`: snapshot diff limited to §6.
 - `cargo fmt --check` and `clippy -p sm-vm --all-targets -D warnings`: clean.

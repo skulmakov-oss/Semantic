@@ -227,6 +227,13 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
+/// Builds a map by inserting the entries in order, so a later duplicate key replaces an
+/// earlier one (last wins, like `std::collections::BTreeMap`).
+///
+/// Migration note: the previous `Value::Map(Vec<(MapKey, Value)>)` payload could hold
+/// duplicate keys when built by Rust code (the VM itself never produced them), and
+/// `MAP_GET` returned the *first* match. `vec.into_iter().rev().collect()` reproduces
+/// that first-match lookup for such a vector.
 impl FromIterator<(MapKey, Value)> for SemMap {
     fn from_iter<I: IntoIterator<Item = (MapKey, Value)>>(entries: I) -> Self {
         let mut map = SemMap::new();
@@ -237,7 +244,9 @@ impl FromIterator<(MapKey, Value)> for SemMap {
     }
 }
 
-/// Content equality: the same bindings, independent of tree shape.
+/// Content equality: the same bindings, independent of tree shape and of insertion order.
+/// Values are compared with `Value::eq` and there is no shared-root shortcut, so a map
+/// holding `F64(NaN)` is not equal to itself, as with the previous `Vec` payload.
 impl PartialEq for SemMap {
     fn eq(&self, other: &Self) -> bool {
         self.len == other.len && self.iter().eq(other.iter())
@@ -361,6 +370,32 @@ mod tests {
         // AVL bound: height < 1.4405 * log2(n + 2).
         let h = m.root.as_ref().map_or(0, |n| n.height);
         assert!(f64::from(h) < 1.4405 * (100_002f64).log2(), "height {h}");
+    }
+
+    #[test]
+    fn nan_values_keep_equality_non_reflexive() {
+        let m: SemMap = [(k(1), Value::F64(f64::NAN))].into_iter().collect();
+        let same_tree = m.clone();
+        assert_ne!(m, same_tree, "no root-identity shortcut");
+        let n: SemMap = [(k(1), Value::F64(1.0))].into_iter().collect();
+        assert_eq!(n, n.clone());
+    }
+
+    #[test]
+    fn duplicate_import_is_last_wins_and_rev_reproduces_first_match() {
+        let legacy = vec![
+            (k(1), Value::I32(10)),
+            (k(2), Value::I32(20)),
+            (k(1), Value::I32(11)),
+        ];
+        let last_wins: SemMap = legacy.clone().into_iter().collect();
+        assert_eq!(last_wins.len(), 2);
+        assert_eq!(last_wins.get(&k(1)), Some(&Value::I32(11)));
+        // The legacy MAP_GET returned the first match for key 1.
+        let first_match: SemMap = legacy.into_iter().rev().collect();
+        assert_eq!(first_match.get(&k(1)), Some(&Value::I32(10)));
+        assert_eq!(first_match.get(&k(2)), Some(&Value::I32(20)));
+        first_match.check_invariants();
     }
 
     #[test]
