@@ -81,7 +81,16 @@ Operand decoding order, register reads, type checks, error kinds and error texts
 6. **Verifier-first, capabilities.** Untouched: no opcode, SemCode revision, verifier rule or capability change.
 7. **Send + Sync.** `SemMap` holds only `Arc`s of `Send + Sync` data. The existing compile-time guard on `Value` keeps covering it.
 
-## 6. Public API change (disclosed, requires OWNER contract decision)
+## 6. Public API change (OWNER APPROVED — Policy B)
+
+The OWNER has formally approved **Policy B** (SHF-P1 final contract decision):
+- Canonical representation is `Value::Map(SemMap)` in `crates/sm-vm/src/semcode_vm.rs`.
+- Single-index persistent AVL tree with `Arc`-shared nodes.
+- Keys are unique and canonically ordered by `MapKey::Ord`.
+- `FromIterator` implements last-write-wins semantics.
+- Rust iteration and `Debug` yield ascending `MapKey` order.
+- Content-based equality preserving nested `F64(NaN)` non-reflexivity without pointer-identity shortcutting.
+- Preserved Semantic program behavior and deterministic accounting.
 
 `tests/golden_snapshots/public_api/sm_vm_semcode_vm.txt`:
 
@@ -96,9 +105,13 @@ New snapshot `tests/golden_snapshots/public_api/sm_vm_sem_map.txt`, registered i
 - the `Iter` type;
 - `Clone`, `Default`, `PartialEq` (content equality, independent of tree shape), `Debug` and `FromIterator<(MapKey, Value)>`.
 
-**Migration** for out-of-tree code:
-- `Value::Map(vec)` → `Value::Map(vec.into_iter().collect())`;
-- `pairs.iter()` → `map.iter()`, which yields `(&MapKey, &Value)` in ascending key order.
+**Migration** for out-of-tree Rust code:
+- `Value::Map(vec)` → `Value::Map(vec.into_iter().collect())` (last-write-wins for duplicates);
+- for legacy duplicate-bearing vectors where first-match was relied upon: `Value::Map(vec.into_iter().rev().collect())`;
+- `pairs.iter()` → `map.iter()`, which yields `(&MapKey, &Value)` in ascending key order;
+- destructuring: match `Value::Map(ref map)` and query via `SemMap::{get, contains_key, iter, len}` instead of slice indexing;
+- equality: `Value::PartialEq` now compares by content (identical bindings compare equal regardless of original insertion sequence);
+- diagnostic formatting: `Debug` formats pairs in ascending `MapKey` order.
 
 No other workspace crate constructs or destructures `Value::Map`.
 
@@ -112,12 +125,12 @@ No other workspace crate constructs or destructures `Value::Map`.
 | Operand decode order, key conversion, errors | `map_key_from_value` after the map type check | unchanged, line by line | identical |
 | Snapshot isolation (old versions, arguments, record fields) | deep copies | structural sharing; shared nodes never mutated | identical (tests) |
 | Duplicate keys | representable when built by Rust code; never produced by the VM | not representable; `FromIterator` is last-wins; `.rev().collect()` reproduces the old first-match lookup | not reachable from Semantic |
-| Rust iteration / `Debug` order | last-write order (replacement moves to the end) | ascending `MapKey` order | not observable: no map iteration, printing or serialization in the language |
+| Rust iteration / `Debug` order | last-write order (replacement moves to the end) | ascending `MapKey` order | observable only in Rust diagnostics: any error message that formats a map will display pairs in ascending key order |
 | Rust `Value::PartialEq` on maps | pairwise in vector order: same bindings in a different insertion order compare **unequal** | bindings in key order: same bindings compare **equal** regardless of insertion order | not observable: `value_eq` on maps is `TypeMismatchRuntime("Map values are not comparable with == / !=")`, unchanged |
 | NaN values | `F64(NaN)` makes map equality non-reflexive | unchanged: element-wise `Value::eq`, no `Arc::ptr_eq` shortcut | test `nan_values_keep_equality_non_reflexive` |
 | Ordinal / order index | none | none (no replacement-order index, so no ordinal-exhaustion policy is needed) | — |
 
-`Debug` keeps the previous shape: a list of `(key, value)` pairs, now in ascending key order. A map's `Debug` text could only reach an error message through malformed but verifier-admitted bytecode that passes a map where a scalar key is expected (`map_key_from_value`). The message wording is unchanged; only the pair order inside it differs.
+**Diagnostic formatting note.** `Debug` renders as a list of `(key, value)` pairs in ascending key order instead of insertion/last-write order. Consequently, in any diagnostic or error-formatting path where an invalid operation (e.g. malformed verifier-admitted bytecode passing a map as a key in `map_key_from_value`) formats a map into an error string, the formatted pairs inside that error text will reflect ascending `MapKey` order rather than the previous insertion sequence. Complete text equivalence is therefore not claimed for diagnostic strings that embed formatted maps; however, the structured error kind, error classification, and message framing remain identical.
 
 ### 6.2 Downstream callers
 
@@ -196,7 +209,7 @@ Base exponents for the same map families were 1.9–2.0. `state_record_seq` (P2)
 
 ## 8. Limitations and non-goals
 
-- **No aggregate heap bound** is claimed, as for every `trusted-compiler` execution (`docs/spec/quotas.md`). Persistence keeps old versions alive while they are referenced: memory is O(live versions × log n) extra nodes, not O(n) per version.
+- **No aggregate heap bound** is claimed, as for every `trusted-compiler` execution (`docs/spec/quotas.md`). Step quotas limit only instruction count and call frame depth, and do not establish a general or aggregate memory bound. Persistence keeps old versions alive while they are referenced: memory is O(live versions × log n) extra nodes, not O(n) per version.
 - Map element reads (`MAP_GET`) still clone the stored `Value`. That is O(size of that value), as before.
 - **Not changed:** sequences (SHF-P3), records (P2, separate design), map iteration/removal/length (not admitted by the language), quotas, and the CLI.
 - Constant factors: for a uniquely owned map, a per-insert path copy allocates about log₂ n small nodes. A later, separately qualified extension of SHF-P3 consumption to `MAP_SET` could make that path unique and update it in place; it is not required to remove the asymptotic bottleneck and is out of scope.
