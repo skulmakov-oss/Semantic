@@ -23,6 +23,8 @@ use sm_verify::{
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+pub use crate::sem_map::{Iter as SemMapIter, SemMap};
+
 /// Scalar key type for Map values.
 ///
 /// Only scalar types that support deterministic equality are admitted as map keys.
@@ -54,7 +56,10 @@ pub enum Value {
     /// `Arc::make_mut`, which copies the buffer only while it is still shared. Programs
     /// therefore keep independent value semantics; only physical storage is shared.
     Sequence(Arc<Vec<Value>>),
-    Map(Vec<(MapKey, Value)>),
+    /// Map storage is a persistent ordered tree (SHF-P1, `sem_map.rs`): a logical copy
+    /// shares the tree in O(1), and `MAP_SET` copies only the O(log n) nodes on one
+    /// path that are still shared. No shared node is ever mutated.
+    Map(SemMap),
     Closure(ClosureValue),
     I32(i32),
     F64(f64),
@@ -2740,7 +2745,7 @@ where
             }
             Opcode::MapEmpty => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                set_reg(vm, frame_idx, dst, Value::Map(Vec::new()))?;
+                set_reg(vm, frame_idx, dst, Value::Map(SemMap::new()))?;
                 next_pc = cur - f.instr_start;
             }
             Opcode::MapContains => {
@@ -2754,7 +2759,7 @@ where
                     ));
                 };
                 let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
-                let found = pairs.iter().any(|(k, _)| k == &key);
+                let found = pairs.contains_key(&key);
                 set_reg(vm, frame_idx, dst, Value::Bool(found))?;
                 next_pc = cur - f.instr_start;
             }
@@ -2770,8 +2775,8 @@ where
                     ));
                 };
                 let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
-                let result = match pairs.iter().find(|(k, _)| k == &key) {
-                    Some((_, v)) => v.clone(),
+                let result = match pairs.get(&key) {
+                    Some(v) => v.clone(),
                     None => get_reg(vm, frame_idx, default_reg)?,
                 };
                 set_reg(vm, frame_idx, dst, result)?;
@@ -2783,17 +2788,17 @@ where
                 let key_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let val_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let map_val = get_reg(vm, frame_idx, map_reg)?;
-                let Value::Map(pairs) = map_val else {
+                let Value::Map(mut map) = map_val else {
                     return Err(RuntimeError::TypeMismatchRuntime(
                         "MAP_SET first argument must be a map".to_string(),
                     ));
                 };
                 let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
                 let val = get_reg(vm, frame_idx, val_reg)?;
-                let mut new_pairs: Vec<(MapKey, Value)> =
-                    pairs.iter().filter(|(k, _)| k != &key).cloned().collect();
-                new_pairs.push((key, val));
-                set_reg(vm, frame_idx, dst, Value::Map(new_pairs))?;
+                // `map` shares its tree with the source register; `insert` copies only
+                // the still-shared nodes on one path, so the source value is unchanged.
+                map.insert(key, val);
+                set_reg(vm, frame_idx, dst, Value::Map(map))?;
                 next_pc = cur - f.instr_start;
             }
             Opcode::RngSeed => {
