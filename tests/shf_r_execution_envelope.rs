@@ -445,7 +445,10 @@ fn q08_to_q14_q41_invalid_arguments_fail_before_compilation() {
             &["--metrics", "json", "--metrics", "json"],
             "duplicate run option '--metrics'",
         ),
-        (&["--max-calls", "100"], "unknown run option '--max-calls'"),
+        (
+            &["--max-calls", "100"],
+            "--max-calls requires --envelope trusted-compiler",
+        ),
     ];
     for (extra, message) in cases {
         let mut args = extra.to_vec();
@@ -470,6 +473,238 @@ fn q08_to_q14_q41_invalid_arguments_fail_before_compilation() {
             "{extra:?}: compiled"
         );
     }
+}
+
+// P3: cumulative Calls is opt-in and independent of Steps/Frames defaults.
+#[test]
+fn p3_explicit_calls_exact_boundary_and_limit_plus_one() {
+    let dir = mk_temp_dir();
+    let program = write_program(&dir, "calls.sm", &calls_program(0, 2));
+    for (limit, exit) in [("2", 0), ("1", 1)] {
+        let output = smc_run(
+            &dir,
+            &program,
+            "pure",
+            &[
+                "--envelope",
+                "trusted-compiler",
+                "--max-calls",
+                limit,
+                "--metrics",
+                "json",
+            ],
+            &[],
+        );
+        assert_exit(&output, exit);
+        let m = metrics(&output);
+        assert_eq!(
+            m["effective_quotas"]["max_calls"],
+            limit.parse::<u64>().unwrap()
+        );
+        assert_eq!(m["effective_quotas"]["max_steps"], 100000);
+        assert_eq!(m["effective_quotas"]["max_frames"], 256);
+        assert_eq!(m["effective_quotas"]["max_stack_depth"], 256);
+        assert_eq!(m["effective_quotas"]["max_effect_calls"], 1024);
+        assert!(
+            m["counters"]["steps"].as_u64().unwrap() >= m["counters"]["calls"].as_u64().unwrap()
+        );
+        if exit == 0 {
+            assert_eq!(m["outcome"], "ok");
+            assert_eq!(m["counters"]["calls"], 2);
+        } else {
+            assert_eq!(
+                m["quota_exceeded"],
+                serde_json::json!({"kind":"Calls","limit":1,"used":2})
+            );
+            assert_eq!(m["counters"]["calls"], 1);
+        }
+    }
+}
+
+#[test]
+fn p3_invalid_calls_fail_before_compilation() {
+    let dir = mk_temp_dir();
+    let program = write_program(&dir, "bad.sm", "fn main() { let x: i32 = ; }\n");
+    for (value, diagnostic) in [
+        ("0", "must be between 1 and 200000000"),
+        ("200000001", "must be between 1 and 200000000"),
+        ("18446744073709551616", "must be between 1 and 200000000"),
+        ("-1", "must be a decimal integer"),
+        ("+100", "must be a decimal integer"),
+        ("0x10", "must be a decimal integer"),
+        ("1e2", "must be a decimal integer"),
+        (" 100", "must be a decimal integer"),
+        ("100 ", "must be a decimal integer"),
+        ("", "must be a decimal integer"),
+        ("１００", "must be a decimal integer"),
+        ("100001", "must not exceed the effective max_steps (100000)"),
+    ] {
+        let output = smc_run(
+            &dir,
+            &program,
+            "pure",
+            &[
+                "--envelope",
+                "trusted-compiler",
+                "--max-calls",
+                value,
+                "--metrics",
+                "json",
+            ],
+            &[],
+        );
+        assert_exit(&output, 1);
+        assert!(
+            stderr_of(&output).contains(&format!("--max-calls {diagnostic}")),
+            "{}",
+            stderr_of(&output)
+        );
+        assert!(metrics_lines(&output).is_empty());
+    }
+    for (flags, diagnostic) in [
+        (vec!["--max-calls"], "usage:"),
+        (
+            vec!["--max-calls", "2", "--max-calls", "3"],
+            "duplicate run option '--max-calls'",
+        ),
+        (
+            vec!["--max-calls", "2"],
+            "--max-calls requires --envelope trusted-compiler",
+        ),
+        (
+            vec!["--envelope", "verified-local", "--max-calls", "2"],
+            "--max-calls requires --envelope trusted-compiler",
+        ),
+        (
+            vec![
+                "--envelope",
+                "trusted-compiler",
+                "--max-steps",
+                "1",
+                "--max-calls",
+                "2",
+            ],
+            "--max-calls must not exceed the effective max_steps (1)",
+        ),
+    ] {
+        let output = smc_run(&dir, &program, "pure", &flags, &[]);
+        assert_exit(&output, 1);
+        assert!(
+            stderr_of(&output).contains(diagnostic),
+            "{}",
+            stderr_of(&output)
+        );
+        assert!(metrics_lines(&output).is_empty());
+    }
+}
+
+#[test]
+fn p3_calls_override_admits_old_blocker_and_numeric_boundaries() {
+    let dir = mk_temp_dir();
+    // Existing calls_program: 128 * 129 = 16512 admitted non-root calls.
+    let program = write_program(&dir, "calls.sm", &calls_program(128, 0));
+    let output = smc_run(
+        &dir,
+        &program,
+        "pure",
+        &[
+            "--envelope",
+            "trusted-compiler",
+            "--max-calls",
+            "16512",
+            "--metrics",
+            "json",
+        ],
+        &[],
+    );
+    assert_exit(&output, 0);
+    assert_eq!(metrics(&output)["counters"]["calls"], 16512);
+    let minimal = write_program(&dir, "ok.sm", PURE_OK);
+    for flags in [
+        vec!["--max-calls", "100000"],
+        vec!["--max-steps", "200000000", "--max-calls", "200000000"],
+    ] {
+        let mut extra = vec!["--envelope", "trusted-compiler", "--metrics", "json"];
+        extra.extend_from_slice(&flags);
+        let output = smc_run(&dir, &minimal, "pure", &extra, &[]);
+        assert_exit(&output, 0);
+        assert_eq!(
+            metrics(&output)["effective_quotas"]["max_calls"],
+            flags.last().unwrap().parse::<u64>().unwrap()
+        );
+    }
+}
+
+#[test]
+fn p3_omitted_calls_preserves_default_below_steps_and_run_smc_rejects_override() {
+    let dir = mk_temp_dir();
+    let program = write_program(&dir, "ok.sm", PURE_OK);
+    let output = smc_run(
+        &dir,
+        &program,
+        "pure",
+        &[
+            "--envelope",
+            "trusted-compiler",
+            "--max-steps",
+            "1",
+            "--metrics",
+            "json",
+        ],
+        &[],
+    );
+    assert_exit(&output, 1);
+    let m = metrics(&output);
+    assert_eq!(m["effective_quotas"]["max_calls"], 16384);
+    assert_eq!(m["quota_exceeded"]["kind"], "Steps");
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("run-smc")
+        .arg(dir.join("missing.smc"))
+        .args(["--max-calls", "100"])
+        .output()
+        .expect("run-smc");
+    assert_exit(&output, 1);
+    assert!(stderr_of(&output).contains("usage: smc run-smc <input.smc>"));
+}
+
+#[test]
+fn p3_raised_calls_does_not_grant_capabilities() {
+    let dir = mk_temp_dir();
+    let program = write_program(
+        &dir,
+        "args.sm",
+        "fn main() { let x: text = args_read(0u32); return; }\n",
+    );
+    let ordinary = smc_run(
+        &dir,
+        &program,
+        "pure",
+        &["--envelope", "trusted-compiler", "--metrics", "json"],
+        &["x"],
+    );
+    let raised = smc_run(
+        &dir,
+        &program,
+        "pure",
+        &[
+            "--envelope",
+            "trusted-compiler",
+            "--max-calls",
+            "100000",
+            "--metrics",
+            "json",
+        ],
+        &["x"],
+    );
+    for output in [&ordinary, &raised] {
+        assert_exit(output, 1);
+        let m = metrics(output);
+        assert_eq!(m["outcome"], "capability_denied");
+        assert_eq!(m["counters"]["effect_calls"], 0);
+        assert!(stderr_of(output).contains("decision=deny"));
+    }
+    assert_eq!(metrics(&ordinary)["counters"], metrics(&raised)["counters"]);
+    assert_eq!(metrics(&ordinary)["error"], metrics(&raised)["error"]);
 }
 
 // ---------- R2: metrics outcomes ----------
@@ -515,6 +750,16 @@ fn q22_verifier_rejection_through_the_register_budget_has_null_counters() {
             "--metrics",
             "json",
         ][..],
+        &[
+            "--envelope",
+            "trusted-compiler",
+            "--max-steps",
+            "200000000",
+            "--max-calls",
+            "200000000",
+            "--metrics",
+            "json",
+        ][..],
     ] {
         let output = smc_run(&dir, &program, "pure", extra, &[]);
         assert_exit(&output, 1);
@@ -530,6 +775,7 @@ fn q22_verifier_rejection_through_the_register_budget_has_null_counters() {
         errors.push(m["error"].clone());
     }
     assert_eq!(errors[0], errors[1]);
+    assert_eq!(errors[0], errors[2]);
 }
 
 #[test]
