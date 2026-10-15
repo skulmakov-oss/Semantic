@@ -242,6 +242,36 @@ thread_local! {
 }
 
 #[cfg(test)]
+thread_local! {
+    static VM_TEST_E2_FIELD_MOVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static VM_TEST_E2_FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub fn vm_test_reset_e2_counters() {
+    VM_TEST_E2_FIELD_MOVES.with(|c| c.set(0));
+    VM_TEST_E2_FALLBACKS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+pub fn vm_test_get_e2_counters() -> (usize, usize) {
+    (
+        VM_TEST_E2_FIELD_MOVES.with(|c| c.get()),
+        VM_TEST_E2_FALLBACKS.with(|c| c.get()),
+    )
+}
+
+#[cfg(test)]
+fn vm_test_record_e2_move() {
+    VM_TEST_E2_FIELD_MOVES.with(|c| c.set(c.get() + 1));
+}
+
+#[cfg(test)]
+fn vm_test_record_e2_fallback() {
+    VM_TEST_E2_FALLBACKS.with(|c| c.set(c.get() + 1));
+}
+
+#[cfg(test)]
 fn vm_test_clear_terminal_observation() {
     VM_TEST_TERMINAL_OBSERVATION.with(|slot| {
         *slot.borrow_mut() = None;
@@ -2677,8 +2707,13 @@ where
                         if local_matches {
                             // Verify uniqueness of the local's record:
                             // 1. No other local variable holds a Record of this type.
-                            let other_locals_count = frame.locals.iter()
-                                .filter(|(s, v)| *s != &site.local_symbol && matches!(v, Value::Record(r) if r.type_name == expected_name))
+                            let other_locals_count = frame
+                                .locals
+                                .iter()
+                                .filter(|(s, v)| {
+                                    *s != &site.local_symbol
+                                        && matches!(v, Value::Record(r) if r.type_name == expected_name)
+                                })
                                 .count();
                             // 2. Only registers defined from this local (such as the base record or projection sources) hold it.
                             // The field-sensitive analysis proved that all uses of these loaded registers are RECORD_GET for fields != field_idx.
@@ -2703,7 +2738,27 @@ where
                                     moved_item =
                                         Some(std::mem::replace(&mut rec.slots[index], Value::Unit));
                                 }
+                                // Also clear this consumed field slot in any live registers holding the snapshot
+                                // (such as earlier base record registers). This drops their reference to the buffer.
+                                for &r_idx in &site.allowed_registers {
+                                    let r_idx = r_idx as usize;
+                                    if let Some(RegisterSlot::Value(Value::Record(r))) =
+                                        frame.regs.get_mut(r_idx)
+                                    {
+                                        if r.type_name == expected_name && index < r.slots.len() {
+                                            r.slots[index] = Value::Unit;
+                                        }
+                                    }
+                                }
+                                #[cfg(test)]
+                                vm_test_record_e2_move();
+                            } else {
+                                #[cfg(test)]
+                                vm_test_record_e2_fallback();
                             }
+                        } else {
+                            #[cfg(test)]
+                            vm_test_record_e2_fallback();
                         }
                     }
                 }
@@ -4335,116 +4390,133 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             continue;
         }
 
-        // Control-flow barrier check: no jump targets into the window from LOAD_VAR to RECORD_GET
-        if jump_target_in(instrs[li].pc, ins.pc) {
+        // Gap 2A: Verify no STORE_VAR to local_sym occurs between li and i
+        let mut local_overwritten_between_load_and_get = false;
+        for mid_ins in &instrs[(li + 1)..i] {
+            if mid_ins.opcode == Some(Opcode::StoreVar)
+                && symbol_of(mid_ins.u16s.first()) == Some(local_sym)
+            {
+                local_overwritten_between_load_and_get = true;
+                break;
+            }
+        }
+        if local_overwritten_between_load_and_get {
             continue;
         }
 
-        let mut allowed_registers = vec![r_src];
-
-        // Verify that in instructions following RECORD_GET, field_idx of local_sym is not read
-        // before local_sym is completely overwritten by STORE_VAR local_sym, _,
-        // and no jump targets enter the window.
+        // Find the restoring STORE_VAR following RECORD_GET in straight-line code
         let mut store_idx = None;
-        for next in (i + 1)..instrs.len() {
-            let next_ins = &instrs[next];
+        for (next, next_ins) in instrs.iter().enumerate().skip(i + 1) {
             if matches!(
                 next_ins.opcode,
                 Some(Opcode::Jmp) | Some(Opcode::JmpIf) | Some(Opcode::Ret)
             ) {
-                // If a jump or return occurs before STORE_VAR, conservative reject
                 break;
             }
-            if next_ins.opcode == Some(Opcode::StoreVar) {
-                if symbol_of(next_ins.u16s.first()) == Some(local_sym) {
-                    store_idx = Some(next);
-                    break;
-                }
-            } else if next_ins.opcode == Some(Opcode::LoadVar)
-                && symbol_of(next_ins.u16s.get(1)) == Some(local_sym)
+            if next_ins.opcode == Some(Opcode::StoreVar)
+                && symbol_of(next_ins.u16s.first()) == Some(local_sym)
             {
-                // Another load of local_sym before overwrite:
-                // Check if it's only for a different field index
-                let Some(&r_loaded) = next_ins.u16s.first() else {
-                    break;
-                };
-                let mut only_other_fields = true;
-                for scan_ins in instrs.iter().skip(next + 1) {
-                    let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
-                        instruction_defs_uses(op, &scan_ins.u16s)
-                    } else {
-                        (None, Vec::new())
-                    };
-                    if scan_u.contains(&r_loaded) {
-                        if scan_ins.opcode == Some(Opcode::RecordGet)
-                            && scan_ins.u16s.get(1) == Some(&r_loaded)
-                        {
-                            let f_idx = scan_ins.u16s.get(3).copied().unwrap_or(0) as usize;
-                            if f_idx == field_idx {
-                                only_other_fields = false;
-                                break;
-                            }
-                        } else {
-                            only_other_fields = false;
-                            break;
-                        }
-                    }
-                    if scan_d == Some(r_loaded) {
-                        break;
-                    }
-                    if scan_ins.opcode == Some(Opcode::StoreVar)
-                        && symbol_of(scan_ins.u16s.first()) == Some(local_sym)
-                    {
-                        break;
-                    }
-                }
-                if !only_other_fields {
-                    break;
-                }
-                allowed_registers.push(r_loaded);
+                store_idx = Some(next);
+                break;
             }
         }
-
         let Some(si) = store_idx else {
             continue;
         };
 
-        // Ensure no jump target can jump into the window between RECORD_GET and STORE_VAR
-        if jump_target_in(ins.pc, instrs[si].pc) {
+        // Find earliest LOAD_VAR local_sym in the straight-line block preceding li
+        let mut earliest_idx = li;
+        for prev in (0..li).rev() {
+            let prev_ins = &instrs[prev];
+            if matches!(
+                prev_ins.opcode,
+                Some(Opcode::Jmp) | Some(Opcode::JmpIf) | Some(Opcode::Ret)
+            ) {
+                break;
+            }
+            if prev_ins.opcode == Some(Opcode::StoreVar)
+                && symbol_of(prev_ins.u16s.first()) == Some(local_sym)
+            {
+                break;
+            }
+            if prev_ins.opcode == Some(Opcode::LoadVar)
+                && symbol_of(prev_ins.u16s.get(1)) == Some(local_sym)
+            {
+                // Ensure no jump lands between prev and earliest_idx
+                if jump_target_in(prev_ins.pc, instrs[earliest_idx].pc) {
+                    break;
+                }
+                earliest_idx = prev;
+            }
+        }
+
+        // Control-flow barrier check: no jump targets anywhere strictly inside the window (earliest_idx to si)
+        if jump_target_in(instrs[earliest_idx].pc, instrs[si].pc) {
             continue;
         }
 
-        // Ensure r_src is not read anywhere after ins.pc
-        let mut r_src_survives = false;
-        for scan_ins in instrs.iter().skip(i + 1) {
-            let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
-                instruction_defs_uses(op, &scan_ins.u16s)
-            } else {
-                (None, Vec::new())
-            };
-            if scan_u.contains(&r_src) {
-                // If it is used by RECORD_GET on another field before STORE_VAR, that is safe
-                if scan_ins.opcode == Some(Opcode::RecordGet)
-                    && scan_ins.u16s.get(1) == Some(&r_src)
-                    && scan_ins.u16s.get(3).copied().unwrap_or(0) as usize != field_idx
-                {
-                    continue;
+        // Collect all registers loaded from local_sym in the block [earliest_idx..si]
+        let mut loaded_regs = HashSet::new();
+        loaded_regs.insert(r_src);
+        for scan_ins in &instrs[earliest_idx..si] {
+            if scan_ins.opcode == Some(Opcode::LoadVar)
+                && symbol_of(scan_ins.u16s.get(1)) == Some(local_sym)
+            {
+                if let Some(&r) = scan_ins.u16s.first() {
+                    loaded_regs.insert(r);
                 }
-                r_src_survives = true;
-                break;
-            }
-            if scan_d == Some(r_src) {
-                break;
             }
         }
 
-        if !r_src_survives {
+        // Verify each register in loaded_regs:
+        // Must never read field_idx throughout its lifetime (even beyond si until redefined)
+        let mut safe_and_allowed = Vec::new();
+        let mut all_registers_safe = true;
+        for &reg in &loaded_regs {
+            let mut reg_safe = true;
+            for scan_ins in instrs.iter().skip(earliest_idx) {
+                let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
+                    instruction_defs_uses(op, &scan_ins.u16s)
+                } else {
+                    (None, Vec::new())
+                };
+
+                if scan_u.contains(&reg) {
+                    if scan_ins.opcode == Some(Opcode::RecordGet)
+                        && scan_ins.u16s.get(1) == Some(&reg)
+                    {
+                        let f_idx = scan_ins.u16s.get(3).copied().unwrap_or(0) as usize;
+                        if f_idx == field_idx && scan_ins.pc != ins.pc {
+                            reg_safe = false;
+                            break;
+                        }
+                    } else {
+                        // Any other use of this record snapshot (e.g. passing to function, tuple, etc.)
+                        reg_safe = false;
+                        break;
+                    }
+                }
+
+                if scan_d == Some(reg) && scan_ins.pc > instrs[earliest_idx].pc {
+                    // Register was redefined
+                    break;
+                }
+            }
+
+            if !reg_safe {
+                all_registers_safe = false;
+                break;
+            }
+            safe_and_allowed.push(reg);
+        }
+
+        if all_registers_safe {
             sites.insert(
                 ins.pc,
                 FieldMoveSite {
                     local_symbol: local_sym,
                     field_idx,
-                    allowed_registers,
+                    allowed_registers: safe_and_allowed,
                 },
             );
         }
@@ -12546,7 +12618,26 @@ mod tests {
 
         #[test]
         fn partial_with_update_multi_field_records_regression() {
-            // Regression test for Point 5: 3, 5, and 10 field records with partial with-updates
+            // Regression test for Point 5: 3, 5, 10, and 15 field records with partial with-updates
+            let src_3 = "record State3 {\n\
+                             toks: Sequence(i32),\n\
+                             pos: i32,\n\
+                             tag: i32\n\
+                         }\n\
+                         fn main() {\n\
+                             let mut st: State3 = State3 { toks: [], pos: 0, tag: 99 };\n\
+                             let mut i: i32 = 0;\n\
+                             while i < 10 {\n\
+                                 st = st with { toks: push(st.toks, i), pos: st.pos + 1 };\n\
+                                 i = i + 1;\n\
+                             }\n\
+                             assert(len(st.toks) == 10);\n\
+                             assert(st.pos == 10);\n\
+                             assert(st.tag == 99);\n\
+                             return;\n\
+                         }\n";
+            assert_equivalent_under_every_steps_limit(src_3, true);
+
             let src_5 = "record State5 {\n\
                              toks: Sequence(i32),\n\
                              f1: i32,\n\
@@ -12591,6 +12682,222 @@ mod tests {
                               return;\n\
                           }\n";
             assert_equivalent_under_every_steps_limit(src_10, true);
+
+            let src_15 = "record State15 {\n\
+                              toks: Sequence(i32),\n\
+                              f1: i32, f2: i32, f3: i32, f4: i32, f5: i32,\n\
+                              f6: i32, f7: i32, f8: i32, f9: i32, f10: i32,\n\
+                              f11: i32, f12: i32, f13: i32,\n\
+                              pos: i32\n\
+                          }\n\
+                          fn main() {\n\
+                              let mut st: State15 = State15 {\n\
+                                  toks: [],\n\
+                                  f1: 1, f2: 2, f3: 3, f4: 4, f5: 5,\n\
+                                  f6: 6, f7: 7, f8: 8, f9: 9, f10: 10,\n\
+                                  f11: 11, f12: 12, f13: 13,\n\
+                                  pos: 0\n\
+                              };\n\
+                              let mut i: i32 = 0;\n\
+                              while i < 5 {\n\
+                                  st = st with { toks: push(st.toks, i * 4), pos: st.pos + 1 };\n\
+                                  i = i + 1;\n\
+                              }\n\
+                              assert(len(st.toks) == 5);\n\
+                              assert(st.toks[4] == 16);\n\
+                              assert(st.pos == 5);\n\
+                              assert(st.f1 == 1 && st.f13 == 13);\n\
+                              return;\n\
+                          }\n";
+            assert_equivalent_under_every_steps_limit(src_15, true);
+        }
+
+        #[test]
+        fn e2_fast_path_activation_and_moves_count() {
+            // Verify that E2 field moves actually execute and do not fall back
+            let src_5 = "record State5 {\n\
+                             toks: Sequence(i32),\n\
+                             f1: i32,\n\
+                             f2: i32,\n\
+                             f3: i32,\n\
+                             pos: i32\n\
+                         }\n\
+                         fn main() {\n\
+                             let mut st: State5 = State5 { toks: [], f1: 10, f2: 20, f3: 30, pos: 0 };\n\
+                             let mut i: i32 = 0;\n\
+                             while i < 100 {\n\
+                                 st = st with { toks: push(st.toks, i), pos: st.pos + 1 };\n\
+                                 i = i + 1;\n\
+                             }\n\
+                             assert(len(st.toks) == 100);\n\
+                             return;\n\
+                         }\n";
+            let bytes = compile(src_5);
+            vm_test_reset_e2_counters();
+            let res = run_with(&bytes, config(100_000), true);
+            assert_eq!(res.0, Ok(()));
+            let (moves, fallbacks) = vm_test_get_e2_counters();
+            assert!(
+                moves >= 100,
+                "expected at least 100 field moves, got {moves}"
+            );
+            assert_eq!(fallbacks, 0, "expected 0 fallbacks");
+        }
+
+        #[test]
+        fn gap_2a_local_overwrite_between_load_and_record_get_rejected() {
+            // Hand-crafted IR:
+            // LOAD_VAR r1, s
+            // STORE_VAR s, r2  (overwrites s before RECORD_GET)
+            // RECORD_GET r3, r1, State, 0
+            // E2 must NOT consume field 0 here.
+            use IrInstr as I;
+            let instrs = vec![
+                I::MakeSequence {
+                    dst: 10,
+                    items: vec![],
+                },
+                I::LoadI32 { dst: 11, val: 1 },
+                I::MakeRecord {
+                    dst: 12,
+                    name: "Lx".to_string(),
+                    items: vec![10, 11],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 12,
+                    activation_site: None,
+                    write_site: None,
+                },
+                I::LoadVar {
+                    dst: 1,
+                    name: "s".to_string(),
+                },
+                // Overwrite local s with a new record
+                I::MakeSequence {
+                    dst: 20,
+                    items: vec![],
+                },
+                I::LoadI32 { dst: 21, val: 2 },
+                I::MakeRecord {
+                    dst: 22,
+                    name: "Lx".to_string(),
+                    items: vec![20, 21],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 22,
+                    activation_site: None,
+                    write_site: None,
+                },
+                // Now RecordGet on r1 (the old snapshot)
+                I::RecordGet {
+                    dst: 3,
+                    src: 1,
+                    record_name: "Lx".to_string(),
+                    index: 0,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 22,
+                    activation_site: None,
+                    write_site: None,
+                },
+                I::Ret { src: None },
+            ];
+            let bytes = ir_main(instrs).expect("emit");
+            let program = parse_semcode(&bytes).expect("parse");
+            let plan = ConsumptionPlan::build(&program.functions);
+            // Verify that no field move site is planned for main
+            let fm = plan.field_moves.get("main");
+            assert!(
+                fm.is_none() || fm.unwrap().is_empty(),
+                "Gap 2A: must reject field move site"
+            );
+            assert_eq!(
+                run_with(&bytes, config(100), true),
+                run_with(&bytes, config(100), false)
+            );
+        }
+
+        #[test]
+        #[ignore]
+        fn benchmark_multi_field_state_scaling_sweep() {
+            use std::time::Instant;
+
+            let make_state5 = |n: usize| {
+                format!(
+                    "record State5 {{\n\
+                     toks: Sequence(i32),\n\
+                     f1: i32,\n\
+                     f2: i32,\n\
+                     f3: i32,\n\
+                     pos: i32\n\
+                 }}\n\
+                 fn main() {{\n\
+                     let mut st: State5 = State5 {{ toks: [], f1: 10, f2: 20, f3: 30, pos: 0 }};\n\
+                     let mut i: i32 = 0;\n\
+                     while i < {n} {{\n\
+                         st = st with {{ toks: push(st.toks, i), pos: st.pos + 1 }};\n\
+                         i = i + 1;\n\
+                     }}\n\
+                     assert(len(st.toks) == {n});\n\
+                     return;\n\
+                 }}\n"
+                )
+            };
+
+            let make_state10 = |n: usize| {
+                format!(
+                    "record State10 {{\n\
+                     toks: Sequence(i32),\n\
+                     a1: i32, a2: i32, a3: i32, a4: i32,\n\
+                     a5: i32, a6: i32, a7: i32, a8: i32,\n\
+                     pos: i32\n\
+                 }}\n\
+                 fn main() {{\n\
+                     let mut st: State10 = State10 {{\n\
+                         toks: [], a1: 1, a2: 2, a3: 3, a4: 4,\n\
+                         a5: 5, a6: 6, a7: 7, a8: 8, pos: 0\n\
+                     }};\n\
+                     let mut i: i32 = 0;\n\
+                     while i < {n} {{\n\
+                         st = st with {{ toks: push(st.toks, i), pos: st.pos + 1 }};\n\
+                         i = i + 1;\n\
+                     }}\n\
+                     assert(len(st.toks) == {n});\n\
+                     return;\n\
+                 }}\n"
+                )
+            };
+
+            println!("\n=== State5 Benchmark (N=8k, 16k, 32k) ===");
+            for &n in &[8_000, 16_000, 32_000] {
+                let bytes = compile(&make_state5(n));
+                vm_test_reset_e2_counters();
+                let start = Instant::now();
+                let res = run_with(&bytes, config(50_000_000), true);
+                let duration = start.elapsed();
+                assert_eq!(res.0, Ok(()));
+                let (moves, fallbacks) = vm_test_get_e2_counters();
+                println!("State5 N={n:5}: time={duration:?}, moves={moves}, fallbacks={fallbacks}");
+            }
+
+            println!("\n=== State10 Benchmark (N=8k, 16k, 32k) ===");
+            for &n in &[8_000, 16_000, 32_000] {
+                let bytes = compile(&make_state10(n));
+                vm_test_reset_e2_counters();
+                let start = Instant::now();
+                let res = run_with(&bytes, config(50_000_000), true);
+                let duration = start.elapsed();
+                assert_eq!(res.0, Ok(()));
+                let (moves, fallbacks) = vm_test_get_e2_counters();
+                println!(
+                    "State10 N={n:5}: time={duration:?}, moves={moves}, fallbacks={fallbacks}"
+                );
+            }
         }
     }
 }
