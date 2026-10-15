@@ -141,9 +141,22 @@ explicitly selected local execution, exposed only by application-mode
 | `max_steps` | 100000 | `--max-steps`, 1 ..= `TRUSTED_COMPILER_MAX_STEPS` (200000000) |
 | `max_frames` | 256 | `--max-frames`, 1 ..= `TRUSTED_COMPILER_MAX_FRAMES` (1024) |
 | `max_stack_depth` | 256 | follows `--max-frames` |
-| `max_calls` | 16384 | not overridable |
+| `max_calls` | 16384 | P3 candidate: `--max-calls`, 1 ..= `TRUSTED_COMPILER_MAX_CALLS` (200000000), no greater than effective `max_steps` |
 | `max_effect_calls` | 1024 | not overridable |
 | `max_registers`, `max_symbol_table`, `max_debug_symbols_per_function` | as `verified_local` | not overridable |
+
+The existing two-argument Rust constructor remains unchanged. The separate
+`RuntimeQuotas::with_trusted_compiler_calls(value)` method applies the explicit
+Calls override to the selected quota object, rejects zero/above 200000000 and
+values above its effective Steps, and leaves every other field unchanged.
+`CallsOverrideError` is separate from the existing `QuotaOverrideError`, so
+existing exhaustive matches and the old constructor signature are preserved.
+The CLI permits this method only for an explicitly selected `trusted-compiler`
+envelope. Custom `ExecutionConfig` construction remains supported as before.
+
+Omitted Calls stays exactly 16384; a Steps override alone never increases it.
+The explicit-override relation is not imposed on existing configurations with
+omitted Calls and a Steps budget below 16384.
 
 - The context stays `ExecutionContext::VerifiedLocal`. This is a custom
   envelope under the "Execution Envelope Provenance Rule" below.
@@ -174,7 +187,7 @@ time-safety measure. Larger maxima require, at minimum:
 - Windows and Linux measurements at the proposed limit;
 - a revision of this contract.
 
-### Known compiler-workload blocker: `max_calls`
+### Historical compiler-workload blocker and P3 candidate
 
 `Calls` counts every admitted non-root call over the whole execution, not
 the stack depth.
@@ -190,9 +203,38 @@ R0 measurements of MiniLang workloads on Windows x64 at base
   and above. Its practical ceiling is about 1.8 KB of source, independent of
   `max_steps`.
 
-Raising `Steps` alone therefore does not make self-hosted compiler
-workloads practical. Any change to `max_calls` requires a separately
-approved, independently bounded mechanism.
+Raising `Steps` alone therefore does not remove this blocker. P3 proposes
+an opt-in override, retaining 16384 as the default. This is a reviewable
+experimental contract candidate, not a released/stable resource guarantee.
+
+### P3 accounting rationale and alternatives
+
+Every admitted non-root frame is charged once in `sm-vm::push_frame_in`.
+On the supported trusted SemCode execution routes it is reached from one
+`Call` or `ClosureCall` dispatch. The common loop charges that instruction's
+Step first; target/signature/frame/stack/register checks precede the Calls
+charge. Root entry is exempt; inline builtins spend Steps without Calls.
+Direct, recursive and closure invocations share these charge points. Thus
+stored charged `calls <= steps`; a Steps failure prevents a later Calls
+charge, and a rejected Calls increment is not committed. Overflow fails
+closed. This is a count relationship, not a bound on cost per call.
+
+The proposed 200000000 Calls cap reuses the existing experimental maximum
+Steps count: no permitted explicit Calls budget exceeds the permitted Steps
+count. It does not assert that running that many calls is operationally safe
+on all hosts. A lower fixed cap (for example the research alternative 2000000)
+would provide a stricter operational ceiling, but available toy/partial
+compiler workloads do not justify a universal compiler-size threshold.
+Allowing Calls above Steps would configure an unreachable budget. Removing
+Calls charging or redefining it as depth would break the existing contract.
+These alternatives and the numeric cap remain subject to final OWNER
+contract review; implementation qualification does not approve a release.
+
+Higher Calls does not establish an aggregate heap limit or wall-clock limit,
+does not bound retained values across calls, and grants no capabilities or
+external-caller trust. Frames/StackDepth still bound simultaneously live
+frames; they do not bound bytes per frame. Other resource and semantic
+failures can still terminate a compiler workload.
 
 ## Execution Envelope Provenance Rule
 

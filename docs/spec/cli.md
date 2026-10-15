@@ -68,7 +68,7 @@ Current accepted usage forms are:
 - `smc verify <input.smc|project-root>`
 - `smc test <project-root>`
 - `smc run <input.sm|project-root>`
-- `smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--metrics json] [-- <application-args...>]`
+- `smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--max-calls <N>] [--metrics json] [-- <application-args...>]`
 - `smc run-smc <input.smc>`
 - `smc disasm <input.smc>`
 - `smc 7hell <input.sm> [--json]`
@@ -307,9 +307,15 @@ are unchanged and do not accept these options.
 - `--max-steps <N>` (1..=200000000) and `--max-frames <N>` (1..=1024) are
   accepted only together with `--envelope trusted-compiler`.
   `--max-frames` also sets `max_stack_depth`.
-- `max_calls` (16384), `max_effect_calls`, `max_registers`,
-  `max_symbol_table` and `max_debug_symbols_per_function` are never changed
-  by the envelope. There is no `--max-calls` option.
+- P3 experimental contract candidate: `--max-calls <N>` is accepted only
+  with `--envelope trusted-compiler`, for `1..=200000000` and
+  `N <= effective max_steps`. Without `--max-steps`, effective Steps is
+  100000. Omitting `--max-calls` preserves 16384 even when an explicit Steps
+  budget is smaller. Raising Steps never raises Calls automatically.
+- Calls counts cumulative admitted non-root Semantic calls, not stack depth.
+  The explicit local envelope is configuration, not caller authentication.
+- `max_effect_calls`, `max_registers`, `max_symbol_table` and
+  `max_debug_symbols_per_function` are never changed by the envelope.
 - The capability manifest is selected by `--profile` alone; the envelope
   never grants capabilities.
 - One `ExecutionConfig` is constructed after argument validation and is
@@ -328,26 +334,29 @@ this order:
 
 1. unknown option: `unknown run option '<option>'` followed by usage
 2. option without a value: usage
-3. repeated `--envelope`, `--max-steps`, `--max-frames` or `--metrics`:
+3. repeated `--envelope`, `--max-steps`, `--max-frames`, `--max-calls` or `--metrics`:
    `duplicate run option '<option>'`
 4. unknown envelope:
    `unknown execution envelope '<value>'; expected verified-local or trusted-compiler`
 5. unknown metrics format: `unsupported metrics format '<value>'; expected json`
 6. a value that is not plain ASCII decimal digits (empty, sign, whitespace,
    prefix, exponent or non-ASCII digits):
-   `--max-steps must be a decimal integer` (likewise `--max-frames`)
+   `--max-steps must be a decimal integer` (likewise `--max-frames` and `--max-calls`)
 7. zero, a value above the maximum, or a value that overflows `u64`:
    `--max-steps must be between 1 and 200000000`,
-   `--max-frames must be between 1 and 1024`
+   `--max-frames must be between 1 and 1024`,
+   `--max-calls must be between 1 and 200000000`
 8. an override without `--envelope trusted-compiler`:
-   `--max-steps requires --envelope trusted-compiler` (likewise `--max-frames`)
-9. the pre-existing rules: an option in the input position, an unknown
+   `--max-steps requires --envelope trusted-compiler` (likewise `--max-frames` and `--max-calls`)
+9. explicit Calls above effective Steps:
+   `--max-calls must not exceed the effective max_steps (<S>)`
+10. the pre-existing rules: an option in the input position, an unknown
    `--profile` value and an invalid `--duration-ms` value; then a missing
    `--profile` or `--root`
 
-Rules 1-6, and the value errors of rule 9, are applied while scanning
+Rules 1-6, and the value errors of rule 10, are applied while scanning
 options in command-line order, so the first offending option wins. Rules 7
-and 8 follow the scan, and a missing `--profile` or `--root` is reported
+through 9 follow the scan, and a missing `--profile` or `--root` is reported
 last.
 
 ### `--metrics json`

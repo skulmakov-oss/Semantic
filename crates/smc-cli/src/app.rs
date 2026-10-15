@@ -5018,6 +5018,7 @@ fn parse_quota_decimal(flag: &str, value: &str) -> Result<Option<u64>, String> {
 fn quota_range_error(flag: &str) -> String {
     let max = match flag {
         "--max-steps" => sm_runtime_core::TRUSTED_COMPILER_MAX_STEPS,
+        "--max-calls" => sm_runtime_core::TRUSTED_COMPILER_MAX_CALLS,
         _ => sm_runtime_core::TRUSTED_COMPILER_MAX_FRAMES,
     };
     format!("{flag} must be between 1 and {max}")
@@ -5039,6 +5040,7 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
     // Outer Option: flag seen. Inner Option: None means the digits overflowed u64.
     let mut max_steps: Option<Option<u64>> = None;
     let mut max_frames: Option<Option<u64>> = None;
+    let mut max_calls: Option<Option<u64>> = None;
     let mut metrics_json = None;
     let mut index = 1;
     while index < args.len() {
@@ -5059,12 +5061,14 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
                     }
                 });
             }
-            "--max-steps" | "--max-frames" => {
+            "--max-steps" | "--max-frames" | "--max-calls" => {
                 let flag = args[index].clone();
                 let slot = if flag == "--max-steps" {
                     &mut max_steps
-                } else {
+                } else if flag == "--max-frames" {
                     &mut max_frames
+                } else {
+                    &mut max_calls
                 };
                 if slot.is_some() {
                     return Err(format!("duplicate run option '{flag}'"));
@@ -5141,12 +5145,20 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
         None => None,
     };
     let envelope = envelope.unwrap_or(RunEnvelope::VerifiedLocal);
+    let max_calls = match max_calls {
+        Some(Some(v)) if (1..=sm_runtime_core::TRUSTED_COMPILER_MAX_CALLS).contains(&v) => Some(v),
+        Some(_) => return Err(quota_range_error("--max-calls")),
+        None => None,
+    };
     if envelope != RunEnvelope::TrustedCompiler {
         if max_steps.is_some() {
             return Err("--max-steps requires --envelope trusted-compiler".to_string());
         }
         if max_frames.is_some() {
             return Err("--max-frames requires --envelope trusted-compiler".to_string());
+        }
+        if max_calls.is_some() {
+            return Err("--max-calls requires --envelope trusted-compiler".to_string());
         }
     }
     let quotas = match envelope {
@@ -5163,6 +5175,20 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
             }
         })?,
     };
+    let quotas = if let Some(value) = max_calls {
+        quotas
+            .with_trusted_compiler_calls(value)
+            .map_err(|error| match error {
+                sm_runtime_core::CallsOverrideError::OutOfRange { .. } => {
+                    quota_range_error("--max-calls")
+                }
+                sm_runtime_core::CallsOverrideError::ExceedsSteps { max_steps, .. } => {
+                    format!("--max-calls must not exceed the effective max_steps ({max_steps})")
+                }
+            })?
+    } else {
+        quotas
+    };
     Ok(ApplicationRunOptions {
         input,
         profile: profile.ok_or_else(application_run_usage)?,
@@ -5176,7 +5202,7 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
 }
 
 fn application_run_usage() -> String {
-    "usage: smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--metrics json] [-- <application-args...>]".to_string()
+    "usage: smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--max-calls <N>] [--metrics json] [-- <application-args...>]".to_string()
 }
 
 fn cmd_verify(args: &[String]) -> Result<(), String> {

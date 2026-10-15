@@ -243,6 +243,17 @@ pub const TRUSTED_COMPILER_MAX_STEPS: u64 = 200_000_000;
 /// override.
 pub const TRUSTED_COMPILER_MAX_FRAMES: u64 = 1_024;
 
+/// P3 experimental explicit Calls ceiling; also bounded by effective Steps.
+/// This is a count bound, not a heap or wall-clock bound.
+pub const TRUSTED_COMPILER_MAX_CALLS: u64 = 200_000_000;
+
+/// Separate from `QuotaOverrideError` to preserve existing exhaustive matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallsOverrideError {
+    OutOfRange { value: u64 },
+    ExceedsSteps { value: u64, max_steps: usize },
+}
+
 /// A rejected `trusted-compiler` quota override. Carries the offending
 /// value so callers can render a deterministic diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,6 +263,23 @@ pub enum QuotaOverrideError {
 }
 
 impl RuntimeQuotas {
+    /// Applies an explicit P3 Calls override to an already selected envelope.
+    /// Only Calls changes. The CLI restricts this to `trusted-compiler`;
+    /// this method grants no capabilities or caller authentication.
+    pub fn with_trusted_compiler_calls(mut self, value: u64) -> Result<Self, CallsOverrideError> {
+        if value == 0 || value > TRUSTED_COMPILER_MAX_CALLS {
+            return Err(CallsOverrideError::OutOfRange { value });
+        }
+        if value > self.max_steps as u64 {
+            return Err(CallsOverrideError::ExceedsSteps {
+                value,
+                max_steps: self.max_steps,
+            });
+        }
+        self.max_calls = value as usize;
+        Ok(self)
+    }
+
     /// SHF-R (#2030): the `trusted-compiler` envelope.
     ///
     /// Starts from `verified_local()` and applies only the explicit
@@ -527,6 +555,59 @@ mod tests {
         assert_eq!(
             RuntimeQuotas::trusted_compiler(None, None),
             Ok(RuntimeQuotas::verified_local())
+        );
+    }
+
+    #[test]
+    fn p3_calls_changes_only_calls_and_preserves_existing_api() {
+        let constructor: fn(Option<u64>, Option<u64>) -> Result<RuntimeQuotas, QuotaOverrideError> =
+            RuntimeQuotas::trusted_compiler;
+        let original = constructor(Some(TRUSTED_COMPILER_MAX_STEPS), Some(1024)).unwrap();
+        for value in [1, 16_384, TRUSTED_COMPILER_MAX_CALLS] {
+            assert_eq!(
+                original.with_trusted_compiler_calls(value),
+                Ok(RuntimeQuotas {
+                    max_calls: value as usize,
+                    ..original
+                })
+            );
+        }
+        // The existing public error enum remains exhaustively matchable.
+        let field = match constructor(Some(0), None).unwrap_err() {
+            QuotaOverrideError::StepsOutOfRange { .. } => "steps",
+            QuotaOverrideError::FramesOutOfRange { .. } => "frames",
+        };
+        assert_eq!(field, "steps");
+    }
+
+    #[test]
+    fn p3_calls_range_and_effective_steps_are_checked() {
+        let quotas = RuntimeQuotas::trusted_compiler(None, None).unwrap();
+        for value in [0, TRUSTED_COMPILER_MAX_CALLS + 1, u64::MAX] {
+            assert_eq!(
+                quotas.with_trusted_compiler_calls(value),
+                Err(CallsOverrideError::OutOfRange { value })
+            );
+        }
+        assert_eq!(
+            quotas.with_trusted_compiler_calls(100001),
+            Err(CallsOverrideError::ExceedsSteps {
+                value: 100001,
+                max_steps: 100000
+            })
+        );
+        assert_eq!(
+            quotas
+                .with_trusted_compiler_calls(100000)
+                .unwrap()
+                .max_calls,
+            100000
+        );
+        assert_eq!(
+            RuntimeQuotas::trusted_compiler(Some(1), None)
+                .unwrap()
+                .max_calls,
+            16384
         );
     }
 
