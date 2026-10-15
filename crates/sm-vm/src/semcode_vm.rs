@@ -4455,26 +4455,55 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             continue;
         }
 
-        // Collect all registers loaded from local_sym in the block [earliest_idx..si]
-        let mut loaded_regs = HashSet::new();
-        loaded_regs.insert(r_src);
-        for scan_ins in &instrs[earliest_idx..si] {
+        // Collect all definitions (reg, def_idx) loaded from local_sym in [earliest_idx..si]
+        let mut defs: Vec<(u16, usize)> = Vec::new();
+        for (scan_idx, scan_ins) in instrs.iter().enumerate().take(si).skip(earliest_idx) {
             if scan_ins.opcode == Some(Opcode::LoadVar)
                 && symbol_of(scan_ins.u16s.get(1)) == Some(local_sym)
             {
                 if let Some(&r) = scan_ins.u16s.first() {
-                    loaded_regs.insert(r);
+                    defs.push((r, scan_idx));
                 }
             }
         }
 
-        // Verify each register in loaded_regs:
-        // Must never read field_idx throughout its lifetime (even beyond si until redefined)
-        let mut safe_and_allowed = Vec::new();
-        let mut all_registers_safe = true;
-        for &reg in &loaded_regs {
-            let mut reg_safe = true;
-            for scan_ins in instrs.iter().skip(earliest_idx) {
+        // Verify each (reg, def_idx) definition:
+        // 1. If def_idx < i: prove reaching definition at move site i (reg not redefined in (def_idx..i)).
+        // 2. Scan all uses from def_idx + 1 until a redefinition of reg or end of function.
+        //    - If reg is used, it MUST only be RECORD_GET for a field OTHER than field_idx
+        //      (or the candidate RECORD_GET itself at i when reg == r_src).
+        //    - Any other use (or reading field_idx after i) invalidates the optimization.
+        // 3. For registers defined after i (def_idx > i), field_idx in local_sym has already been
+        //    moved out (set to Value::Unit). Therefore, loading local_sym after i and reading field_idx
+        //    would observe Unit. Scan to verify no use reads field_idx.
+        let mut safe_allowed = std::collections::BTreeSet::new();
+        let mut all_definitions_safe = true;
+
+        for (reg, def_idx) in defs {
+            // Verify reaching definition at instruction i if defined before i
+            if def_idx < i {
+                let mut redefined_before_i = false;
+                for mid_ins in &instrs[(def_idx + 1)..i] {
+                    let (d, _) = if let Some(op) = mid_ins.opcode {
+                        instruction_defs_uses(op, &mid_ins.u16s)
+                    } else {
+                        (None, Vec::new())
+                    };
+                    if d == Some(reg) {
+                        redefined_before_i = true;
+                        break;
+                    }
+                }
+                if redefined_before_i {
+                    // Register was overwritten before move site; cannot be part of the valid snapshot at i
+                    all_definitions_safe = false;
+                    break;
+                }
+            }
+
+            // Scan uses strictly after def_idx until redefinition of reg or function end
+            let mut def_safe = true;
+            for scan_ins in instrs.iter().skip(def_idx + 1) {
                 let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
                     instruction_defs_uses(op, &scan_ins.u16s)
                 } else {
@@ -4487,36 +4516,41 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
                     {
                         let f_idx = scan_ins.u16s.get(3).copied().unwrap_or(0) as usize;
                         if f_idx == field_idx && scan_ins.pc != ins.pc {
-                            reg_safe = false;
+                            def_safe = false;
                             break;
                         }
                     } else {
-                        // Any other use of this record snapshot (e.g. passing to function, tuple, etc.)
-                        reg_safe = false;
+                        // Any other use of this record snapshot (e.g. argument, sequence, tuple, etc.)
+                        def_safe = false;
                         break;
                     }
                 }
 
-                if scan_d == Some(reg) && scan_ins.pc > instrs[earliest_idx].pc {
-                    // Register was redefined
+                // If this instruction redefines reg, this record snapshot's lifetime ends here
+                if scan_d == Some(reg) {
                     break;
                 }
             }
 
-            if !reg_safe {
-                all_registers_safe = false;
+            if !def_safe {
+                all_definitions_safe = false;
                 break;
             }
-            safe_and_allowed.push(reg);
+
+            // Only registers defined before or at move site i hold the live snapshot in frame.regs at i
+            if def_idx <= i {
+                safe_allowed.insert(reg);
+            }
         }
 
-        if all_registers_safe {
+        if all_definitions_safe && safe_allowed.contains(&r_src) {
+            let allowed_registers: Vec<u16> = safe_allowed.into_iter().collect();
             sites.insert(
                 ins.pc,
                 FieldMoveSite {
                     local_symbol: local_sym,
                     field_idx,
-                    allowed_registers: safe_and_allowed,
+                    allowed_registers,
                 },
             );
         }
@@ -12816,6 +12850,180 @@ mod tests {
                 fm.is_none() || fm.unwrap().is_empty(),
                 "Gap 2A: must reject field move site"
             );
+            assert_eq!(
+                run_with(&bytes, config(100), true),
+                run_with(&bytes, config(100), false)
+            );
+        }
+
+        #[test]
+        fn false_positive_reaching_definition_premature_break_regression() {
+            // Regression test for Argon review finding:
+            // earliest_idx defines r7 from local s.
+            // A subsequent instruction defines r8 from local s.
+            // r8 then reads field 0 (the same field that r9 tries to consume)!
+            // Under the buggy analysis, scanning r8 started at earliest_idx, saw scan_d == Some(r8)
+            // at the definition of r8 itself (where pc > earliest_idx.pc), and broke prematurely
+            // before checking r8's subsequent RECORD_GET on field 0.
+            // Under the fixed analysis, r8's uses after its definition are checked, detecting
+            // that r8 reads field 0, which rejects the field move site!
+            use IrInstr as I;
+            let instrs = vec![
+                I::MakeSequence {
+                    dst: 10,
+                    items: vec![],
+                },
+                I::LoadI32 { dst: 11, val: 42 },
+                I::MakeRecord {
+                    dst: 12,
+                    name: "Rec".to_string(),
+                    items: vec![10, 11],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 12,
+                    activation_site: None,
+                    write_site: None,
+                },
+                // 1. earliest_idx: loads r7 from s
+                I::LoadVar {
+                    dst: 7,
+                    name: "s".to_string(),
+                },
+                // 2. r8 loaded from s after earliest_idx
+                I::LoadVar {
+                    dst: 8,
+                    name: "s".to_string(),
+                },
+                // 3. RECORD_GET candidate on r7 consuming field 0
+                I::RecordGet {
+                    dst: 9,
+                    src: 7,
+                    record_name: "Rec".to_string(),
+                    index: 0,
+                },
+                // 4. r8 reads field 0! This MUST prevent E2 move at step 3.
+                I::RecordGet {
+                    dst: 13,
+                    src: 8,
+                    record_name: "Rec".to_string(),
+                    index: 0,
+                },
+                // 5. Restoring STORE_VAR for s
+                I::MakeRecord {
+                    dst: 14,
+                    name: "Rec".to_string(),
+                    items: vec![9, 11],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 14,
+                    activation_site: None,
+                    write_site: None,
+                },
+                I::Ret { src: None },
+            ];
+            let bytes = ir_main(instrs).expect("emit");
+            let program = parse_semcode(&bytes).expect("parse");
+            let plan = ConsumptionPlan::build(&program.functions);
+            let fm = plan.field_moves.get("main");
+            assert!(
+                fm.is_none() || fm.unwrap().is_empty(),
+                "Must reject field move site because r8 reads field 0 after definition"
+            );
+            assert_eq!(
+                run_with(&bytes, config(100), true),
+                run_with(&bytes, config(100), false)
+            );
+        }
+
+        #[test]
+        fn register_reuse_and_definition_ordering_verified() {
+            // Test that if a register is reused (redefined by another instruction),
+            // its snapshot lifetime ends at the redefinition, and subsequent uses of the new value
+            // do not invalidate the earlier snapshot.
+            use IrInstr as I;
+            let instrs = vec![
+                I::MakeSequence {
+                    dst: 10,
+                    items: vec![],
+                },
+                I::LoadI32 { dst: 11, val: 100 },
+                I::MakeRecord {
+                    dst: 12,
+                    name: "St".to_string(),
+                    items: vec![10, 11],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 12,
+                    activation_site: None,
+                    write_site: None,
+                },
+                // Load r7 from s (base)
+                I::LoadVar {
+                    dst: 7,
+                    name: "s".to_string(),
+                },
+                // Load r8 from s (source for field 0)
+                I::LoadVar {
+                    dst: 8,
+                    name: "s".to_string(),
+                },
+                // RecordGet r9 = r8.field0
+                I::RecordGet {
+                    dst: 9,
+                    src: 8,
+                    record_name: "St".to_string(),
+                    index: 0,
+                },
+                // Redefine r8 with an integer (reused register)
+                I::LoadI32 { dst: 8, val: 555 },
+                // Use r8 as integer - this should NOT invalidate r8's earlier record snapshot!
+                I::AddI32 {
+                    dst: 15,
+                    lhs: 8,
+                    rhs: 11,
+                },
+                // Read field 1 from r7 (unchanged field)
+                I::RecordGet {
+                    dst: 16,
+                    src: 7,
+                    record_name: "St".to_string(),
+                    index: 1,
+                },
+                // Reconstruct and store
+                I::MakeRecord {
+                    dst: 17,
+                    name: "St".to_string(),
+                    items: vec![9, 16],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 17,
+                    activation_site: None,
+                    write_site: None,
+                },
+                I::Ret { src: None },
+            ];
+            let bytes = ir_main(instrs).expect("emit");
+            let program = parse_semcode(&bytes).expect("parse");
+            let plan = ConsumptionPlan::build(&program.functions);
+            let fm = plan.field_moves.get("main");
+            assert!(
+                fm.is_some() && !fm.unwrap().is_empty(),
+                "Field move site should be planned because r8 redefinition safely ends its record lifetime"
+            );
+            // Verify deterministic sorted order of allowed_registers
+            for site in fm.unwrap().values() {
+                let mut sorted = site.allowed_registers.clone();
+                sorted.sort_unstable();
+                assert_eq!(site.allowed_registers, sorted);
+            }
             assert_eq!(
                 run_with(&bytes, config(100), true),
                 run_with(&bytes, config(100), false)
