@@ -2454,14 +2454,19 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let dead_ops = plan.dead_operands_at(&func_name, pc);
-                let mut items = Vec::with_capacity(count);
+                let mut srcs = Vec::with_capacity(count);
                 for _ in 0..count {
-                    let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
-                        take_reg(vm, frame_idx, src)?
-                    } else {
-                        get_reg(vm, frame_idx, src)?
-                    };
+                    srcs.push(read_u16_le(&f.code, &mut cur).map_err(map_format_err)?);
+                }
+                let mut items = Vec::with_capacity(count);
+                for (idx, &src) in srcs.iter().enumerate() {
+                    let is_last_use_in_instr = !srcs[idx + 1..].contains(&src);
+                    let v =
+                        if is_last_use_in_instr && dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                            take_reg(vm, frame_idx, src)?
+                        } else {
+                            get_reg(vm, frame_idx, src)?
+                        };
                     items.push(v);
                 }
                 set_reg(vm, frame_idx, dst, Value::Sequence(Arc::new(items)))?;
@@ -2473,14 +2478,19 @@ where
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let function_name = lookup_str(f, sid)?.to_string();
                 let dead_ops = plan.dead_operands_at(&func_name, pc);
-                let mut captures = Vec::with_capacity(count);
+                let mut srcs = Vec::with_capacity(count);
                 for _ in 0..count {
-                    let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
-                        take_reg(vm, frame_idx, src)?
-                    } else {
-                        get_reg(vm, frame_idx, src)?
-                    };
+                    srcs.push(read_u16_le(&f.code, &mut cur).map_err(map_format_err)?);
+                }
+                let mut captures = Vec::with_capacity(count);
+                for (idx, &src) in srcs.iter().enumerate() {
+                    let is_last_use_in_instr = !srcs[idx + 1..].contains(&src);
+                    let v =
+                        if is_last_use_in_instr && dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                            take_reg(vm, frame_idx, src)?
+                        } else {
+                            get_reg(vm, frame_idx, src)?
+                        };
                     captures.push(v);
                 }
                 set_reg(
@@ -2498,14 +2508,19 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let dead_ops = plan.dead_operands_at(&func_name, pc);
-                let mut items = Vec::with_capacity(count);
+                let mut srcs = Vec::with_capacity(count);
                 for _ in 0..count {
-                    let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
-                        take_reg(vm, frame_idx, src)?
-                    } else {
-                        get_reg(vm, frame_idx, src)?
-                    };
+                    srcs.push(read_u16_le(&f.code, &mut cur).map_err(map_format_err)?);
+                }
+                let mut items = Vec::with_capacity(count);
+                for (idx, &src) in srcs.iter().enumerate() {
+                    let is_last_use_in_instr = !srcs[idx + 1..].contains(&src);
+                    let v =
+                        if is_last_use_in_instr && dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                            take_reg(vm, frame_idx, src)?
+                        } else {
+                            get_reg(vm, frame_idx, src)?
+                        };
                     items.push(v);
                 }
                 set_reg(vm, frame_idx, dst, Value::Tuple(items))?;
@@ -2517,14 +2532,19 @@ where
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let type_name = lookup_str(f, sid)?.to_string();
                 let dead_ops = plan.dead_operands_at(&func_name, pc);
-                let mut slots = Vec::with_capacity(count);
+                let mut srcs = Vec::with_capacity(count);
                 for _ in 0..count {
-                    let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
-                        take_reg(vm, frame_idx, src)?
-                    } else {
-                        get_reg(vm, frame_idx, src)?
-                    };
+                    srcs.push(read_u16_le(&f.code, &mut cur).map_err(map_format_err)?);
+                }
+                let mut slots = Vec::with_capacity(count);
+                for (idx, &src) in srcs.iter().enumerate() {
+                    let is_last_use_in_instr = !srcs[idx + 1..].contains(&src);
+                    let v =
+                        if is_last_use_in_instr && dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                            take_reg(vm, frame_idx, src)?
+                        } else {
+                            get_reg(vm, frame_idx, src)?
+                        };
                     slots.push(v);
                 }
                 set_reg(
@@ -2544,14 +2564,19 @@ where
                 let type_name = lookup_str(f, sid)?.to_string();
                 let variant_name = lookup_str(f, variant_sid)?.to_string();
                 let dead_ops = plan.dead_operands_at(&func_name, pc);
-                let mut payload = Vec::with_capacity(count);
+                let mut srcs = Vec::with_capacity(count);
                 for _ in 0..count {
-                    let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
-                        take_reg(vm, frame_idx, src)?
-                    } else {
-                        get_reg(vm, frame_idx, src)?
-                    };
+                    srcs.push(read_u16_le(&f.code, &mut cur).map_err(map_format_err)?);
+                }
+                let mut payload = Vec::with_capacity(count);
+                for (idx, &src) in srcs.iter().enumerate() {
+                    let is_last_use_in_instr = !srcs[idx + 1..].contains(&src);
+                    let v =
+                        if is_last_use_in_instr && dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                            take_reg(vm, frame_idx, src)?
+                        } else {
+                            get_reg(vm, frame_idx, src)?
+                        };
                     payload.push(v);
                 }
                 set_reg(
@@ -2618,12 +2643,31 @@ where
                 let index = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let expected_name = lookup_str(f, sid)?.to_string();
 
+                // Always validate the actual source register first to preserve error precedence
+                let src_val = get_reg(vm, frame_idx, src)?;
+                let Value::Record(src_record) = src_val else {
+                    return Err(RuntimeError::TypeMismatchRuntime(
+                        "RECORD_GET source must be record".to_string(),
+                    ));
+                };
+                if src_record.type_name != expected_name {
+                    return Err(RuntimeError::TypeMismatchRuntime(format!(
+                        "RECORD_GET expected record '{}', got '{}'",
+                        expected_name, src_record.type_name
+                    )));
+                }
+                if index >= src_record.slots.len() {
+                    return Err(RuntimeError::BadFormat(format!(
+                        "record-get index out of bounds: {}",
+                        index
+                    )));
+                }
+
                 // SHF-P2 / E2: check if this site qualifies for moving the field out of the local
                 let mut moved_item = None;
                 if let Some(site) = plan.field_move_at(&func_name, pc) {
                     if site.field_idx == index {
                         let frame = &mut vm.callstack[frame_idx];
-                        // Verify local exists, is of expected record type, and index is in bounds
                         let local_matches = match frame.locals.get(&site.local_symbol) {
                             Some(Value::Record(r)) => {
                                 r.type_name == expected_name && index < r.slots.len()
@@ -2631,15 +2675,28 @@ where
                             _ => false,
                         };
                         if local_matches {
-                            // Verify uniqueness: no other local or register holds a Record of this type
+                            // Verify uniqueness of the local's record:
+                            // 1. No other local variable holds a Record of this type.
                             let other_locals_count = frame.locals.iter()
                                 .filter(|(s, v)| *s != &site.local_symbol && matches!(v, Value::Record(r) if r.type_name == expected_name))
                                 .count();
-                            let registers_count = frame.regs.iter()
-                                .filter(|slot| matches!(slot, RegisterSlot::Value(Value::Record(r)) if r.type_name == expected_name))
+                            // 2. Only registers defined from this local (such as the base record or projection sources) hold it.
+                            // The field-sensitive analysis proved that all uses of these loaded registers are RECORD_GET for fields != field_idx.
+                            let unproven_registers_count = frame
+                                .regs
+                                .iter()
+                                .enumerate()
+                                .filter(|(r_idx, slot)| {
+                                    if let RegisterSlot::Value(Value::Record(r)) = slot {
+                                        r.type_name == expected_name
+                                            && *r_idx != src as usize
+                                            && !site.allowed_registers.contains(&(*r_idx as u16))
+                                    } else {
+                                        false
+                                    }
+                                })
                                 .count();
-                            // src holds the record in registers_count (count == 1 means only src holds it)
-                            if other_locals_count == 0 && registers_count <= 1 {
+                            if other_locals_count == 0 && unproven_registers_count == 0 {
                                 if let Some(Value::Record(rec)) =
                                     frame.locals.get_mut(&site.local_symbol)
                                 {
@@ -2651,28 +2708,7 @@ where
                     }
                 }
 
-                let item = if let Some(item) = moved_item {
-                    item
-                } else {
-                    let record = get_reg(vm, frame_idx, src)?;
-                    let Value::Record(record) = record else {
-                        return Err(RuntimeError::TypeMismatchRuntime(
-                            "RECORD_GET source must be record".to_string(),
-                        ));
-                    };
-                    if record.type_name != expected_name {
-                        return Err(RuntimeError::TypeMismatchRuntime(format!(
-                            "RECORD_GET expected record '{}', got '{}'",
-                            expected_name, record.type_name
-                        )));
-                    }
-                    record.slots.get(index).cloned().ok_or_else(|| {
-                        RuntimeError::BadFormat(format!(
-                            "record-get index out of bounds: {}",
-                            index
-                        ))
-                    })?
-                };
+                let item = moved_item.unwrap_or_else(|| src_record.slots[index].clone());
                 set_reg(vm, frame_idx, dst, item)?;
                 next_pc = cur - f.instr_start;
             }
@@ -3659,10 +3695,11 @@ enum ConsumeSite {
     StoreSource,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct FieldMoveSite {
     local_symbol: SymbolId,
     field_idx: usize,
+    allowed_registers: Vec<u16>,
 }
 
 #[derive(Debug, Default)]
@@ -3719,11 +3756,11 @@ impl ConsumptionPlan {
     }
 
     #[inline]
-    fn field_move_at(&self, func: &str, pc: usize) -> Option<FieldMoveSite> {
+    fn field_move_at(&self, func: &str, pc: usize) -> Option<&FieldMoveSite> {
         if self.field_moves.is_empty() {
             return None;
         }
-        self.field_moves.get(func).and_then(|m| m.get(&pc)).copied()
+        self.field_moves.get(func).and_then(|m| m.get(&pc))
     }
 }
 
@@ -4234,17 +4271,22 @@ fn compute_register_liveness(f: &FunctionBytecode) -> HashMap<usize, Vec<u16>> {
 fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMoveSite> {
     let mut sites = HashMap::new();
     let mut instrs = Vec::new();
-    let Ok(_) = scan_function_bytecode(f, Some(&mut instrs)) else {
+    let Ok(mut jumps) = scan_function_bytecode(f, Some(&mut instrs)) else {
         return sites;
     };
     if !instrs.iter().any(|i| i.opcode == Some(Opcode::RecordGet)) {
         return sites;
     }
+    jumps.sort_unstable();
 
     let symbol_of =
         |sid: Option<&u16>| sid.and_then(|sid| f.symbol_ids.get(*sid as usize).copied());
     let borrowed_roots: HashSet<SymbolId> =
         f.borrowed_paths.iter().map(|bp| bp.path.root).collect();
+    let jump_target_in = |lo: usize, hi: usize| {
+        let k = jumps.partition_point(|&t| t <= lo);
+        jumps.get(k).is_some_and(|&t| t <= hi)
+    };
 
     // Check each candidate RECORD_GET
     for (i, ins) in instrs.iter().enumerate() {
@@ -4259,11 +4301,13 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
         };
         let field_idx = field_idx_u16 as usize;
 
-        // Trace definition of r_src backward in straight-line code
+        // Trace definition of r_src backward in straight-line code to LOAD_VAR local
+        let mut load_idx = None;
         let mut local_opt = None;
         for prev in (0..i).rev() {
             let prev_ins = &instrs[prev];
             if prev_ins.opcode == Some(Opcode::LoadVar) && prev_ins.u16s.first() == Some(&r_src) {
+                load_idx = Some(prev);
                 local_opt = symbol_of(prev_ins.u16s.get(1));
                 break;
             }
@@ -4284,14 +4328,24 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             }
         }
 
-        let Some(local_sym) = local_opt else { continue };
+        let (Some(li), Some(local_sym)) = (load_idx, local_opt) else {
+            continue;
+        };
         if borrowed_roots.contains(&local_sym) {
             continue;
         }
 
+        // Control-flow barrier check: no jump targets into the window from LOAD_VAR to RECORD_GET
+        if jump_target_in(instrs[li].pc, ins.pc) {
+            continue;
+        }
+
+        let mut allowed_registers = vec![r_src];
+
         // Verify that in instructions following RECORD_GET, field_idx of local_sym is not read
-        // before local_sym is completely overwritten by STORE_VAR local_sym, _.
-        let mut unobserved = false;
+        // before local_sym is completely overwritten by STORE_VAR local_sym, _,
+        // and no jump targets enter the window.
+        let mut store_idx = None;
         for next in (i + 1)..instrs.len() {
             let next_ins = &instrs[next];
             if matches!(
@@ -4303,8 +4357,7 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             }
             if next_ins.opcode == Some(Opcode::StoreVar) {
                 if symbol_of(next_ins.u16s.first()) == Some(local_sym) {
-                    // Full overwrite reached without observing field_idx
-                    unobserved = true;
+                    store_idx = Some(next);
                     break;
                 }
             } else if next_ins.opcode == Some(Opcode::LoadVar)
@@ -4315,7 +4368,6 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
                 let Some(&r_loaded) = next_ins.u16s.first() else {
                     break;
                 };
-                // Ensure all uses of r_loaded are RECORD_GET for a field != field_idx
                 let mut only_other_fields = true;
                 for scan_ins in instrs.iter().skip(next + 1) {
                     let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
@@ -4349,15 +4401,50 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
                 if !only_other_fields {
                     break;
                 }
+                allowed_registers.push(r_loaded);
             }
         }
 
-        if unobserved {
+        let Some(si) = store_idx else {
+            continue;
+        };
+
+        // Ensure no jump target can jump into the window between RECORD_GET and STORE_VAR
+        if jump_target_in(ins.pc, instrs[si].pc) {
+            continue;
+        }
+
+        // Ensure r_src is not read anywhere after ins.pc
+        let mut r_src_survives = false;
+        for scan_ins in instrs.iter().skip(i + 1) {
+            let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
+                instruction_defs_uses(op, &scan_ins.u16s)
+            } else {
+                (None, Vec::new())
+            };
+            if scan_u.contains(&r_src) {
+                // If it is used by RECORD_GET on another field before STORE_VAR, that is safe
+                if scan_ins.opcode == Some(Opcode::RecordGet)
+                    && scan_ins.u16s.get(1) == Some(&r_src)
+                    && scan_ins.u16s.get(3).copied().unwrap_or(0) as usize != field_idx
+                {
+                    continue;
+                }
+                r_src_survives = true;
+                break;
+            }
+            if scan_d == Some(r_src) {
+                break;
+            }
+        }
+
+        if !r_src_survives {
             sites.insert(
                 ins.pc,
                 FieldMoveSite {
                     local_symbol: local_sym,
                     field_idx,
+                    allowed_registers,
                 },
             );
         }
@@ -12417,6 +12504,93 @@ mod tests {
                            return;\n\
                        }\n";
             assert_equivalent_under_every_steps_limit(src, true);
+        }
+
+        #[test]
+        fn container_constructor_repeated_register_regression() {
+            // Regression test for Point 1: repeated register in MakeSequence/MakeTuple
+            let src = "fn main() {\n\
+                           let x: i32 = 42;\n\
+                           let s: Sequence(i32) = [x, x, x];\n\
+                           assert(len(s) == 3 && s[0] == 42 && s[1] == 42 && s[2] == 42);\n\
+                           let (a, b): (i32, i32) = (x, x);\n\
+                           assert(a == 42 && b == 42);\n\
+                           return;\n\
+                       }\n";
+            assert_equivalent_under_every_steps_limit(src, true);
+        }
+
+        #[test]
+        fn record_get_error_precedence_regression() {
+            // Regression test for Point 2: RecordGet on non-record source must fail with TypeMismatchRuntime
+            use IrInstr as I;
+            let instrs = vec![
+                I::LoadI32 { dst: 1, val: 123 },
+                I::RecordGet {
+                    dst: 2,
+                    src: 1,
+                    record_name: "Lx".to_string(),
+                    index: 0,
+                },
+                I::Ret { src: None },
+            ];
+            let bytes = ir_main(instrs).expect("emit");
+            let full_planned = run_with(&bytes, config(100), true);
+            let full_unplanned = run_with(&bytes, config(100), false);
+            assert_eq!(full_planned, full_unplanned);
+            assert!(matches!(
+                full_planned.0,
+                Err(RuntimeError::TypeMismatchRuntime(_))
+            ));
+        }
+
+        #[test]
+        fn partial_with_update_multi_field_records_regression() {
+            // Regression test for Point 5: 3, 5, and 10 field records with partial with-updates
+            let src_5 = "record State5 {\n\
+                             toks: Sequence(i32),\n\
+                             f1: i32,\n\
+                             f2: i32,\n\
+                             f3: i32,\n\
+                             pos: i32\n\
+                         }\n\
+                         fn main() {\n\
+                             let mut st: State5 = State5 { toks: [], f1: 10, f2: 20, f3: 30, pos: 0 };\n\
+                             let mut i: i32 = 0;\n\
+                             while i < 10 {\n\
+                                 st = st with { toks: push(st.toks, i), pos: st.pos + 1 };\n\
+                                 i = i + 1;\n\
+                             }\n\
+                             assert(len(st.toks) == 10);\n\
+                             assert(st.pos == 10);\n\
+                             assert(st.f1 == 10 && st.f2 == 20 && st.f3 == 30);\n\
+                             return;\n\
+                         }\n";
+            assert_equivalent_under_every_steps_limit(src_5, true);
+
+            let src_10 = "record State10 {\n\
+                              toks: Sequence(i32),\n\
+                              a1: i32, a2: i32, a3: i32, a4: i32,\n\
+                              a5: i32, a6: i32, a7: i32, a8: i32,\n\
+                              pos: i32\n\
+                          }\n\
+                          fn main() {\n\
+                              let mut st: State10 = State10 {\n\
+                                  toks: [], a1: 1, a2: 2, a3: 3, a4: 4,\n\
+                                  a5: 5, a6: 6, a7: 7, a8: 8, pos: 0\n\
+                              };\n\
+                              let mut i: i32 = 0;\n\
+                              while i < 8 {\n\
+                                  st = st with { toks: push(st.toks, i * 3), pos: st.pos + 1 };\n\
+                                  i = i + 1;\n\
+                              }\n\
+                              assert(len(st.toks) == 8);\n\
+                              assert(st.toks[7] == 21);\n\
+                              assert(st.pos == 8);\n\
+                              assert(st.a1 == 1 && st.a8 == 8);\n\
+                              return;\n\
+                          }\n";
+            assert_equivalent_under_every_steps_limit(src_10, true);
         }
     }
 }
