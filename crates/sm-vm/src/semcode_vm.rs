@@ -248,13 +248,13 @@ thread_local! {
 }
 
 #[cfg(test)]
-pub fn vm_test_reset_e2_counters() {
+fn vm_test_reset_e2_counters() {
     VM_TEST_E2_FIELD_MOVES.with(|c| c.set(0));
     VM_TEST_E2_FALLBACKS.with(|c| c.set(0));
 }
 
 #[cfg(test)]
-pub fn vm_test_get_e2_counters() -> (usize, usize) {
+fn vm_test_get_e2_counters() -> (usize, usize) {
     (
         VM_TEST_E2_FIELD_MOVES.with(|c| c.get()),
         VM_TEST_E2_FALLBACKS.with(|c| c.get()),
