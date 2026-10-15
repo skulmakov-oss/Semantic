@@ -2617,21 +2617,62 @@ where
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let index = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let expected_name = lookup_str(f, sid)?.to_string();
-                let record = get_reg(vm, frame_idx, src)?;
-                let Value::Record(record) = record else {
-                    return Err(RuntimeError::TypeMismatchRuntime(
-                        "RECORD_GET source must be record".to_string(),
-                    ));
-                };
-                if record.type_name != expected_name {
-                    return Err(RuntimeError::TypeMismatchRuntime(format!(
-                        "RECORD_GET expected record '{}', got '{}'",
-                        expected_name, record.type_name
-                    )));
+
+                // SHF-P2 / E2: check if this site qualifies for moving the field out of the local
+                let mut moved_item = None;
+                if let Some(site) = plan.field_move_at(&func_name, pc) {
+                    if site.field_idx == index {
+                        let frame = &mut vm.callstack[frame_idx];
+                        // Verify local exists, is of expected record type, and index is in bounds
+                        let local_matches = match frame.locals.get(&site.local_symbol) {
+                            Some(Value::Record(r)) => {
+                                r.type_name == expected_name && index < r.slots.len()
+                            }
+                            _ => false,
+                        };
+                        if local_matches {
+                            // Verify uniqueness: no other local or register holds a Record of this type
+                            let other_locals_count = frame.locals.iter()
+                                .filter(|(s, v)| *s != &site.local_symbol && matches!(v, Value::Record(r) if r.type_name == expected_name))
+                                .count();
+                            let registers_count = frame.regs.iter()
+                                .filter(|slot| matches!(slot, RegisterSlot::Value(Value::Record(r)) if r.type_name == expected_name))
+                                .count();
+                            // src holds the record in registers_count (count == 1 means only src holds it)
+                            if other_locals_count == 0 && registers_count <= 1 {
+                                if let Some(Value::Record(rec)) =
+                                    frame.locals.get_mut(&site.local_symbol)
+                                {
+                                    moved_item =
+                                        Some(std::mem::replace(&mut rec.slots[index], Value::Unit));
+                                }
+                            }
+                        }
+                    }
                 }
-                let item = record.slots.get(index).cloned().ok_or_else(|| {
-                    RuntimeError::BadFormat(format!("record-get index out of bounds: {}", index))
-                })?;
+
+                let item = if let Some(item) = moved_item {
+                    item
+                } else {
+                    let record = get_reg(vm, frame_idx, src)?;
+                    let Value::Record(record) = record else {
+                        return Err(RuntimeError::TypeMismatchRuntime(
+                            "RECORD_GET source must be record".to_string(),
+                        ));
+                    };
+                    if record.type_name != expected_name {
+                        return Err(RuntimeError::TypeMismatchRuntime(format!(
+                            "RECORD_GET expected record '{}', got '{}'",
+                            expected_name, record.type_name
+                        )));
+                    }
+                    record.slots.get(index).cloned().ok_or_else(|| {
+                        RuntimeError::BadFormat(format!(
+                            "record-get index out of bounds: {}",
+                            index
+                        ))
+                    })?
+                };
                 set_reg(vm, frame_idx, dst, item)?;
                 next_pc = cur - f.instr_start;
             }
@@ -3618,16 +3659,24 @@ enum ConsumeSite {
     StoreSource,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FieldMoveSite {
+    local_symbol: SymbolId,
+    field_idx: usize,
+}
+
 #[derive(Debug, Default)]
 struct ConsumptionPlan {
     sites: HashMap<String, HashMap<usize, ConsumeSite>>,
     dead_operands: HashMap<String, HashMap<usize, Vec<u16>>>,
+    field_moves: HashMap<String, HashMap<usize, FieldMoveSite>>,
 }
 
 impl ConsumptionPlan {
     fn build(functions: &HashMap<String, FunctionBytecode>) -> Self {
         let mut sites = HashMap::new();
         let mut dead_operands = HashMap::new();
+        let mut field_moves = HashMap::new();
         for (name, f) in functions {
             let s = plan_function(f);
             if !s.is_empty() {
@@ -3637,10 +3686,15 @@ impl ConsumptionPlan {
             if !d.is_empty() {
                 dead_operands.insert(name.clone(), d);
             }
+            let fm = plan_record_field_consumption(f);
+            if !fm.is_empty() {
+                field_moves.insert(name.clone(), fm);
+            }
         }
         Self {
             sites,
             dead_operands,
+            field_moves,
         }
     }
 
@@ -3662,6 +3716,14 @@ impl ConsumptionPlan {
             .get(func)
             .and_then(|m| m.get(&pc))
             .map(|v| v.as_slice())
+    }
+
+    #[inline]
+    fn field_move_at(&self, func: &str, pc: usize) -> Option<FieldMoveSite> {
+        if self.field_moves.is_empty() {
+            return None;
+        }
+        self.field_moves.get(func).and_then(|m| m.get(&pc)).copied()
     }
 }
 
@@ -4140,6 +4202,12 @@ fn compute_register_liveness(f: &FunctionBytecode) -> HashMap<usize, Vec<u16>> {
             let pc = instrs[i].pc;
             let mut dead_here = Vec::new();
             let mut seen = HashSet::new();
+            // If the instruction defines a register that is immediately dead (never read), release it
+            if let Some(d) = instr_defs[i] {
+                if !live.contains(&d) && seen.insert(d) {
+                    dead_here.push(d);
+                }
+            }
             for &u in &instr_uses[i] {
                 if !live.contains(&u) && seen.insert(u) {
                     dead_here.push(u);
@@ -4160,6 +4228,142 @@ fn compute_register_liveness(f: &FunctionBytecode) -> HashMap<usize, Vec<u16>> {
     }
 
     dead_operands
+}
+
+/// SHF-P2 / E2: Field-sensitive analysis for record field consumption from a local.
+fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMoveSite> {
+    let mut sites = HashMap::new();
+    let mut instrs = Vec::new();
+    let Ok(_) = scan_function_bytecode(f, Some(&mut instrs)) else {
+        return sites;
+    };
+    if !instrs.iter().any(|i| i.opcode == Some(Opcode::RecordGet)) {
+        return sites;
+    }
+
+    let symbol_of =
+        |sid: Option<&u16>| sid.and_then(|sid| f.symbol_ids.get(*sid as usize).copied());
+    let borrowed_roots: HashSet<SymbolId> =
+        f.borrowed_paths.iter().map(|bp| bp.path.root).collect();
+
+    // Check each candidate RECORD_GET
+    for (i, ins) in instrs.iter().enumerate() {
+        if ins.opcode != Some(Opcode::RecordGet) {
+            continue;
+        }
+        let Some(&r_src) = ins.u16s.get(1) else {
+            continue;
+        };
+        let Some(&field_idx_u16) = ins.u16s.get(3) else {
+            continue;
+        };
+        let field_idx = field_idx_u16 as usize;
+
+        // Trace definition of r_src backward in straight-line code
+        let mut local_opt = None;
+        for prev in (0..i).rev() {
+            let prev_ins = &instrs[prev];
+            if prev_ins.opcode == Some(Opcode::LoadVar) && prev_ins.u16s.first() == Some(&r_src) {
+                local_opt = symbol_of(prev_ins.u16s.get(1));
+                break;
+            }
+            // If r_src is defined by something else or if a barrier occurs, stop
+            let (d, _) = if let Some(op) = prev_ins.opcode {
+                instruction_defs_uses(op, &prev_ins.u16s)
+            } else {
+                (None, Vec::new())
+            };
+            if d == Some(r_src) {
+                break;
+            }
+            if matches!(
+                prev_ins.opcode,
+                Some(Opcode::Jmp) | Some(Opcode::JmpIf) | Some(Opcode::Ret)
+            ) {
+                break;
+            }
+        }
+
+        let Some(local_sym) = local_opt else { continue };
+        if borrowed_roots.contains(&local_sym) {
+            continue;
+        }
+
+        // Verify that in instructions following RECORD_GET, field_idx of local_sym is not read
+        // before local_sym is completely overwritten by STORE_VAR local_sym, _.
+        let mut unobserved = false;
+        for next in (i + 1)..instrs.len() {
+            let next_ins = &instrs[next];
+            if matches!(
+                next_ins.opcode,
+                Some(Opcode::Jmp) | Some(Opcode::JmpIf) | Some(Opcode::Ret)
+            ) {
+                // If a jump or return occurs before STORE_VAR, conservative reject
+                break;
+            }
+            if next_ins.opcode == Some(Opcode::StoreVar) {
+                if symbol_of(next_ins.u16s.first()) == Some(local_sym) {
+                    // Full overwrite reached without observing field_idx
+                    unobserved = true;
+                    break;
+                }
+            } else if next_ins.opcode == Some(Opcode::LoadVar)
+                && symbol_of(next_ins.u16s.get(1)) == Some(local_sym)
+            {
+                // Another load of local_sym before overwrite:
+                // Check if it's only for a different field index
+                let Some(&r_loaded) = next_ins.u16s.first() else {
+                    break;
+                };
+                // Ensure all uses of r_loaded are RECORD_GET for a field != field_idx
+                let mut only_other_fields = true;
+                for scan_ins in instrs.iter().skip(next + 1) {
+                    let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
+                        instruction_defs_uses(op, &scan_ins.u16s)
+                    } else {
+                        (None, Vec::new())
+                    };
+                    if scan_u.contains(&r_loaded) {
+                        if scan_ins.opcode == Some(Opcode::RecordGet)
+                            && scan_ins.u16s.get(1) == Some(&r_loaded)
+                        {
+                            let f_idx = scan_ins.u16s.get(3).copied().unwrap_or(0) as usize;
+                            if f_idx == field_idx {
+                                only_other_fields = false;
+                                break;
+                            }
+                        } else {
+                            only_other_fields = false;
+                            break;
+                        }
+                    }
+                    if scan_d == Some(r_loaded) {
+                        break;
+                    }
+                    if scan_ins.opcode == Some(Opcode::StoreVar)
+                        && symbol_of(scan_ins.u16s.first()) == Some(local_sym)
+                    {
+                        break;
+                    }
+                }
+                if !only_other_fields {
+                    break;
+                }
+            }
+        }
+
+        if unobserved {
+            sites.insert(
+                ins.pc,
+                FieldMoveSite {
+                    local_symbol: local_sym,
+                    field_idx,
+                },
+            );
+        }
+    }
+
+    sites
 }
 
 /// Accepts an accumulator triple
@@ -12177,6 +12381,42 @@ mod tests {
                 assert_eq!(run_with(&a, config(10_000_000), true).0, Ok(()));
                 assert_eq!(run_with(&b, config(10_000_000), true).0, Ok(()));
             }
+        }
+
+        #[test]
+        fn record_field_consumption_loop_equivalence_and_sweep() {
+            let src = "record Lx { toks: Sequence(i32), pos: i32 }\n\
+                       fn main() {\n\
+                           let mut st: Lx = Lx { toks: [], pos: 0 };\n\
+                           let mut i: i32 = 0;\n\
+                           while i < 15 {\n\
+                               st = st with { toks: push(st.toks, i * 2), pos: st.pos + 1 };\n\
+                               i = i + 1;\n\
+                           }\n\
+                           assert(len(st.toks) == 15);\n\
+                           assert(st.toks[14] == 28);\n\
+                           assert(st.pos == 15);\n\
+                           return;\n\
+                       }\n";
+            assert_equivalent_under_every_steps_limit(src, true);
+        }
+
+        #[test]
+        fn record_field_aliasing_fallback_is_equivalent() {
+            let src = "record Lx { toks: Sequence(i32), pos: i32 }\n\
+                       fn main() {\n\
+                           let mut st: Lx = Lx { toks: [], pos: 0 };\n\
+                           let alias: Lx = st;\n\
+                           let mut i: i32 = 0;\n\
+                           while i < 5 {\n\
+                               st = st with { toks: push(st.toks, i), pos: st.pos + 1 };\n\
+                               i = i + 1;\n\
+                           }\n\
+                           assert(len(alias.toks) == 0);\n\
+                           assert(len(st.toks) == 5);\n\
+                           return;\n\
+                       }\n";
+            assert_equivalent_under_every_steps_limit(src, true);
         }
     }
 }
