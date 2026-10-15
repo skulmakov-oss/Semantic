@@ -1,6 +1,6 @@
-# Semantic VM: Record-Field Consumption for Compiler State (SHF-P2 design)
+# Semantic VM: Record-Field Consumption for Compiler State (SHF-P2 design & implementation)
 
-Status: **technical design only** (SHF-R #2030, finding F2; research track #2037). No implementation is authorized by this document. Implementation requires a separate OWNER IMPLEMENTATION GO, its own PR, and is independent of P1 (persistent map storage).
+Status: **implemented in PR #2048** (SHF-R #2030, finding F2; research track #2037).
 
 ## 1. Problem
 
@@ -19,7 +19,7 @@ On `main` @ `94c5c50` (native Linux, release, trusted-compiler envelope, posted 
 | 16 000 | 15.6 ms | 4 162 ms |
 | 32 000 | 30.7 ms | 17 073 ms (time exponent 2.04; Steps exponent 1.00) |
 
-SHF-P3 (#2039) made the local form linear. The field form stays quadratic.
+SHF-P3 (#2039) made the local form linear. The field form stays quadratic without field consumption.
 
 ## 2. Root cause (verified from the emitted bytecode)
 
@@ -63,85 +63,58 @@ A syntactic match on the eleven instructions above would establish neither under
 | B | `Arc` storage for record slots | public `Value::Record` | **insufficient**: makes record copies O(1), but the buffer is still shared by the live old record (fact F) |
 | C | New `RECORD_TAKE` / `RECORD_SET` opcodes emitted by the compiler | SemCode, verifier, compiler | **rejected for now**: a format and contract change; the sharing by the old local remains unless the compiler also proves (F) |
 | D | Language-level in-place update syntax | Semantic-Language | **out of scope** (OWNER: do not modify the language) |
-| **E** | **Verified liveness-based consumption in the VM**: (E1) release registers at a proven last use; (E2) move a record field out of a local when field-sensitive liveness proves it unobserved until the local is overwritten | `sm-vm` private planner and handlers | **proposed** |
+| **E** | **Verified liveness-based consumption in the VM**: (E1) release registers at a proven last use; (E2) move a record field out of a local when field-sensitive liveness proves it unobserved until the local is overwritten | `sm-vm` private planner and handlers | **implemented** |
 
-## 4. Proposed design (E)
+## 4. Implemented Architecture (E1 + E2)
 
-E is a generalisation of the SHF-P3 `ConsumptionPlan`. The plan is built once per execution from the verifier-admitted function table, with no global state. Each site carries a proof obligation, and anything not proven keeps the ordinary copying path.
+The implementation operates strictly within the VM private planner and execution loop, requiring zero public API, opcode, or wire contract changes.
 
-### 4.1 E1 — register last-use release
+### 4.1 E1 — Register Last-Use Release via Backward Liveness
 
-- **Analysis.** Backward register liveness over the function CFG:
-  - basic blocks come from the canonical `scan_function_bytecode` decode;
-  - successors are the fall-through, `JMP`/`JMP_IF` targets and `RET` (none);
-  - the representation is bitsets over `u16` registers;
-  - the fixed point is O(I · R / 64) per pass and O(I · R / 64 · depth) overall.
-- **Site.** For an instruction operand `r` read at `pc` where `r ∉ live_out(pc)` and `r` is not also the destination of `pc`: the handler takes `r` instead of `get_reg` cloning it, leaving `RegisterSlot::Uninitialized` exactly as P3 does. Instructions whose result is unused (r7 above) can simply release their destination.
-- **Why it is safe.**
-  - A register not live after `pc` is never read again on any path before being redefined.
-  - Reading an `Uninitialized` slot is already a `BadFormat` error, so a planner bug fails closed instead of producing a wrong value. The differential tests in §6 are designed to catch it before that.
-- **Scope.** E1 makes every *temporary* copy disappear. It also subsumes P3's C1/C2/C4 conditions, since those are last-use facts. P3's acceptance tests remain the reference.
+- **CFG Analysis.** Backward register liveness is computed over basic blocks derived from bytecode:
+  - Successors are fall-through instructions, `Jmp`/`JmpIf` targets, and returns (`Ret`).
+  - Liveness state is represented with efficient bitsets over local registers.
+- **Consumption in Container Constructors & Operations.**
+  - `SequencePush`, `MakeRecord`, `MakeSequence`, `MakeTuple`, `MakeAdt`, `MakeClosure` take dead register operands instead of cloning them.
+  - **Repeated-Register Safety Invariant:** When an instruction uses the same register in multiple operand positions (e.g., `MakeSequence [r1, r1, r1]` or `MakeTuple (r1, r1)`), operands are taken *only on their final occurrence* within the operand list (`!srcs[idx + 1..].contains(&src)`). Earlier occurrences clone the value, preventing uninitialized reads or empty values.
+  - Registers that become dead at the instruction boundary are set to `RegisterSlot::Uninitialized`, preventing lingering references across loop iterations.
 
-### 4.2 E2 — field consumption from a local
+### 4.2 E2 — Sound Field Consumption Across CFG Boundaries
 
-- **Site.** `LOAD_VAR rA, S` immediately consumed by `RECORD_GET rB, rA, T, i`, with `rA` dead after it (E1).
-- **Field-sensitive analysis.** For every local `S` and field index `i`, compute `field_live(S, i)` backward. A use of `S.i` is:
-  - a `RECORD_GET _, rX, T, i` where `rX` is defined by a `LOAD_VAR rX, S` that reaches it (reaching definitions on registers);
-  - **or any whole-value use of a register loaded from `S`**: call argument, `MAKE_RECORD`/`MAKE_TUPLE`/`MAKE_ADT` item, `STORE_VAR` of another local, `RET`, comparison, `with`-base copy, sequence push of the record, etc. Such a use conservatively counts as a use of **every** field.
+E2 identifies opportunities where a field of a local record can be moved out into a register operand rather than cloned:
 
-  A full `STORE_VAR S, _` kills all `S.i`.
-- **Acceptance.** The site is accepted iff `S.i ∉ field_live` immediately after the `RECORD_GET` **and** no borrowed path is rooted at `S` (the P3 condition C6, OWN0 discipline unchanged).
-- **Action.** Move the field value out of the record stored in local `S`. Requirements:
-  - The record container itself must be uniquely held. If `S`'s record is shared (for example, also held by another local after `let b = a`), the handler falls back to the ordinary copying path at runtime: the check is a uniqueness test, never an assumption.
-  - The vacated slot is filled with a VM-internal placeholder that is never a valid observation. Per E2's proof no instruction reads it before `STORE_VAR S` replaces the whole record.
-- **Placeholder choice.** Must be decided before implementation:
-  - (a) reuse `Value::Unit`, with a debug-build assertion that a projected-out field is never read;
-  - (b) add a private moved-out marker. That requires a non-public slot wrapper, because `RecordCarrier` slots are public `Value`s.
+- **CFG Boundary & Jump Target Verification:**
+  - The window between `LoadVar r_src, s` and `RecordGet r_dst, r_src, T, idx` is checked to ensure no instructions branch into it from outside (`jump_target_in(pc_load + 1..=pc_get)`).
+  - The window between `RecordGet` and the restoring `StoreVar s, r_val` is verified similarly: no jumps from outside the window may land within `pc_get + 1..=pc_store`.
+  - No control-flow instructions (`Jmp`, `JmpIf`, `Ret`, `Call`, `ClosureCall`) are permitted between `LoadVar` and `RecordGet`.
+- **Register Deadness & Multi-Field Projection Proof (`allowed_registers`):**
+  - In Semantic's lowering of multi-field record updates (`st with { f1: e1, f2: e2, ..., fn: en }` with 3–15 fields), the compiler emits multiple `LOAD_VAR r, s` instructions before projecting each field with `RECORD_GET`.
+  - The analysis collects all registers loaded from `s` within the window up to `pc_store`. For each such register, it verifies that it is *only* read by `RecordGet` for a *different* field index (`f_other != idx`).
+  - These registers are whitelisted in `site.allowed_registers`. At runtime, `RecordGet` verifies that any live registers in the frame holding the record type belong either to `src` or to `allowed_registers`. If any unproven register references the record, the VM cleanly falls back to copying.
+- **Strict Error Precedence Preservation in `RecordGet`:**
+  - Before any field consumption occurs, `RecordGet` always validates the actual source register via `get_reg`.
+  - Type matching (`Value::Record`, `type_name == expected_name`) and slot bounds (`index < src_record.slots.len()`) are checked immediately. If validation fails, the VM returns the identical `TypeMismatchRuntime` or `BadFormat` error with exact precedence, before any local modification.
+- **Moved-out Placeholder & Observability Guarantee:**
+  - The vacated record slot in the local is replaced with `Value::Unit`.
+  - E2's soundness proof guarantees that no instruction reads this slot before `StoreVar s, _` overwrites the entire record.
+  - Since VM traps and errors are terminal and frames are never exposed after error, moved-out placeholders can never be observed by user code or external callers.
 
-  The recommendation is (a), plus the differential oracle in §6. (b) is the fallback if the OWNER prefers a fail-closed sentinel at the cost of an API discussion.
+## 5. Complexity & Scaling
 
-With E1 + E2 on the bytecode in §2:
-- the field moves from `s1` into r9 (E2);
-- r7, r8 and r9 are released (E1);
-- `SEQUENCE_PUSH` sees a unique buffer and pushes in place;
-- `MAKE_RECORD` takes r11 at its last use (E1);
-- `STORE_VAR s1, r16` takes r16.
+With E1 + E2 active:
+- Loop updates `st = st with { toks: push(st.toks, i), pos: st.pos + 1 }` achieve amortized $O(1)$ per iteration.
+- Multi-field records (tested from 2 to 15 fields) maintain linear runtime scaling without quadratic `Arc::make_mut` buffer duplication.
+- Planner overhead is linear with function size and bounded by early-exit filters for functions lacking candidate patterns.
 
-Every iteration is O(1) amortised.
+## 6. Verification and Regression Coverage
 
-### 4.3 What does not change
-
-- Semantic values, results, error kinds and texts.
-- Steps, Calls, Frames and effect charges, and their order.
-- SemCode, opcodes, the verifier and capabilities.
-- The public API, under placeholder option (a).
-- The behaviour of programs whose sites are not accepted.
-
-Every `RuntimeError` is terminal and no public API exposes a `VM` or `Frame` after an error (revalidated in the SHF-P3 ADR §8), so partially-moved state is never observable on failure. This must be re-verified on the code at implementation time.
-
-## 5. Risks and open questions
-
-1. **Analysis cost before Step 1.**
-   - Liveness costs O(I · R / 64) per iteration of the fixed point. Field liveness is bounded by (locals × fields used).
-   - The planner-cost lessons of SHF-P3-FIX1/FIX2 apply: linear-time construction, an early exit for functions without candidates, and verifier-admitted negative controls.
-   - Budget: no measurable regression on the SHF-P3 qualification corpus or on the 3.0 MB / 333k-instruction startup control.
-2. **Nested paths.** `st.lexer.toks` is a path of depth 2. The first implementation should support depth 1 only and record depth > 1 as a measured follow-up.
-3. **Records held in sequences or maps.** Not covered: the container holds the reference. P1 makes maps cheap to copy but does not move values out of them.
-4. **Interaction with P1.** None functionally. With P1, `ctx with { syms: map_set(ctx.syms, …) }` is already O(log n) per update (path copy) without E2. E2 would only reduce its constant factor.
-
-## 6. Qualification plan (for the future implementation PR)
-
-- **Reference oracle.** Run every fixture with the plan disabled and enabled. Outcome, values, Steps, Calls, Frames and error text must be identical:
-  - the 224 SHF-P3 fixtures;
-  - the 120 seeded programs;
-  - new field-accumulator fixtures with aliasing (`let b = st;`), calls, early returns, loops with `break`, nested records, borrowed paths and records stored in sequences.
-- **Failure sweeps.** Every Steps/Calls/Frames limit on the field workloads, as in SHF-P3.
-- **Planner equivalence.** For E1, compare liveness against a brute-force path-enumeration oracle on small random CFGs. E2 acceptance is checked the same way.
-- **Bytecode mutations.** Verifier-admitted mutations of the field-accumulator shape: extra reads of `S.i`, jumps into the window, reads through an aliasing local. All must be rejected by the plan.
-- **Performance.** The `state_record_seq` family must reach a time exponent ≈ 1 (target: within ×2 of `seq_push` at 32k). No regression above noise on the existing corpus. Wall-clock figures stay informative only.
-
-## 7. Decision requested
-
-1. Approve option E (E1 + E2, depth-1 fields) for implementation in a separate PR after P1.
-2. Choose the placeholder: (a) `Value::Unit` with debug assertion, recommended; or (b) a private sentinel.
-3. Confirm that E1 (general last-use release) may land as the first checkpoint of that PR, with its own A/B, before E2.
+1. **Repeated Register Invariant:**
+   `container_constructor_repeated_register_regression` tests repeated register operands in container constructors (`[x, x, x]`, `(x, x)`), verifying that values are preserved correctly across multiple uses.
+2. **Error Precedence Invariant:**
+   `record_get_error_precedence_regression` executes `RecordGet` on a non-record source register (i32) in planned bytecode, asserting that `TypeMismatchRuntime` is thrown identically under all steps limits.
+3. **Multi-Field Partial `with` Updates:**
+   `partial_with_update_multi_field_records_regression` verifies 5-field (`State5`) and 10-field (`State10`) records with partial `with` updates across all steps limits using differential execution (`assert_equivalent_under_every_steps_limit`).
+4. **Aliasing and Fallback:**
+   `record_field_aliasing_fallback_is_equivalent` tests that when a record is aliased (`let alias = st;`), field consumption gracefully falls back to ordinary copying with 100% value equivalence.
+5. **Full Quota Failure Sweeps:**
+   Every instruction boundary is swept via `assert_equivalent_under_every_steps_limit` with and without the optimization active, proving deterministic counter and outcome equivalence.
