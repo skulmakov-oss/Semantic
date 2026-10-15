@@ -9,7 +9,7 @@ Semantic exists to make reasoning, semantic state transitions, and policy decisi
 
 The current compiler, verifier, and VM are implemented in Rust. Rust is the host and bootstrap implementation; Semantic's source semantics and artifact contracts are defined by this repository's [specifications](docs/spec/index.md). The next engineering program is self-hosting: closing the language foundations needed for a compiler written in Semantic, with compiler source and bootstrap qualification in [Semantic-Language](https://github.com/skulmakov-oss/Semantic-Language).
 
-[Getting started](docs/getting_started.md) · [Specifications](docs/spec/index.md) · [Architecture](ARCHITECTURE.md) · [Self-hosting program](https://github.com/skulmakov-oss/Semantic/issues/1910)
+[Getting started](docs/getting_started.md) · [Specifications](docs/spec/index.md) · [Architecture](ARCHITECTURE.md) · [Self-hosting program](https://github.com/skulmakov-oss/Semantic/issues/1910) · [Historical SHF-R research](https://github.com/skulmakov-oss/skulmakov-oss/blob/d4bfd57580bdf2f27404f281eb867bb7ab7e5167/docs/research/semantic/shf-r/README.md)
 
 ## Four-state semantics
 
