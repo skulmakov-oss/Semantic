@@ -4501,7 +4501,12 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
                 }
             }
 
-            // Scan uses strictly after def_idx until redefinition of reg or function end
+            // Scan uses strictly after def_idx.
+            // In straight-line code up to si, instructions are checked linearly.
+            // Beyond si (where jumps/branches may occur), a linear redefinition of reg cannot be assumed
+            // to kill the register on other CFG branches! Therefore, if reg survives beyond si
+            // (i.e. not proven dead at si by CFG backward liveness), we must ensure it cannot observe field_idx
+            // on ANY path.
             let mut def_safe = true;
             for scan_ins in instrs.iter().skip(def_idx + 1) {
                 let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
@@ -4526,8 +4531,9 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
                     }
                 }
 
-                // If this instruction redefines reg, this record snapshot's lifetime ends here
-                if scan_d == Some(reg) {
+                // If within the straight-line block [def_idx..=si], redefinition safely ends the lifetime
+                // because no jumps enter or leave this straight-line window.
+                if scan_d == Some(reg) && scan_ins.pc <= instrs[si].pc {
                     break;
                 }
             }
@@ -4543,7 +4549,201 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             }
         }
 
-        if all_definitions_safe && safe_allowed.contains(&r_src) {
+        // CFG-aware liveness condition:
+        // For every register in safe_allowed that survives past the restoring STORE_VAR at si,
+        // verify via CFG backward dataflow liveness that it is NOT live across any CFG branch after si,
+        // OR that no instruction in the entire function reads field_idx from this register.
+        // If a register remains live at the exit of the straight-line block containing si,
+        // and control flow branches, we conservatively reject if the register could observe the cleared field.
+        let mut cfg_liveness_safe = true;
+        if all_definitions_safe {
+            // Build CFG blocks and compute backward live sets at si
+            let n = instrs.len();
+            let pc_to_idx: HashMap<usize, usize> = instrs
+                .iter()
+                .enumerate()
+                .map(|(idx, ins)| (ins.pc, idx))
+                .collect();
+            let mut is_leader = vec![false; n];
+            is_leader[0] = true;
+            for &target in &jumps {
+                if let Some(&idx) = pc_to_idx.get(&target) {
+                    is_leader[idx] = true;
+                }
+            }
+            for (idx, ins) in instrs.iter().enumerate() {
+                if matches!(
+                    ins.opcode,
+                    Some(Opcode::Jmp) | Some(Opcode::JmpIf) | Some(Opcode::Ret)
+                ) && idx + 1 < n
+                {
+                    is_leader[idx + 1] = true;
+                }
+            }
+            let mut block_starts = Vec::new();
+            for (idx, &leader) in is_leader.iter().enumerate() {
+                if leader {
+                    block_starts.push(idx);
+                }
+            }
+            let num_blocks = block_starts.len();
+            struct Bb {
+                start: usize,
+                end: usize,
+                successors: Vec<usize>,
+            }
+            let mut blocks = Vec::with_capacity(num_blocks);
+            for (b_idx, &start) in block_starts.iter().enumerate() {
+                let end = if b_idx + 1 < num_blocks {
+                    block_starts[b_idx + 1]
+                } else {
+                    n
+                };
+                blocks.push(Bb {
+                    start,
+                    end,
+                    successors: Vec::new(),
+                });
+            }
+            let mut instr_to_block = vec![0; n];
+            for (b_idx, b) in blocks.iter().enumerate() {
+                for slot in &mut instr_to_block[b.start..b.end] {
+                    *slot = b_idx;
+                }
+            }
+            for b in &mut blocks {
+                let last_i = b.end - 1;
+                let last_ins = &instrs[last_i];
+                match last_ins.opcode {
+                    Some(Opcode::Ret) => {}
+                    Some(Opcode::Jmp) => {
+                        let mut cur = f.instr_start + last_ins.pc + 1;
+                        if let Ok(addr) = read_u32_le(&f.code, &mut cur) {
+                            if let Some(&tgt_idx) = pc_to_idx.get(&(addr as usize)) {
+                                b.successors.push(instr_to_block[tgt_idx]);
+                            }
+                        }
+                    }
+                    Some(Opcode::JmpIf) => {
+                        let mut cur = f.instr_start + last_ins.pc + 1 + 2;
+                        if let Ok(addr) = read_u32_le(&f.code, &mut cur) {
+                            if let Some(&tgt_idx) = pc_to_idx.get(&(addr as usize)) {
+                                b.successors.push(instr_to_block[tgt_idx]);
+                            }
+                        }
+                        if last_i + 1 < n {
+                            b.successors.push(instr_to_block[last_i + 1]);
+                        }
+                    }
+                    _ => {
+                        if last_i + 1 < n {
+                            b.successors.push(instr_to_block[last_i + 1]);
+                        }
+                    }
+                }
+            }
+
+            let mut block_gen = vec![HashSet::new(); num_blocks];
+            let mut block_kill = vec![HashSet::new(); num_blocks];
+            for (b_idx, b) in blocks.iter().enumerate() {
+                for ins in &instrs[b.start..b.end] {
+                    let (d, u) = if let Some(op) = ins.opcode {
+                        instruction_defs_uses(op, &ins.u16s)
+                    } else {
+                        (None, Vec::new())
+                    };
+                    for r in u {
+                        if !block_kill[b_idx].contains(&r) {
+                            block_gen[b_idx].insert(r);
+                        }
+                    }
+                    if let Some(d) = d {
+                        block_kill[b_idx].insert(d);
+                    }
+                }
+            }
+
+            let mut block_in = vec![HashSet::new(); num_blocks];
+            let mut block_out = vec![HashSet::new(); num_blocks];
+            let mut changed = true;
+            while changed {
+                changed = false;
+                for b_idx in (0..num_blocks).rev() {
+                    let mut new_out = HashSet::new();
+                    for &succ in &blocks[b_idx].successors {
+                        new_out.extend(&block_in[succ]);
+                    }
+                    let mut new_in = block_gen[b_idx].clone();
+                    for &r in &new_out {
+                        if !block_kill[b_idx].contains(&r) {
+                            new_in.insert(r);
+                        }
+                    }
+                    if new_out != block_out[b_idx] {
+                        block_out[b_idx] = new_out;
+                        changed = true;
+                    }
+                    if new_in != block_in[b_idx] {
+                        block_in[b_idx] = new_in;
+                        changed = true;
+                    }
+                }
+            }
+
+            // Compute live_out at instruction si
+            let si_block = instr_to_block[si];
+            let mut live_at_si = block_out[si_block].clone();
+            for idx in (si + 1..blocks[si_block].end).rev() {
+                let (d, u) = if let Some(op) = instrs[idx].opcode {
+                    instruction_defs_uses(op, &instrs[idx].u16s)
+                } else {
+                    (None, Vec::new())
+                };
+                if let Some(d) = d {
+                    live_at_si.remove(&d);
+                }
+                for r in u {
+                    live_at_si.insert(r);
+                }
+            }
+
+            // For any register in safe_allowed that is live after si:
+            // Verify that NO reachable instruction in the function ever uses reg to read field_idx
+            // or perform an unproven operation.
+            for &reg in &safe_allowed {
+                if live_at_si.contains(&reg) {
+                    // Register is live beyond si. If there are branches/jumps in the function after si,
+                    // verify that across the ENTIRE rest of the function (after si), NO instruction
+                    // reads field_idx or uses reg in an unproven way, even if another branch redefined it!
+                    for scan_ins in instrs.iter().skip(si + 1) {
+                        let (_, scan_u) = if let Some(op) = scan_ins.opcode {
+                            instruction_defs_uses(op, &scan_ins.u16s)
+                        } else {
+                            (None, Vec::new())
+                        };
+                        if scan_u.contains(&reg) {
+                            if scan_ins.opcode == Some(Opcode::RecordGet)
+                                && scan_ins.u16s.get(1) == Some(&reg)
+                            {
+                                let f_idx = scan_ins.u16s.get(3).copied().unwrap_or(0) as usize;
+                                if f_idx == field_idx {
+                                    cfg_liveness_safe = false;
+                                    break;
+                                }
+                            } else {
+                                cfg_liveness_safe = false;
+                                break;
+                            }
+                        }
+                    }
+                    if !cfg_liveness_safe {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if all_definitions_safe && cfg_liveness_safe && safe_allowed.contains(&r_src) {
             let allowed_registers: Vec<u16> = safe_allowed.into_iter().collect();
             sites.insert(
                 ins.pc,
@@ -13024,6 +13224,108 @@ mod tests {
                 sorted.sort_unstable();
                 assert_eq!(site.allowed_registers, sorted);
             }
+            assert_eq!(
+                run_with(&bytes, config(100), true),
+                run_with(&bytes, config(100), false)
+            );
+        }
+
+        #[test]
+        fn diamond_cfg_branch_redefinition_safety_regression() {
+            // Regression test for Argon CFG lifetime safety finding:
+            // A diamond CFG where r7 is a record snapshot loaded from local s before RECORD_GET on field 0.
+            // After the restoring STORE_VAR at si, control flow branches:
+            // - Branch A: redefines r7 with an integer 999.
+            // - Branch B: does NOT redefine r7, but retains r7 and reads field 0!
+            // Under linear scanning without CFG awareness, encountering the redefinition in Branch A
+            // could prematurely terminate the check for r7, failing to notice that Branch B retains r7
+            // and reads the consumed field.
+            // Under CFG-aware liveness checking, r7 is live after si, and Branch B reads field 0,
+            // so the candidate field move site must be rejected!
+            use IrInstr as I;
+            let instrs = vec![
+                I::MakeSequence {
+                    dst: 10,
+                    items: vec![],
+                },
+                I::LoadI32 { dst: 11, val: 42 },
+                I::MakeRecord {
+                    dst: 12,
+                    name: "Rec".to_string(),
+                    items: vec![10, 11],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 12,
+                    activation_site: None,
+                    write_site: None,
+                },
+                // Load r7 (base snapshot)
+                I::LoadVar {
+                    dst: 7,
+                    name: "s".to_string(),
+                },
+                // Load r8 (for field 0 extraction)
+                I::LoadVar {
+                    dst: 8,
+                    name: "s".to_string(),
+                },
+                // Candidate RECORD_GET on field 0
+                I::RecordGet {
+                    dst: 9,
+                    src: 8,
+                    record_name: "Rec".to_string(),
+                    index: 0,
+                },
+                // Restoring STORE_VAR for s
+                I::MakeRecord {
+                    dst: 13,
+                    name: "Rec".to_string(),
+                    items: vec![9, 11],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 13,
+                    activation_site: None,
+                    write_site: None,
+                },
+                // Condition for diamond branch: if cond goto BranchA else fallthrough to BranchB
+                I::LoadBool { dst: 14, val: true },
+                I::JmpIf {
+                    cond: 14,
+                    label: "branch_a".to_string(),
+                },
+                // Branch B: reads field 0 from r7!
+                I::RecordGet {
+                    dst: 15,
+                    src: 7,
+                    record_name: "Rec".to_string(),
+                    index: 0,
+                },
+                I::Jmp {
+                    label: "join".to_string(),
+                },
+                // Branch A: redefines r7
+                I::Label {
+                    name: "branch_a".to_string(),
+                },
+                I::LoadI32 { dst: 7, val: 999 },
+                // Join block
+                I::Label {
+                    name: "join".to_string(),
+                },
+                I::Ret { src: None },
+            ];
+            let bytes = ir_main(instrs).expect("emit");
+            let program = parse_semcode(&bytes).expect("parse");
+            let plan = ConsumptionPlan::build(&program.functions);
+            let fm = plan.field_moves.get("main");
+            assert!(
+                fm.is_none() || fm.unwrap().is_empty(),
+                "CFG safety: must reject field move site because Branch B reads field 0 from surviving snapshot r7"
+            );
             assert_eq!(
                 run_with(&bytes, config(100), true),
                 run_with(&bytes, config(100), false)
