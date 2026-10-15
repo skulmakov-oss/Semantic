@@ -2453,10 +2453,16 @@ where
             Opcode::MakeSequence => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
+                let dead_ops = plan.dead_operands_at(&func_name, pc);
                 let mut items = Vec::with_capacity(count);
                 for _ in 0..count {
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    items.push(get_reg(vm, frame_idx, src)?);
+                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                        take_reg(vm, frame_idx, src)?
+                    } else {
+                        get_reg(vm, frame_idx, src)?
+                    };
+                    items.push(v);
                 }
                 set_reg(vm, frame_idx, dst, Value::Sequence(Arc::new(items)))?;
                 next_pc = cur - f.instr_start;
@@ -2466,10 +2472,16 @@ where
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let function_name = lookup_str(f, sid)?.to_string();
+                let dead_ops = plan.dead_operands_at(&func_name, pc);
                 let mut captures = Vec::with_capacity(count);
                 for _ in 0..count {
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    captures.push(get_reg(vm, frame_idx, src)?);
+                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                        take_reg(vm, frame_idx, src)?
+                    } else {
+                        get_reg(vm, frame_idx, src)?
+                    };
+                    captures.push(v);
                 }
                 set_reg(
                     vm,
@@ -2485,10 +2497,16 @@ where
             Opcode::MakeTuple => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
+                let dead_ops = plan.dead_operands_at(&func_name, pc);
                 let mut items = Vec::with_capacity(count);
                 for _ in 0..count {
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    items.push(get_reg(vm, frame_idx, src)?);
+                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                        take_reg(vm, frame_idx, src)?
+                    } else {
+                        get_reg(vm, frame_idx, src)?
+                    };
+                    items.push(v);
                 }
                 set_reg(vm, frame_idx, dst, Value::Tuple(items))?;
                 next_pc = cur - f.instr_start;
@@ -2498,10 +2516,16 @@ where
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let type_name = lookup_str(f, sid)?.to_string();
+                let dead_ops = plan.dead_operands_at(&func_name, pc);
                 let mut slots = Vec::with_capacity(count);
                 for _ in 0..count {
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    slots.push(get_reg(vm, frame_idx, src)?);
+                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                        take_reg(vm, frame_idx, src)?
+                    } else {
+                        get_reg(vm, frame_idx, src)?
+                    };
+                    slots.push(v);
                 }
                 set_reg(
                     vm,
@@ -2519,10 +2543,16 @@ where
                 let count = read_u16_le(&f.code, &mut cur).map_err(map_format_err)? as usize;
                 let type_name = lookup_str(f, sid)?.to_string();
                 let variant_name = lookup_str(f, variant_sid)?.to_string();
+                let dead_ops = plan.dead_operands_at(&func_name, pc);
                 let mut payload = Vec::with_capacity(count);
                 for _ in 0..count {
                     let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                    payload.push(get_reg(vm, frame_idx, src)?);
+                    let v = if dead_ops.is_some_and(|ops| ops.contains(&src)) {
+                        take_reg(vm, frame_idx, src)?
+                    } else {
+                        get_reg(vm, frame_idx, src)?
+                    };
+                    payload.push(v);
                 }
                 set_reg(
                     vm,
@@ -2691,7 +2721,10 @@ where
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let seq_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let val_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let sequence = if plan.site(&func_name, pc) == Some(ConsumeSite::SequenceOperand) {
+                let dead_ops = plan.dead_operands_at(&func_name, pc);
+                let sequence = if plan.site(&func_name, pc) == Some(ConsumeSite::SequenceOperand)
+                    || (seq_reg != val_reg && dead_ops.is_some_and(|ops| ops.contains(&seq_reg)))
+                {
                     take_reg(vm, frame_idx, seq_reg)?
                 } else {
                     get_reg(vm, frame_idx, seq_reg)?
@@ -2701,7 +2734,12 @@ where
                         "SEQUENCE_PUSH first argument must be sequence".to_string(),
                     ));
                 };
-                let new_val = get_reg(vm, frame_idx, val_reg)?;
+                let new_val =
+                    if seq_reg != val_reg && dead_ops.is_some_and(|ops| ops.contains(&val_reg)) {
+                        take_reg(vm, frame_idx, val_reg)?
+                    } else {
+                        get_reg(vm, frame_idx, val_reg)?
+                    };
                 let mut new_items = items;
                 Arc::make_mut(&mut new_items).push(new_val);
                 set_reg(vm, frame_idx, dst, Value::Sequence(new_items))?;
@@ -3260,6 +3298,18 @@ where
             }
         }
 
+        // SHF-P2 / E1: clear operand registers that became dead after this instruction.
+        if let Some(dead_regs) = plan.dead_operands_at(&func_name, pc) {
+            if let Some(frame) = vm.callstack.get_mut(frame_idx) {
+                for &reg in dead_regs {
+                    let r = reg as usize;
+                    if r < frame.regs.len() {
+                        frame.regs[r] = RegisterSlot::Uninitialized;
+                    }
+                }
+            }
+        }
+
         vm.callstack[frame_idx].pc = next_pc;
     }
 }
@@ -3571,16 +3621,27 @@ enum ConsumeSite {
 #[derive(Debug, Default)]
 struct ConsumptionPlan {
     sites: HashMap<String, HashMap<usize, ConsumeSite>>,
+    dead_operands: HashMap<String, HashMap<usize, Vec<u16>>>,
 }
 
 impl ConsumptionPlan {
     fn build(functions: &HashMap<String, FunctionBytecode>) -> Self {
-        let sites = functions
-            .iter()
-            .map(|(name, f)| (name.clone(), plan_function(f)))
-            .filter(|(_, s)| !s.is_empty())
-            .collect();
-        Self { sites }
+        let mut sites = HashMap::new();
+        let mut dead_operands = HashMap::new();
+        for (name, f) in functions {
+            let s = plan_function(f);
+            if !s.is_empty() {
+                sites.insert(name.clone(), s);
+            }
+            let d = compute_register_liveness(f);
+            if !d.is_empty() {
+                dead_operands.insert(name.clone(), d);
+            }
+        }
+        Self {
+            sites,
+            dead_operands,
+        }
     }
 
     #[inline]
@@ -3591,6 +3652,514 @@ impl ConsumptionPlan {
         }
         self.sites.get(func).and_then(|s| s.get(&pc)).copied()
     }
+
+    #[inline]
+    fn dead_operands_at(&self, func: &str, pc: usize) -> Option<&[u16]> {
+        if self.dead_operands.is_empty() {
+            return None;
+        }
+        self.dead_operands
+            .get(func)
+            .and_then(|m| m.get(&pc))
+            .map(|v| v.as_slice())
+    }
+}
+
+/// SHF-P2: Instruction register destination and source operand classification for liveness analysis.
+fn instruction_defs_uses(opcode: Opcode, u16s: &[u16]) -> (Option<u16>, Vec<u16>) {
+    match opcode {
+        // Loads with literal or empty map: dst = u16s[0], uses = []
+        Opcode::LoadQ
+        | Opcode::LoadBool
+        | Opcode::LoadI32
+        | Opcode::LoadU32
+        | Opcode::LoadF64
+        | Opcode::LoadFx
+        | Opcode::MapEmpty => {
+            let dst = u16s.first().copied();
+            (dst, Vec::new())
+        }
+        // LoadText: dst = u16s[0], u16s[1] is string id
+        Opcode::LoadText => {
+            let dst = u16s.first().copied();
+            (dst, Vec::new())
+        }
+        // LoadVar: dst = u16s[0], u16s[1] is symbol id
+        Opcode::LoadVar => {
+            let dst = u16s.first().copied();
+            (dst, Vec::new())
+        }
+        // StoreVar: u16s[0] is symbol id, u16s[1] is src register
+        Opcode::StoreVar => {
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (None, uses)
+        }
+        // Unary arithmetic/logical: dst = u16s[0], src = u16s[1]
+        Opcode::BoolNot | Opcode::QNot | Opcode::QTruthNot => {
+            let dst = u16s.first().copied();
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (dst, uses)
+        }
+        // Binary arithmetic/logical: dst = u16s[0], lhs = u16s[1], rhs = u16s[2]
+        Opcode::AddI32
+        | Opcode::SubI32
+        | Opcode::MulI32
+        | Opcode::DivI32
+        | Opcode::ModI32
+        | Opcode::AddU32
+        | Opcode::SubU32
+        | Opcode::MulU32
+        | Opcode::DivU32
+        | Opcode::ModU32
+        | Opcode::AddF64
+        | Opcode::SubF64
+        | Opcode::MulF64
+        | Opcode::DivF64
+        | Opcode::AddFx
+        | Opcode::SubFx
+        | Opcode::MulFx
+        | Opcode::DivFx
+        | Opcode::BoolAnd
+        | Opcode::BoolOr
+        | Opcode::QAnd
+        | Opcode::QOr
+        | Opcode::QImpl
+        | Opcode::QTruthAnd
+        | Opcode::QTruthOr
+        | Opcode::QTruthImpl
+        | Opcode::CmpEq
+        | Opcode::CmpNe
+        | Opcode::CmpI32Lt
+        | Opcode::CmpI32Le
+        | Opcode::CmpU32Lt
+        | Opcode::CmpU32Le
+        | Opcode::ConcatText => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(2);
+            if let Some(&l) = u16s.get(1) {
+                uses.push(l);
+            }
+            if let Some(&r) = u16s.get(2) {
+                uses.push(r);
+            }
+            (dst, uses)
+        }
+        // Container constructors
+        Opcode::MakeTuple => {
+            let dst = u16s.first().copied();
+            let count = u16s.get(1).copied().unwrap_or(0) as usize;
+            let uses = u16s.get(2..2 + count).unwrap_or(&[]).to_vec();
+            (dst, uses)
+        }
+        Opcode::MakeSequence => {
+            let dst = u16s.first().copied();
+            let count = u16s.get(1).copied().unwrap_or(0) as usize;
+            let uses = u16s.get(2..2 + count).unwrap_or(&[]).to_vec();
+            (dst, uses)
+        }
+        Opcode::MakeClosure => {
+            let dst = u16s.first().copied();
+            // u16s[1] is fn symbol id
+            let count = u16s.get(2).copied().unwrap_or(0) as usize;
+            let uses = u16s.get(3..3 + count).unwrap_or(&[]).to_vec();
+            (dst, uses)
+        }
+        Opcode::MakeRecord => {
+            let dst = u16s.first().copied();
+            // u16s[1] is type symbol id
+            let count = u16s.get(2).copied().unwrap_or(0) as usize;
+            let uses = u16s.get(3..3 + count).unwrap_or(&[]).to_vec();
+            (dst, uses)
+        }
+        Opcode::MakeAdt => {
+            let dst = u16s.first().copied();
+            // u16s[1] type symbol id, u16s[2] variant symbol id, u16s[3] tag
+            let count = u16s.get(4).copied().unwrap_or(0) as usize;
+            let uses = u16s.get(5..5 + count).unwrap_or(&[]).to_vec();
+            (dst, uses)
+        }
+        // Container projections / inspectors
+        Opcode::AdtTag => {
+            let dst = u16s.first().copied();
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (dst, uses)
+        }
+        Opcode::AdtGet => {
+            let dst = u16s.first().copied();
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (dst, uses)
+        }
+        Opcode::RecordGet => {
+            let dst = u16s.first().copied();
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (dst, uses)
+        }
+        Opcode::TupleGet => {
+            let dst = u16s.first().copied();
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (dst, uses)
+        }
+        Opcode::SequenceGet => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(2);
+            if let Some(&s) = u16s.get(1) {
+                uses.push(s);
+            }
+            if let Some(&idx) = u16s.get(2) {
+                uses.push(idx);
+            }
+            (dst, uses)
+        }
+        Opcode::SequenceLen | Opcode::SequenceIsEmpty => {
+            let dst = u16s.first().copied();
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (dst, uses)
+        }
+        Opcode::SequenceContains => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(2);
+            if let Some(&s) = u16s.get(1) {
+                uses.push(s);
+            }
+            if let Some(&v) = u16s.get(2) {
+                uses.push(v);
+            }
+            (dst, uses)
+        }
+        Opcode::SequencePush | Opcode::SequencePrepend => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(2);
+            if let Some(&s) = u16s.get(1) {
+                uses.push(s);
+            }
+            if let Some(&v) = u16s.get(2) {
+                uses.push(v);
+            }
+            (dst, uses)
+        }
+        Opcode::SequencePop => {
+            let dst = u16s.first().copied();
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (dst, uses)
+        }
+        Opcode::MapContains => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(2);
+            if let Some(&m) = u16s.get(1) {
+                uses.push(m);
+            }
+            if let Some(&k) = u16s.get(2) {
+                uses.push(k);
+            }
+            (dst, uses)
+        }
+        Opcode::MapGet => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(3);
+            if let Some(&m) = u16s.get(1) {
+                uses.push(m);
+            }
+            if let Some(&k) = u16s.get(2) {
+                uses.push(k);
+            }
+            if let Some(&d) = u16s.get(3) {
+                uses.push(d);
+            }
+            (dst, uses)
+        }
+        Opcode::MapSet => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(3);
+            if let Some(&m) = u16s.get(1) {
+                uses.push(m);
+            }
+            if let Some(&k) = u16s.get(2) {
+                uses.push(k);
+            }
+            if let Some(&v) = u16s.get(3) {
+                uses.push(v);
+            }
+            (dst, uses)
+        }
+        Opcode::RngSeed => {
+            let dst = u16s.first().copied();
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (dst, uses)
+        }
+        Opcode::RngNextI32 => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(2);
+            if let Some(&lo) = u16s.get(1) {
+                uses.push(lo);
+            }
+            if let Some(&hi) = u16s.get(2) {
+                uses.push(hi);
+            }
+            (dst, uses)
+        }
+        Opcode::ClosureCall => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(2);
+            if let Some(&c) = u16s.get(1) {
+                uses.push(c);
+            }
+            if let Some(&arg) = u16s.get(2) {
+                uses.push(arg);
+            }
+            (dst, uses)
+        }
+        Opcode::Call => {
+            let dst = u16s.first().copied();
+            // u16s[1] is callee sid
+            let argc = u16s.get(2).copied().unwrap_or(0) as usize;
+            let uses = u16s.get(3..3 + argc).unwrap_or(&[]).to_vec();
+            (dst, uses)
+        }
+        Opcode::Assert => {
+            let uses = u16s.first().copied().into_iter().collect();
+            (None, uses)
+        }
+        Opcode::Ret => {
+            let uses = u16s.first().copied().into_iter().collect();
+            (None, uses)
+        }
+        Opcode::Jmp => (None, Vec::new()),
+        Opcode::JmpIf => {
+            let uses = u16s.first().copied().into_iter().collect();
+            (None, uses)
+        }
+        Opcode::GateRead => {
+            let dst = u16s.first().copied();
+            let mut uses = Vec::with_capacity(2);
+            if let Some(&d) = u16s.get(1) {
+                uses.push(d);
+            }
+            if let Some(&p) = u16s.get(2) {
+                uses.push(p);
+            }
+            (dst, uses)
+        }
+        Opcode::GateWrite => {
+            let mut uses = Vec::with_capacity(3);
+            if let Some(&d) = u16s.first() {
+                uses.push(d);
+            }
+            if let Some(&p) = u16s.get(1) {
+                uses.push(p);
+            }
+            if let Some(&v) = u16s.get(2) {
+                uses.push(v);
+            }
+            (None, uses)
+        }
+        Opcode::PulseEmit | Opcode::EventPost => (None, Vec::new()),
+        Opcode::StateQuery => {
+            let dst = u16s.first().copied();
+            (dst, Vec::new())
+        }
+        Opcode::StateUpdate => {
+            let uses = u16s.get(1).copied().into_iter().collect();
+            (None, uses)
+        }
+        Opcode::ClockRead => {
+            let dst = u16s.first().copied();
+            (dst, Vec::new())
+        }
+    }
+}
+
+/// Computes dead operands at each instruction for backward CFG register liveness (SHF-P2 / E1).
+fn compute_register_liveness(f: &FunctionBytecode) -> HashMap<usize, Vec<u16>> {
+    let mut instrs = Vec::new();
+    let Ok(jumps) = scan_function_bytecode(f, Some(&mut instrs)) else {
+        return HashMap::new();
+    };
+    if instrs.is_empty() {
+        return HashMap::new();
+    }
+
+    let n = instrs.len();
+    let pc_to_idx: HashMap<usize, usize> = instrs
+        .iter()
+        .enumerate()
+        .map(|(i, ins)| (ins.pc, i))
+        .collect();
+
+    // Find basic block leaders
+    let mut is_leader = vec![false; n];
+    is_leader[0] = true;
+    for &target in &jumps {
+        if let Some(&idx) = pc_to_idx.get(&target) {
+            is_leader[idx] = true;
+        }
+    }
+    for (i, ins) in instrs.iter().enumerate() {
+        if matches!(
+            ins.opcode,
+            Some(Opcode::Jmp) | Some(Opcode::JmpIf) | Some(Opcode::Ret)
+        ) && i + 1 < n
+        {
+            is_leader[i + 1] = true;
+        }
+    }
+
+    // Build basic blocks
+    struct BasicBlock {
+        start: usize,
+        end: usize, // exclusive
+        successors: Vec<usize>,
+    }
+
+    let mut block_starts = Vec::new();
+    for (i, &leader) in is_leader.iter().enumerate() {
+        if leader {
+            block_starts.push(i);
+        }
+    }
+
+    let num_blocks = block_starts.len();
+    let mut blocks = Vec::with_capacity(num_blocks);
+    for (b_idx, &start) in block_starts.iter().enumerate() {
+        let end = if b_idx + 1 < num_blocks {
+            block_starts[b_idx + 1]
+        } else {
+            n
+        };
+        blocks.push(BasicBlock {
+            start,
+            end,
+            successors: Vec::new(),
+        });
+    }
+
+    // Map instruction index to block index
+    let mut instr_to_block = vec![0; n];
+    for (b_idx, b) in blocks.iter().enumerate() {
+        for slot in &mut instr_to_block[b.start..b.end] {
+            *slot = b_idx;
+        }
+    }
+
+    // Wire successors for each block
+    for b in &mut blocks {
+        let last_i = b.end - 1;
+        let last_ins = &instrs[last_i];
+        match last_ins.opcode {
+            Some(Opcode::Ret) => {}
+            Some(Opcode::Jmp) => {
+                let mut cur = f.instr_start + last_ins.pc + 1; // skip opcode
+                if let Ok(addr) = read_u32_le(&f.code, &mut cur) {
+                    if let Some(&tgt_idx) = pc_to_idx.get(&(addr as usize)) {
+                        b.successors.push(instr_to_block[tgt_idx]);
+                    }
+                }
+            }
+            Some(Opcode::JmpIf) => {
+                // Target from JmpIf
+                let mut cur = f.instr_start + last_ins.pc + 1 + 2; // skip opcode + cond u16
+                if let Ok(addr) = read_u32_le(&f.code, &mut cur) {
+                    if let Some(&tgt_idx) = pc_to_idx.get(&(addr as usize)) {
+                        b.successors.push(instr_to_block[tgt_idx]);
+                    }
+                }
+                // Fallthrough
+                if last_i + 1 < n {
+                    b.successors.push(instr_to_block[last_i + 1]);
+                }
+            }
+            _ => {
+                if last_i + 1 < n {
+                    b.successors.push(instr_to_block[last_i + 1]);
+                }
+            }
+        }
+    }
+
+    // Precompute defs and uses per instruction
+    let mut instr_defs = Vec::with_capacity(n);
+    let mut instr_uses = Vec::with_capacity(n);
+    for ins in &instrs {
+        let (d, u) = if let Some(op) = ins.opcode {
+            instruction_defs_uses(op, &ins.u16s)
+        } else {
+            (None, Vec::new())
+        };
+        instr_defs.push(d);
+        instr_uses.push(u);
+    }
+
+    // Precompute block GEN (use before def) and KILL (def)
+    let mut block_gen = vec![HashSet::new(); num_blocks];
+    let mut block_kill = vec![HashSet::new(); num_blocks];
+    for (b_idx, b) in blocks.iter().enumerate() {
+        for i in b.start..b.end {
+            for &u in &instr_uses[i] {
+                if !block_kill[b_idx].contains(&u) {
+                    block_gen[b_idx].insert(u);
+                }
+            }
+            if let Some(d) = instr_defs[i] {
+                block_kill[b_idx].insert(d);
+            }
+        }
+    }
+
+    // Backward dataflow fixed point
+    let mut block_in = vec![HashSet::new(); num_blocks];
+    let mut block_out = vec![HashSet::new(); num_blocks];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for b_idx in (0..num_blocks).rev() {
+            let mut new_out = HashSet::new();
+            for &succ in &blocks[b_idx].successors {
+                new_out.extend(&block_in[succ]);
+            }
+            let mut new_in = block_gen[b_idx].clone();
+            for &r in &new_out {
+                if !block_kill[b_idx].contains(&r) {
+                    new_in.insert(r);
+                }
+            }
+            if new_out != block_out[b_idx] {
+                block_out[b_idx] = new_out;
+                changed = true;
+            }
+            if new_in != block_in[b_idx] {
+                block_in[b_idx] = new_in;
+                changed = true;
+            }
+        }
+    }
+
+    // Per-instruction dead operand computation
+    let mut dead_operands = HashMap::new();
+    for (b_idx, b) in blocks.iter().enumerate() {
+        let mut live = block_out[b_idx].clone();
+        for i in (b.start..b.end).rev() {
+            let pc = instrs[i].pc;
+            let mut dead_here = Vec::new();
+            let mut seen = HashSet::new();
+            for &u in &instr_uses[i] {
+                if !live.contains(&u) && seen.insert(u) {
+                    dead_here.push(u);
+                }
+            }
+            if !dead_here.is_empty() {
+                dead_operands.insert(pc, dead_here);
+            }
+
+            // Update live: live_in(i) = (live_out(i) \ def(i)) U use(i)
+            if let Some(d) = instr_defs[i] {
+                live.remove(&d);
+            }
+            for &u in &instr_uses[i] {
+                live.insert(u);
+            }
+        }
+    }
+
+    dead_operands
 }
 
 /// Accepts an accumulator triple
