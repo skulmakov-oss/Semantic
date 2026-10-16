@@ -1,0 +1,7 @@
+{
+  "platform": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "binaries": {
+    "reference": "d58a450464c47ea5cc5ffeca69a3622ad56c6d1d8c2ee948be2ad41d35b642f5",
+    "prototype": "0e1b19f55798542f428130d59859af13ad2ba715be0c3f8492375b043b04c04a"
+  }
+}
