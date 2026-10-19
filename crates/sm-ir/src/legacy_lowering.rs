@@ -13,7 +13,7 @@ use crate::semcode_format::{
     WRITE_EXECUTION_MODE_MAKE_RECORD_SITE, WRITE_EXECUTION_MODE_STORE_VAR_SITE,
 };
 use sm_front::types::{
-    AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
+    AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily, IfLetExpr,
     MatchExprArm, MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget,
     SequenceCollectionFamily, SequenceType,
 };
@@ -6022,17 +6022,8 @@ fn lower_expr_with_expected(
                     lowered_locals,
                 );
             }
-            let desugared = MatchExpr {
-                scrutinee: if_let.value,
-                arms: vec![MatchExprArm {
-                    pat: if_let.pattern.clone(),
-                    guard: None,
-                    block: if_let.then_block.clone(),
-                }],
-                default: Some(if_let.else_block.clone()),
-            };
             lower_match_expr(
-                &desugared,
+                &if_let_as_match(if_let),
                 arena,
                 next,
                 out,
@@ -6048,6 +6039,21 @@ fn lower_expr_with_expected(
                 lowered_locals,
             )
         }
+    }
+}
+
+/// S2043 CP05: `if let P = v { A } else { B }` as `match v { P => { A }
+/// _ => { B } }`. The one desugaring both lowering and the ownership prescan
+/// use, so an `if let` and its `match` cannot drift apart.
+fn if_let_as_match(if_let: &IfLetExpr) -> MatchExpr {
+    MatchExpr {
+        scrutinee: if_let.value,
+        arms: vec![MatchExprArm {
+            pat: if_let.pattern.clone(),
+            guard: None,
+            block: if_let.then_block.clone(),
+        }],
+        default: Some(if_let.else_block.clone()),
     }
 }
 
@@ -12495,26 +12501,12 @@ fn append_record_update_write_events_from_expr(
                 lowered_locals,
             )?;
         }
-        Expr::IfLet(if_let_expr) => {
-            append_record_update_write_events_from_expr(
-                if_let_expr.value,
-                arena,
-                ownership_events,
-                lowered_locals,
-            )?;
-            append_record_update_write_events_from_expr(
-                if_let_expr.then_block.tail,
-                arena,
-                ownership_events,
-                lowered_locals,
-            )?;
-            append_record_update_write_events_from_expr(
-                if_let_expr.else_block.tail,
-                arena,
-                ownership_events,
-                lowered_locals,
-            )?;
-        }
+        Expr::IfLet(if_let_expr) => append_match_record_update_write_events(
+            &if_let_as_match(if_let_expr),
+            arena,
+            ownership_events,
+            lowered_locals,
+        )?,
         Expr::Block(block) => {
             append_record_update_write_events_from_expr(
                 block.tail,
@@ -12523,26 +12515,52 @@ fn append_record_update_write_events_from_expr(
                 lowered_locals,
             )?;
         }
-        Expr::Match(match_expr) => {
-            append_record_update_write_events_from_expr(
-                match_expr.scrutinee,
-                arena,
-                ownership_events,
-                lowered_locals,
-            )?;
+        Expr::Match(match_expr) => append_match_record_update_write_events(
+            match_expr,
+            arena,
+            ownership_events,
+            lowered_locals,
+        )?,
+        Expr::QuadLiteral(_)
+        | Expr::BoolLiteral(_)
+        | Expr::TextLiteral(_)
+        | Expr::NumericLiteral(_)
+        | Expr::Closure(_)
+        | Expr::AdtCtor(_)
+        | Expr::Var(_)
+        | Expr::Loop(_) => {}
+    }
+    Ok(())
+}
 
-            // #1725 corrective: only attempt to resolve the scrutinee's
-            // ownership path if some arm's pattern actually needs it (a
-            // real Borrow-mode ADT payload capture below) - the scrutinee
-            // may be a variable bound by an *enclosing* match/if-let arm's
-            // own pattern within this same prescan tree (e.g.
-            // `Option::Some(dir) => { match dir { ... } }`), which
-            // genuinely has no `LoweredLocalEnv` entry yet at prescan time
-            // (real binding only happens later, during that arm's own real
-            // lowering). Gating on actual need means the common case - no
-            // Borrow capture anywhere in this match - never attempts a
-            // resolve that would otherwise fail closed for no reason.
-            let any_arm_borrows_adt_payload = match_expr.arms.iter().any(|arm| {
+/// The `match` arm of [`append_record_update_write_events_from_expr`],
+/// shared with `if let` through [`if_let_as_match`] (S2043 CP05): an
+/// `if let` records exactly the events of its equivalent `match`.
+fn append_match_record_update_write_events(
+    match_expr: &MatchExpr,
+    arena: &AstArena,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &LoweredLocalEnv,
+) -> Result<(), FrontendError> {
+    append_record_update_write_events_from_expr(
+        match_expr.scrutinee,
+        arena,
+        ownership_events,
+        lowered_locals,
+    )?;
+
+    // #1725 corrective: only attempt to resolve the scrutinee's
+    // ownership path if some arm's pattern actually needs it (a
+    // real Borrow-mode ADT payload capture below) - the scrutinee
+    // may be a variable bound by an *enclosing* match/if-let arm's
+    // own pattern within this same prescan tree (e.g.
+    // `Option::Some(dir) => { match dir { ... } }`), which
+    // genuinely has no `LoweredLocalEnv` entry yet at prescan time
+    // (real binding only happens later, during that arm's own real
+    // lowering). Gating on actual need means the common case - no
+    // Borrow capture anywhere in this match - never attempts a
+    // resolve that would otherwise fail closed for no reason.
+    let any_arm_borrows_adt_payload = match_expr.arms.iter().any(|arm| {
                 matches!(&arm.pat, sm_front::types::MatchPattern::Adt(adt_pat) if adt_pat.items.iter().any(|item| {
                     matches!(
                         item,
@@ -12553,87 +12571,75 @@ fn append_record_update_write_events_from_expr(
                     )
                 }))
             });
-            let scrutinee_path = if any_arm_borrows_adt_payload {
-                sequence_access_path_from_expr(match_expr.scrutinee, arena, lowered_locals)?
-            } else {
-                None
-            };
-            let mut borrowed_dynamic_scrutinee_root = false;
-            for arm in &match_expr.arms {
-                if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
-                    if let Some(path) = &scrutinee_path {
-                        if path.is_dynamic_fallback() {
-                            let should_borrow = adt_pat.items.iter().any(|item| {
-                                matches!(
-                                    item,
-                                    sm_front::types::AdtPatternItem::Bind {
-                                        capture: sm_front::types::CaptureMode::Borrow,
-                                        ..
-                                    }
-                                )
+    let scrutinee_path = if any_arm_borrows_adt_payload {
+        sequence_access_path_from_expr(match_expr.scrutinee, arena, lowered_locals)?
+    } else {
+        None
+    };
+    let mut borrowed_dynamic_scrutinee_root = false;
+    for arm in &match_expr.arms {
+        if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
+            if let Some(path) = &scrutinee_path {
+                if path.is_dynamic_fallback() {
+                    let should_borrow = adt_pat.items.iter().any(|item| {
+                        matches!(
+                            item,
+                            sm_front::types::AdtPatternItem::Bind {
+                                capture: sm_front::types::CaptureMode::Borrow,
+                                ..
+                            }
+                        )
+                    });
+                    if should_borrow && !borrowed_dynamic_scrutinee_root {
+                        ownership_events.push(OwnershipPathEvent {
+                            kind: OwnershipPathEventKind::Borrow,
+                            path: path.as_path().clone(),
+                            activation_site: None,
+                            write_site: None,
+                        });
+                        borrowed_dynamic_scrutinee_root = true;
+                    }
+                } else {
+                    for (idx, item) in adt_pat.items.iter().enumerate() {
+                        if let sm_front::types::AdtPatternItem::Bind {
+                            capture: sm_front::types::CaptureMode::Borrow,
+                            ..
+                        } = item
+                        {
+                            ownership_events.push(OwnershipPathEvent {
+                                kind: OwnershipPathEventKind::Borrow,
+                                path: path.as_path().adt_payload(adt_pat.variant_name, idx as u16),
+                                activation_site: None,
+                                write_site: None,
                             });
-                            if should_borrow && !borrowed_dynamic_scrutinee_root {
-                                ownership_events.push(OwnershipPathEvent {
-                                    kind: OwnershipPathEventKind::Borrow,
-                                    path: path.as_path().clone(),
-                                    activation_site: None,
-                                    write_site: None,
-                                });
-                                borrowed_dynamic_scrutinee_root = true;
-                            }
-                        } else {
-                            for (idx, item) in adt_pat.items.iter().enumerate() {
-                                if let sm_front::types::AdtPatternItem::Bind {
-                                    capture: sm_front::types::CaptureMode::Borrow,
-                                    ..
-                                } = item
-                                {
-                                    ownership_events.push(OwnershipPathEvent {
-                                        kind: OwnershipPathEventKind::Borrow,
-                                        path: path
-                                            .as_path()
-                                            .adt_payload(adt_pat.variant_name, idx as u16),
-                                        activation_site: None,
-                                        write_site: None,
-                                    });
-                                }
-                            }
                         }
                     }
                 }
-
-                if let Some(guard) = arm.guard {
-                    append_record_update_write_events_from_expr(
-                        guard,
-                        arena,
-                        ownership_events,
-                        lowered_locals,
-                    )?;
-                }
-                append_record_update_write_events_from_expr(
-                    arm.block.tail,
-                    arena,
-                    ownership_events,
-                    lowered_locals,
-                )?;
-            }
-            if let Some(default) = &match_expr.default {
-                append_record_update_write_events_from_expr(
-                    default.tail,
-                    arena,
-                    ownership_events,
-                    lowered_locals,
-                )?;
             }
         }
-        Expr::QuadLiteral(_)
-        | Expr::BoolLiteral(_)
-        | Expr::TextLiteral(_)
-        | Expr::NumericLiteral(_)
-        | Expr::Closure(_)
-        | Expr::AdtCtor(_)
-        | Expr::Var(_)
-        | Expr::Loop(_) => {}
+
+        if let Some(guard) = arm.guard {
+            append_record_update_write_events_from_expr(
+                guard,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
+        }
+        append_record_update_write_events_from_expr(
+            arm.block.tail,
+            arena,
+            ownership_events,
+            lowered_locals,
+        )?;
+    }
+    if let Some(default) = &match_expr.default {
+        append_record_update_write_events_from_expr(
+            default.tail,
+            arena,
+            ownership_events,
+            lowered_locals,
+        )?;
     }
     Ok(())
 }
@@ -14305,6 +14311,53 @@ mod opt_tests {
             decoded_main.borrowed_paths[1].activation,
             Some(crate::semcode_decode::DecodedBorrowActivation::StoreVarSite(_))
         ));
+    }
+
+    // S2043 CP05: `if let P = v { A } else { B }` is `match v { P => { A }
+    // _ => { B } }`, including the `Borrow(AdtPayload)` event a `ref`
+    // capture records, the OWN0 section and the header it promotes to.
+    #[test]
+    fn s2043_if_let_ref_capture_records_the_same_ownership_events_as_match() {
+        let if_let = r#"
+            fn main() {
+                let opt: Option(i32) = Option::Some(1);
+                let v: i32 = if let Option::Some(ref value) = opt { value } else { 0 };
+                let _ = v;
+                return;
+            }
+        "#;
+        let matched = r#"
+            fn main() {
+                let opt: Option(i32) = Option::Some(1);
+                let v: i32 = match opt { Option::Some(ref value) => { value } _ => { 0 } };
+                let _ = v;
+                return;
+            }
+        "#;
+        for opt in [OptLevel::O0, OptLevel::O1] {
+            let main_events = |src: &str| {
+                let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, opt)
+                    .expect("compiles");
+                let bytes = emit_ir_to_semcode(&ir, false).expect("emit");
+                let main = ir.into_iter().find(|f| f.name == "main").expect("main");
+                (main.ownership_events, bytes)
+            };
+            let (if_let_events, if_let_bytes) = main_events(if_let);
+            let (match_events, match_bytes) = main_events(matched);
+            assert!(
+                match_events
+                    .iter()
+                    .any(|e| e.kind == OwnershipPathEventKind::Borrow
+                        && e.path
+                            .components
+                            .iter()
+                            .any(|c| matches!(c, PathComponent::AdtPayload { .. }))),
+                "{opt:?}: the match reference must record Borrow(AdtPayload)"
+            );
+            assert_eq!(if_let_events, match_events, "{opt:?}: ownership events");
+            assert_eq!(&if_let_bytes[0..8], &match_bytes[0..8], "{opt:?}: header");
+            assert_eq!(if_let_bytes, match_bytes, "{opt:?}: SemCode artifact");
+        }
     }
 
     // #1726 Checkpoint D2b.5 reconciliation (see the design doc's
