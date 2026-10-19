@@ -88,6 +88,15 @@ const KNOWN: &[Known] = &[
         nth: 0,
         code: "E0201",
     },
+    // Codex review (PR #2052, P2): the const-initializer path reports the
+    // same unknown-variable family before type inference runs.
+    Known {
+        name: "const_unknown_variable",
+        src: "fn main() {\n    const X: i32 = missing;\n    let _ = X;\n    return;\n}\n",
+        token: "missing",
+        nth: 0,
+        code: "E0201",
+    },
     Known {
         name: "unicode_prefix",
         src: "fn main() {\n    let s: text = \"\u{e9}\u{1f642}\";\n    let _ = s;\n    let y: i32 = missing;\n    let _ = y;\n    return;\n}\n",

@@ -17287,11 +17287,19 @@ fn ensure_const_initializer_safe(
             // that pass cannot be relied on to have already produced this
             // diagnostic first.
             if env.get(*name).is_none() {
-                return Err(FrontendError {
-                    detail: None,
-                    pos: 0,
-                    message: format!("unknown variable '{}'", resolve_symbol_name(arena, *name)?),
-                });
+                // S2043: same unknown-variable family, same identifier anchor
+                // as `infer_expr_type`.
+                return Err(anchor_type_error(
+                    FrontendError {
+                        detail: None,
+                        pos: 0,
+                        message: format!(
+                            "unknown variable '{}'",
+                            resolve_symbol_name(arena, *name)?
+                        ),
+                    },
+                    arena.expr_anchor(expr_id),
+                ));
             }
             if env.is_const(*name)? {
                 Ok(())
