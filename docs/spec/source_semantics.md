@@ -658,6 +658,33 @@ Current `if` expression semantics:
 `quad` is intentionally not treated as an implicit condition type. Users must
 write explicit comparisons.
 
+### If Let (S2043)
+
+`if let PATTERN = SCRUTINEE { THEN } else { ELSE }` is a value-producing
+expression with exactly the meaning of
+`match SCRUTINEE { PATTERN => { THEN } _ => { ELSE } }`:
+
+- the scrutinee is evaluated exactly once
+- names bound by `PATTERN` exist only inside `THEN`; `ELSE` sees none of them
+- `ELSE` runs for every value `PATTERN` does not match; a bare `_` pattern is
+  irrefutable, so `THEN` always runs
+- both branches must produce the same type; `else` is required
+- ownership effects of the pattern and of each branch are those of the
+  equivalent `match` arm and default, joined after the expression
+- `PATTERN` admits exactly the `match` arm patterns, with the same
+  boundaries: or-patterns are rejected by the type checker, and integer
+  range patterns are type-checked but rejected deterministically by the IR
+  backend, as for `match`
+- it compiles through the verifier-first path at every optimization level
+  with no instruction, SemCode revision or VM behavior of its own
+
+In `if CONDITION { ... }` / `if let ... = SCRUTINEE { ... }`, a brace group of
+the shapes `{}`, `{ x }` or `{ x, .. }` that is directly followed by `else`
+is the `then` block, not a record literal: no expression is ever directly
+followed by `else` except such a condition. Record literals with explicit
+`field: value` items, and shorthand record literals anywhere else, are
+unchanged.
+
 ### Quad values and control flow
 
 `quad` values do not implicitly control execution flow.

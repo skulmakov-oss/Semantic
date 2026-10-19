@@ -2279,17 +2279,47 @@ impl<'a> Parser<'a> {
             return false;
         }
         if self.tokens[field_idx].kind == TokenKind::RBrace {
-            return true;
+            return !self.brace_group_is_followed_by_else(lbrace_idx);
         }
         if self.tokens[field_idx].kind != TokenKind::Ident {
             return false;
         }
         let next_idx = self.next_non_layout_idx_from(field_idx + 1);
-        next_idx < self.tokens.len()
-            && matches!(
-                self.tokens[next_idx].kind,
-                TokenKind::Colon | TokenKind::Comma | TokenKind::RBrace
-            )
+        if next_idx >= self.tokens.len() {
+            return false;
+        }
+        match self.tokens[next_idx].kind {
+            TokenKind::Colon => true,
+            // S2043 CP05: `{}` / `{ x }` / `{ x, .. }` are also block shapes.
+            // An expression is never directly followed by `else` except as
+            // an `if` condition / `if let` scrutinee, so such a group
+            // followed by `else` is the `if`'s then-block, not a record.
+            TokenKind::Comma | TokenKind::RBrace => {
+                !self.brace_group_is_followed_by_else(lbrace_idx)
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether the brace group opened at `lbrace_idx` is closed and the next
+    /// non-layout token after it is `else`.
+    fn brace_group_is_followed_by_else(&self, lbrace_idx: usize) -> bool {
+        let mut depth = 0usize;
+        for idx in lbrace_idx..self.tokens.len() {
+            match self.tokens[idx].kind {
+                TokenKind::LBrace => depth += 1,
+                TokenKind::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let after = self.next_non_layout_idx_from(idx + 1);
+                        return after < self.tokens.len()
+                            && self.tokens[after].kind == TokenKind::KwElse;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     fn starts_short_lambda_head(&self) -> bool {

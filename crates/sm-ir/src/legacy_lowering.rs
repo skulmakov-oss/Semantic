@@ -14,8 +14,8 @@ use crate::semcode_format::{
 };
 use sm_front::types::{
     AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
-    MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget, SequenceCollectionFamily,
-    SequenceType,
+    MatchExprArm, MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget,
+    SequenceCollectionFamily, SequenceType,
 };
 use sm_front::{CallArg, LoopExpr, TuplePatternItem};
 use std::collections::{BTreeMap, BTreeSet};
@@ -5977,12 +5977,49 @@ fn lower_expr_with_expected(
             }
             Ok((dst, lt))
         }
-        // M9.4 Wave 1: IfLet lowering is deferred (typecheck-only in M9.4).
-        Expr::IfLet(_) => Err(FrontendError {
-            detail: None,
-            pos: 0,
-            message: "if-let lowering is not yet implemented in the IR backend".to_string(),
-        }),
+        // S2043 CP05: `if let PAT = v { A } else { B }` lowers exactly as
+        // `match v { PAT => { A } _ => { B } }` - the scrutinee is evaluated
+        // once, PAT's bindings exist only in A, and B is the explicit
+        // default. The type checker already checks `if let` through the same
+        // arm-environment helper `match` arms use, so the lowered ownership
+        // events agree with it. No new instruction is introduced.
+        Expr::IfLet(if_let) => {
+            // A bare `_` pattern is irrefutable: the `match` form of
+            // `if let _ = v { A } else { B }` is `match v { _ => { A } }`.
+            let desugared = if if_let.pattern == MatchPattern::Wildcard {
+                MatchExpr {
+                    scrutinee: if_let.value,
+                    arms: Vec::new(),
+                    default: Some(if_let.then_block.clone()),
+                }
+            } else {
+                MatchExpr {
+                    scrutinee: if_let.value,
+                    arms: vec![MatchExprArm {
+                        pat: if_let.pattern.clone(),
+                        guard: None,
+                        block: if_let.then_block.clone(),
+                    }],
+                    default: Some(if_let.else_block.clone()),
+                }
+            };
+            lower_match_expr(
+                &desugared,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                expected,
+                ret_ty,
+                closure_state,
+                ownership_events,
+                lowered_locals,
+            )
+        }
     }
 }
 
