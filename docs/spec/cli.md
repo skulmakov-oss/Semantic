@@ -63,6 +63,7 @@ Current accepted usage forms are:
 - `smc hash-smc <input.sm|project-root> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols] [--trace-cache]`
 - `smc snapshots [--update]`
 - `smc features`
+- `smc language describe --format json` (machine-readable language surface; see `language_surface_v1.md`)
 - `smc explain <error-code|--list>`
 - `smc repl`
 - `smc verify <input.smc|project-root>`
@@ -123,6 +124,7 @@ The following commands expose persisted artifact, admission, or build-surface be
 - `smc test`
 - `smc run-smc`
 - `smc features`
+- `smc language describe --format json`
 - `smc hub invoke`
 - `smc hub session`
 

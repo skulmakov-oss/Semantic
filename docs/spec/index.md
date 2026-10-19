@@ -35,6 +35,7 @@ Current documents in this PR:
 - `source_semantics.md` - source-level execution and binding semantics
 - `diagnostics.md` - source-facing parse, policy, type, and module diagnostics
 - `diagnostics_machine_schema_v1.md` - versioned machine-readable diagnostics schema (`smc check --format json`)
+- `language_surface_v1.md` - versioned machine-readable language surface (`smc language describe --format json`): per-feature release maturity and pipeline-stage status, checked against the running pipeline
 - `editor_lsp_baseline.md` - `smc lsp` language-server baseline, formatter contract, and documented editor path
 - `modules.md` - module, import, and re-export contract
 - `logos.md` - declarative Logos source-surface contract
