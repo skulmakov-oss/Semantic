@@ -5984,24 +5984,52 @@ fn lower_expr_with_expected(
         // arm-environment helper `match` arms use, so the lowered ownership
         // events agree with it. No new instruction is introduced.
         Expr::IfLet(if_let) => {
-            // A bare `_` pattern is irrefutable: the `match` form of
-            // `if let _ = v { A } else { B }` is `match v { _ => { A } }`.
-            let desugared = if if_let.pattern == MatchPattern::Wildcard {
-                MatchExpr {
-                    scrutinee: if_let.value,
-                    arms: Vec::new(),
-                    default: Some(if_let.then_block.clone()),
-                }
-            } else {
-                MatchExpr {
-                    scrutinee: if_let.value,
-                    arms: vec![MatchExprArm {
-                        pat: if_let.pattern.clone(),
-                        guard: None,
-                        block: if_let.then_block.clone(),
-                    }],
-                    default: Some(if_let.else_block.clone()),
-                }
+            // A bare `_` pattern is irrefutable and binds nothing, for every
+            // scrutinee type (the type checker admits any): evaluate the
+            // scrutinee once, as `let _ = v;` does, then the THEN block. It
+            // must not go through `match` lowering, whose scrutinee-family
+            // restriction does not apply to an irrefutable pattern.
+            if if_let.pattern == MatchPattern::Wildcard {
+                lower_expr(
+                    if_let.value,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    ret_ty.clone(),
+                    closure_state,
+                    ownership_events,
+                    lowered_locals,
+                )?;
+                return lower_value_block_expr(
+                    &if_let.then_block,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    expected,
+                    ret_ty,
+                    closure_state,
+                    ownership_events,
+                    lowered_locals,
+                );
+            }
+            let desugared = MatchExpr {
+                scrutinee: if_let.value,
+                arms: vec![MatchExprArm {
+                    pat: if_let.pattern.clone(),
+                    guard: None,
+                    block: if_let.then_block.clone(),
+                }],
+                default: Some(if_let.else_block.clone()),
             };
             lower_match_expr(
                 &desugared,

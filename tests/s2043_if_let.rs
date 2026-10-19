@@ -136,6 +136,24 @@ fn if_let_pattern_forms_shared_with_match_run() {
     );
 }
 
+/// Codex review (PR #2052, P1): `_` is irrefutable over every type the type
+/// checker admits, including scrutinee families `match` itself rejects.
+#[test]
+fn wildcard_if_let_runs_over_any_scrutinee_type_once() {
+    let dir = mk_temp_dir("s2043_cp05_wild_any");
+    run_everywhere(
+        &dir,
+        "wild_any",
+        "record P {\n    v: i32,\n}\nfn main() {\n    let a: i32 = if let _ = true { 1 } else { 0 };\n    let pair: (i32, i32) = (1, 2);\n    let b: i32 = if let _ = pair { 2 } else { 0 };\n    let rec: P = P { v: 3 };\n    let c: i32 = if let _ = rec { 3 } else { 0 };\n    let d: i32 = if let _ = \"text\" { 4 } else { 0 };\n    assert(a + b + c + d == 10);\n    return;\n}\n",
+    );
+    let stdout = run_everywhere(
+        &dir,
+        "wild_once",
+        "fn flag() -> bool {\n    print(\"eval\");\n    return false;\n}\nfn main() {\n    let v: i32 = if let _ = flag() { 7 } else { 0 };\n    assert(v == 7);\n    return;\n}\n",
+    );
+    assert_eq!(stdout.matches("eval").count(), 1, "{stdout}");
+}
+
 #[test]
 fn integer_range_if_let_is_rejected_at_lowering_like_match() {
     // Same documented boundary as an integer range `match` arm
