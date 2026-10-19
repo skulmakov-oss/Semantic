@@ -310,13 +310,15 @@ fn tokenize_line(
                         }
                     }
                 }
-                if i + 2 <= bytes.len() && &line_text[i..i + 2] == "fx" {
+                // Byte comparison: `i` is a byte offset and the suffix bytes
+                // are ASCII, so no `&str` slice may land inside a scalar.
+                if bytes.get(i..i + 2) == Some(b"fx".as_slice()) {
                     i += 2;
-                } else if i + 3 <= bytes.len() {
-                    let suffix = &line_text[i..i + 3];
-                    if matches!(suffix, "i32" | "u32" | "f64") {
-                        i += 3;
-                    }
+                } else if matches!(
+                    bytes.get(i..i + 3),
+                    Some(b"i32") | Some(b"u32") | Some(b"f64")
+                ) {
+                    i += 3;
                 }
                 push_tok(
                     out,
@@ -551,6 +553,59 @@ mod tests {
         assert_eq!(failure.code, "E0001");
         assert_eq!(failure.detail, "unexpected character '\u{e9}'");
         assert_eq!(&src[failure.range.unwrap()], "\u{e9}");
+    }
+
+    /// S2043 CP01: the numeric suffix scan works on byte offsets, so a
+    /// multibyte scalar after the digits must produce the ordinary E0001
+    /// for that scalar, never a panic from a non-char-boundary slice.
+    #[test]
+    fn numeric_suffix_scan_is_utf8_safe() {
+        let heads = ["1", "61", "1.0", "0x3D", "1_000"];
+        let tails = [
+            "", "f", "fx", "fu", "u", "u3", "u32", "i", "i3", "i32", "f6", "f64",
+        ];
+        // 2-, 3- and 4-byte scalars.
+        let scalars = ["\u{e9}", "\u{20ac}", "\u{1f642}"];
+        let afters = ["", ";", " ", "\u{e9}", "\u{1f642}"];
+        for head in heads {
+            for tail in tails {
+                for scalar in scalars {
+                    for after in afters {
+                        let src = format!("let x = {head}{tail}{scalar}{after}");
+                        let failure = lex_tokens_with_authority(&src)
+                            .expect_err(&format!("{src:?} must be rejected"));
+                        assert_eq!(failure.code, "E0001", "{src:?}");
+                        assert_eq!(
+                            failure.detail,
+                            format!("unexpected character '{scalar}'"),
+                            "{src:?}"
+                        );
+                        let range = failure.range.expect("E0001 carries a range");
+                        assert_eq!(&src[range], scalar, "{src:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// S2043 CP01: valid numeric literals keep their token text and byte
+    /// position after the UTF-8-safe suffix scan.
+    #[test]
+    fn valid_numeric_literals_keep_text_and_position() {
+        for lit in [
+            "7", "61u32", "2i32", "1.5f64", "1.0fx", "3fx", "0x3Du32", "0x3D", "1_000", "1_000u32",
+        ] {
+            for after in ["", ";", " ", ")", "\n"] {
+                let src = format!("let x = {lit}{after}");
+                let toks = lex_tokens(&src).expect("valid literal must lex");
+                let num = toks
+                    .iter()
+                    .find(|t| t.kind == TokenKind::Num)
+                    .expect("numeric token");
+                assert_eq!(num.text, lit, "{src:?}");
+                assert_eq!(num.pos, 8, "{src:?}");
+            }
+        }
     }
 
     #[test]
