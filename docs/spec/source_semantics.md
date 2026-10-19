@@ -678,12 +678,14 @@ expression with exactly the meaning of
 - it compiles through the verifier-first path at every optimization level
   with no instruction, SemCode revision or VM behavior of its own
 
-In `if CONDITION { ... }` / `if let ... = SCRUTINEE { ... }`, a brace group of
-the shapes `{}`, `{ x }` or `{ x, .. }` that is directly followed by `else`
-is the `then` block, not a record literal: no expression is ever directly
-followed by `else` except such a condition. Record literals with explicit
-`field: value` items, and shorthand record literals anywhere else, are
-unchanged.
+At the top level of an `if CONDITION` / `if let ... = SCRUTINEE` (not inside
+a block nested in it), a brace group of the shapes `{}`, `{ x }` or
+`{ x, .. }` that is directly followed by `else` is the `then` block, not a
+record literal. The rule is scoped to that position only: `guard` conditions
+and let-else initializers are also directly followed by `else`, and a
+shorthand record literal there (`guard x == P { v } else return;`,
+`let P { q: T } = P { q } else return;`) stays a record literal. Record
+literals with explicit `field: value` items are unchanged everywhere.
 
 ### Quad values and control flow
 

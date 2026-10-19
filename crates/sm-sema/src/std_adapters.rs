@@ -213,20 +213,16 @@ impl SemanticError {
             .as_ref()
             .map(|range| source_mark_from_byte_offset(source, range.start))
             .unwrap_or_default();
-        let fresh = render_diag(
+        let fresh = render_diag_in(
             self.diag.level,
             self.diag.code,
             self.diag.message.clone(),
             mark,
             source,
+            file,
         );
         self.diag.mark = fresh.mark;
-        self.diag.rendered = match (file, fresh.rendered.split_once('\n')) {
-            (Some(file), Some((header, body))) if range.is_some() => {
-                format!("{header} in {file}\n{body}")
-            }
-            _ => fresh.rendered,
-        };
+        self.diag.rendered = fresh.rendered;
         self.diag.canonical.range = range;
         self
     }
@@ -1221,6 +1217,19 @@ fn render_diag(
     mark: SourceMark,
     source: &str,
 ) -> SemanticDiagnostic {
+    render_diag_in(level, code, message, mark, source, None)
+}
+
+/// As [`render_diag`]; a located header also names `file` (S2043 CP03: a
+/// module of a composed bundle other than the checked root).
+fn render_diag_in(
+    level: DiagLevel,
+    code: &'static str,
+    message: String,
+    mark: SourceMark,
+    source: &str,
+    file: Option<&str>,
+) -> SemanticDiagnostic {
     let mut sm = SourceMap::new();
     let file_id = sm.add_file("<input>", source);
     let mark = SourceMark { file_id, ..mark };
@@ -1237,13 +1246,17 @@ fn render_diag(
         append_help_line(&mut body, help);
     }
     let header = if located {
-        format_diagnostic_header(
+        let header = format_diagnostic_header(
             to_core_diag_level(level),
             code,
             &message,
             mark.line,
             mark.col,
-        )
+        );
+        match file {
+            Some(file) => format!("{header} in {file}"),
+            None => header,
+        }
     } else {
         let lvl = match level {
             DiagLevel::Error => "Error",

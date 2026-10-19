@@ -86,6 +86,13 @@ Two independent axes:
   deterministically rejects the feature), `not-qualified` (not proven either
   way), `not-applicable` (a previous stage rejects).
 
+Registry statuses were qualified on a build that contains the feature's
+source surface. A binary built without that surface's Cargo feature
+(`PROFILE_RUST` for Rust-like features, `PROFILE_LOGOS` for Logos features)
+reports the feature fail closed: `release_state` `unknown` and every stage
+`not-qualified`. The feature stays listed, so the `id` set never depends on
+the build.
+
 A stage is `qualified` only when the feature's registry probe passes it
 through the real pipeline of the same build (`check --format json`, then
 `compile` at `O0` and `O1`, `verify` and `run-smc` of both artifacts), and an

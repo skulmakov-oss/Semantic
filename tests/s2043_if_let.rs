@@ -221,6 +221,40 @@ fn bare_identifier_block_after_a_condition_is_a_block() {
     );
 }
 
+/// Adversarial review of #2052: the `else` rule is scoped to the `if` head.
+/// A shorthand record literal directly before `else` in a `guard` condition
+/// or a let-else initializer is still a record literal (valid on base).
+#[test]
+fn shorthand_record_before_else_outside_if_heads_is_unchanged() {
+    let dir = mk_temp_dir("s2043_cp05_scope");
+    run_everywhere(
+        &dir,
+        "guard_shorthand",
+        "record P {\n    v: i32,\n}\nfn check(x: P) -> i32 {\n    let v: i32 = 1;\n    guard x == P { v } else return 0;\n    return 1;\n}\nfn main() {\n    assert(check(P { v: 1 }) == 1);\n    assert(check(P { v: 2 }) == 0);\n    return;\n}\n",
+    );
+    run_everywhere(
+        &dir,
+        "let_else_shorthand",
+        "record P {\n    q: quad,\n}\nfn main() {\n    let q: quad = T;\n    let P { q: T } = P { q } else return;\n    return;\n}\n",
+    );
+    // A shorthand record literal compared in an `if` head, followed by the
+    // then-block (not by `else`), stays a record literal.
+    run_everywhere(
+        &dir,
+        "record_compare_in_if_head",
+        "record P {\n    v: i32,\n}\nfn main() {\n    let v: i32 = 1;\n    let x: P = P { v: 1 };\n    let r: i32 = if x == P { v } { 1 } else { 0 };\n    assert(r == 1);\n    return;\n}\n",
+    );
+    // A block nested in an `if` head is not an `if` head: its let-else
+    // initializer stays a record literal, so the program fails exactly as on
+    // base (let-else is not a value-block statement), not as a misparse.
+    assert_check_rejects(
+        &dir,
+        "let_else_in_block_in_if_head",
+        "record P {\n    q: quad,\n}\nfn main() {\n    let q: quad = T;\n    let c: bool = true;\n    let r: i32 = if if c { let P { q: T } = P { q } else return; true } else { false } { 1 } else { 0 };\n    assert(r == 1);\n    return;\n}\n",
+        "value-producing block currently supports only",
+    );
+}
+
 #[test]
 fn invalid_if_let_forms_fail_closed() {
     let dir = mk_temp_dir("s2043_cp05_reject");

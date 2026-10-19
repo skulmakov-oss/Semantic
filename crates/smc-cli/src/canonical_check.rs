@@ -353,13 +353,13 @@ impl Session {
 
     /// S2043 CP03: binds a composed-bundle module to a registered source,
     /// registering it on first use with the exact text the bundle reproduced.
-    fn bundle_module_source(&mut self, origin: &BundleOrigin) -> SourceId {
+    fn bundle_module_source(&mut self, origin: &BundleOrigin, text: &str) -> SourceId {
         let path = crate::source_access::strip_verbatim_prefix(&origin.path);
         if let Some(id) = self.by_path.get(&path) {
             return *id;
         }
         let identity = source_identity(&path);
-        self.register(Some(path), identity, origin.text.clone(), None)
+        self.register(Some(path), identity, text.to_string(), None)
     }
 
     fn finish(
@@ -374,8 +374,7 @@ impl Session {
             Err(error) => vec![error.diag],
         };
         let mut diagnostics = Vec::with_capacity(producer.len());
-        for diag in &producer {
-            let mut diag = diag.clone();
+        for mut diag in producer {
             let source = match &attribution {
                 CheckAttribution::RawRoot => Some(root_id),
                 // S2043 CP03: a bundle range is rebound to the one module
@@ -387,11 +386,11 @@ impl Session {
                         .as_ref()
                         .and_then(|range| origins.locate(range))
                     {
-                        Some((origin, local)) => {
+                        Some((origin, text, local)) => {
                             let source = if origin.is_root {
                                 root_id
                             } else {
-                                self.bundle_module_source(origin)
+                                self.bundle_module_source(origin, text)
                             };
                             diag.canonical.range = Some(local);
                             Some(source)
