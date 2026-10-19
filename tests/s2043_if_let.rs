@@ -89,6 +89,13 @@ fn if_let_over_option_result_and_enums_runs_at_o0_and_o1() {
         "option",
         "fn pick(o: Option(i32)) -> i32 {\n    let v: i32 = if let Option::Some(x) = o {\n        x + 1\n    } else {\n        0\n    };\n    return v;\n}\nfn main() {\n    assert(pick(Option::Some(4)) == 5);\n    let none: Option(i32) = Option::None;\n    assert(pick(none) == 0);\n    return;\n}\n",
     );
+    // A `ref` capture records Borrow(AdtPayload) exactly as `match` does
+    // and the artifact passes the verifier.
+    run_everywhere(
+        &dir,
+        "ref_capture",
+        "fn main() {\n    let opt: Option(i32) = Option::Some(4);\n    let v: i32 = if let Option::Some(ref value) = opt {\n        value\n    } else {\n        0\n    };\n    assert(v == 4);\n    return;\n}\n",
+    );
     run_everywhere(
         &dir,
         "result",
