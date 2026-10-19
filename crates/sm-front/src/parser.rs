@@ -1304,6 +1304,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Semi, "expected ';'")?;
                 return Ok(self.arena.alloc_stmt(Stmt::LetTuple { items, ty, value }));
             }
+            let name_pos = self.pos();
             let name = self.expect_symbol()?;
             if self.check(TokenKind::LBrace) {
                 if let_is_mut {
@@ -1351,12 +1352,14 @@ impl<'a> Parser<'a> {
                 });
             }
             self.expect(TokenKind::Semi, "expected ';'")?;
-            return Ok(self.arena.alloc_stmt(Stmt::Let {
+            let stmt = self.arena.alloc_stmt(Stmt::Let {
                 name,
                 is_mut: let_is_mut,
                 ty,
                 value,
-            }));
+            });
+            self.arena.set_stmt_anchor(stmt, name_pos);
+            return Ok(stmt);
         }
         if self.check(TokenKind::Ident) {
             if let Some(op) = self.peek_compound_assign_op() {
@@ -2117,6 +2120,7 @@ impl<'a> Parser<'a> {
             return self.parse_numeric_literal_expr(&token.text, token.pos);
         }
         if self.check(TokenKind::Ident) {
+            let name_pos = self.pos();
             let name = self.expect_symbol()?;
             if self.eat(TokenKind::PathSep) {
                 let variant_name = self.expect_symbol()?;
@@ -2143,7 +2147,9 @@ impl<'a> Parser<'a> {
                 )?;
                 return self.parse_record_literal_after_name(name);
             }
-            return Ok(self.arena.alloc_expr(Expr::Var(name)));
+            let var = self.arena.alloc_expr(Expr::Var(name));
+            self.arena.set_expr_anchor(var, name_pos);
+            return Ok(var);
         }
         Err(FrontendError {
             detail: None,
@@ -2236,11 +2242,16 @@ impl<'a> Parser<'a> {
     ) -> Result<Vec<RecordInitField>, FrontendError> {
         let mut fields = Vec::new();
         while !self.check(TokenKind::RBrace) {
+            let field_pos = self.pos();
             let field_name = self.expect_symbol()?;
             let value = if self.eat(TokenKind::Colon) {
                 self.parse_expr()?
             } else {
-                self.arena.alloc_expr(Expr::Var(field_name))
+                // Field shorthand `{ x }` reads the variable named by the
+                // real `x` token.
+                let var = self.arena.alloc_expr(Expr::Var(field_name));
+                self.arena.set_expr_anchor(var, field_pos);
+                var
             };
             fields.push(RecordInitField {
                 name: field_name,
@@ -2874,6 +2885,12 @@ impl<'a> Parser<'a> {
 
     fn parse_if_expr_after_kw_if(&mut self) -> Result<ExprId, FrontendError> {
         // M9.4 Wave 2: if-let expression `if let Pattern = expr { ... } else { ... }`
+        let if_pos = self
+            .idx
+            .checked_sub(1)
+            .and_then(|i| self.tokens.get(i))
+            .filter(|t| t.kind == TokenKind::KwIf)
+            .map(|t| t.pos);
         if self.eat(TokenKind::KwLet) {
             let pattern = self.parse_match_pattern()?;
             self.expect(TokenKind::Assign, "expected '=' after pattern in if-let")?;
@@ -2887,12 +2904,16 @@ impl<'a> Parser<'a> {
                 });
             }
             let else_block = self.parse_value_block()?;
-            return Ok(self.arena.alloc_expr(Expr::IfLet(IfLetExpr {
+            let if_let = self.arena.alloc_expr(Expr::IfLet(IfLetExpr {
                 pattern,
                 value,
                 then_block,
                 else_block,
-            })));
+            }));
+            if let Some(pos) = if_pos {
+                self.arena.set_expr_anchor(if_let, pos);
+            }
+            return Ok(if_let);
         }
         let condition = self.parse_expr()?;
         let then_block = self.parse_value_block()?;

@@ -89,8 +89,9 @@ RustLike admission-boundary provenance:
 - `E0000` remains the current `sm-sema` facade code for these failures; parser
   numeric-code compatibility is not frozen
 - direct-source `provider_module_id` remains `None`
-- RustLike type-check location quality is unchanged: current type-check
-  producers do not yet provide meaningful source positions
+- RustLike type-check location quality: only the anchored families listed
+  under "Location truthfulness" below carry a source position; every other
+  type-check failure is unlocated
 - imported-module diagnostic behavior remains owned by #1699
 
 ## Policy Diagnostics
@@ -375,6 +376,29 @@ Module warning provenance:
   for `SourceMark.file_id`
 - it is not an external serialization, JSON, or LSP schema contract
 - existing error provenance behavior is unchanged
+
+## Location truthfulness (S2043)
+
+A diagnostic either carries a position its producer proved or it carries
+none; no layer substitutes a guessed one.
+
+- an unlocated diagnostic is rendered by the legacy `smc check` / `smc watch`
+  text as `Error [CODE]: message (location unavailable)` with no source
+  excerpt or caret, never as `at line 1:1`; the canonical JSON keeps
+  `range: null`
+- byte offset `0` is a real position (line 1, column 1) and is rendered as
+  one; "no position" is never encoded as offset `0`
+- the RustLike type checker anchors exactly three failure families at a
+  token the parser recorded: a `let` binding type mismatch at the binding
+  name, an unknown variable at its identifier, and an `if let` pattern or
+  branch-type failure at its `if` keyword; the range is that token's exact
+  extent, proven against the analyzed source tokens
+- a range that refers to a composed executable bundle is never presented as a
+  position of the root or of one helper file; it is either mapped back to the
+  single original source it lies in or the diagnostic is unlocated
+- `smc compile` failure text keeps the legacy `at <byte offset>: message`
+  form; for anchored type-check failures the offset is the proven anchor,
+  while unanchored failures still report offset `0` there (known limit)
 
 ## Diagnostic Stability Rules
 

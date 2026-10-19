@@ -16,8 +16,11 @@
 //! reported byte offset is the start of a lexical token of the *same* token
 //! stream the parser consumed, and that token's text is byte-identical to the
 //! source at that offset; the range is then exactly that token's extent.
-//! Type-checker errors carry no positional authority at all (the checker
-//! reports offset `0` for every error) and therefore never carry a range.
+//! Type-checker errors carry positional authority only when the checker
+//! attached a parser-recorded anchor as structured detail (S2043 CP02: `let`
+//! binding mismatches, unknown variables and `if let` pattern/branch
+//! failures); the range is then proven under the same token rule. Every other
+//! type-checker error reports offset `0` and never carries a range.
 
 use crate::lexer::LexFailure;
 use crate::types::{FrontendError, FrontendErrorKind, Token, TokenKind};
@@ -141,8 +144,8 @@ impl FrontendDiagnostic {
         }
     }
 
-    /// RustLike type-checker failure. The type checker has no positional
-    /// authority, so the range is always absent.
+    /// RustLike type-checker failure without its source text: the range is
+    /// always absent.
     pub fn from_type_check_error(error: &FrontendError) -> Self {
         Self {
             stage: FrontendStage::TypeCheck,
@@ -150,6 +153,22 @@ impl FrontendDiagnostic {
             message: error.message.clone(),
             range: None,
             related: Vec::new(),
+        }
+    }
+
+    /// RustLike type-checker failure over `tokens`, which must be the exact
+    /// token stream of the `source` the checked program was parsed from.
+    /// A range exists only when the checker attached an anchor and that
+    /// anchor is the start of a byte-identical token of `source`.
+    pub fn from_type_check_error_in(source: &str, tokens: &[Token], error: &FrontendError) -> Self {
+        let range = error
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.items.first())
+            .and_then(|item| token_anchor_range(source, tokens, item.pos));
+        Self {
+            range,
+            ..Self::from_type_check_error(error)
         }
     }
 

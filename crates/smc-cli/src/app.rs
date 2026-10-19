@@ -1,7 +1,7 @@
 use crate::application_host::CliApplicationHost;
 use crate::executable_bundle::{
     compose_executable_bundle, prepare_source, read_raw_source, rustlike_effective_program,
-    PrepareSourceError, PreparedSource,
+    rustlike_effective_program_with_origins, BundleOrigins, PrepareSourceError, PreparedSource,
 };
 use crate::incremental::{
     emit_trace, module_graph_fingerprint, module_graph_module_count, read_graph_hash,
@@ -183,22 +183,39 @@ fn check_root_with_project_authority(
     provider: &dyn ModuleProvider,
     parser_profile: &ParserProfile,
 ) -> Result<sm_sema::SemanticReport, sm_sema::SemanticError> {
-    check_root_with_attribution(
+    let (result, attribution) = check_root_with_attribution(
         root_canon,
         raw_source,
         prepared,
         provider,
         parser_profile,
         &DiskSources,
-    )
-    .0
+    );
+    match attribution {
+        // S2043 CP02/CP03: a range into a composed bundle is not a position
+        // of the bundle text. It is shown in the one module file it lies in
+        // verbatim (naming that file unless it is the root), or not at all.
+        CheckAttribution::ComposedBundle(origins) => result.map_err(|error| {
+            let Some(range) = error.diag.canonical.range.clone() else {
+                return error;
+            };
+            match origins.locate(&range) {
+                Some((origin, local)) => {
+                    let label = (!origin.is_root).then_some(origin.display.as_str());
+                    error.relocated(&origin.text, Some(local), label)
+                }
+                None => error.relocated("", None, None),
+            }
+        }),
+        CheckAttribution::RawRoot | CheckAttribution::ProviderModules => result,
+    }
 }
 
 /// SSF-09 #1580: which source text the diagnostics of one
 /// [`check_root_with_attribution`] run were produced from. The canonical
 /// check path uses it to bind each diagnostic to a source without
 /// guessing: the answer is fixed by the branch the frozen authority took.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CheckAttribution {
     /// Project mechanism: a diagnostic belongs to the module named by its
     /// `provider_module_id`; one without it has no single source.
@@ -206,8 +223,10 @@ pub(crate) enum CheckAttribution {
     /// Direct check of the raw root text: every diagnostic belongs to it.
     RawRoot,
     /// The checked text was a composed executable bundle, not any one
-    /// source file: no diagnostic can be bound to a source.
-    ComposedBundle,
+    /// source file. S2043 CP03: a diagnostic range is bound to the one
+    /// module file it lies in verbatim (`BundleOrigins::locate`); any other
+    /// diagnostic has no source.
+    ComposedBundle(BundleOrigins),
 }
 
 /// The single dispatch behind `smc check` (legacy and canonical output)
@@ -229,18 +248,18 @@ pub(crate) fn check_root_with_attribution(
             CheckAttribution::ProviderModules,
         ),
         PreparedSource::RustLikeOwned(Ok(program)) => {
-            match rustlike_effective_program(
+            match rustlike_effective_program_with_origins(
                 root_canon,
                 raw_source,
                 program,
                 parser_profile,
                 access,
             ) {
-                Ok((effective_source, effective_program)) => {
+                Ok((effective_source, effective_program, origins)) => {
                     let attribution = if effective_source == raw_source {
                         CheckAttribution::RawRoot
                     } else {
-                        CheckAttribution::ComposedBundle
+                        CheckAttribution::ComposedBundle(origins)
                     };
                     (
                         check_rustlike_program(&effective_program, &effective_source),
@@ -249,7 +268,7 @@ pub(crate) fn check_root_with_attribution(
                 }
                 Err(message) => (
                     Err(bundler_semantic_error(message)),
-                    CheckAttribution::ComposedBundle,
+                    CheckAttribution::ComposedBundle(BundleOrigins::default()),
                 ),
             }
         }

@@ -158,7 +158,7 @@ keeps its historical host detail.
 | `sm-front` RustLike parser | `FrontendDiagnostic::from_parse_error` | `E0005` syntax, `E0006` policy | exact extent of the token at the reported offset |
 | `sm-front` Logos parser | `FrontendDiagnostic::from_parse_error` (structured `FrontendErrorDetail`) | the parser's own `E02xx` codes | anchor token extent; recovered errors as `related` |
 | `sm-front` surface resolution | `FrontendDiagnostic::surface_resolution` | `E0007` ambiguous, `E0008` no claim | none (whole input) |
-| `sm-front` type checker | `FrontendDiagnostic::from_type_check_error` | `E0201` | none: the type checker has no position authority |
+| `sm-front` type checker | `FrontendDiagnostic::from_type_check_error_in` | `E0201` | S2043: exact extent of the parser-recorded anchor token for `let` binding type mismatches (binding name), unknown variables (identifier) and `if let` pattern/branch failures (`if` keyword); none for every other type-check failure |
 | `smc-cli` executable bundle composition | `bundler_semantic_error` | `E0009` | none |
 | `sm-sema` | `SemanticDiagnostic::to_canonical` | `sm-sema` codes (`E02xx`, `W02xx`) | extent of the lexical token whose mark the analyzer reported |
 | `sm-verify` | `VerificationDiagnostic::to_canonical`, `RejectReport::to_canonical` | stable `V0001`-`V0032` tokens | none: artifact offsets are notes, never ranges |

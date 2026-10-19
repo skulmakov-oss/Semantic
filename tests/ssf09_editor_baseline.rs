@@ -259,8 +259,10 @@ fn lexer_error_keeps_lexer_code_and_exact_range() {
 #[test]
 fn unprovable_ranges_are_absent_never_fabricated() {
     let dir = fixture_dir("rootless");
+    // S2043 CP02: `type_error.sm` (a `let` binding mismatch) is now an
+    // anchored type-check family; a return-type mismatch is not.
     for (file, code) in [
-        ("type_error.sm", "E0201"),
+        ("type_error_unanchored.sm", "E0201"),
         ("no_surface_claim.sm", "E0008"),
         ("ambiguous_surface.sm", "E0007"),
     ] {
@@ -274,6 +276,21 @@ fn unprovable_ranges_are_absent_never_fabricated() {
             "{file}: no producer range authority"
         );
     }
+}
+
+#[test]
+fn anchored_type_check_range_is_the_binding_name() {
+    // S2043 CP02: the parser-recorded binding-name anchor is proven against
+    // the source tokens, so the range is exactly `x`.
+    let dir = fixture_dir("rootless");
+    let (_, json) = check_json(&dir, "type_error.sm");
+    let d = only_diag(&json);
+    assert_eq!(d["code"], "E0201");
+    assert_eq!(d["source"], 0);
+    let text = fs::read_to_string(dir.join("type_error.sm")).unwrap();
+    assert_eq!(range_text(&text, d), "x");
+    assert_eq!(d["range"]["start"]["line"], 2);
+    assert_eq!(d["range"]["start"]["column"], 9);
 }
 
 #[test]
@@ -787,7 +804,7 @@ fn lsp_projects_recovered_errors_as_related_information() {
 #[test]
 fn lsp_absent_range_is_marked_not_claimed() {
     let dir = fixture_dir("rootless");
-    let path = dir.join("type_error.sm");
+    let path = dir.join("type_error_unanchored.sm");
     let uri = file_uri(&path);
     let mut msgs = init(Some(&dir));
     msgs.push(open(&uri, 1, &fs::read_to_string(&path).unwrap()));

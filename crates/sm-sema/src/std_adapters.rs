@@ -195,6 +195,43 @@ impl core::fmt::Display for SemanticError {
 
 impl std::error::Error for SemanticError {}
 
+impl SemanticError {
+    /// S2043 CP02/CP03: re-anchors this diagnostic onto `source` at `range`
+    /// (a byte range of `source`), or makes it unlocated when `range` is
+    /// `None`. Used when the producer analyzed a composed text whose ranges
+    /// must not be presented as positions of any single file: the caller maps
+    /// the range back to the one original source it lies in, or drops it.
+    /// `file` names that source in the rendered location when it is not the
+    /// checked root. Code, level and message are unchanged.
+    pub fn relocated(
+        mut self,
+        source: &str,
+        range: Option<Range<usize>>,
+        file: Option<&str>,
+    ) -> Self {
+        let mark = range
+            .as_ref()
+            .map(|range| source_mark_from_byte_offset(source, range.start))
+            .unwrap_or_default();
+        let fresh = render_diag(
+            self.diag.level,
+            self.diag.code,
+            self.diag.message.clone(),
+            mark,
+            source,
+        );
+        self.diag.mark = fresh.mark;
+        self.diag.rendered = match (file, fresh.rendered.split_once('\n')) {
+            (Some(file), Some((header, body))) if range.is_some() => {
+                format!("{header} in {file}\n{body}")
+            }
+            _ => fresh.rendered,
+        };
+        self.diag.canonical.range = range;
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticReport {
     pub warnings: Vec<SemanticDiagnostic>,
@@ -277,12 +314,21 @@ pub fn check_rustlike_program(
     program: &Program,
     source: &str,
 ) -> Result<SemanticReport, SemanticError> {
-    type_check_program(program).map_err(|e| SemanticError {
-        diag: render_frontend_diag(
-            FrontendDiagnostic::from_type_check_error(&e),
-            SourceMark::default(),
-            source,
-        ),
+    type_check_program(program).map_err(|e| {
+        // S2043 CP02: a checker-attached anchor becomes a range only when it
+        // is proven against the tokens of the very text `program` came from.
+        let frontend = match lex(source) {
+            Ok(tokens) => FrontendDiagnostic::from_type_check_error_in(source, &tokens, &e),
+            Err(_) => FrontendDiagnostic::from_type_check_error(&e),
+        };
+        let mark = frontend
+            .range
+            .as_ref()
+            .map(|range| source_mark_from_byte_offset(source, range.start))
+            .unwrap_or_default();
+        SemanticError {
+            diag: render_frontend_diag(frontend, mark, source),
+        }
     })?;
     Ok(SemanticReport {
         warnings: Vec::new(),
@@ -1178,17 +1224,33 @@ fn render_diag(
     let mut sm = SourceMap::new();
     let file_id = sm.add_file("<input>", source);
     let mark = SourceMark { file_id, ..mark };
-    let mut body = render_context_with_caret(sm.source(file_id).unwrap_or(""), mark, 2);
+    // S2043 CP02: lines are 1-based, so line 0 is the "no proven position"
+    // mark. It renders as unavailable instead of a fabricated `1:1` caret;
+    // a genuine first-byte position is line 1 and renders normally.
+    let located = mark.line != 0 && mark.col != 0;
+    let mut body = if located {
+        render_context_with_caret(sm.source(file_id).unwrap_or(""), mark, 2)
+    } else {
+        String::new()
+    };
     if let Some(help) = diagnostic_help_core(code) {
         append_help_line(&mut body, help);
     }
-    let header = format_diagnostic_header(
-        to_core_diag_level(level),
-        code,
-        &message,
-        mark.line.max(1),
-        mark.col.max(1),
-    );
+    let header = if located {
+        format_diagnostic_header(
+            to_core_diag_level(level),
+            code,
+            &message,
+            mark.line,
+            mark.col,
+        )
+    } else {
+        let lvl = match level {
+            DiagLevel::Error => "Error",
+            DiagLevel::Warning => "Warning",
+        };
+        format!("{lvl} [{code}]: {message} (location unavailable)")
+    };
     let rendered = format!("{header}\n{body}");
     let range = mark_token_range(source, mark);
     SemanticDiagnostic {
@@ -2560,7 +2622,24 @@ Law "Alpha" [priority 7]:
         let profile = ParserProfile::foundation_default();
         let err = check_source_with_profile(src, &profile).expect_err("type check must fail");
         assert_eq!(err.diag.code, "E0201");
+        // S2043 CP02: a `let` binding mismatch is anchored at the binding
+        // name the parser recorded; the range is that token exactly.
+        let start = src.find("value").unwrap();
+        assert_eq!(
+            (err.diag.mark.line, err.diag.mark.col),
+            (1, start as u32 + 1)
+        );
+        assert_eq!(err.diag.canonical.range, Some(start..start + "value".len()));
+        assert_eq!(err.diag.frontend_error_kind, None);
+
+        // A family without a recorded anchor stays unlocated.
+        let src = "fn main() -> i32 { return true; }";
+        let err = check_source_with_profile(src, &profile).expect_err("type check must fail");
+        assert_eq!(err.diag.code, "E0201");
         assert_eq!(err.diag.mark, SourceMark::default());
+        assert_eq!(err.diag.canonical.range, None);
+        assert!(err.diag.rendered.contains("(location unavailable)"));
+        assert!(!err.diag.rendered.contains("at line"));
         assert_eq!(err.diag.frontend_error_kind, None);
     }
 

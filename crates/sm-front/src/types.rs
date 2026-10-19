@@ -870,11 +870,12 @@ pub enum FrontendErrorKind {
 pub struct FrontendError {
     pub pos: usize,
     pub message: String,
-    /// SSF-09 C1A: structured producer detail, attached only by a grammar
-    /// parser that knows each underlying error's own code, bare message and
-    /// anchor offset (today: the Logos parser, whose `message` is a legacy
-    /// pre-rendered presentation block). `None` means `message` itself is
-    /// the frontend's bare diagnostic text.
+    /// SSF-09 C1A: structured producer detail, attached only by a producer
+    /// that knows each underlying error's own code, bare message and anchor
+    /// offset: the Logos parser (whose `message` is a legacy pre-rendered
+    /// presentation block) and, since S2043 CP02, the RustLike type checker
+    /// for anchored failures (whose `message` is already bare). `None` means
+    /// `message` itself is the frontend's bare diagnostic text.
     pub detail: Option<FrontendErrorDetail>,
 }
 
@@ -1326,15 +1327,67 @@ pub struct LogosProgram {
     pub legacy_directives: Vec<LogosLegacyDirective>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Clone, Default)]
 pub struct AstArena {
     exprs: Vec<Expr>,
     stmts: Vec<Stmt>,
     sigtable: SigTable,
     pub(crate) symbol_to_id: BTreeMap<String, SymbolId>,
+    anchors: SourceAnchors,
+}
+
+/// S2043 CP02: source byte offsets the parser recorded for selected nodes,
+/// read back by the type checker to anchor its diagnostics. An anchor is
+/// presentation metadata, not part of the program: two arenas that differ
+/// only in anchors are the same AST (`PartialEq`), and the `Debug` rendering
+/// (the `dump-ast` / `hash-ast` text) is unchanged by them.
+#[derive(Clone, Default)]
+struct SourceAnchors {
+    exprs: BTreeMap<u32, usize>,
+    stmts: BTreeMap<u32, usize>,
+}
+
+impl PartialEq for AstArena {
+    fn eq(&self, other: &Self) -> bool {
+        self.exprs == other.exprs
+            && self.stmts == other.stmts
+            && self.sigtable == other.sigtable
+            && self.symbol_to_id == other.symbol_to_id
+    }
+}
+
+impl core::fmt::Debug for AstArena {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("AstArena")
+            .field("exprs", &self.exprs)
+            .field("stmts", &self.stmts)
+            .field("sigtable", &self.sigtable)
+            .field("symbol_to_id", &self.symbol_to_id)
+            .finish()
+    }
 }
 
 impl AstArena {
+    /// Records the source byte offset of the token that begins `id`.
+    pub fn set_expr_anchor(&mut self, id: ExprId, offset: usize) {
+        self.anchors.exprs.insert(id.0, offset);
+    }
+
+    /// Records the source byte offset of the token that anchors `id`.
+    pub fn set_stmt_anchor(&mut self, id: StmtId, offset: usize) {
+        self.anchors.stmts.insert(id.0, offset);
+    }
+
+    /// The parser-recorded source offset of `id`, if one was recorded.
+    pub fn expr_anchor(&self, id: ExprId) -> Option<usize> {
+        self.anchors.exprs.get(&id.0).copied()
+    }
+
+    /// The parser-recorded source offset of `id`, if one was recorded.
+    pub fn stmt_anchor(&self, id: StmtId) -> Option<usize> {
+        self.anchors.stmts.get(&id.0).copied()
+    }
+
     pub fn alloc_expr(&mut self, expr: Expr) -> ExprId {
         let id = ExprId(self.exprs.len() as u32);
         self.exprs.push(expr);
