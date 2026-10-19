@@ -202,6 +202,17 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         evidence_suite: EVIDENCE,
     },
     LanguageFeature {
+        id: "literal.ascii_byte",
+        release_state: ReleaseState::CurrentMainExperimental,
+        stages: EXECUTABLE,
+        probe: "fn main() {\n    const EQ: u32 = b'=';\n    assert(EQ == 61u32);\n    assert(b'\\n' == 10u32);\n    assert(b'\\x7F' == 127u32);\n    return;\n}\n",
+        negative_probe: Some((
+            "fn main() {\n    let x: i32 = b'a';\n    let _ = x;\n    return;\n}\n",
+            Stage::Typecheck,
+        )),
+        evidence_suite: EVIDENCE,
+    },
+    LanguageFeature {
         id: "logic.bool.and_or",
         release_state: ReleaseState::FoundationIncluded,
         stages: EXECUTABLE,

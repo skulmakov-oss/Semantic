@@ -1125,6 +1125,9 @@ pub enum TokenKind {
     QuadS,
     Ident,
     Num,
+    /// S2043 CP07: an ASCII byte literal `b'...'`; the token text is the
+    /// exact source spelling, its value a `u32` in `0..=127`.
+    ByteLit,
     String,
     AndAnd,
     OrOr,

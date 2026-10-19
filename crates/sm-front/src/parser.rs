@@ -2119,6 +2119,14 @@ impl<'a> Parser<'a> {
             let token = self.advance();
             return self.parse_numeric_literal_expr(&token.text, token.pos);
         }
+        if self.check(TokenKind::ByteLit) {
+            // S2043 CP07: `b'='` is exactly the `u32` literal `61u32`, decoded
+            // here and parsed through the same numeric-literal path.
+            let token = self.advance();
+            let value = crate::lexer::ascii_byte_literal_value(&token.text)
+                .ok_or_else(|| FrontendError::syntax(token.pos, "invalid byte literal"))?;
+            return self.parse_numeric_literal_expr(&format!("{value}u32"), token.pos);
+        }
         if self.check(TokenKind::Ident) {
             let name_pos = self.pos();
             let name = self.expect_symbol()?;

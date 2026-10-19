@@ -329,6 +329,18 @@ fn tokenize_line(
                     col,
                 );
             }
+            b'b' if bytes.get(i + 1) == Some(&b'\'') => {
+                let end = scan_ascii_byte_literal(line_text, start, line_no, line_start)?;
+                push_tok(
+                    out,
+                    TokenKind::ByteLit,
+                    &line_text[start..end],
+                    abs_pos,
+                    line_no,
+                    col,
+                );
+                i = end;
+            }
             a if a.is_ascii_alphabetic() => {
                 i += 1;
                 while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
@@ -402,6 +414,128 @@ fn tokenize_line(
         }
     }
     Ok(())
+}
+
+/// S2043 CP07: scans the ASCII byte literal starting with `b'` at `start` and
+/// returns the byte index just past its closing quote. Grammar:
+/// `b'` (printable ASCII 0x20..=0x7E except `'` and `\` | `\0` `\t` `\n` `\r`
+/// `\'` `\\` `\"` | `\x` HEX HEX with value <= 0x7F) `'`. Every malformed
+/// spelling is an `E0001` anchored at the offending character, or at the
+/// whole partial literal when the line ends first.
+fn scan_ascii_byte_literal(
+    line_text: &str,
+    start: usize,
+    line_no: u32,
+    line_start: usize,
+) -> Result<usize, LexFailure> {
+    let line_end = line_text.trim_end_matches('\r').len();
+    let fail_at = |at: usize, detail: &str| {
+        if at >= line_end {
+            return fmt_mark_error(
+                "E0001",
+                line_no,
+                (start + 1) as u32,
+                line_text,
+                "invalid byte literal: unterminated",
+                line_start + start,
+                Some(line_start + start..line_start + line_end),
+            );
+        }
+        let ch = line_text[at..].chars().next().unwrap_or('\u{fffd}');
+        fmt_mark_error(
+            "E0001",
+            line_no,
+            (at + 1) as u32,
+            line_text,
+            &format!("invalid byte literal: {detail}"),
+            line_start + at,
+            Some(line_start + at..line_start + at + ch.len_utf8()),
+        )
+    };
+    let bytes = line_text.as_bytes();
+    let content = start + 2;
+    let byte_at = |at: usize| (at < line_end).then(|| bytes[at]);
+    let after_content = match byte_at(content) {
+        None => return Err(fail_at(content, "")),
+        Some(b'\'') => return Err(fail_at(content, "empty")),
+        Some(b'\\') => match byte_at(content + 1) {
+            None => return Err(fail_at(content + 1, "")),
+            Some(b'0' | b't' | b'n' | b'r' | b'\'' | b'\\' | b'"') => content + 2,
+            Some(b'x') => {
+                let hi = content + 2;
+                match byte_at(hi) {
+                    None => return Err(fail_at(hi, "")),
+                    Some(b'0'..=b'7') => {}
+                    Some(d) if d.is_ascii_hexdigit() => {
+                        return Err(fail_at(hi, "\\x escape above \\x7F is not ASCII"))
+                    }
+                    Some(_) => {
+                        let found = line_text[hi..].chars().next().unwrap_or('\u{fffd}');
+                        return Err(fail_at(hi, &format!("expected hex digit, found '{found}'")));
+                    }
+                }
+                match byte_at(hi + 1) {
+                    None => return Err(fail_at(hi + 1, "")),
+                    Some(d) if d.is_ascii_hexdigit() => hi + 2,
+                    Some(_) => {
+                        let found = line_text[hi + 1..].chars().next().unwrap_or('\u{fffd}');
+                        return Err(fail_at(
+                            hi + 1,
+                            &format!("expected hex digit, found '{found}'"),
+                        ));
+                    }
+                }
+            }
+            Some(_) => {
+                let found = line_text[content + 1..]
+                    .chars()
+                    .next()
+                    .unwrap_or('\u{fffd}');
+                return Err(fail_at(content + 1, &format!("unknown escape '\\{found}'")));
+            }
+        },
+        Some(c) if (0x20..=0x7E).contains(&c) => content + 1,
+        Some(c) if c.is_ascii() => {
+            return Err(fail_at(
+                content,
+                &format!("control character U+{c:04X} must be escaped"),
+            ))
+        }
+        Some(_) => {
+            let found = line_text[content..].chars().next().unwrap_or('\u{fffd}');
+            return Err(fail_at(content, &format!("non-ASCII character '{found}'")));
+        }
+    };
+    match byte_at(after_content) {
+        Some(b'\'') => Ok(after_content + 1),
+        None => Err(fail_at(after_content, "")),
+        Some(_) => {
+            let found = line_text[after_content..]
+                .chars()
+                .next()
+                .unwrap_or('\u{fffd}');
+            Err(fail_at(
+                after_content,
+                &format!("expected closing quote, found '{found}'"),
+            ))
+        }
+    }
+}
+
+/// S2043 CP07: the value of a byte literal token the lexer admitted.
+pub fn ascii_byte_literal_value(text: &str) -> Option<u32> {
+    let inner = text.strip_prefix("b'")?.strip_suffix('\'')?;
+    let value = match inner.as_bytes() {
+        [c] => *c as u32,
+        [b'\\', b'0'] => 0,
+        [b'\\', b't'] => 9,
+        [b'\\', b'n'] => 10,
+        [b'\\', b'r'] => 13,
+        [b'\\', c @ (b'\'' | b'\\' | b'"')] => *c as u32,
+        [b'\\', b'x', _, _] => u32::from_str_radix(&inner[2..], 16).ok()?,
+        _ => return None,
+    };
+    (value <= 0x7F).then_some(value)
 }
 
 fn compute_indent(line: &str) -> usize {
