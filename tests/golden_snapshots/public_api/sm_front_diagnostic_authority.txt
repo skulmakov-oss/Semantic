@@ -26,6 +26,7 @@ pub range: Option<Range<usize>>,
 pub fn from_lex_failure(failure: &LexFailure) -> Self {
 pub fn from_parse_error(source: &str, tokens: &[Token], error: &FrontendError) -> Self {
 pub fn from_type_check_error(error: &FrontendError) -> Self {
+pub fn from_type_check_error_in(source: &str, tokens: &[Token], error: &FrontendError) -> Self {
 pub fn surface_resolution(code: &'static str, message: String) -> Self {
 pub const fn severity(&self) -> DiagnosticSeverity {
 pub fn to_canonical(&self, source: Option<SourceId>) -> Option<Diagnostic> {

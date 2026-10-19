@@ -16,7 +16,18 @@
       "family": "frontend",
       "message": "type mismatch in let 'x': I32 vs Bool",
       "source": 0,
-      "range": null,
+      "range": {
+        "start": {
+          "offset": 20,
+          "line": 2,
+          "column": 9
+        },
+        "end": {
+          "offset": 21,
+          "line": 2,
+          "column": 10
+        }
+      },
       "related": [],
       "notes": [],
       "fix": null,

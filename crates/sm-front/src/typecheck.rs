@@ -1318,7 +1318,8 @@ fn check_stmt(
                     *value,
                     arena,
                     format!("let '{}'", resolve_symbol_name(arena, *name)?),
-                )?;
+                )
+                .map_err(|e| anchor_type_error(e, arena.stmt_anchor(stmt_id)))?;
                 expected_ty
             } else {
                 let vt = infer_expr_type(
@@ -2719,11 +2720,14 @@ fn infer_expr_type(
         ),
         Expr::Var(v) => {
             // M9.9: path check moved to top of infer_expr_type via expr_access_path.
-            env.get(*v).ok_or(FrontendError {
-                detail: None,
-                pos: 0,
-                message: format!("unknown variable '{}'", resolve_symbol_name(arena, *v)?),
-            })
+            env.get(*v).ok_or(anchor_type_error(
+                FrontendError {
+                    detail: None,
+                    pos: 0,
+                    message: format!("unknown variable '{}'", resolve_symbol_name(arena, *v)?),
+                },
+                arena.expr_anchor(expr_id),
+            ))
         }
         Expr::Block(block) => {
             let (ty, result_env) = infer_value_block_type(
@@ -2853,7 +2857,8 @@ fn infer_expr_type(
                 env,
                 record_table,
                 adt_table,
-            )?;
+            )
+            .map_err(|e| anchor_type_error(e, arena.expr_anchor(expr_id)))?;
             let (then_ty, mut then_result_env) = infer_value_block_type(
                 &if_let.then_block,
                 arena,
@@ -2881,14 +2886,17 @@ fn infer_expr_type(
                 impl_list,
             )?;
             if then_ty != else_ty {
-                return Err(FrontendError {
-                    detail: None,
-                    pos: 0,
-                    message: format!(
-                        "if-let branch type mismatch: then is {:?}, else is {:?}",
-                        then_ty, else_ty
-                    ),
-                });
+                return Err(anchor_type_error(
+                    FrontendError {
+                        detail: None,
+                        pos: 0,
+                        message: format!(
+                            "if-let branch type mismatch: then is {:?}, else is {:?}",
+                            then_ty, else_ty
+                        ),
+                    },
+                    arena.expr_anchor(expr_id),
+                ));
             }
             env.join_ownership_from(&[then_result_env, else_result_env])?;
             Ok(then_ty)
@@ -17185,6 +17193,25 @@ fn ensure_binding_value_type(
     })
 }
 
+/// S2043 CP02: attaches a parser-recorded source anchor to a type-check
+/// error. The anchor travels as structured producer detail, so the canonical
+/// projection can prove a range against the source tokens; `pos` alone stays
+/// a legacy point. An error that already carries detail keeps it, and a
+/// missing anchor leaves the error unlocated.
+fn anchor_type_error(mut error: FrontendError, anchor: Option<usize>) -> FrontendError {
+    if let (None, Some(pos)) = (&error.detail, anchor) {
+        error.pos = pos;
+        error.detail = Some(crate::types::FrontendErrorDetail {
+            items: alloc::vec![crate::types::FrontendErrorItem {
+                code: crate::diagnostic_authority::FRONTEND_TYPE_CHECK_CODE,
+                message: error.message.clone(),
+                pos,
+            }],
+        });
+    }
+    error
+}
+
 fn ensure_const_initializer_safe(
     expr_id: ExprId,
     arena: &AstArena,
@@ -17729,11 +17756,14 @@ fn infer_expr_type_no_check(
         Expr::Var(v) => {
             // No path check here; the outer infer_expr_type call for the full
             // field/index expression already checked the correct sub-path.
-            env.get(*v).ok_or(FrontendError {
-                detail: None,
-                pos: 0,
-                message: format!("unknown variable '{}'", resolve_symbol_name(arena, *v)?),
-            })
+            env.get(*v).ok_or(anchor_type_error(
+                FrontendError {
+                    detail: None,
+                    pos: 0,
+                    message: format!("unknown variable '{}'", resolve_symbol_name(arena, *v)?),
+                },
+                arena.expr_anchor(expr_id),
+            ))
         }
         Expr::RecordField(field_expr) if expr_access_path(expr_id, arena).is_some() => {
             // Same no-check contract as the Var case above, recursed one

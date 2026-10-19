@@ -25,6 +25,7 @@ pub fn to_canonical(&self, source: Option<SourceId>) -> Option<CanonicalDiagnost
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticError {
 pub diag: SemanticDiagnostic,
+pub fn relocated( mut self, source: &str, range: Option<Range<usize>>, file: Option<&str>, ) -> Self {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticReport {
 pub warnings: Vec<SemanticDiagnostic>,

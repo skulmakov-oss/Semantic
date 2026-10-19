@@ -18,7 +18,7 @@
 //! part of the external schema.
 
 use crate::app::{check_root_with_attribution, cli_profile, CheckAttribution};
-use crate::executable_bundle::{prepare_source_text, PrepareSourceError};
+use crate::executable_bundle::{prepare_source_text, BundleOrigin, PrepareSourceError};
 use crate::package_manifest::{
     admit_package_entry_module, resolve_package_import_path,
     resolve_project_root_check_entry_portable,
@@ -351,6 +351,17 @@ impl Session {
         Some(self.register(Some(canonical), identity, text, None))
     }
 
+    /// S2043 CP03: binds a composed-bundle module to a registered source,
+    /// registering it on first use with the exact text the bundle reproduced.
+    fn bundle_module_source(&mut self, origin: &BundleOrigin) -> SourceId {
+        let path = crate::source_access::strip_verbatim_prefix(&origin.path);
+        if let Some(id) = self.by_path.get(&path) {
+            return *id;
+        }
+        let identity = source_identity(&path);
+        self.register(Some(path), identity, origin.text.clone(), None)
+    }
+
     fn finish(
         mut self,
         result: Result<sm_sema::SemanticReport, sm_sema::SemanticError>,
@@ -364,14 +375,36 @@ impl Session {
         };
         let mut diagnostics = Vec::with_capacity(producer.len());
         for diag in &producer {
-            let source = match attribution {
+            let mut diag = diag.clone();
+            let source = match &attribution {
                 CheckAttribution::RawRoot => Some(root_id),
-                CheckAttribution::ComposedBundle => None,
+                // S2043 CP03: a bundle range is rebound to the one module
+                // file it lies in verbatim, as that file's own range.
+                CheckAttribution::ComposedBundle(origins) => {
+                    match diag
+                        .canonical
+                        .range
+                        .as_ref()
+                        .and_then(|range| origins.locate(range))
+                    {
+                        Some((origin, local)) => {
+                            let source = if origin.is_root {
+                                root_id
+                            } else {
+                                self.bundle_module_source(origin)
+                            };
+                            diag.canonical.range = Some(local);
+                            Some(source)
+                        }
+                        None => None,
+                    }
+                }
                 CheckAttribution::ProviderModules => match &diag.provider_module_id {
                     Some(module_id) => self.provider_source(module_id, served),
                     None => None,
                 },
             };
+            let diag = &diag;
             if let (Some(source), Some(range)) = (source, &diag.canonical.range) {
                 let text = &self
                     .sources
