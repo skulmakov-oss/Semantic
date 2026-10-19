@@ -8069,9 +8069,9 @@ fn lower_stmt(
             }
             then_env.pop_scope();
             ctx.lowered_locals.pop_scope();
-            ctx.instrs.push(IrInstr::Jmp {
-                label: end_label.clone(),
-            });
+            // S2043 CP04: a branch that ended in `Ret` has no edge to the
+            // join; the join exists only when some branch falls through.
+            let mut join_reached = ctx.jump_to_join_unless_returned(&end_label);
 
             ctx.instrs.push(IrInstr::Label { name: else_label });
             let mut else_env = env.clone();
@@ -8091,11 +8091,11 @@ fn lower_stmt(
             }
             else_env.pop_scope();
             ctx.lowered_locals.pop_scope();
-            ctx.instrs.push(IrInstr::Jmp {
-                label: end_label.clone(),
-            });
+            join_reached |= ctx.jump_to_join_unless_returned(&end_label);
 
-            ctx.instrs.push(IrInstr::Label { name: end_label });
+            if join_reached {
+                ctx.instrs.push(IrInstr::Label { name: end_label });
+            }
             Ok(())
         }
         Stmt::Match {
@@ -8165,6 +8165,7 @@ fn lower_stmt(
             };
 
             let mid = ctx.next_if_id();
+            let mut join_reached = false;
             let end_label = format!("match_{}_end", mid);
             let default_label = format!("match_{}_default", mid);
             let arm_labels: Vec<String> = (0..arms.len())
@@ -8214,9 +8215,7 @@ fn lower_stmt(
                         }
                         arm_env.pop_scope();
                         ctx.lowered_locals.pop_scope();
-                        ctx.instrs.push(IrInstr::Jmp {
-                            label: end_label.clone(),
-                        });
+                        join_reached |= ctx.jump_to_join_unless_returned(&end_label);
                     }
                 }
                 Type::Quad => {
@@ -8296,9 +8295,7 @@ fn lower_stmt(
                         }
                         arm_env.pop_scope();
                         ctx.lowered_locals.pop_scope();
-                        ctx.instrs.push(IrInstr::Jmp {
-                            label: end_label.clone(),
-                        });
+                        join_reached |= ctx.jump_to_join_unless_returned(&end_label);
                     }
                 }
                 Type::I32 | Type::U32 => {
@@ -8382,9 +8379,7 @@ fn lower_stmt(
                         }
                         arm_env.pop_scope();
                         ctx.lowered_locals.pop_scope();
-                        ctx.instrs.push(IrInstr::Jmp {
-                            label: end_label.clone(),
-                        });
+                        join_reached |= ctx.jump_to_join_unless_returned(&end_label);
                     }
                 }
                 Type::Adt(_) | Type::Option(_) | Type::Result(_, _) => {
@@ -8493,9 +8488,7 @@ fn lower_stmt(
                         }
                         arm_env.pop_scope();
                         ctx.lowered_locals.pop_scope();
-                        ctx.instrs.push(IrInstr::Jmp {
-                            label: end_label.clone(),
-                        });
+                        join_reached |= ctx.jump_to_join_unless_returned(&end_label);
                     }
                 }
                 _ => unreachable!("non-matchable scrutinee handled above"),
@@ -8533,11 +8526,13 @@ fn lower_stmt(
                 def_env.pop_scope();
                 ctx.lowered_locals.pop_scope();
             }
-            ctx.instrs.push(IrInstr::Jmp {
-                label: end_label.clone(),
-            });
+            // The exhaustive-without-default trap path ends in `Assert`, not
+            // `Ret`, so it still reaches the join (no artificial return).
+            join_reached |= ctx.jump_to_join_unless_returned(&end_label);
 
-            ctx.instrs.push(IrInstr::Label { name: end_label });
+            if join_reached {
+                ctx.instrs.push(IrInstr::Label { name: end_label });
+            }
             Ok(())
         }
     }
@@ -12142,6 +12137,20 @@ impl LoweringCtx {
     fn ends_with_ret(&self) -> bool {
         matches!(self.instrs.last(), Some(IrInstr::Ret { .. }))
     }
+
+    /// S2043 CP04: closes a branch of a statement `if`/`match`. A branch
+    /// whose lowering ended in `Ret` cannot reach the join, so no jump is
+    /// emitted for it; otherwise it jumps to `join`. Returns whether the
+    /// join gained a predecessor.
+    fn jump_to_join_unless_returned(&mut self, join: &str) -> bool {
+        if self.ends_with_ret() {
+            return false;
+        }
+        self.instrs.push(IrInstr::Jmp {
+            label: join.to_string(),
+        });
+        true
+    }
 }
 
 fn find_contract_result_symbol(
@@ -12983,9 +12992,12 @@ mod opt_tests {
     #[test]
     fn r1f_g_generic_impl_method_preflight_preempts_body_lowering() {
         // Functions are lowered before impl methods, and `f` below has a
-        // genuine, source-reachable lowering failure (it may fall through
-        // without returning). Only the impl-method branch of the program-wide
-        // preflight lets the generic method's E0280 win over that body.
+        // genuine, source-reachable lowering failure (an integer range match
+        // pattern the type checker admits but the IR backend rejects). Only
+        // the impl-method branch of the program-wide preflight lets the
+        // generic method's E0280 win over that body. (S2043 CP04: the former
+        // witness, a possible fall-through, is now rejected by the type
+        // checker before lowering, so it no longer reaches this precedence.)
         let failing_body = r#"
             trait Show {
                 fn show(self: Self) -> i32;
@@ -12993,9 +13005,10 @@ mod opt_tests {
             record P {
                 v: i32,
             }
-            fn f(b: bool) -> i32 {
-                if b {
-                    return 1;
+            fn f(x: i32) -> i32 {
+                match x {
+                    1..=3 => { return 1; }
+                    _ => { return 0; }
                 }
             }
         "#;
@@ -13019,7 +13032,9 @@ mod opt_tests {
             FrontendError {
                 detail: None,
                 pos: 0,
-                message: "function 'f' may exit without returning I32".to_string(),
+                message:
+                    "integer range match pattern lowering is not yet implemented in the IR backend"
+                        .to_string(),
             }
         );
 
