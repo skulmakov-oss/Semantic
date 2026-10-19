@@ -557,7 +557,49 @@ fn type_check_function_with_tables(
             impl_list,
         )?;
     }
+    // S2043 CP04: a non-unit function must return on every path. This is
+    // the same structural criterion the IR lowering can prove (its body ends
+    // in `Ret` with no join left to fall into), so `check` and `compile`
+    // accept and reject exactly the same functions.
+    if func.ret != Type::Unit && !block_must_return(&func.body, arena) {
+        return Err(FrontendError {
+            detail: None,
+            pos: 0,
+            message: format!(
+                "function '{}' may exit without returning {:?}",
+                resolve_symbol_name(arena, func.name)?,
+                func.ret
+            ),
+        });
+    }
     Ok(())
+}
+
+/// S2043 CP04: whether the last statement of `block` returns on every path.
+/// Only `return`, an `if` whose both branches must return, and a `match`
+/// whose every arm and explicit `_` default must return qualify; loops,
+/// guards and a `match` without `_` (its implicit default traps and then
+/// reaches the join) never do. Statements after a returning one do not
+/// make an earlier return count: the last statement decides.
+fn block_must_return(block: &[StmtId], arena: &AstArena) -> bool {
+    let Some(last) = block.last() else {
+        return false;
+    };
+    match arena.stmt(*last) {
+        Stmt::Return(_) => true,
+        Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } => block_must_return(then_block, arena) && block_must_return(else_block, arena),
+        Stmt::Match { arms, default, .. } => {
+            default
+                .as_ref()
+                .is_some_and(|default| block_must_return(default, arena))
+                && arms.iter().all(|arm| block_must_return(&arm.block, arena))
+        }
+        _ => false,
+    }
 }
 
 fn check_requires_clauses(
@@ -10534,9 +10576,13 @@ mod tests {
 
             impl Describe for Color {
                 fn label(self: Self) -> i32 {
+                    // S2043 CP04: an explicit `_` makes the method provably
+                    // return on every path (a `match` without `_` ends in its
+                    // trapping implicit default, then the join).
                     match self {
                         Color::Red => { return 1; }
                         Color::Blue => { return 2; }
+                        _ => { return 0; }
                     }
                 }
             }

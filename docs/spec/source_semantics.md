@@ -463,6 +463,25 @@ Current statement meaning:
 - `return expr;` terminates the current function with that value
 - `return;` terminates a `unit`-returning function
 
+Return completeness (S2043):
+
+- a function whose return type is not `unit` must return on every path: its
+  last statement must be `return expr;`, an `if` whose both branches end in
+  such a statement, or a statement `match` whose every arm and explicit `_`
+  default do
+- loops, `guard`, and a `match` without `_` never count as returning (the
+  implicit default of an exhaustive `match` traps and then reaches the code
+  after the `match`); a `return` followed by further statements does not make
+  the block return; no implicit or artificial return value is ever produced
+- violations are rejected by `smc check` and `smc compile` alike with
+  `E0201` `function '<name>' may exit without returning <type>`; the rule is
+  exactly the one the IR lowering can prove, so both commands accept and
+  reject the same functions
+- branches that end in `return` emit no jump to the join point after the
+  `if`/`match`, and the join point exists only when some branch reaches it;
+  observable behavior is unchanged, and unoptimized SemCode no longer
+  carries those dead jumps
+
 Current non-goal:
 
 - the source contract does not claim deferred execution, generators, or
