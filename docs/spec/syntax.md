@@ -283,6 +283,8 @@ Current expression forms:
     - decimal with separators `1_000`
     - hexadecimal `0xff`
     - explicit typed forms `123i32`, `123u32`, `0xffu32`
+  - ASCII byte literals (S2043, current-main experimental): `b'='`, `b'\n'`,
+    `b'\x7F'` - see "ASCII Byte Literal" below
   - floating and fixed-point literals:
     - decimal `1.25`
     - decimal with separators `1_000.25`
@@ -702,6 +704,37 @@ assert(ready == true);
 Current builtins are resolved as part of the public source surface and must not
 require a separate foreign-call syntax. `assert` shares ordinary call-like
 syntax but is statement-only in the current contract.
+
+## ASCII Byte Literal
+
+S2043, current-main experimental (`literal.ascii_byte` in
+`smc language describe --format json`); not part of `v1.2.0` or Foundation
+Source 1.2.
+
+```ebnf
+AsciiByteLiteral  = "b'" , ( RawPrintableAscii | Escape ) , "'" ;
+RawPrintableAscii = ? byte 0x20..=0x7E except "'" (0x27) and "\" (0x5C) ? ;
+Escape            = "\0" | "\t" | "\n" | "\r" | "\'" | "\\" | "\""
+                  | "\x" , OctalHigh , HexDigit ;
+OctalHigh         = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" ;
+```
+
+- the value is the ASCII code, `0..=127`, and the type is exactly `u32`:
+  `b'='` is `61u32`, `b'\n'` is `10u32`, `b'"'` and `b'\"'` are `34u32`,
+  `b'\x00'` is `0u32`, `b'\x7F'` is `127u32`
+- it is decoded at compile time and parsed as that `u32` literal; the
+  emitted SemCode is byte-identical to the numeric spelling (so a program
+  using only literals and equality keeps the `SEMCOD22` floor)
+- `b'` must be adjacent: the identifier `b` and `b '...'` are unchanged
+- it is not `u8`, `char`, `text` or `i32`, converts to nothing implicitly,
+  and is not accepted as a `match` pattern (use the numeric spelling there)
+- rejected deterministically at lexing with `E0001` (`invalid byte
+  literal: ...`, range on the offending character): empty `b''`, more than
+  one character, raw non-ASCII (`b'é'`), raw control characters (escape
+  them), unknown escapes, `\x80`..`\xFF` (not ASCII), malformed hex, and a
+  missing closing quote; a literal cut off by the end of the line is
+  `invalid byte literal: unterminated` over the partial literal
+- the formatter preserves the literal's exact spelling
 
 ## Imports And Module Surface
 

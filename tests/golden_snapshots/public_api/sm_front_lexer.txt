@@ -5,5 +5,6 @@ pub code: &'static str,
 pub detail: String,
 pub range: Option<core::ops::Range<usize>>,
 pub error: FrontendError,
+pub fn ascii_byte_literal_value(text: &str) -> Option<u32> {
 pub fn lex_tokens(input: &str) -> Result<Vec<Token>, FrontendError> {
 pub fn lex_tokens_with_authority(input: &str) -> Result<Vec<Token>, LexFailure> {
