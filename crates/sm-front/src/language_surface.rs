@@ -115,6 +115,17 @@ pub struct LanguageFeature {
     pub negative_probe: Option<(&'static str, Stage)>,
     /// The suite that checks this entry against the running pipeline.
     pub evidence_suite: &'static str,
+    /// The source surface the feature belongs to. The statuses above are
+    /// qualified for a build that includes this surface's parser profile;
+    /// a projection must not report them for a build without it.
+    pub surface: SourceSurface,
+}
+
+/// The source surface (parser profile) a feature belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceSurface {
+    RustLike,
+    Logos,
 }
 
 impl LanguageFeature {
@@ -146,6 +157,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
             Stage::Typecheck,
         )),
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "control.function.return_completeness",
@@ -157,6 +169,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
             Stage::Typecheck,
         )),
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "control.if_let.expression",
@@ -168,6 +181,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
             Stage::Typecheck,
         )),
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "control.let_else.adt_pattern",
@@ -176,6 +190,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         probe: "fn f(o: Option(i32)) -> i32 {\n    let Option::Some(x) = o else return 0;\n    return x;\n}\nfn main() {\n    return;\n}\n",
         negative_probe: None,
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "control.match.integer_range_pattern",
@@ -184,6 +199,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         probe: "fn f(x: i32) -> i32 {\n    match x {\n        1..=3 => { return 1; }\n        _ => { return 0; }\n    }\n}\nfn main() {\n    assert(f(2) == 1);\n    return;\n}\n",
         negative_probe: None,
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "control.match.or_pattern",
@@ -192,6 +208,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         probe: "fn f(x: i32) -> i32 {\n    match x {\n        1 | 2 => { return 1; }\n        _ => { return 0; }\n    }\n}\nfn main() {\n    return;\n}\n",
         negative_probe: None,
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "item.const.top_level",
@@ -200,6 +217,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         probe: "const LIMIT: i32 = 3;\nfn main() {\n    return;\n}\n",
         negative_probe: None,
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "literal.ascii_byte",
@@ -211,6 +229,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
             Stage::Typecheck,
         )),
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "logic.bool.and_or",
@@ -222,6 +241,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
             Stage::Typecheck,
         )),
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "logic.quad.and_or",
@@ -233,6 +253,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
             Stage::Typecheck,
         )),
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "logic.quad.implicit_bool_condition",
@@ -241,6 +262,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         probe: "fn main() {\n    let q: quad = T;\n    if q {\n        return;\n    } else {\n        return;\n    }\n}\n",
         negative_probe: None,
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "operator.coalesce",
@@ -249,6 +271,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         probe: "fn main() {\n    let o: Option(i32) = Option::Some(1);\n    let v: i32 = o ?? 0;\n    let _ = v;\n    return;\n}\n",
         negative_probe: None,
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "operator.try",
@@ -257,6 +280,7 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         probe: "fn f() -> Result(i32, i32) {\n    let r: Result(i32, i32) = Result::Ok(1);\n    let v: i32 = r?;\n    return Result::Ok(v);\n}\nfn main() {\n    return;\n}\n",
         negative_probe: None,
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::RustLike,
     },
     LanguageFeature {
         id: "surface.logos.declarative",
@@ -265,5 +289,6 @@ pub const LANGUAGE_FEATURES: &[LanguageFeature] = &[
         probe: "Entity Sensor:\n    state val: quad\n\nLaw \"CheckSignal\" [priority 10]:\n    When Sensor.val == T -> Log.emit(\"Signal OK\")\n",
         negative_probe: None,
         evidence_suite: EVIDENCE,
+        surface: SourceSurface::Logos,
     },
 ];

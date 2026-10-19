@@ -6,8 +6,8 @@
 
 use serde::Serialize;
 use sm_front::language_surface::{
-    LanguageFeature, Stage, LANGUAGE_FEATURES, LANGUAGE_SURFACE_SCHEMA_ID,
-    LANGUAGE_SURFACE_SCHEMA_VERSION,
+    LanguageFeature, ReleaseState, SourceSurface, Stage, StageStatus, LANGUAGE_FEATURES,
+    LANGUAGE_SURFACE_SCHEMA_ID, LANGUAGE_SURFACE_SCHEMA_VERSION,
 };
 
 const USAGE: &str = "usage: smc language describe --format json";
@@ -77,11 +77,38 @@ struct Runtime {
     capability_grants: Option<&'static str>,
 }
 
-fn feature(entry: &LanguageFeature) -> Feature {
-    let status = |stage| entry.stage(stage).as_str();
+/// The Cargo build feature (as reported in `SM_ENABLED_FEATURES`) that must
+/// be compiled in for a surface's registry statuses to describe this binary.
+fn required_build_feature(surface: SourceSurface) -> &'static str {
+    match surface {
+        SourceSurface::RustLike => "PROFILE_RUST",
+        SourceSurface::Logos => "PROFILE_LOGOS",
+    }
+}
+
+/// Projects one registry entry for a build with `enabled_features`. A
+/// feature whose surface is not compiled into this binary is reported fail
+/// closed (`unknown` / `not-qualified`): its registry statuses were
+/// qualified on a build that has it.
+fn feature(entry: &LanguageFeature, enabled_features: &str) -> Feature {
+    let built = enabled_features
+        .split(',')
+        .map(str::trim)
+        .any(|f| f == required_build_feature(entry.surface));
+    let status = |stage| {
+        if built {
+            entry.stage(stage).as_str()
+        } else {
+            StageStatus::NotQualified.as_str()
+        }
+    };
     Feature {
         id: entry.id,
-        release_state: entry.release_state.as_str(),
+        release_state: if built {
+            entry.release_state.as_str()
+        } else {
+            ReleaseState::Unknown.as_str()
+        },
         stage_status: StageStatusJson {
             lex: status(Stage::Lex),
             parse: status(Stage::Parse),
@@ -104,8 +131,13 @@ fn magic(bytes: &'static [u8; 8]) -> &'static str {
 /// The complete `semantic.language-surface` v1 document, with a trailing
 /// newline. Identical for every call of the same build.
 pub(crate) fn describe_json() -> Result<String, String> {
-    let mut features: Vec<Feature> = LANGUAGE_FEATURES.iter().map(feature).collect();
-    features.sort_by(|a, b| a.id.cmp(b.id));
+    // The registry is the one ordering authority (sorted by id, enforced by
+    // tests/s2043_language_surface.rs); the document keeps its order.
+    let enabled = env!("SM_ENABLED_FEATURES");
+    let features: Vec<Feature> = LANGUAGE_FEATURES
+        .iter()
+        .map(|entry| feature(entry, enabled))
+        .collect();
     let document = Document {
         schema_id: LANGUAGE_SURFACE_SCHEMA_ID,
         schema_version: LANGUAGE_SURFACE_SCHEMA_VERSION,
@@ -150,5 +182,45 @@ pub(crate) fn cmd_language(args: &[String]) -> Result<(), String> {
             "unsupported language describe format '{other}'\n{USAGE}"
         )),
         _ => Err(USAGE.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn features_of_a_surface_missing_from_the_build_fail_closed() {
+        let logos = LANGUAGE_FEATURES
+            .iter()
+            .find(|f| f.surface == SourceSurface::Logos)
+            .expect("a Logos entry");
+        let rust = LANGUAGE_FEATURES
+            .iter()
+            .find(|f| f.surface == SourceSurface::RustLike)
+            .expect("a RustLike entry");
+
+        let without_logos = "STD, PROFILE_RUST";
+        let doc = feature(logos, without_logos);
+        assert_eq!(doc.release_state, "unknown");
+        assert_eq!(doc.stage_status.lex, "not-qualified");
+        assert_eq!(doc.stage_status.typecheck, "not-qualified");
+        assert_eq!(doc.stage_status.lower, "not-qualified");
+        assert_eq!(
+            feature(rust, without_logos).release_state,
+            rust.release_state.as_str()
+        );
+
+        let without_rust = "STD,PROFILE_LOGOS";
+        let doc = feature(rust, without_rust);
+        assert_eq!(doc.release_state, "unknown");
+        assert_eq!(doc.stage_status.run, "not-qualified");
+
+        let full = "DEBUG_SYMBOLS,PROFILE_LOGOS,PROFILE_RUST,STD";
+        assert_eq!(feature(logos, full).stage_status.parse, "qualified");
+        assert_eq!(
+            feature(rust, full).stage_status.run,
+            rust.stage(Stage::Run).as_str()
+        );
     }
 }

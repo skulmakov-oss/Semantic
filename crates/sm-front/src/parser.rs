@@ -215,6 +215,7 @@ pub fn parse_rustlike_with_profile(
         policy: CompilePolicyView::new(profile),
         type_param_scope: Vec::new(),
         self_type_scope: None,
+        if_head: false,
         logos_recovery: LogosRecoveryState::default(),
         #[cfg(test)]
         recovery_token_visits: 0,
@@ -236,6 +237,7 @@ pub fn parse_logos_with_profile(
         policy: CompilePolicyView::new(profile),
         type_param_scope: Vec::new(),
         self_type_scope: None,
+        if_head: false,
         logos_recovery: LogosRecoveryState::default(),
         #[cfg(test)]
         recovery_token_visits: 0,
@@ -274,6 +276,7 @@ pub fn admit_program_with_profile(
         policy: CompilePolicyView::new(profile),
         type_param_scope: Vec::new(),
         self_type_scope: None,
+        if_head: false,
         logos_recovery: LogosRecoveryState::default(),
         #[cfg(test)]
         recovery_token_visits: 0,
@@ -299,6 +302,7 @@ pub fn admit_logos_program_with_profile(
         policy: CompilePolicyView::new(profile),
         type_param_scope: Vec::new(),
         self_type_scope: None,
+        if_head: false,
         logos_recovery: LogosRecoveryState::default(),
         #[cfg(test)]
         recovery_token_visits: 0,
@@ -346,6 +350,10 @@ struct Parser<'a> {
     /// needs to inspect each token once, rather than reconstructing the whole
     /// prefix after every error.
     logos_recovery: LogosRecoveryState,
+    /// S2043 CP05: true only while parsing the condition of an `if` or the
+    /// scrutinee of an `if let` (not inside blocks nested in it). There, a
+    /// brace group directly followed by `else` is the then-block.
+    if_head: bool,
     #[cfg(test)]
     recovery_token_visits: usize,
 }
@@ -1198,13 +1206,25 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block(&mut self) -> Result<Vec<StmtId>, FrontendError> {
+        // A block nested in an `if` head is not itself an `if` head.
+        let outer_if_head = core::mem::replace(&mut self.if_head, false);
         self.expect(TokenKind::LBrace, "expected '{'")?;
         let mut out = Vec::new();
         while !self.check(TokenKind::RBrace) {
             out.push(self.parse_stmt()?);
         }
         self.expect(TokenKind::RBrace, "expected '}'")?;
+        self.if_head = outer_if_head;
         Ok(out)
+    }
+
+    /// S2043 CP05: parses an `if` condition or `if let` scrutinee with the
+    /// `if`-head record-literal rule enabled (see `starts_record_literal_head`).
+    fn parse_if_head_expr(&mut self) -> Result<ExprId, FrontendError> {
+        let outer = core::mem::replace(&mut self.if_head, true);
+        let expr = self.parse_expr();
+        self.if_head = outer;
+        expr
     }
 
     fn parse_stmt(&mut self) -> Result<StmtId, FrontendError> {
@@ -1452,7 +1472,7 @@ impl<'a> Parser<'a> {
             }));
         }
         if self.eat(TokenKind::KwIf) {
-            let condition = self.parse_expr()?;
+            let condition = self.parse_if_head_expr()?;
             let then_block = self.parse_block()?;
             let else_block = if self.eat(TokenKind::KwElse) {
                 if self.eat(TokenKind::KwIf) {
@@ -1785,7 +1805,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if_after_kw_if(&mut self) -> Result<Stmt, FrontendError> {
-        let condition = self.parse_expr()?;
+        let condition = self.parse_if_head_expr()?;
         let then_block = self.parse_block()?;
         let else_block = if self.eat(TokenKind::KwElse) {
             if self.eat(TokenKind::KwIf) {
@@ -2287,7 +2307,7 @@ impl<'a> Parser<'a> {
             return false;
         }
         if self.tokens[field_idx].kind == TokenKind::RBrace {
-            return !self.brace_group_is_followed_by_else(lbrace_idx);
+            return !(self.if_head && self.brace_group_is_followed_by_else(lbrace_idx));
         }
         if self.tokens[field_idx].kind != TokenKind::Ident {
             return false;
@@ -2299,11 +2319,12 @@ impl<'a> Parser<'a> {
         match self.tokens[next_idx].kind {
             TokenKind::Colon => true,
             // S2043 CP05: `{}` / `{ x }` / `{ x, .. }` are also block shapes.
-            // An expression is never directly followed by `else` except as
-            // an `if` condition / `if let` scrutinee, so such a group
-            // followed by `else` is the `if`'s then-block, not a record.
+            // At the top of an `if` condition / `if let` scrutinee, such a
+            // group directly followed by `else` is the then-block. Elsewhere
+            // (`guard ... else`, let-else initializers) a value legitimately
+            // precedes `else`, so the group stays a record literal there.
             TokenKind::Comma | TokenKind::RBrace => {
-                !self.brace_group_is_followed_by_else(lbrace_idx)
+                !(self.if_head && self.brace_group_is_followed_by_else(lbrace_idx))
             }
             _ => false,
         }
@@ -2932,7 +2953,7 @@ impl<'a> Parser<'a> {
         if self.eat(TokenKind::KwLet) {
             let pattern = self.parse_match_pattern()?;
             self.expect(TokenKind::Assign, "expected '=' after pattern in if-let")?;
-            let value = self.parse_expr()?;
+            let value = self.parse_if_head_expr()?;
             let then_block = self.parse_value_block()?;
             if !self.eat(TokenKind::KwElse) {
                 return Err(FrontendError {
@@ -2953,7 +2974,7 @@ impl<'a> Parser<'a> {
             }
             return Ok(if_let);
         }
-        let condition = self.parse_expr()?;
+        let condition = self.parse_if_head_expr()?;
         let then_block = self.parse_value_block()?;
         if !self.eat(TokenKind::KwElse) {
             return Err(FrontendError {
@@ -3226,6 +3247,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_value_block(&mut self) -> Result<BlockExpr, FrontendError> {
+        // A block nested in an `if` head is not itself an `if` head.
+        let outer_if_head = core::mem::replace(&mut self.if_head, false);
+        let block = self.parse_value_block_body();
+        self.if_head = outer_if_head;
+        block
+    }
+
+    fn parse_value_block_body(&mut self) -> Result<BlockExpr, FrontendError> {
         self.expect(TokenKind::LBrace, "expected '{'")?;
         let mut statements = Vec::new();
 
@@ -8290,6 +8319,7 @@ fn apply<T: Eq, U>(x: T, y: U) -> i32 {
             policy: CompilePolicyView::new(&profile),
             type_param_scope: vec![sentinel],
             self_type_scope: None,
+            if_head: false,
             logos_recovery: LogosRecoveryState::default(),
             recovery_token_visits: 0,
         };
@@ -8327,6 +8357,7 @@ fn apply<T: Eq, U>(x: T, y: U) -> i32 {
             policy: CompilePolicyView::new(&profile),
             type_param_scope: Vec::new(),
             self_type_scope: None,
+            if_head: false,
             logos_recovery: LogosRecoveryState::default(),
             recovery_token_visits: 0,
         };
@@ -8618,6 +8649,7 @@ mod grammar_admission_tests {
             policy: CompilePolicyView::new(profile),
             type_param_scope: Vec::new(),
             self_type_scope: None,
+            if_head: false,
             logos_recovery: LogosRecoveryState::default(),
             recovery_token_visits: 0,
         };

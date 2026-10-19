@@ -136,7 +136,7 @@ pub(crate) fn compose_executable_bundle(
     access: &dyn SourceAccess,
 ) -> Result<String, String> {
     compose_executable_bundle_with_origins(path, raw_source, root_program, parser_profile, access)
-        .map(|(bundle, _)| bundle)
+        .map(BundleOrigins::into_text)
 }
 
 /// S2043 CP03: the module file one byte interval of a composed bundle
@@ -145,34 +145,52 @@ pub(crate) fn compose_executable_bundle(
 pub(crate) struct BundleOrigin {
     /// Canonical host path of the module file.
     pub(crate) path: PathBuf,
-    /// The module's diagnostic display name (`SourceAccess::display_path`).
+    /// The module's diagnostic name: relative to the root module's directory.
     pub(crate) display: String,
-    /// The exact module text the bundle reproduces.
-    pub(crate) text: String,
     /// Whether this module is the checked root itself.
     pub(crate) is_root: bool,
 }
 
-/// S2043 CP03: where the bytes of a composed executable bundle came from.
-/// Only whole modules composed verbatim (`ExecutableBundleMode::Full`) have
-/// an origin; selected-import modules are synthesized (renamed) text, and the
-/// separators between modules belong to no file.
+/// S2043 CP03: a composed text and where its bytes came from. Only whole
+/// modules composed verbatim (`ExecutableBundleMode::Full`) have an origin;
+/// selected-import modules are synthesized (renamed) text, and the separators
+/// between modules belong to no file. The text is held once: a module's own
+/// text is the slice of its verbatim segment.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct BundleOrigins {
+    text: String,
     segments: Vec<(Range<usize>, Option<BundleOrigin>)>,
 }
 
 impl BundleOrigins {
-    /// The original module and module-local byte range for `range`, when the
-    /// whole range lies inside one verbatim module segment. A range touching
-    /// synthesized text, a separator or two segments has no origin.
-    pub(crate) fn locate(&self, range: &Range<usize>) -> Option<(&BundleOrigin, Range<usize>)> {
+    /// The composed (effective) source text.
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub(crate) fn into_text(self) -> String {
+        self.text
+    }
+
+    /// The original module, its exact text, and the module-local byte range
+    /// for `range`, when the whole range lies inside one verbatim module
+    /// segment. A range touching synthesized text, a separator or two
+    /// segments has no origin.
+    pub(crate) fn locate(
+        &self,
+        range: &Range<usize>,
+    ) -> Option<(&BundleOrigin, &str, Range<usize>)> {
         self.segments
             .iter()
             .find(|(span, _)| span.start <= range.start && range.end <= span.end)
             .and_then(|(span, origin)| {
                 let origin = origin.as_ref()?;
-                Some((origin, range.start - span.start..range.end - span.start))
+                let module_text = self.text.get(span.clone())?;
+                Some((
+                    origin,
+                    module_text,
+                    range.start - span.start..range.end - span.start,
+                ))
             })
     }
 }
@@ -226,9 +244,12 @@ pub(crate) fn compose_executable_bundle_with_origins(
     root_program: &Program,
     parser_profile: &ParserProfile,
     access: &dyn SourceAccess,
-) -> Result<(String, BundleOrigins), String> {
+) -> Result<BundleOrigins, String> {
     if root_program.imports.is_empty() {
-        return Ok((raw_source.to_string(), BundleOrigins::default()));
+        return Ok(BundleOrigins {
+            text: raw_source.to_string(),
+            segments: Vec::new(),
+        });
     }
     let canonical = path.canonicalize().map_err(|e| {
         format!(
@@ -250,7 +271,7 @@ pub(crate) fn compose_executable_bundle_with_origins(
         access,
     )?;
     let mut bundle = String::new();
-    let mut origins = BundleOrigins::default();
+    let mut segments = Vec::new();
     for (idx, module_path) in order.into_iter().enumerate() {
         let module = planned.get(&module_path).ok_or_else(|| {
             format!(
@@ -264,19 +285,21 @@ pub(crate) fn compose_executable_bundle_with_origins(
         }
         let start = bundle.len();
         bundle.push_str(&module_source);
-        let origin = (module.mode == ExecutableBundleMode::Full && module_source == module.source)
-            .then(|| BundleOrigin {
-                path: module_path.clone(),
-                display: bundle_module_label(&canonical, &module_path),
-                text: module.source.clone(),
-                is_root: module_path == canonical,
-            });
-        origins.segments.push((start..bundle.len(), origin));
+        // A Full-mode module is rendered as its exact source text.
+        let origin = (module.mode == ExecutableBundleMode::Full).then(|| BundleOrigin {
+            path: module_path.clone(),
+            display: bundle_module_label(&canonical, &module_path),
+            is_root: module_path == canonical,
+        });
+        segments.push((start..bundle.len(), origin));
         if !module_source.ends_with('\n') {
             bundle.push('\n');
         }
     }
-    Ok((bundle, origins))
+    Ok(BundleOrigins {
+        text: bundle,
+        segments,
+    })
 }
 
 /// #1933: given a `RustLikeOwned(Ok(program))` root, produces the
@@ -299,7 +322,7 @@ pub(crate) fn rustlike_effective_program(
     access: &dyn SourceAccess,
 ) -> Result<(String, Program), String> {
     rustlike_effective_program_with_origins(path, raw_source, root_program, parser_profile, access)
-        .map(|(source, program, _)| (source, program))
+        .map(|(program, origins)| (origins.into_text(), program))
 }
 
 /// As [`rustlike_effective_program`], also returning the bundle origins
@@ -310,15 +333,17 @@ pub(crate) fn rustlike_effective_program_with_origins(
     root_program: Program,
     parser_profile: &ParserProfile,
     access: &dyn SourceAccess,
-) -> Result<(String, Program, BundleOrigins), String> {
+) -> Result<(Program, BundleOrigins), String> {
     if root_program.imports.is_empty() {
         return Ok((
-            raw_source.to_string(),
             root_program,
-            BundleOrigins::default(),
+            BundleOrigins {
+                text: raw_source.to_string(),
+                segments: Vec::new(),
+            },
         ));
     }
-    let (effective_source, origins) = compose_executable_bundle_with_origins(
+    let origins = compose_executable_bundle_with_origins(
         path,
         raw_source,
         &root_program,
@@ -326,8 +351,8 @@ pub(crate) fn rustlike_effective_program_with_origins(
         access,
     )?;
     let effective_program =
-        parse_program_with_profile(&effective_source, parser_profile).map_err(|e| e.to_string())?;
-    Ok((effective_source, effective_program, origins))
+        parse_program_with_profile(origins.text(), parser_profile).map_err(|e| e.to_string())?;
+    Ok((effective_program, origins))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

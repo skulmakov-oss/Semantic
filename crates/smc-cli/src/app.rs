@@ -200,9 +200,9 @@ fn check_root_with_project_authority(
                 return error;
             };
             match origins.locate(&range) {
-                Some((origin, local)) => {
+                Some((origin, text, local)) => {
                     let label = (!origin.is_root).then_some(origin.display.as_str());
-                    error.relocated(&origin.text, Some(local), label)
+                    error.relocated(text, Some(local), label)
                 }
                 None => error.relocated("", None, None),
             }
@@ -255,16 +255,14 @@ pub(crate) fn check_root_with_attribution(
                 parser_profile,
                 access,
             ) {
-                Ok((effective_source, effective_program, origins)) => {
-                    let attribution = if effective_source == raw_source {
+                Ok((effective_program, origins)) => {
+                    let result = check_rustlike_program(&effective_program, origins.text());
+                    let attribution = if origins.text() == raw_source {
                         CheckAttribution::RawRoot
                     } else {
                         CheckAttribution::ComposedBundle(origins)
                     };
-                    (
-                        check_rustlike_program(&effective_program, &effective_source),
-                        attribution,
-                    )
+                    (result, attribution)
                 }
                 Err(message) => (
                     Err(bundler_semantic_error(message)),
