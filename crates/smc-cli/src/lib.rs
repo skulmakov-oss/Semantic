@@ -32,6 +32,8 @@ mod hub;
 #[cfg(feature = "std")]
 mod incremental;
 #[cfg(feature = "std")]
+mod language_surface;
+#[cfg(feature = "std")]
 pub mod lsp;
 #[cfg(feature = "std")]
 mod package_manifest;

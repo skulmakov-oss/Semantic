@@ -120,6 +120,8 @@ pub use types::{
     ValidationVariantPlan,
 };
 
+pub mod language_surface;
+
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod diagnostic_authority;
 #[cfg(any(feature = "alloc", feature = "std"))]
