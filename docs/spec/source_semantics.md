@@ -923,6 +923,25 @@ Current operator meaning:
   same family
 - `!` works on `bool` and `quad`
 - `->` is quad implication and returns `quad`
+
+Quad operator laws (S2043 clarification of current behavior; normative frame
+in `quad_logic_frame_v1.md`). With `N = (t 0, f 0)`, `F = (0, 1)`,
+`T = (1, 0)`, `S = (1, 1)`:
+
+- `a && b` is the knowledge-lattice meet `(a.t & b.t, a.f & b.f)`
+  (`T && F == N`, `F && N == N`); `a || b` is the join
+  `(a.t | b.t, a.f | b.f)` (`T || F == S`, `T || N == T`)
+- `!a` swaps the planes `(a.f, a.t)`; `a -> b` is `(a.f | b.t, a.t | b.f)`
+- the truth map is reached only through `qtruth_and` `(a.t & b.t, a.f | b.f)`,
+  `qtruth_or` `(a.t | b.t, a.f & b.f)`, `qtruth_not` `(a.f, a.t)` and
+  `qtruth_impl` `(a.f | b.t, a.t | b.f)` (`qtruth_impl(T, T) == S`); the
+  lattice and truth-map families never alias each other
+- `&&` and `||` evaluate both operands, left to right, for `bool` and `quad`
+  alike: the right operand's effects and traps happen even when the left
+  operand already determines the result
+- the full 4x4 tables are pinned in
+  `tests/golden_snapshots/s2043/quad_4x4_static.csv` and executed at `O0` and
+  `O1` by `tests/s2043_quad_semcode_goldens.rs`
 - `+`, `-`, `*`, `/` currently have stable arithmetic meaning on `f64`
 - current `main` now also admits the first same-family `i32` arithmetic slice:
   unary `-`, binary `+`, `-`, `*`
