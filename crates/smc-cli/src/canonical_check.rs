@@ -353,13 +353,20 @@ impl Session {
 
     /// S2043 CP03: binds a composed-bundle module to a registered source,
     /// registering it on first use with the exact text the bundle reproduced.
+    /// #2054: a module outside the working directory is still named by its
+    /// relative form from that directory (`../outside.sm`), as the schema's
+    /// `Source.path` requires; `null` only when none exists.
     fn bundle_module_source(&mut self, origin: &BundleOrigin, text: &str) -> SourceId {
         let path = crate::source_access::strip_verbatim_prefix(&origin.path);
         if let Some(id) = self.by_path.get(&path) {
             return *id;
         }
         let identity = source_identity(&path);
-        self.register(Some(path), identity, text.to_string(), None)
+        let relative = self
+            .display_base
+            .as_deref()
+            .and_then(|base| crate::executable_bundle::relative_path_label(base, &path));
+        self.register(Some(path), identity, text.to_string(), relative)
     }
 
     fn finish(
