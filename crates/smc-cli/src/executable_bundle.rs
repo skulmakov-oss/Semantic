@@ -200,40 +200,40 @@ impl BundleOrigins {
 /// as the import itself spells them). Paths sharing no prefix with the root
 /// (another drive) fall back to the file name. Never an absolute host path.
 fn bundle_module_label(root: &Path, module: &Path) -> String {
-    use std::path::Component;
     let root = crate::source_access::strip_verbatim_prefix(root);
+    root.parent()
+        .and_then(|dir| relative_path_label(dir, module))
+        .unwrap_or_else(|| {
+            crate::source_access::strip_verbatim_prefix(module)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        })
+}
+
+/// `module` relative to the directory `dir`, with `/` separators and `..`
+/// for each level above `dir`. `None` when no such relative form exists:
+/// no shared prefix (another drive), only a shared filesystem root, a
+/// non-UTF-8 component, or `module == dir`. Never an absolute host path.
+pub(crate) fn relative_path_label(dir: &Path, module: &Path) -> Option<String> {
+    use std::path::Component;
+    let dir = crate::source_access::strip_verbatim_prefix(dir);
     let module = crate::source_access::strip_verbatim_prefix(module);
-    let file_name = || {
-        module
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    };
-    let Some(dir) = root.parent() else {
-        return file_name();
-    };
     let dir: Vec<Component> = dir.components().collect();
     let target: Vec<Component> = module.components().collect();
     let common = dir.iter().zip(&target).take_while(|(a, b)| a == b).count();
     let has_root_prefix = matches!(dir.first(), Some(Component::Prefix(_) | Component::RootDir));
     if common == 0 || (has_root_prefix && common < 2 && dir.len() > 1) {
-        return file_name();
+        return None;
     }
     let mut parts: Vec<String> = Vec::new();
     for _ in common..dir.len() {
         parts.push("..".to_string());
     }
     for component in &target[common..] {
-        match component.as_os_str().to_str() {
-            Some(part) => parts.push(part.to_string()),
-            None => return file_name(),
-        }
+        parts.push(component.as_os_str().to_str()?.to_string());
     }
-    if parts.is_empty() {
-        file_name()
-    } else {
-        parts.join("/")
-    }
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 /// As [`compose_executable_bundle`], also returning the origin of every
@@ -1177,4 +1177,26 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
         h = h.wrapping_mul(0x100000001b3);
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relative_path_label;
+    use std::path::Path;
+
+    #[test]
+    fn relative_path_label_is_relative_or_none() {
+        let dir = Path::new("/w/fixture/app");
+        assert_eq!(
+            relative_path_label(dir, Path::new("/w/fixture/outside.sm")).as_deref(),
+            Some("../outside.sm")
+        );
+        assert_eq!(
+            relative_path_label(dir, Path::new("/w/fixture/app/sub/h.sm")).as_deref(),
+            Some("sub/h.sm")
+        );
+        // Only the filesystem root in common: no relative form.
+        assert_eq!(relative_path_label(dir, Path::new("/other/h.sm")), None);
+        assert_eq!(relative_path_label(dir, dir), None);
+    }
 }

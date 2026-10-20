@@ -283,6 +283,91 @@ fn subdirectory_and_parent_relative_helpers_are_named_relatively() {
     }
 }
 
+/// `fixture/outside.sm` (type error) imported by `fixture/app/main.sm` as
+/// `../outside.sm`; `fixture/app/sub` is an empty directory. No manifest, so
+/// every module is rootless (no package identity).
+fn external_module_fixture() -> (PathBuf, &'static str) {
+    let fixture = mk_temp_dir("s2054_external");
+    std::fs::create_dir_all(fixture.join("app").join("sub")).unwrap();
+    std::fs::write(
+        fixture.join("app").join("main.sm"),
+        "Import \"../outside.sm\"\n\nfn main() {\n    let value: i32 = outside();\n    let _ = value;\n    return;\n}\n",
+    )
+    .unwrap();
+    let outside = "fn outside() -> i32 {\n    let value: i32 = 1u32;\n    return value;\n}\n";
+    std::fs::write(fixture.join("outside.sm"), outside).unwrap();
+    (fixture, outside)
+}
+
+/// Asserts the JSON document of `smc check <entry> --format json` run in
+/// `cwd` attributes its one diagnostic to `outside.sm` under exactly
+/// `expected_path`, with `outside.sm`'s own byte range, and returns stdout.
+fn assert_external_module_path(
+    cwd: &Path,
+    entry: &str,
+    expected_path: &str,
+    outside: &str,
+) -> String {
+    let (code, stdout, stderr) = smc_in(cwd, &["check", entry, "--format", "json"]);
+    assert_eq!(code, 1, "{stdout}{stderr}");
+    let report: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("invalid json {e}: {stdout}"));
+    assert_eq!(report["schema"], "semantic.diagnostics", "{report}");
+    assert_eq!(report["schema_version"], 1, "{report}");
+    let diag = &report["diagnostics"][0];
+    let source = diag["source"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("diagnostic not bound to a source: {report}"));
+    assert_ne!(source, 0, "attributed to the root: {report}");
+    let entry_json = &report["sources"][source as usize];
+    assert_eq!(entry_json["path"], expected_path, "{report}");
+    assert!(
+        entry_json["identity"].is_null(),
+        "rootless module: {report}"
+    );
+    // The let binding's name in outside.sm, as for any let type mismatch.
+    let start = outside.find("value").unwrap();
+    assert_eq!(
+        diag["range"]["start"]["offset"].as_u64(),
+        Some(start as u64),
+        "{report}"
+    );
+    assert_eq!(
+        diag["range"]["end"]["offset"].as_u64(),
+        Some((start + "value".len()) as u64),
+        "{report}"
+    );
+    stdout
+}
+
+/// skulmakov-oss/Semantic#2054: a bundle module outside the working
+/// directory is named by its relative form, never `null` / `null`.
+#[test]
+fn external_bundle_module_is_named_relative_to_the_working_directory() {
+    let (fixture, outside) = external_module_fixture();
+    let app = fixture.join("app");
+    let first = assert_external_module_path(&app, "main.sm", "../outside.sm", outside);
+    let host = fixture.to_string_lossy().replace('\\', "/");
+    assert!(
+        !first.replace('\\', "/").contains(&host),
+        "host path leaked: {first}"
+    );
+    let second = assert_external_module_path(&app, "main.sm", "../outside.sm", outside);
+    assert_eq!(first, second, "deterministic");
+}
+
+/// #2054: the path is relative to the working directory (the schema's
+/// `Source.path` contract), not to the root module's directory, when the
+/// two differ.
+#[test]
+fn external_bundle_module_path_is_relative_to_the_working_directory_not_the_root() {
+    let (fixture, outside) = external_module_fixture();
+    let sub = fixture.join("app").join("sub");
+    let out = assert_external_module_path(&sub, "../main.sm", "../../outside.sm", outside);
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(report["sources"][0]["path"], "../main.sm", "{report}");
+}
+
 #[test]
 fn diamond_import_error_is_attributed_to_the_shared_module_once() {
     let dir = project(&[
