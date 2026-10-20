@@ -262,6 +262,39 @@ fn shorthand_record_before_else_outside_if_heads_is_unchanged() {
     );
 }
 
+/// KNOWN LIMITATION, not correct semantics (skulmakov-oss/Semantic#2053): a
+/// nested `ref` capture on a binding of an enclosing arm, in that arm's tail,
+/// passes `check` but `compile` fails closed (no artifact). `match` and its
+/// equivalent `if let` fail identically. When #2053 is fixed, replace this
+/// with `run_everywhere` on both forms.
+#[test]
+fn known_limitation_2053_nested_ref_capture_on_outer_arm_binding_fails_closed() {
+    let dir = mk_temp_dir("s2043_cp05_2053");
+    let forms = [
+        ("nested_match", "match outer { Option::Some(inner) => { match inner { Option::Some(ref x) => { x } _ => { 0 } } } _ => { 0 } }"),
+        ("nested_if_let", "if let Option::Some(inner) = outer { match inner { Option::Some(ref x) => { x } _ => { 0 } } } else { 0 }"),
+    ];
+    for (name, expr) in forms {
+        let src = format!(
+            "fn main() {{\n    let outer: Option(Option(i32)) = Option::Some(Option::Some(3));\n    let v: i32 = {expr};\n    assert(v == 3);\n    return;\n}}\n"
+        );
+        let path = write(&dir, name, &src);
+        let (code, stdout, stderr) = smc(&["check", &path]);
+        assert_eq!(code, 0, "{name}: check admits it today: {stdout}{stderr}");
+        let out = dir.join(format!("{name}.smc"));
+        let (code, stdout, stderr) = smc(&["compile", &path, "-o", out.to_str().unwrap()]);
+        assert_eq!(
+            code, 1,
+            "{name}: compile must fail closed: {stdout}{stderr}"
+        );
+        assert!(
+            format!("{stdout}{stderr}").contains("cannot resolve lexical binding 'inner'"),
+            "{name}: {stdout}{stderr}"
+        );
+        assert!(!out.exists(), "{name}: no artifact");
+    }
+}
+
 #[test]
 fn invalid_if_let_forms_fail_closed() {
     let dir = mk_temp_dir("s2043_cp05_reject");
