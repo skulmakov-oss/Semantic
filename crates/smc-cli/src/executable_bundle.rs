@@ -202,7 +202,7 @@ impl BundleOrigins {
 fn bundle_module_label(root: &Path, module: &Path) -> String {
     let root = crate::source_access::strip_verbatim_prefix(root);
     root.parent()
-        .and_then(|dir| relative_path_label(dir, module))
+        .and_then(|dir| relative_label(dir, module, false))
         .unwrap_or_else(|| {
             crate::source_access::strip_verbatim_prefix(module)
                 .file_name()
@@ -213,17 +213,27 @@ fn bundle_module_label(root: &Path, module: &Path) -> String {
 
 /// `module` relative to the directory `dir`, with `/` separators and `..`
 /// for each level above `dir`. `None` when no such relative form exists:
-/// no shared prefix (another drive), only a shared filesystem root, a
-/// non-UTF-8 component, or `module == dir`. Never an absolute host path.
+/// no shared prefix (another drive), a shared Windows drive prefix without
+/// its root, a non-UTF-8 component, or `module == dir`. A shared Unix
+/// filesystem root alone is a relative form (`/workspace` →
+/// `../tmp/outside.sm`). Never an absolute host path.
 pub(crate) fn relative_path_label(dir: &Path, module: &Path) -> Option<String> {
+    relative_label(dir, module, true)
+}
+
+/// [`relative_path_label`]; with `across_root == false` (the CP03 text
+/// label) a module sharing only the filesystem root has no relative form.
+fn relative_label(dir: &Path, module: &Path, across_root: bool) -> Option<String> {
     use std::path::Component;
     let dir = crate::source_access::strip_verbatim_prefix(dir);
     let module = crate::source_access::strip_verbatim_prefix(module);
     let dir: Vec<Component> = dir.components().collect();
     let target: Vec<Component> = module.components().collect();
     let common = dir.iter().zip(&target).take_while(|(a, b)| a == b).count();
+    let drive_prefix_only = matches!(dir.first(), Some(Component::Prefix(_))) && common < 2;
     let has_root_prefix = matches!(dir.first(), Some(Component::Prefix(_) | Component::RootDir));
-    if common == 0 || (has_root_prefix && common < 2 && dir.len() > 1) {
+    let root_only = has_root_prefix && common < 2 && dir.len() > 1;
+    if common == 0 || drive_prefix_only || (!across_root && root_only) {
         return None;
     }
     let mut parts: Vec<String> = Vec::new();
@@ -1181,7 +1191,7 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::relative_path_label;
+    use super::{bundle_module_label, relative_path_label};
     use std::path::Path;
 
     #[test]
@@ -1195,8 +1205,55 @@ mod tests {
             relative_path_label(dir, Path::new("/w/fixture/app/sub/h.sm")).as_deref(),
             Some("sub/h.sm")
         );
-        // Only the filesystem root in common: no relative form.
-        assert_eq!(relative_path_label(dir, Path::new("/other/h.sm")), None);
+        // Only the filesystem root in common is still a relative form
+        // (Codex review on #2055): `/workspace` → `/tmp/outside.sm`.
+        assert_eq!(
+            relative_path_label(dir, Path::new("/other/h.sm")).as_deref(),
+            Some("../../../other/h.sm")
+        );
+        assert_eq!(
+            relative_path_label(Path::new("/workspace"), Path::new("/tmp/outside.sm")).as_deref(),
+            Some("../tmp/outside.sm")
+        );
         assert_eq!(relative_path_label(dir, dir), None);
+    }
+
+    /// Another drive, or a shared drive prefix without its root, has no
+    /// relative form; a shared drive root does.
+    #[cfg(windows)]
+    #[test]
+    fn relative_path_label_needs_the_same_windows_drive_root() {
+        assert_eq!(
+            relative_path_label(Path::new(r"C:\w\app"), Path::new(r"D:\h.sm")),
+            None
+        );
+        assert_eq!(
+            relative_path_label(Path::new(r"C:\w\app"), Path::new(r"C:h.sm")),
+            None
+        );
+        assert_eq!(
+            relative_path_label(Path::new(r"C:\w\app"), Path::new(r"C:\t\h.sm")).as_deref(),
+            Some("../../t/h.sm")
+        );
+    }
+
+    /// The legacy text label keeps its CP03 rule: a module sharing only the
+    /// filesystem root with the root module's directory is named by file name.
+    #[test]
+    fn bundle_module_label_keeps_file_name_when_only_the_root_is_shared() {
+        assert_eq!(
+            bundle_module_label(
+                Path::new("/w/fixture/app/main.sm"),
+                Path::new("/other/h.sm")
+            ),
+            "h.sm"
+        );
+        assert_eq!(
+            bundle_module_label(
+                Path::new("/w/fixture/app/main.sm"),
+                Path::new("/w/fixture/o.sm")
+            ),
+            "../o.sm"
+        );
     }
 }
