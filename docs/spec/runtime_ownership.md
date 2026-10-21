@@ -145,6 +145,9 @@ Current lowering contract:
 
 - runtime ownership transport is path-based, not AST-pattern-based
 - the lowered contract uses canonical `AccessPath` rooted in `SymbolId`
+- a path is rooted at the binding in lexical scope where the access is
+  written, including a binding of an enclosing `match` / `if let` arm
+  pattern or block `let` (#2053); it is never re-rooted at an outer binding
 
 ## SemCode Transport Contract
 

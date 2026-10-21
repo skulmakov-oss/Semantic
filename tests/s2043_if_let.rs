@@ -262,37 +262,224 @@ fn shorthand_record_before_else_outside_if_heads_is_unchanged() {
     );
 }
 
-/// KNOWN LIMITATION, not correct semantics (skulmakov-oss/Semantic#2053): a
-/// nested `ref` capture on a binding of an enclosing arm, in that arm's tail,
-/// passes `check` but `compile` fails closed (no artifact). `match` and its
-/// equivalent `if let` fail identically. When #2053 is fixed, replace this
-/// with `run_everywhere` on both forms.
-#[test]
-fn known_limitation_2053_nested_ref_capture_on_outer_arm_binding_fails_closed() {
-    let dir = mk_temp_dir("s2043_cp05_2053");
-    let forms = [
-        ("nested_match", "match outer { Option::Some(inner) => { match inner { Option::Some(ref x) => { x } _ => { 0 } } } _ => { 0 } }"),
-        ("nested_if_let", "if let Option::Some(inner) = outer { match inner { Option::Some(ref x) => { x } _ => { 0 } } } else { 0 }"),
-    ];
-    for (name, expr) in forms {
-        let src = format!(
-            "fn main() {{\n    let outer: Option(Option(i32)) = Option::Some(Option::Some(3));\n    let v: i32 = {expr};\n    assert(v == 3);\n    return;\n}}\n"
-        );
-        let path = write(&dir, name, &src);
-        let (code, stdout, stderr) = smc(&["check", &path]);
-        assert_eq!(code, 0, "{name}: check admits it today: {stdout}{stderr}");
-        let out = dir.join(format!("{name}.smc"));
-        let (code, stdout, stderr) = smc(&["compile", &path, "-o", out.to_str().unwrap()]);
-        assert_eq!(
-            code, 1,
-            "{name}: compile must fail closed: {stdout}{stderr}"
-        );
+/// check, compile and verify succeed at O0 and O1, and running traps with
+/// the deterministic write/borrow overlap (R0002).
+fn run_traps_on_borrow_overlap(dir: &Path, name: &str, src: &str) {
+    let path = write(dir, name, src);
+    let (code, stdout, stderr) = smc(&["check", &path, "--format", "json"]);
+    assert_eq!(code, 0, "{name}: check: {stdout}{stderr}");
+    for level in ["O0", "O1"] {
+        let out = dir.join(format!("{name}.{level}.smc"));
+        let out = out.to_str().unwrap();
+        let (code, stdout, stderr) = smc(&["compile", &path, "-o", out, "--opt-level", level]);
+        assert_eq!(code, 0, "{name} {level}: compile: {stdout}{stderr}");
+        let (code, stdout, stderr) = smc(&["verify", out]);
+        assert_eq!(code, 0, "{name} {level}: verify: {stdout}{stderr}");
+        let (code, stdout, stderr) = smc(&["run-smc", out]);
+        assert_eq!(code, 1, "{name} {level}: run must trap: {stdout}{stderr}");
         assert!(
-            format!("{stdout}{stderr}").contains("cannot resolve lexical binding 'inner'"),
-            "{name}: {stdout}{stderr}"
+            format!("{stdout}{stderr}").contains("write path overlaps active borrow"),
+            "{name} {level}: {stdout}{stderr}"
         );
-        assert!(!out.exists(), "{name}: no artifact");
     }
+}
+
+fn main_with(prelude: &str, expr: &str, expected: i32, epilogue: &str) -> String {
+    format!(
+        "fn main() {{\n{prelude}    let v: i32 = {expr};\n    assert(v == {expected});\n{epilogue}    return;\n}}\n"
+    )
+}
+
+const OUTER: &str = "    let outer: Option(Option(i32)) = Option::Some(Option::Some(3));\n";
+const NESTED_MATCH: &str = "match outer { Option::Some(inner) => { match inner { Option::Some(ref x) => { x } _ => { 0 } } } _ => { 0 } }";
+const NESTED_IF_LET: &str = "if let Option::Some(inner) = outer { match inner { Option::Some(ref x) => { x } _ => { 0 } } } else { 0 }";
+
+/// skulmakov-oss/Semantic#2053: a `ref` capture on a binding of an
+/// enclosing arm, in that arm's tail, compiles and runs (it used to pass
+/// `check` and fail `compile` with "cannot resolve lexical binding"). The
+/// `match` and the equivalent `if let` produce byte-identical SemCode.
+#[test]
+fn nested_ref_capture_on_an_outer_arm_binding_runs_everywhere() {
+    let dir = mk_temp_dir("s2053_tail");
+    run_everywhere(&dir, "nested_match", &main_with(OUTER, NESTED_MATCH, 3, ""));
+    run_everywhere(
+        &dir,
+        "nested_if_let",
+        &main_with(OUTER, NESTED_IF_LET, 3, ""),
+    );
+    for level in ["O0", "O1"] {
+        let a = std::fs::read(dir.join(format!("nested_match.{level}.smc"))).unwrap();
+        let b = std::fs::read(dir.join(format!("nested_if_let.{level}.smc"))).unwrap();
+        assert_eq!(a, b, "{level}: if let and its match differ");
+    }
+    // The same capture in an arm statement (it compiled before #2053).
+    run_everywhere(
+        &dir,
+        "arm_statement",
+        &main_with(
+            OUTER,
+            "match outer { Option::Some(inner) => { let y: i32 = match inner { Option::Some(ref x) => { x } _ => { 0 } }; y } _ => { 0 } }",
+            3,
+            "",
+        ),
+    );
+    // A tail after the arm block's own `let`, and a plain block tail.
+    run_everywhere(
+        &dir,
+        "arm_block_let_then_tail",
+        &main_with(
+            OUTER,
+            "match outer { Option::Some(inner) => { let y: Option(i32) = inner; match y { Option::Some(ref x) => { x } _ => { 0 } } } _ => { 0 } }",
+            3,
+            "",
+        ),
+    );
+    run_everywhere(
+        &dir,
+        "block_let_then_tail",
+        &main_with(
+            "",
+            "{ let inner: Option(i32) = Option::Some(3); match inner { Option::Some(ref x) => { x } _ => { 0 } } }",
+            3,
+            "",
+        ),
+    );
+}
+
+/// #2053: several nesting levels, non-matching enclosing patterns, match
+/// defaults and if-let ELSE paths, and guards that name arm bindings.
+#[test]
+fn nested_ref_captures_across_levels_defaults_and_guards() {
+    let dir = mk_temp_dir("s2053_levels");
+    let three =
+        "    let o3: Option(Option(Option(i32))) = Option::Some(Option::Some(Option::Some(5)));\n";
+    run_everywhere(
+        &dir,
+        "three_levels_match",
+        &main_with(
+            three,
+            "match o3 { Option::Some(o2) => { match o2 { Option::Some(o1) => { match o1 { Option::Some(ref x) => { x } _ => { 0 } } } _ => { 0 } } } _ => { 0 } }",
+            5,
+            "",
+        ),
+    );
+    run_everywhere(
+        &dir,
+        "three_levels_if_let",
+        &main_with(
+            three,
+            "if let Option::Some(o2) = o3 { if let Option::Some(o1) = o2 { match o1 { Option::Some(ref x) => { x } _ => { 0 } } } else { 0 } } else { 0 }",
+            5,
+            "",
+        ),
+    );
+    // The enclosing pattern does not match: the default / ELSE path runs,
+    // and its own nested capture (on an outer-scope value) still works.
+    let none = "    let outer: Option(Option(i32)) = Option::None;\n    let other: Option(i32) = Option::Some(8);\n";
+    run_everywhere(
+        &dir,
+        "default_path",
+        &main_with(
+            none,
+            "match outer { Option::Some(inner) => { match inner { Option::Some(ref x) => { x } _ => { 0 } } } _ => { match other { Option::Some(ref y) => { y } _ => { 0 } } } }",
+            8,
+            "",
+        ),
+    );
+    run_everywhere(
+        &dir,
+        "else_path",
+        &main_with(
+            none,
+            "if let Option::Some(inner) = outer { match inner { Option::Some(ref x) => { x } _ => { 0 } } } else { match other { Option::Some(ref y) => { y } _ => { 0 } } }",
+            8,
+            "",
+        ),
+    );
+    // A guard that captures by reference from the arm's own binding, taken
+    // and not taken.
+    let guard = |n: i32| {
+        format!("match outer {{ Option::Some(inner) if match inner {{ Option::Some(ref x) => {{ x == {n} }} _ => {{ false }} }} => {{ 1 }} _ => {{ 0 }} }}")
+    };
+    run_everywhere(&dir, "guard_taken", &main_with(OUTER, &guard(3), 1, ""));
+    run_everywhere(&dir, "guard_not_taken", &main_with(OUTER, &guard(4), 0, ""));
+}
+
+/// #2053: the nested borrow is rooted at the arm's own binding, not at an
+/// outer variable of the same name, so writing that outer variable is not
+/// an overlap; a borrow recorded from a tail still enforces R0002 against a
+/// later write of the borrowed path; other ownership events (a site-backed
+/// tuple borrow in an arm statement) coexist.
+#[test]
+fn nested_tail_borrows_keep_their_identity_and_enforcement() {
+    let dir = mk_temp_dir("s2053_enforce");
+    let shadow = "    let mut inner: Option(i32) = Option::Some(9);\n    let outer: Option(Option(i32)) = Option::Some(Option::Some(3));\n";
+    run_everywhere(
+        &dir,
+        "shadowed_outer_write_allowed",
+        &main_with(
+            shadow,
+            NESTED_MATCH,
+            3,
+            "    inner = Option::None;\n    let _ = inner;\n",
+        ),
+    );
+    let tail_on_outer = "    let mut flag: Option(i32) = Option::Some(4);\n    let outer: Option(Option(i32)) = Option::Some(Option::Some(3));\n";
+    let expr = "match outer { Option::Some(inner) => { let _ = inner; match flag { Option::Some(ref x) => { x } _ => { 0 } } } _ => { 0 } }";
+    run_traps_on_borrow_overlap(
+        &dir,
+        "tail_borrow_then_overlapping_write",
+        &main_with(
+            tail_on_outer,
+            expr,
+            4,
+            "    flag = Option::None;\n    let _ = flag;\n",
+        ),
+    );
+    // A Borrow recorded from a guard (prescanned after the arm's bindings)
+    // is enforced the same way.
+    run_traps_on_borrow_overlap(
+        &dir,
+        "guard_borrow_then_overlapping_write",
+        &main_with(
+            tail_on_outer,
+            "match outer { Option::Some(inner) if match flag { Option::Some(ref x) => { x == 4 } _ => { false } } => { let _ = inner; 4 } _ => { 0 } }",
+            4,
+            "    flag = Option::None;\n    let _ = flag;\n",
+        ),
+    );
+    run_everywhere(
+        &dir,
+        "tail_borrow_then_unrelated_write",
+        &main_with(
+            "    let mut other: i32 = 1;\n    let mut flag: Option(i32) = Option::Some(4);\n    let outer: Option(Option(i32)) = Option::Some(Option::Some(3));\n",
+            expr,
+            4,
+            "    other = 2;\n    let _ = other;\n    let _ = flag;\n",
+        ),
+    );
+    run_everywhere(
+        &dir,
+        "with_tuple_borrow_in_arm_statement",
+        &main_with(
+            "    let pair: (i32, i32) = (1, 2);\n    let outer: Option(Option(i32)) = Option::Some(Option::Some(3));\n",
+            "match outer { Option::Some(inner) => { let (ref a, _): (i32, i32) = pair; let _ = a; match inner { Option::Some(ref x) => { x } _ => { 0 } } } _ => { 0 } }",
+            3,
+            "",
+        ),
+    );
+    // Adversarial Review 3: a wildcard `if let`'s never-run ELSE still
+    // records its frame-scoped Borrow, so a later write traps (unchanged).
+    run_traps_on_borrow_overlap(
+        &dir,
+        "wildcard_else_borrow_still_enforced",
+        &main_with(
+            "    let mut opt: Option(i32) = Option::Some(7);\n",
+            "if let _ = true { 1 } else { match opt { Option::Some(ref x) => { x } _ => { 0 } } }",
+            1,
+            "    opt = Option::None;\n    let _ = opt;\n",
+        ),
+    );
 }
 
 #[test]
