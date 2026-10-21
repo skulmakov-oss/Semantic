@@ -8190,6 +8190,15 @@ fn lower_stmt(
                 &mut ctx.ownership_events,
                 &ctx.lowered_locals,
             )?;
+            // #2056: the arms' `ref` captures borrow the scrutinee, as in the
+            // expression form.
+            append_match_pattern_borrow_events(
+                *scrutinee,
+                arms.iter().map(|arm| &arm.pat),
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
             let (scr_reg, scr_ty) = lower_expr(
                 *scrutinee,
                 arena,
@@ -8337,6 +8346,15 @@ fn lower_stmt(
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
                         ctx.lowered_locals.push_scope();
+                        // #2056: the guard may name this arm's bindings; prescan it now.
+                        if let Some(guard) = arm.guard {
+                            append_record_update_write_events_from_expr(
+                                guard,
+                                arena,
+                                &mut ctx.ownership_events,
+                                &ctx.lowered_locals,
+                            )?;
+                        }
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -8421,6 +8439,15 @@ fn lower_stmt(
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
                         ctx.lowered_locals.push_scope();
+                        // #2056: the guard may name this arm's bindings; prescan it now.
+                        if let Some(guard) = arm.guard {
+                            append_record_update_write_events_from_expr(
+                                guard,
+                                arena,
+                                &mut ctx.ownership_events,
+                                &ctx.lowered_locals,
+                            )?;
+                        }
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -8530,6 +8557,15 @@ fn lower_stmt(
                             arena,
                             &mut ctx.lowered_locals,
                         )?;
+                        // #2056: the guard may name this arm's bindings; prescan it now.
+                        if let Some(guard) = arm.guard {
+                            append_record_update_write_events_from_expr(
+                                guard,
+                                arena,
+                                &mut ctx.ownership_events,
+                                &ctx.lowered_locals,
+                            )?;
+                        }
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -10176,6 +10212,15 @@ fn lower_loop_expr_stmt(
                 ownership_events,
                 lowered_locals,
             )?;
+            // #2056: the arms' `ref` captures borrow the scrutinee, as in the
+            // expression form.
+            append_match_pattern_borrow_events(
+                *scrutinee,
+                arms.iter().map(|arm| &arm.pat),
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
             let (scr_reg, scr_ty) = lower_expr(
                 *scrutinee,
                 arena,
@@ -10277,6 +10322,15 @@ fn lower_loop_expr_stmt(
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
                         lowered_locals.push_scope();
+                        // #2056: the guard may name this arm's bindings; prescan it now.
+                        if let Some(guard) = arm.guard {
+                            append_record_update_write_events_from_expr(
+                                guard,
+                                arena,
+                                ownership_events,
+                                lowered_locals,
+                            )?;
+                        }
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -10368,6 +10422,15 @@ fn lower_loop_expr_stmt(
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
                         lowered_locals.push_scope();
+                        // #2056: the guard may name this arm's bindings; prescan it now.
+                        if let Some(guard) = arm.guard {
+                            append_record_update_write_events_from_expr(
+                                guard,
+                                arena,
+                                ownership_events,
+                                lowered_locals,
+                            )?;
+                        }
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -10485,6 +10548,15 @@ fn lower_loop_expr_stmt(
                             arena,
                             lowered_locals,
                         )?;
+                        // #2056: the guard may name this arm's bindings; prescan it now.
+                        if let Some(guard) = arm.guard {
+                            append_record_update_write_events_from_expr(
+                                guard,
+                                arena,
+                                ownership_events,
+                                lowered_locals,
+                            )?;
+                        }
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -12581,15 +12653,33 @@ fn append_match_record_update_write_events(
         ownership_events,
         lowered_locals,
     )?;
+    append_match_pattern_borrow_events(
+        match_expr.scrutinee,
+        match_expr.arms.iter().map(|arm| &arm.pat),
+        arena,
+        ownership_events,
+        lowered_locals,
+    )
+}
 
+/// The `Borrow` events of a match's `ref` pattern captures on its
+/// scrutinee, for the expression and the statement form alike (#2056).
+/// Resolved in the scope the scrutinee is evaluated in.
+fn append_match_pattern_borrow_events<'p>(
+    scrutinee: ExprId,
+    patterns: impl Iterator<Item = &'p sm_front::types::MatchPattern> + Clone,
+    arena: &AstArena,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &LoweredLocalEnv,
+) -> Result<(), FrontendError> {
     // #1725 corrective: only attempt to resolve the scrutinee's
     // ownership path if some arm's pattern actually needs it (a
     // real Borrow-mode ADT payload capture below). #2053: a match nested
     // in an enclosing arm's tail or guard (`Option::Some(dir) => { match
     // dir { ... } }`) is prescanned only once that arm's bindings exist,
     // so its scrutinee resolves to the arm's own local.
-    let any_arm_borrows_adt_payload = match_expr.arms.iter().any(|arm| {
-                matches!(&arm.pat, sm_front::types::MatchPattern::Adt(adt_pat) if adt_pat.items.iter().any(|item| {
+    let any_arm_borrows_adt_payload = patterns.clone().any(|pat| {
+                matches!(pat, sm_front::types::MatchPattern::Adt(adt_pat) if adt_pat.items.iter().any(|item| {
                     matches!(
                         item,
                         sm_front::types::AdtPatternItem::Bind {
@@ -12600,13 +12690,13 @@ fn append_match_record_update_write_events(
                 }))
             });
     let scrutinee_path = if any_arm_borrows_adt_payload {
-        sequence_access_path_from_expr(match_expr.scrutinee, arena, lowered_locals)?
+        sequence_access_path_from_expr(scrutinee, arena, lowered_locals)?
     } else {
         None
     };
     let mut borrowed_dynamic_scrutinee_root = false;
-    for arm in &match_expr.arms {
-        if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
+    for pat in patterns {
+        if let sm_front::types::MatchPattern::Adt(adt_pat) = pat {
             if let Some(path) = &scrutinee_path {
                 if path.is_dynamic_fallback() {
                     let should_borrow = adt_pat.items.iter().any(|item| {
@@ -14319,6 +14409,35 @@ mod opt_tests {
             decoded_main.borrowed_paths[1].activation,
             Some(crate::semcode_decode::DecodedBorrowActivation::StoreVarSite(_))
         ));
+    }
+
+    // #2056: a statement-form match records exactly the one Borrow the
+    // expression form records for the same `ref` capture, with the same
+    // canonical path, at O0 and O1.
+    #[test]
+    fn s2056_statement_match_borrow_equals_the_expression_form() {
+        let stmt = "fn main() {\n    let opt: Option(i32) = Option::Some(7);\n    match opt {\n        Option::Some(ref x) => { assert(x == 7); }\n        _ => {}\n    }\n    return;\n}\n";
+        let expr = "fn main() {\n    let opt: Option(i32) = Option::Some(7);\n    let v: i32 = match opt { Option::Some(ref x) => { x } _ => { 0 } };\n    assert(v == 7);\n    return;\n}\n";
+        for opt in [OptLevel::O0, OptLevel::O1] {
+            let events = |src: &str| {
+                compile_program_to_ir_with_options(src, CompileProfile::RustLike, opt)
+                    .expect("compiles")
+                    .into_iter()
+                    .find(|f| f.name == "main")
+                    .expect("main")
+                    .ownership_events
+            };
+            let stmt_events = events(stmt);
+            assert_eq!(stmt_events.len(), 1, "{opt:?}: {stmt_events:?}");
+            assert_eq!(stmt_events[0].kind, OwnershipPathEventKind::Borrow);
+            assert_eq!(stmt_events[0].path.root, "__sm_local_0_opt");
+            assert!(matches!(
+                stmt_events[0].path.components.as_slice(),
+                [PathComponent::AdtPayload { index: 0, .. }]
+            ));
+            assert_eq!(stmt_events[0].activation_site, None);
+            assert_eq!(stmt_events, events(expr), "{opt:?}");
+        }
     }
 
     // #2053: a `ref` capture nested in an enclosing arm's tail is prescanned
