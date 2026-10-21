@@ -3540,11 +3540,13 @@ fn lower_closure_literal_expr(
     // same way a top-level `lower_stmt` arm prescans its own statement's
     // expression before lowering it. Writes into the child's own sink, not
     // the parent's - the closure body is a new function boundary.
+    // #2057: names resolve in the child's own environment (its captures
+    // and parameter, bound above), never the parent's (#1724 §11).
     append_record_update_write_events_from_expr(
         closure.body,
         arena,
         &mut lifted_ownership_events,
-        lowered_locals,
+        &lifted_lowered_locals,
     )?;
     let (body_reg, body_ty) = lower_expr_with_expected(
         closure.body,
@@ -14409,6 +14411,42 @@ mod opt_tests {
             decoded_main.borrowed_paths[1].activation,
             Some(crate::semcode_decode::DecodedBorrowActivation::StoreVarSite(_))
         ));
+    }
+
+    // #2057: the lifted lambda's prescan resolves its own parameter, so the
+    // `ref` capture's single Borrow lives in the lambda's function, rooted at
+    // the lambda-local parameter key, and the enclosing frame records none.
+    #[test]
+    fn s2057_lambda_borrow_is_rooted_in_the_lifted_frame() {
+        let src = "fn main() {\n    let o: Option(i32) = Option::Some(9);\n    let f: Closure(Option(i32) -> i32) = (o => match o { Option::Some(ref x) => { x } _ => { 0 } });\n    assert(f(Option::Some(5)) == 5);\n    let _ = o;\n    return;\n}\n";
+        for opt in [OptLevel::O0, OptLevel::O1] {
+            let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, opt)
+                .expect("compiles");
+            let main = ir.iter().find(|f| f.name == "main").expect("main");
+            assert!(
+                main.ownership_events.is_empty(),
+                "{opt:?}: {:?}",
+                main.ownership_events
+            );
+            let lambda = ir
+                .iter()
+                .find(|f| f.name.starts_with("__closure"))
+                .expect("lifted lambda");
+            assert_eq!(
+                lambda.ownership_events.len(),
+                1,
+                "{opt:?}: {:?}",
+                lambda.ownership_events
+            );
+            let event = &lambda.ownership_events[0];
+            assert_eq!(event.kind, OwnershipPathEventKind::Borrow);
+            assert_eq!(event.path.root, "__sm_local_0_o");
+            assert!(matches!(
+                event.path.components.as_slice(),
+                [PathComponent::AdtPayload { index: 0, .. }]
+            ));
+            assert_eq!(event.activation_site, None);
+        }
     }
 
     // #2056: a statement-form match records exactly the one Borrow the
