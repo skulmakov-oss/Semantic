@@ -6005,6 +6005,16 @@ fn lower_expr_with_expected(
                     ownership_events,
                     lowered_locals,
                 )?;
+                // #2053: ELSE is never lowered here, but its tail keeps the
+                // ownership events the equivalent `match` default records
+                // (frame-scoped Borrow v0; Adversarial Review 3). It sees
+                // only the enclosing scope, which is fully bound.
+                append_record_update_write_events_from_expr(
+                    if_let.else_block.tail,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
                 return lower_value_block_expr(
                     &if_let.then_block,
                     arena,
@@ -8873,6 +8883,15 @@ fn lower_value_block_expr(
             }
         }
     }
+    // #2053: the tail is prescanned here, after this block's statements and
+    // any enclosing arm's bindings are in scope (the enclosing statement's
+    // prescan no longer reaches it).
+    append_record_update_write_events_from_expr(
+        block.tail,
+        arena,
+        ownership_events,
+        lowered_locals,
+    )?;
     let tail = lower_expr_with_expected(
         block.tail,
         arena,
@@ -10729,6 +10748,15 @@ fn lower_match_expr(
                 let mut arm_env = env.clone();
                 arm_env.push_scope();
                 lowered_locals.push_scope();
+                // #2053: the guard may name this arm's bindings; prescan it now.
+                if let Some(guard) = arm.guard {
+                    append_record_update_write_events_from_expr(
+                        guard,
+                        arena,
+                        ownership_events,
+                        lowered_locals,
+                    )?;
+                }
                 if let Some(guard_reg) = lower_match_guard(
                     arm.guard,
                     arena,
@@ -10835,6 +10863,15 @@ fn lower_match_expr(
                 let mut arm_env = env.clone();
                 arm_env.push_scope();
                 lowered_locals.push_scope();
+                // #2053: the guard may name this arm's bindings; prescan it now.
+                if let Some(guard) = arm.guard {
+                    append_record_update_write_events_from_expr(
+                        guard,
+                        arena,
+                        ownership_events,
+                        lowered_locals,
+                    )?;
+                }
                 if let Some(guard_reg) = lower_match_guard(
                     arm.guard,
                     arena,
@@ -10972,6 +11009,15 @@ fn lower_match_expr(
                     arena,
                     lowered_locals,
                 )?;
+                // #2053: the guard may name this arm's bindings; prescan it now.
+                if let Some(guard) = arm.guard {
+                    append_record_update_write_events_from_expr(
+                        guard,
+                        arena,
+                        ownership_events,
+                        lowered_locals,
+                    )?;
+                }
                 if let Some(guard_reg) = lower_match_guard(
                     arm.guard,
                     arena,
@@ -12481,21 +12527,15 @@ fn append_record_update_write_events_from_expr(
                 lowered_locals,
             )?;
         }
+        // #2053: a value block's tail (and a match arm's guard) is prescanned
+        // where it is lowered - `lower_value_block_expr` /
+        // `lower_match_expr` - once the bindings it may name (the block's
+        // own `let`s, the arm pattern's bindings) exist, never here ahead of
+        // them. Only the positions evaluated in the enclosing scope are
+        // scanned here: an `if` condition and a match scrutinee.
         Expr::If(if_expr) => {
             append_record_update_write_events_from_expr(
                 if_expr.condition,
-                arena,
-                ownership_events,
-                lowered_locals,
-            )?;
-            append_record_update_write_events_from_expr(
-                if_expr.then_block.tail,
-                arena,
-                ownership_events,
-                lowered_locals,
-            )?;
-            append_record_update_write_events_from_expr(
-                if_expr.else_block.tail,
                 arena,
                 ownership_events,
                 lowered_locals,
@@ -12507,14 +12547,7 @@ fn append_record_update_write_events_from_expr(
             ownership_events,
             lowered_locals,
         )?,
-        Expr::Block(block) => {
-            append_record_update_write_events_from_expr(
-                block.tail,
-                arena,
-                ownership_events,
-                lowered_locals,
-            )?;
-        }
+        Expr::Block(_) => {}
         Expr::Match(match_expr) => append_match_record_update_write_events(
             match_expr,
             arena,
@@ -12551,15 +12584,10 @@ fn append_match_record_update_write_events(
 
     // #1725 corrective: only attempt to resolve the scrutinee's
     // ownership path if some arm's pattern actually needs it (a
-    // real Borrow-mode ADT payload capture below) - the scrutinee
-    // may be a variable bound by an *enclosing* match/if-let arm's
-    // own pattern within this same prescan tree (e.g.
-    // `Option::Some(dir) => { match dir { ... } }`), which
-    // genuinely has no `LoweredLocalEnv` entry yet at prescan time
-    // (real binding only happens later, during that arm's own real
-    // lowering). Gating on actual need means the common case - no
-    // Borrow capture anywhere in this match - never attempts a
-    // resolve that would otherwise fail closed for no reason.
+    // real Borrow-mode ADT payload capture below). #2053: a match nested
+    // in an enclosing arm's tail or guard (`Option::Some(dir) => { match
+    // dir { ... } }`) is prescanned only once that arm's bindings exist,
+    // so its scrutinee resolves to the arm's own local.
     let any_arm_borrows_adt_payload = match_expr.arms.iter().any(|arm| {
                 matches!(&arm.pat, sm_front::types::MatchPattern::Adt(adt_pat) if adt_pat.items.iter().any(|item| {
                     matches!(
@@ -12617,29 +12645,9 @@ fn append_match_record_update_write_events(
                 }
             }
         }
-
-        if let Some(guard) = arm.guard {
-            append_record_update_write_events_from_expr(
-                guard,
-                arena,
-                ownership_events,
-                lowered_locals,
-            )?;
-        }
-        append_record_update_write_events_from_expr(
-            arm.block.tail,
-            arena,
-            ownership_events,
-            lowered_locals,
-        )?;
-    }
-    if let Some(default) = &match_expr.default {
-        append_record_update_write_events_from_expr(
-            default.tail,
-            arena,
-            ownership_events,
-            lowered_locals,
-        )?;
+        // #2053: guards and arm/default tails are prescanned by
+        // `lower_match_expr` / `lower_value_block_expr`, after the arm's
+        // bindings exist.
     }
     Ok(())
 }
@@ -14311,6 +14319,42 @@ mod opt_tests {
             decoded_main.borrowed_paths[1].activation,
             Some(crate::semcode_decode::DecodedBorrowActivation::StoreVarSite(_))
         ));
+    }
+
+    // #2053: a `ref` capture nested in an enclosing arm's tail is prescanned
+    // after that arm's bindings exist, so its one Borrow(AdtPayload) event is
+    // rooted at the arm's own binding (`inner`), never at the outer value;
+    // the `if let` form records the identical events.
+    #[test]
+    fn s2053_nested_tail_borrow_is_rooted_at_the_arm_binding() {
+        let program = |expr: &str| {
+            format!(
+                "fn main() {{\n    let outer: Option(Option(i32)) = Option::Some(Option::Some(3));\n    let v: i32 = {expr};\n    let _ = v;\n    return;\n}}\n"
+            )
+        };
+        let matched = program("match outer { Option::Some(inner) => { match inner { Option::Some(ref x) => { x } _ => { 0 } } } _ => { 0 } }");
+        let if_let = program("if let Option::Some(inner) = outer { match inner { Option::Some(ref x) => { x } _ => { 0 } } } else { 0 }");
+        for opt in [OptLevel::O0, OptLevel::O1] {
+            let events = |src: &str| {
+                compile_program_to_ir_with_options(src, CompileProfile::RustLike, opt)
+                    .expect("compiles")
+                    .into_iter()
+                    .find(|f| f.name == "main")
+                    .expect("main")
+                    .ownership_events
+            };
+            let match_events = events(&matched);
+            assert_eq!(match_events.len(), 1, "{opt:?}: {match_events:?}");
+            let event = &match_events[0];
+            assert_eq!(event.kind, OwnershipPathEventKind::Borrow);
+            assert!(event.path.root.ends_with("_inner"), "{opt:?}: {event:?}");
+            assert!(matches!(
+                event.path.components.as_slice(),
+                [PathComponent::AdtPayload { index: 0, .. }]
+            ));
+            assert_eq!(event.activation_site, None);
+            assert_eq!(events(&if_let), match_events, "{opt:?}: if let differs");
+        }
     }
 
     // S2043 CP05: `if let P = v { A } else { B }` is `match v { P => { A }

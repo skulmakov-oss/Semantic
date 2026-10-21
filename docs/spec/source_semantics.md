@@ -676,12 +676,12 @@ expression with exactly the meaning of
   range patterns are type-checked but rejected deterministically by the IR
   backend, as for `match`
 - it compiles through the verifier-first path at every optimization level
-  with no instruction, SemCode revision or VM behavior of its own, with the
-  same known limitation as `match`: a nested `ref` capture on a binding of
-  the pattern, written in `THEN`'s tail expression, passes `check` but is
-  rejected by `compile` (fail closed, no artifact;
-  skulmakov-oss/Semantic#2053). `check` and `compile` are not yet in parity
-  for that shape
+  with no instruction, SemCode revision or VM behavior of its own
+- a `match` or `if let` expression with a `ref` capture, nested in `THEN`
+  (or in a `match` expression arm's body or guard), may scrutinize a binding
+  of the enclosing pattern or of the enclosing block's `let`s, in a
+  statement or in the tail expression alike; its `Borrow` is rooted at that
+  binding (skulmakov-oss/Semantic#2053)
 
 At the top level of an `if CONDITION` / `if let ... = SCRUTINEE` (not inside
 a block nested in it), a brace group of the shapes `{}`, `{ x }` or
