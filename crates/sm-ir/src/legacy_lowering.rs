@@ -14418,7 +14418,7 @@ mod opt_tests {
     // the lambda-local parameter key, and the enclosing frame records none.
     #[test]
     fn s2057_lambda_borrow_is_rooted_in_the_lifted_frame() {
-        let src = "fn main() {\n    let o: Option(i32) = Option::Some(9);\n    let f: Closure(Option(i32) -> i32) = (o => match o { Option::Some(ref x) => { x } _ => { 0 } });\n    assert(f(Option::Some(5)) == 5);\n    let _ = o;\n    return;\n}\n";
+        let src = "fn main() {\n    let pad: i32 = 42;\n    let o: Option(i32) = Option::Some(9);\n    let f: Closure(Option(i32) -> i32) = (o => match o { Option::Some(ref x) => { x } _ => { 0 } });\n    assert(f(Option::Some(5)) == 5);\n    let _ = o;\n    let _ = pad;\n    return;\n}\n";
         for opt in [OptLevel::O0, OptLevel::O1] {
             let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, opt)
                 .expect("compiles");

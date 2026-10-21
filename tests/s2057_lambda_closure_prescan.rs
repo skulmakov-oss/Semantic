@@ -8,6 +8,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use sm_format::semcode_decode::{DecodedAccessPathComponent, DecodedBorrowActivation};
+
 static DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn mk_temp_dir(prefix: &str) -> PathBuf {
@@ -73,17 +75,43 @@ fn pipeline(dir: &Path, name: &str, src: &str, trap: bool) -> Vec<Vec<u8>> {
 
 const LAMBDA: &str = "(o => match o { Option::Some(ref x) => { x } _ => { 0 } })";
 
+fn assert_child_borrow(artifacts: &[Vec<u8>], root: &str) {
+    for bytes in artifacts {
+        let decoded = sm_format::semcode_decode::decode_semcode(bytes).expect("decode OWN0");
+        let main = decoded.functions.iter().find(|f| f.name == "main").unwrap();
+        assert!(main.borrowed_paths.is_empty());
+        let child = decoded
+            .functions
+            .iter()
+            .find(|f| f.name.starts_with("__closure"))
+            .unwrap();
+        assert_eq!(child.borrowed_paths.len(), 1);
+        let borrow = &child.borrowed_paths[0];
+        assert_eq!(child.strings[borrow.root_symbol_id as usize], root);
+        assert!(matches!(
+            borrow.components.as_slice(),
+            [DecodedAccessPathComponent::AdtPayload { index: 0, .. }]
+        ));
+        assert!(matches!(
+            borrow.activation,
+            Some(DecodedBorrowActivation::FrameEntry)
+        ));
+    }
+}
+
 /// The #2057 reproduction (it used to pass `check` and fail `compile` with
 /// "cannot resolve lexical binding 'o'"), repeated calls, and the
 /// equivalent named-function form.
 #[test]
 fn lambda_ref_capture_on_its_parameter_runs_everywhere() {
     let dir = mk_temp_dir("s2057_issue");
-    pipeline(
-        &dir,
-        "issue_2057",
-        "fn main() {\n    let f: Closure(Option(i32) -> i32) =\n        (o => match o {\n            Option::Some(ref x) => { x }\n            _ => { 0 }\n        });\n\n    let v: i32 = f(Option::Some(5));\n    assert(v == 5);\n    return;\n}\n",
-        false,
+    let source = "fn main() {\n    let f: Closure(Option(i32) -> i32) =\n        (o => match o {\n            Option::Some(ref x) => { x }\n            _ => { 0 }\n        });\n\n    let v: i32 = f(Option::Some(5));\n    assert(v == 5);\n    return;\n}\n";
+    let artifacts = pipeline(&dir, "issue_2057", source, false);
+    assert_child_borrow(&artifacts, "__sm_local_0_o");
+    assert_eq!(
+        artifacts,
+        pipeline(&dir, "issue_2057_repeat", source, false,),
+        "each optimization level is byte-deterministic"
     );
     pipeline(
         &dir,
@@ -106,24 +134,27 @@ fn lambda_ref_capture_on_its_parameter_runs_everywhere() {
 #[test]
 fn lambda_bindings_keep_their_lexical_identity() {
     let dir = mk_temp_dir("s2057_identity");
-    pipeline(
+    let captured = pipeline(
         &dir,
         "capture_and_parameter",
         "fn main() {\n    let k: i32 = 10;\n    let f: Closure(Option(i32) -> i32) = (o => match o { Option::Some(ref x) => { x + k } _ => { k } });\n    assert(f(Option::Some(5)) == 15);\n    assert(f(Option::None) == 10);\n    return;\n}\n",
         false,
     );
-    pipeline(
+    assert_child_borrow(&captured, "__sm_local_1_o");
+    let local = pipeline(
         &dir,
         "lambda_local_let",
         "fn main() {\n    let f: Closure(Option(i32) -> i32) = (o => { let y: Option(i32) = o; match y { Option::Some(ref x) => { x } _ => { 0 } } });\n    assert(f(Option::Some(5)) == 5);\n    return;\n}\n",
         false,
     );
-    pipeline(
+    assert_child_borrow(&local, "__sm_local_1_y");
+    let shadowed = pipeline(
         &dir,
         "parameter_shadows_outer_then_outer_write",
-        &format!("fn main() {{\n    let mut o: Option(i32) = Option::Some(9);\n    let f: Closure(Option(i32) -> i32) = {LAMBDA};\n    assert(f(Option::Some(5)) == 5);\n    o = Option::None;\n    let _ = o;\n    return;\n}}\n"),
+        &format!("fn main() {{\n    let pad: i32 = 42;\n    let mut o: Option(i32) = Option::Some(9);\n    let f: Closure(Option(i32) -> i32) = {LAMBDA};\n    assert(f(Option::Some(5)) == 5);\n    o = Option::None;\n    let _ = o;\n    let _ = pad;\n    return;\n}}\n"),
         false,
     );
+    assert_child_borrow(&shadowed, "__sm_local_0_o");
 }
 
 /// R0002 is unchanged next to a lambda: a statement-form `ref` in the
