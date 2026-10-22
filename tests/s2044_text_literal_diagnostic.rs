@@ -183,3 +183,69 @@ fn import_path_strings_do_not_inherit_executable_literal_limit() {
     let src = format!("Import \"{path}\"\nfn main() {{ return; }}\n");
     sm_front::parse_program(&src).expect("a path token is not an executable TextLiteral");
 }
+
+#[test]
+fn imported_literal_limit_preserves_bundle_diagnostic_boundary() {
+    for size in [1023, 1022] {
+        let dir = TempDir::new();
+        std::fs::write(
+            dir.path().join("main.sm"),
+            "Import \"helper.sm\"\nfn main() { helper(); return; }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("helper.sm"),
+            source(&"a".repeat(size)).replacen("fn main()", "fn helper()", 1),
+        )
+        .unwrap();
+        let mut previous = None;
+        for _ in 0..3 {
+            let out = smc(dir.path(), &["check", "main.sm", "--format", "json"]);
+            assert_eq!(out.status.code(), Some(i32::from(size > 1022)));
+            assert!(out.stderr.is_empty(), "{}", output_text(&out));
+            assert!(!output_text(&out).contains("internal compiler error"));
+            if let Some(bytes) = &previous {
+                assert_eq!(bytes, &out.stdout, "deterministic bundle diagnostics");
+            }
+            previous = Some(out.stdout.clone());
+            let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(report["schema"], "semantic.diagnostics");
+            assert_eq!(report["schema_version"], 1);
+            if size > 1022 {
+                assert_eq!(report["status"], "failed");
+                let diagnostics = report["diagnostics"].as_array().unwrap();
+                assert_eq!(diagnostics.len(), 1);
+                let diag = &diagnostics[0];
+                assert_eq!(diag["code"], "E0009");
+                assert_eq!(diag.get("source"), Some(&serde_json::Value::Null));
+                assert_eq!(diag.get("range"), Some(&serde_json::Value::Null));
+                let message = diag["message"].as_str().unwrap();
+                assert!(message.contains("helper.sm"), "{message}");
+                assert!(message.contains("text literal exceeds the maximum supported size: 1023 UTF-8 content bytes; maximum 1022 bytes"), "{message}");
+            } else {
+                assert_eq!(report["diagnostics"].as_array().unwrap().len(), 0);
+            }
+        }
+        for level in ["O0", "O1"] {
+            let out = smc(
+                dir.path(),
+                &["compile", "main.sm", "-o", "out.smc", "--opt-level", level],
+            );
+            assert_eq!(
+                out.status.code(),
+                Some(i32::from(size > 1022)),
+                "{level}: {}",
+                output_text(&out)
+            );
+            assert!(!output_text(&out).contains("internal compiler error"));
+            if size > 1022 {
+                assert!(!dir.path().join("out.smc").exists());
+            } else {
+                for command in ["verify", "run-smc"] {
+                    let out = smc(dir.path(), &[command, "out.smc"]);
+                    assert!(out.status.success(), "{command}: {}", output_text(&out));
+                }
+            }
+        }
+    }
+}
