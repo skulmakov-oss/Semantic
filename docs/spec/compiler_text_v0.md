@@ -56,13 +56,24 @@ bytes**, not 1022 Unicode scalars. Its unchanged quoted spelling is stored in
 the SemCode string table: the two ASCII quote bytes count toward the preserved
 `MAX_STRING_LEN = 1024` entry maximum. Escapes remain undecoded as above.
 
-`smc check` and source compilation reject a larger executable literal during
-frontend admission, before IR/SemCode emission, with the existing frontend
-syntax diagnostic `E0005`. The diagnostic identifies the original literal token
-and reports its UTF-8 content byte length and the maximum; human and
-`semantic.diagnostics` v1 JSON projections report the same failure. Shorten the
-embedded literal, or obtain larger inputs through an already-admitted text
-ingress rather than embedding them. Rejected source emits no artifact.
+Direct frontend source admission rejects a larger executable literal with the
+existing syntax diagnostic `E0005` and an accurate source range covering the
+original literal token. The diagnostic reports its UTF-8 content byte length
+and the maximum. Source checking and compilation agree on rejection before
+IR/SemCode emission; rejected source emits no executable artifact. Command-specific
+diagnostic presentations need not be identical.
+
+**Executable-bundle diagnostic boundary.** If the violation is encountered while
+composing an imported executable-bundle module, the existing composition error
+path reports `E0009` with `source: null` and `range: null`, in accordance with
+[`diagnostics_machine_schema_v1.md`](diagnostics_machine_schema_v1.md). The message
+retains available module and underlying error context, but textual names and
+offsets are not structured source attribution. This existing limitation does not
+promise a nested `E0005` diagnostic; precise imported-module diagnostic preservation
+is outside the S2044 correction.
+
+Shorten the embedded literal, or obtain larger inputs through an already-admitted
+text ingress rather than embedding them.
 
 This is not a global runtime `text` length limit: runtime-generated text and
 host text inputs retain their existing contracts and quotas. Import-path tokens
