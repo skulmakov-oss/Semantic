@@ -49,6 +49,28 @@ Text literal bytes follow the current literal rules, including release limit R2:
 sequences are not decoded (a backslash followed by `n` is two bytes). Inspection observes the
 bytes the literal actually produced and never interprets escapes.
 
+### Executable source-literal size admission on current `main` (#2044)
+
+An executable double-quoted `text` literal admits at most **1022 UTF-8 content
+bytes**, not 1022 Unicode scalars. Its unchanged quoted spelling is stored in
+the SemCode string table: the two ASCII quote bytes count toward the preserved
+`MAX_STRING_LEN = 1024` entry maximum. Escapes remain undecoded as above.
+
+`smc check` and source compilation reject a larger executable literal during
+frontend admission, before IR/SemCode emission, with the existing frontend
+syntax diagnostic `E0005`. The diagnostic identifies the original literal token
+and reports its UTF-8 content byte length and the maximum; human and
+`semantic.diagnostics` v1 JSON projections report the same failure. Shorten the
+embedded literal, or obtain larger inputs through an already-admitted text
+ingress rather than embedding them. Rejected source emits no artifact.
+
+This is not a global runtime `text` length limit: runtime-generated text and
+host text inputs retain their existing contracts and quotas. Import-path tokens
+are not executable text literals and do not inherit this source-admission rule.
+Other SemCode string-table producer limits remain unchanged; this correction
+does not qualify every possible oversized non-literal table entry. It does not
+change a published stable release promise.
+
 ## 3. Index model
 
 - **Unit.** Every index, offset, length and position in this contract is a **byte offset** into

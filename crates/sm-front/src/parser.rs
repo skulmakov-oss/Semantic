@@ -2129,7 +2129,22 @@ impl<'a> Parser<'a> {
             return Ok(self.arena.alloc_expr(Expr::BoolLiteral(false)));
         }
         if self.check(TokenKind::String) {
-            let spelling = self.advance().text;
+            let token = self.advance();
+            // SemCode stores the unchanged quoted spelling (MAX_STRING_LEN =
+            // 1024). Keep this source-only bound aligned in the S2044 format
+            // integration test; sm-front intentionally has no format dependency.
+            const MAX_TEXT_LITERAL_CONTENT_BYTES: usize = 1022;
+            if token.text.len() > MAX_TEXT_LITERAL_CONTENT_BYTES + 2 {
+                return Err(FrontendError::syntax(
+                    token.pos,
+                    format!(
+                        "text literal exceeds the maximum supported size: {} UTF-8 content bytes; maximum {} bytes",
+                        token.text.len() - 2,
+                        MAX_TEXT_LITERAL_CONTENT_BYTES,
+                    ),
+                ));
+            }
+            let spelling = token.text;
             return Ok(self.arena.alloc_expr(Expr::TextLiteral(TextLiteral {
                 family: TextLiteralFamily::DoubleQuotedUtf8,
                 spelling,
