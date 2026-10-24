@@ -1,0 +1,5 @@
+model,n,versions,base_extra_live_bytes,retained_extra_live_bytes,peak_extra_live_bytes
+vec,1024,100,40960,8194400,8235360
+persistent,1024,100,270336,158400,158400
+vec,4096,100,163840,32770400,32934240
+persistent,4096,100,1081344,182400,182400
