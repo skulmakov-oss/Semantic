@@ -1,0 +1,146 @@
+// Node indices refer to the append-only arena; -1 denotes no child.
+record Node { kind: u32, start: u32, end: u32, left: i32, right: i32 }
+record Frontend { tokens: Sequence(Token), nodes: Sequence(Node), symbols: Sequence(text), pos: i32, root: i32, error: u32, start: u32, end: u32 }
+
+fn scan(source: text) -> Sequence(Token) {
+    let mut out: Sequence(Token) = [];
+    let mut offset: u32 = 0u32;
+    let mut done: bool = false;
+    while !done {
+        let t: Token = next_token(source, offset);
+        if len(out) == 511 && t.kind != 0u32 {
+            out = push(out, Token { kind: 13u32, start: t.start, end: t.end });
+            done = true;
+        } else {
+            out = push(out, t);
+            offset = t.end;
+            done = t.kind == 0u32 || t.kind == 5u32;
+        }
+    }
+    return out;
+}
+fn current(s: Frontend) -> Token { return s.tokens[s.pos]; }
+fn advance(s: Frontend) -> Frontend { return s with { pos: s.pos + 1 }; }
+fn fail(s: Frontend, code: u32) -> Frontend {
+    let t: Token = current(s);
+    if s.error != 0u32 { return s; }
+    if t.kind == 5u32 { return s with { error: 1u32, start: t.start, end: t.end }; }
+    if t.kind == 13u32 { return s with { error: 6u32, start: t.start, end: t.end }; }
+    return s with { error: code, start: t.start, end: t.end };
+}
+fn add(s: Frontend, n: Node) -> Frontend {
+    let index: i32 = len(s.nodes);
+    return s with { nodes: push(s.nodes, n), root: index };
+}
+fn spelling(source: text, t: Token) -> text {
+    return match text_slice(source, t.start, t.end) {
+        Option::Some(v) => { v }
+        Option::None => { "" }
+    };
+}
+fn priority(k: u32) -> u32 {
+    if k == 6u32 || k == 7u32 { return 1u32; }
+    if k == 8u32 || k == 9u32 { return 2u32; }
+    return 0u32;
+}
+fn expression(source: text, state: Frontend, min: u32, depth: u32) -> Frontend {
+    let mut s: Frontend = state;
+    if depth >= 64u32 { return fail(s, 6u32); }
+    let t: Token = current(s);
+    if t.kind == 2u32 {
+        s = add(advance(s), Node { kind: 2u32, start: t.start, end: t.end, left: -1, right: -1 });
+    } else {
+        if t.kind == 1u32 {
+            let name: text = spelling(source, t);
+            if !contains(s.symbols, name) { return fail(s, 4u32); }
+            s = add(advance(s), Node { kind: 1u32, start: t.start, end: t.end, left: -1, right: -1 });
+        } else {
+            if t.kind == 10u32 {
+                s = expression(source, advance(s), 1u32, depth + 1u32);
+                if s.error != 0u32 { return s; }
+                if current(s).kind != 11u32 { return fail(s, 2u32); }
+                s = advance(s);
+            } else { return fail(s, 2u32); }
+        }
+    }
+    let mut k: u32 = priority(current(s).kind);
+    while k >= min && k != 0u32 {
+        let op: Token = current(s);
+        let left: i32 = s.root;
+        s = expression(source, advance(s), k + 1u32, depth + 1u32);
+        if s.error != 0u32 { return s; }
+        let right: i32 = s.root;
+        let first: Node = s.nodes[left];
+        let last: Node = s.nodes[right];
+        s = add(s, Node { kind: op.kind, start: first.start, end: last.end, left: left, right: right });
+        k = priority(current(s).kind);
+    }
+    return s;
+}
+fn frontend(source: text) -> Frontend {
+    if text_len(source) > 4096u32 {
+        let end: u32 = text_len(source);
+        return Frontend { tokens: [Token { kind: 0u32, start: end, end: end }], nodes: [], symbols: [], pos: 0, root: -1, error: 6u32, start: end, end: end };
+    }
+    let tokens: Sequence(Token) = scan(source);
+    let mut s: Frontend = Frontend { tokens: tokens, nodes: [], symbols: [], pos: 0, root: -1, error: 0u32, start: 0u32, end: 0u32 };
+    while current(s).kind != 0u32 && s.error == 0u32 {
+        let t: Token = current(s);
+        if t.kind == 5u32 || t.kind == 13u32 { return fail(s, 1u32); }
+        if t.kind != 1u32 || spelling(source, t) != "let" { return fail(s, 2u32); }
+        s = advance(s);
+        let name_token: Token = current(s);
+        if name_token.kind != 1u32 { return fail(s, 2u32); }
+        let name: text = spelling(source, name_token);
+        if name == "let" || contains(s.symbols, name) { return fail(s, 3u32); }
+        s = advance(s);
+        if current(s).kind != 3u32 { return fail(s, 2u32); }
+        s = expression(source, advance(s), 1u32, 0u32);
+        if s.error != 0u32 { return s; }
+        if current(s).kind != 4u32 { return fail(s, 2u32); }
+        let end: Token = current(s);
+        s = add(advance(s), Node { kind: 12u32, start: t.start, end: end.end, left: s.root, right: -1 });
+        s = s with { symbols: push(s.symbols, name) };
+    }
+    if current(s).kind != 0u32 && s.error == 0u32 { return fail(s, 6u32); }
+    return s;
+}
+fn frontend_error(source: text) -> u32 { return frontend(source).error; }
+fn frontend_nodes(source: text) -> i32 { return len(frontend(source).nodes); }
+fn frontend_root_kind(source: text) -> u32 {
+    let s: Frontend = frontend(source);
+    if s.root < 0 { return 0u32; }
+    return s.nodes[s.root].kind;
+}
+
+fn frontend_field(source: text, index: i32, field: u32) -> i32 {
+    let s: Frontend = frontend(source);
+    if index < 0 || index >= len(s.nodes) { return -1; }
+    let n: Node = s.nodes[index];
+    if field == 0u32 { return n.left; }
+    if field == 1u32 { return n.right; }
+    return -1;
+}
+fn frontend_node_kind(source: text, index: i32) -> u32 {
+    let s: Frontend = frontend(source);
+    if index < 0 || index >= len(s.nodes) { return 0u32; }
+    return s.nodes[index].kind;
+}
+fn frontend_diagnostic_start(source: text) -> u32 { return frontend(source).start; }
+fn frontend_diagnostic_end(source: text) -> u32 { return frontend(source).end; }
+
+fn frontend_token_field(source: text, index: i32, field: u32) -> u32 {
+    let tokens: Sequence(Token) = scan(source);
+    if index < 0 || index >= len(tokens) { return 4294967295u32; }
+    let t: Token = tokens[index];
+    if field == 0u32 { return t.kind; }
+    if field == 1u32 { return t.start; }
+    return t.end;
+}
+fn frontend_node_span(source: text, index: i32, end: bool) -> u32 {
+    let s: Frontend = frontend(source);
+    if index < 0 || index >= len(s.nodes) { return 4294967295u32; }
+    let n: Node = s.nodes[index];
+    if end { return n.end; }
+    return n.start;
+}

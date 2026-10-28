@@ -1,0 +1,62 @@
+// MiniLang tokens use ASCII identifiers, decimal integers and punctuation.
+// Token ranges are half-open UTF-8 byte offsets; kind 0 is EOF, 5 invalid.
+record Token { kind: u32, start: u32, end: u32 }
+fn byte_at(source: text, offset: u32) -> u32 {
+    return match text_byte_at(source, offset) {
+        Option::Some(v) => { v }
+        Option::None => { 256u32 }
+    };
+}
+fn letter(b: u32) -> bool {
+    return (65u32 <= b && b <= 90u32) || (97u32 <= b && b <= 122u32) || b == 95u32;
+}
+fn digit(b: u32) -> bool { return 48u32 <= b && b <= 57u32; }
+fn next_token(source: text, from: u32) -> Token {
+    let len: u32 = text_len(source);
+    let mut start: u32 = from;
+    let mut skipping: bool = true;
+    while skipping && start < len {
+        let c: u32 = byte_at(source, start);
+        if c == 32u32 || c == 9u32 || c == 10u32 || c == 13u32 {
+            start = start + 1u32;
+        } else {
+            if c == 47u32 && byte_at(source, start + 1u32) == 47u32 {
+                start = start + 2u32;
+                while start < len && byte_at(source, start) != 10u32 { start = start + 1u32; }
+            } else { skipping = false; }
+        }
+    }
+    if start >= len { return Token { kind: 0u32, start: len, end: len }; }
+    let b: u32 = byte_at(source, start);
+    let mut end: u32 = start + 1u32;
+    if letter(b) {
+        while end < len && (letter(byte_at(source, end)) || digit(byte_at(source, end))) { end = end + 1u32; }
+        return Token { kind: 1u32, start: start, end: end };
+    }
+    if digit(b) {
+        while end < len && digit(byte_at(source, end)) { end = end + 1u32; }
+        return Token { kind: 2u32, start: start, end: end };
+    }
+    if b == 61u32 { return Token { kind: 3u32, start: start, end: end }; }
+    if b == 59u32 { return Token { kind: 4u32, start: start, end: end }; }
+    if b == 43u32 { return Token { kind: 6u32, start: start, end: end }; }
+    if b == 45u32 { return Token { kind: 7u32, start: start, end: end }; }
+    if b == 42u32 { return Token { kind: 8u32, start: start, end: end }; }
+    if b == 47u32 { return Token { kind: 9u32, start: start, end: end }; }
+    if b == 40u32 { return Token { kind: 10u32, start: start, end: end }; }
+    if b == 41u32 { return Token { kind: 11u32, start: start, end: end }; }
+    return Token { kind: 5u32, start: start, end: end };
+}
+// Pack only these small test vectors for transport; token fields remain separate.
+fn packed(source: text, offset: u32) -> u32 {
+    let token: Token = next_token(source, offset);
+    return token.kind * 10000u32 + token.start * 100u32 + token.end;
+}
+fn identifier() -> u32 { return packed("  abc12 = 42;", 0u32); }
+fn equals() -> u32 { return packed("  abc12 = 42;", 7u32); }
+fn number() -> u32 { return packed("  abc12 = 42;", 9u32); }
+fn semicolon() -> u32 { return packed("  abc12 = 42;", 12u32); }
+fn eof() -> u32 { return packed("  abc12 = 42;", 13u32); }
+fn invalid_utf8_byte() -> u32 { return packed("a = é;", 3u32); }
+fn invalid_symbol() -> u32 { return packed("@", 0u32); }
+fn main() { return; }

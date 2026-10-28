@@ -1,0 +1,108 @@
+// Knowledge join accumulates independent positive and negative attestations.
+// Rejected observations never contribute to the accepted state or provenance.
+record Evidence { state: quad, positive: Sequence(u32), negative: Sequence(u32), quarantine: Sequence(u32) }
+fn join(a: quad, b: quad) -> quad {
+    if a == S || b == S { return S; }
+    if a == N { return b; }
+    if b == N { return a; }
+    if a == b { return a; }
+    return S;
+}
+fn observe(e: Evidence, source: u32, value: quad, authorized: bool) -> Evidence {
+    if !authorized {
+        if contains(e.quarantine, source) { return e; }
+        return e with { quarantine: push(e.quarantine, source) };
+    }
+    let mut positive: Sequence(u32) = e.positive;
+    let mut negative: Sequence(u32) = e.negative;
+    if (value == T || value == S) && !contains(positive, source) { positive = push(positive, source); }
+    if (value == F || value == S) && !contains(negative, source) { negative = push(negative, source); }
+    return e with { state: join(e.state, value), positive: positive, negative: negative };
+}
+fn code(q: quad) -> u32 {
+    if q == F { return 1u32; }
+    if q == T { return 2u32; }
+    if q == S { return 3u32; }
+    return 0u32;
+}
+// 0..3 are quad encodings; 4 is an explicit invalid-input result.
+fn evidence_join(a: u32, b: u32) -> u32 {
+    if a > 3u32 || b > 3u32 { return 4u32; }
+    let mut left: quad = N;
+    let mut right: quad = N;
+    if a == 1u32 { left = F; }
+    if a == 2u32 { left = T; }
+    if a == 3u32 { left = S; }
+    if b == 1u32 { right = F; }
+    if b == 2u32 { right = T; }
+    if b == 3u32 { right = S; }
+    return code(join(left, right));
+}
+fn scenario(which: u32) -> u32 {
+    let initial: Evidence = Evidence { state: N, positive: [], negative: [], quarantine: [] };
+    let a: Evidence = observe(initial, 10u32, T, true);
+    let b: Evidence = observe(a, 20u32, F, true);
+    let c: Evidence = observe(b, 10u32, T, true);
+    let d: Evidence = observe(c, 30u32, S, false);
+    let e: Evidence = observe(d, 30u32, S, false);
+    if which == 0u32 { return code(e.state); }
+    if which == 1u32 { if len(e.positive) == 1 { return 1u32; } return 0u32; }
+    if which == 2u32 { if len(e.negative) == 1 { return 1u32; } return 0u32; }
+    if which == 3u32 { if len(e.quarantine) == 1 { return 1u32; } return 0u32; }
+    if which == 4u32 { if contains(e.positive, 10u32) && contains(e.negative, 20u32) { return 1u32; } }
+    if which == 5u32 { if contains(e.positive, 30u32) || contains(e.negative, 30u32) { return 1u32; } }
+    return 0u32;
+}
+fn admitted_after_quarantine() -> u32 {
+    let e: Evidence = Evidence { state: N, positive: [], negative: [], quarantine: [] };
+    let q: Evidence = observe(e, 77u32, S, false);
+    let a: Evidence = observe(q, 77u32, S, true);
+    if code(a.state) == 3u32 && contains(a.positive, 77u32) && contains(a.negative, 77u32) && contains(a.quarantine, 77u32) { return 1u32; }
+    return 0u32;
+}
+fn quarantine_only() -> u32 {
+    let e: Evidence = Evidence { state: N, positive: [], negative: [], quarantine: [] };
+    let q: Evidence = observe(e, 77u32, T, false);
+    return code(q.state);
+}
+// Authorization is per observation; quarantine is an audit history, not a revocation list.
+fn probe(which: u32, field: u32) -> u32 {
+    let initial: Evidence = Evidence { state: N, positive: [], negative: [], quarantine: [] };
+    let mut e: Evidence = initial;
+    if which == 0u32 { e = observe(e, 10u32, N, true); }
+    if which == 1u32 { e = observe(e, 10u32, F, true); }
+    if which == 2u32 { e = observe(e, 10u32, T, true); }
+    if which == 3u32 { e = observe(e, 10u32, S, true); }
+    if which == 4u32 {
+        e = observe(e, 10u32, T, true);
+        e = observe(e, 10u32, F, true);
+        e = observe(e, 10u32, F, true);
+    }
+    if which == 5u32 {
+        e = observe(e, 20u32, F, true);
+        e = observe(e, 10u32, T, true);
+    }
+    if which == 6u32 {
+        e = observe(e, 20u32, F, false);
+        e = observe(e, 10u32, T, true);
+        e = observe(e, 20u32, F, false);
+    }
+    if which == 7u32 {
+        e = observe(e, 10u32, T, true);
+        e = observe(e, 10u32, F, false);
+        e = observe(e, 20u32, S, false);
+    }
+    if field == 0u32 { return code(e.state); }
+    if field == 1u32 { if contains(e.positive, 10u32) { return 1u32; } }
+    if field == 2u32 { if contains(e.negative, 10u32) { return 1u32; } }
+    if field == 3u32 { if contains(e.positive, 20u32) { return 1u32; } }
+    if field == 4u32 { if contains(e.negative, 20u32) { return 1u32; } }
+    if field == 5u32 { if contains(e.quarantine, 10u32) { return 1u32; } }
+    if field == 6u32 { if contains(e.quarantine, 20u32) { return 1u32; } }
+    if field == 7u32 { if len(e.positive) == 1 { return 1u32; } }
+    if field == 8u32 { if len(e.negative) == 1 { return 1u32; } }
+    if field == 9u32 { if len(e.quarantine) == 1 { return 1u32; } }
+    if field == 10u32 { if len(e.quarantine) == 2 { return 1u32; } }
+    return 0u32;
+}
+fn main() { return; }

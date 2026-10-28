@@ -1,0 +1,86 @@
+enum Tag { Leaf, Branch }
+record Link { parent: i32 }
+record Item { index: i32, value: i32, tag: Tag, link: Link }
+fn lookup(items: Sequence(Item), index: i32) -> Option(i32) {
+    if index < 0 || index >= len(items) { return Option::None; }
+    let item: Item = items[index];
+    return Option::Some(item.value);
+}
+fn checked(flag: bool) -> Result(i32, text) {
+    if flag { return Result::Ok(17); }
+    return Result::Err("bad");
+}
+fn structured(count: i32) -> i32 {
+    if count < 0 || count > 64 { return -1; }
+    let mut items: Sequence(Item) = [];
+    let mut index: Map(i32, i32) = map_empty();
+    let mut i: i32 = 0;
+    while i < count {
+        let mut tag: Tag = Tag::Leaf;
+        if i == 0 { tag = Tag::Branch; }
+        let link: Link = Link { parent: i - 1 };
+        let item: Item = Item { index: i, value: i * 3, tag: tag, link: link };
+        items = push(items, item);
+        index = map_set(index, i, i * 3);
+        i = i + 1;
+    }
+    let mut sum: i32 = 0;
+    i = 0;
+    while i < count {
+        let item: Item = items[i];
+        let leaf: bool = match item.tag { Tag::Leaf => { true } Tag::Branch => { false } };
+        if item.index != i || leaf == (i == 0) || map_get(index, i, -1) != item.value { return -2; }
+        let v: i32 = match lookup(items, i) { Option::Some(x) => { x } Option::None => { -1000 } };
+        sum = sum + v;
+        i = i + 1;
+    }
+    // Follow arena links rather than relying on insertion-order iteration.
+    let mut cursor: i32 = count - 1;
+    let mut reverse_sum: i32 = 0;
+    let mut visited: i32 = 0;
+    while cursor >= 0 && visited < count {
+        let node: Item = items[cursor];
+        reverse_sum = reverse_sum + node.value;
+        cursor = node.link.parent;
+        visited = visited + 1;
+    }
+    if cursor != -1 || visited != count || reverse_sum != sum { return -5; }
+    if count > 0 {
+        let original: Item = items[0];
+        let altered: Item = original with { value: 999 };
+        let extended: Sequence(Item) = push(items, altered);
+        if original.value != 0 || items[0].value != 0 || len(items) != count || len(extended) != count + 1 { return -6; }
+        if extended[count].value != 999 { return -6; }
+        let updated: Map(i32, i32) = map_set(index, 0, 999);
+        if map_get(index, 0, -1) != 0 || map_get(updated, 0, -1) != 999 { return -7; }
+    }
+    let missing: Option(i32) = lookup(items, count);
+    let absent: bool = match missing { Option::Some(_) => { false } Option::None => { true } };
+    if !absent || map_contains(index, count) { return -3; }
+    let ok: i32 = match checked(true) { Result::Ok(v) => { v } Result::Err(_) => { -1 } };
+    let err: bool = match checked(false) { Result::Ok(_) => { false } Result::Err(e) => { e == "bad" } };
+    if ok != 17 || !err { return -4; }
+    return sum;
+}
+fn byte_roundtrip(value: u32) -> u32 {
+    let b: Bytes = write_u32_le(value);
+    return match read_u32_le(b, 0u32) { Option::Some(v) => { v } Option::None => { assert(false); 0u32 } };
+}
+fn byte_checks() -> u32 {
+    let b: Bytes = write_u32_le(0x01020304u32);
+    let empty: Bytes = bytes_empty();
+    let extended: Bytes = bytes_extend(empty, b);
+    if bytes_len(empty) != 0u32 || bytes_len(extended) != 4u32 { return 0u32; }
+    let mid1: bool = match bytes_get(b, 1u32) { Option::Some(v) => { v == 3u32 } Option::None => { false } };
+    let mid2: bool = match bytes_get(b, 2u32) { Option::Some(v) => { v == 2u32 } Option::None => { false } };
+    let absent: bool = match bytes_get(b, 4u32) { Option::Some(_) => { false } Option::None => { true } };
+    let overflow: bool = match read_u32_le(b, 4294967295u32) { Option::Some(_) => { false } Option::None => { true } };
+    let low: bool = match bytes_get(b, 0u32) { Option::Some(v) => { v == 4u32 } Option::None => { false } };
+    let high: bool = match bytes_get(b, 3u32) { Option::Some(v) => { v == 1u32 } Option::None => { false } };
+    let short: bool = match read_u32_le(b, 1u32) { Option::Some(_) => { false } Option::None => { true } };
+    let invalid: bool = match bytes_push(b, 256u32) { Option::Some(_) => { false } Option::None => { true } };
+    let too_large: bool = match write_u16_le(65536u32) { Option::Some(_) => { false } Option::None => { true } };
+    if low && mid1 && mid2 && high && absent && overflow && short && invalid && too_large { return 1u32; }
+    return 0u32;
+}
+fn main() { return; }
