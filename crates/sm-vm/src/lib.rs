@@ -21,9 +21,9 @@ pub enum QuadVal {
 }
 
 #[cfg(feature = "std")]
-pub mod diagnostic_admission;
-#[cfg(feature = "std")]
 pub mod arg_policy;
+#[cfg(feature = "std")]
+pub mod diagnostic_admission;
 #[cfg(feature = "std")]
 mod sem_map;
 #[cfg(feature = "std")]
