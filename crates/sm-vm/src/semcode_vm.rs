@@ -218,6 +218,8 @@ pub struct VM {
     /// `push_frame` after every quota check for the new frame has passed.
     /// Observation only; never consulted by quota enforcement.
     pub peak_frames: usize,
+    /// Optional ARG v3 governor. `None` preserves the established v2 path.
+    arg_governor: Option<crate::arg_policy::AdaptiveGovernor>,
 }
 
 #[cfg(test)]
@@ -948,6 +950,7 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
         symbols: program.runtime_symbols,
         prng_state: 0,
         peak_frames: 0,
+        arg_governor: None,
     };
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
     let mut bridge = PrometheusVmHost { host, capabilities };
@@ -1029,6 +1032,7 @@ pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_con
         symbols: program.runtime_symbols,
         prng_state: 0,
         peak_frames: 0,
+        arg_governor: None,
     };
     let quotas = vm.config.quotas;
     let mut bridge = ApplicationVmHost {
@@ -1143,6 +1147,7 @@ pub fn run_verified_function_semcode_with_args_and_config(
         symbols: program.runtime_symbols,
         prng_state: 0,
         peak_frames: 0,
+        arg_governor: None,
     };
     // Argument validation happens inside `push_frame` itself (#1773 /
     // FA-09-005) - see `validate_call_arguments`'s doc comment.
@@ -1150,6 +1155,78 @@ pub fn run_verified_function_semcode_with_args_and_config(
     let mut host = UnavailableVmHost;
     let mut observation = HelloObservationRuntime::discard();
     exec_loop(&mut vm, &mut host, &mut observation)
+}
+
+/// Explicit ARG v3 invocation. The policy is validated before bytecode
+/// execution and remains immutable to the guest; `None` is never an implicit
+/// privilege transition from the established v2 path.
+pub fn run_verified_function_semcode_with_args_and_policy(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    args: Vec<Value>,
+    policy: crate::arg_policy::ArgPolicy,
+) -> Result<Value, RuntimeError> {
+    let config = policy
+        .execution_config()
+        .map_err(|error| RuntimeError::BadFormat(format!("invalid ARG policy: {error:?}")))?;
+    let governor = crate::arg_policy::AdaptiveGovernor::from_policy(&policy)
+        .map_err(|error| RuntimeError::BadFormat(format!("invalid ARG policy: {error:?}")))?;
+    let program = prepare_verified_execution(token)?;
+    let func_name = token.entry();
+    if !program.functions.contains_key(func_name) {
+        return Err(RuntimeError::UnknownFunction(func_name.to_string()));
+    }
+    let mut vm = VM {
+        functions: program.functions,
+        callstack: Vec::new(),
+        config,
+        effect_calls: 0,
+        steps: 0,
+        calls: 0,
+        symbols: program.runtime_symbols,
+        prng_state: 0,
+        peak_frames: 0,
+        arg_governor: Some(governor),
+    };
+    push_frame(&mut vm, func_name, args, None)?;
+    let mut host = UnavailableVmHost;
+    let mut observation = HelloObservationRuntime::discard();
+    exec_loop(&mut vm, &mut host, &mut observation)
+}
+
+/// ARG v3 qualification path returning the canonical adaptive decisions.
+pub fn run_verified_function_semcode_with_args_and_policy_events(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    args: Vec<Value>,
+    policy: crate::arg_policy::ArgPolicy,
+) -> Result<(Value, Vec<crate::arg_policy::AdaptiveEvent>), RuntimeError> {
+    let config = policy
+        .execution_config()
+        .map_err(|error| RuntimeError::BadFormat(format!("invalid ARG policy: {error:?}")))?;
+    let governor = crate::arg_policy::AdaptiveGovernor::from_policy(&policy)
+        .map_err(|error| RuntimeError::BadFormat(format!("invalid ARG policy: {error:?}")))?;
+    let program = prepare_verified_execution(token)?;
+    let func_name = token.entry();
+    if !program.functions.contains_key(func_name) {
+        return Err(RuntimeError::UnknownFunction(func_name.to_string()));
+    }
+    let mut vm = VM {
+        functions: program.functions,
+        callstack: Vec::new(),
+        config,
+        effect_calls: 0,
+        steps: 0,
+        calls: 0,
+        symbols: program.runtime_symbols,
+        prng_state: 0,
+        peak_frames: 0,
+        arg_governor: Some(governor),
+    };
+    push_frame(&mut vm, func_name, args, None)?;
+    let mut host = UnavailableVmHost;
+    let mut observation = HelloObservationRuntime::discard();
+    let result = exec_loop(&mut vm, &mut host, &mut observation)?;
+    let events = vm.arg_governor.take().expect("ARG policy governor").events;
+    Ok((result, events))
 }
 
 /// Local opcode profiling path for verified token execution.
@@ -1174,6 +1251,7 @@ pub fn run_verified_entry_semcode_with_profile(
         symbols: program.runtime_symbols,
         prng_state: 0,
         peak_frames: 0,
+        arg_governor: None,
     };
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
     let mut host = prom_abi::RecordingHostAbi::default();
@@ -1240,6 +1318,7 @@ fn run_vm_program_view_with_entry_and_config_with_observation_runtime<'a>(
         symbols: program.runtime_symbols,
         prng_state: 0,
         peak_frames: 0,
+        arg_governor: None,
     };
     push_frame(&mut vm, entry, Vec::new(), None)?;
     let mut host = UnavailableVmHost;
@@ -2279,6 +2358,7 @@ struct ExecState<'vm> {
     #[cfg_attr(not(test), allow(dead_code))]
     symbols: &'vm RuntimeSymbolTable,
     prng_state: &'vm mut u64,
+    arg_governor: &'vm mut Option<crate::arg_policy::AdaptiveGovernor>,
 }
 
 /// Splits a `VM` into its immutable function table and its mutable execution
@@ -2295,6 +2375,7 @@ fn split_vm(vm: &mut VM) -> (&HashMap<String, FunctionBytecode>, ExecState<'_>) 
         peak_frames,
         symbols,
         prng_state,
+        arg_governor,
     } = vm;
     (
         functions,
@@ -2307,8 +2388,34 @@ fn split_vm(vm: &mut VM) -> (&HashMap<String, FunctionBytecode>, ExecState<'_>) 
             peak_frames,
             symbols,
             prng_state,
+            arg_governor,
         },
     )
+}
+
+fn adaptive_charge(
+    vm: &mut ExecState<'_>,
+    resource: crate::arg_policy::ArgResource,
+    kind: QuotaKind,
+    amount: u64,
+) -> Result<bool, RuntimeError> {
+    let Some(governor) = vm.arg_governor.as_mut() else {
+        return Ok(false);
+    };
+    let used_before = governor.used(resource);
+    match governor.charge(resource, amount) {
+        Ok(_) => Ok(true),
+        Err(crate::arg_policy::AdaptiveError::Exhausted)
+        | Err(crate::arg_policy::AdaptiveError::Overflow) => {
+            let used = used_before.saturating_add(amount).min(usize::MAX as u64) as usize;
+            let limit = governor.budget(resource).min(usize::MAX as u64) as usize;
+            Err(RuntimeError::QuotaExceeded(QuotaExceeded {
+                kind,
+                limit,
+                used,
+            }))
+        }
+    }
 }
 
 /// The dispatch loop. `vm` is the split execution state and `functions` the
@@ -2351,7 +2458,20 @@ where
         // malformed opcode byte charges no Step. No refund on a later
         // failure within this same dispatch - see
         // ssf08_1759_steps_calls_contract_decision.md §2-§3.
-        *vm.steps = charge_counter(*vm.steps, vm.config.quotas.max_steps, QuotaKind::Steps)?;
+        if adaptive_charge(
+            vm,
+            crate::arg_policy::ArgResource::Steps,
+            QuotaKind::Steps,
+            1,
+        )? {
+            *vm.steps = vm
+                .arg_governor
+                .as_ref()
+                .expect("adaptive governor")
+                .used(crate::arg_policy::ArgResource::Steps) as usize;
+        } else {
+            *vm.steps = charge_counter(*vm.steps, vm.config.quotas.max_steps, QuotaKind::Steps)?;
+        }
         profile.record_opcode(opcode);
         // #1891 Checkpoint W2F: check every Write path attached to this
         // exact PC against the frame's currently active borrows BEFORE the
@@ -3610,10 +3730,25 @@ fn push_frame_in(
         .ok_or_else(|| RuntimeError::UnknownFunction(func_name.to_string()))?;
     validate_call_arguments(func_name, f.signature.as_ref(), &args)?;
     let next_depth = vm.callstack.len() + 1;
-    enforce_quota(&vm.config.quotas, QuotaKind::Frames, next_depth)?;
-    match enforce_quota(&vm.config.quotas, QuotaKind::StackDepth, next_depth) {
-        Err(RuntimeError::QuotaExceeded(_)) => return Err(RuntimeError::StackOverflow),
-        other => other?,
+    let prior_depth = vm
+        .arg_governor
+        .as_ref()
+        .map(|governor| governor.used(crate::arg_policy::ArgResource::Frames) as usize)
+        .unwrap_or(0);
+    let depth_delta = next_depth.saturating_sub(prior_depth) as u64;
+    let adaptive_depth = depth_delta == 0
+        || adaptive_charge(
+            vm,
+            crate::arg_policy::ArgResource::Frames,
+            QuotaKind::Frames,
+            depth_delta,
+        )?;
+    if !adaptive_depth {
+        enforce_quota(&vm.config.quotas, QuotaKind::Frames, next_depth)?;
+        match enforce_quota(&vm.config.quotas, QuotaKind::StackDepth, next_depth) {
+            Err(RuntimeError::QuotaExceeded(_)) => return Err(RuntimeError::StackOverflow),
+            other => other?,
+        }
     }
     let initial_reg_count = 16usize.max(args.len());
     enforce_quota(&vm.config.quotas, QuotaKind::Registers, initial_reg_count)?;
@@ -3631,7 +3766,20 @@ fn push_frame_in(
     // frame, push" is one combined final step that comes entirely after
     // the Calls charge, not interleaved with it.
     if !vm.callstack.is_empty() {
-        *vm.calls = charge_counter(*vm.calls, vm.config.quotas.max_calls, QuotaKind::Calls)?;
+        if adaptive_charge(
+            vm,
+            crate::arg_policy::ArgResource::Calls,
+            QuotaKind::Calls,
+            1,
+        )? {
+            *vm.calls = vm
+                .arg_governor
+                .as_ref()
+                .expect("adaptive governor")
+                .used(crate::arg_policy::ArgResource::Calls) as usize;
+        } else {
+            *vm.calls = charge_counter(*vm.calls, vm.config.quotas.max_calls, QuotaKind::Calls)?;
+        }
     }
     let mut regs = vec![RegisterSlot::Uninitialized; initial_reg_count];
     for (i, v) in args.into_iter().enumerate() {
@@ -5075,6 +5223,19 @@ fn charge_counter(used: usize, limit: usize, kind: QuotaKind) -> Result<usize, R
 /// relative to capability checks, and host dispatch are unchanged - this
 /// only replaces how the counter itself is incremented.
 fn bump_effect_calls(vm: &mut ExecState<'_>) -> Result<(), RuntimeError> {
+    if adaptive_charge(
+        vm,
+        crate::arg_policy::ArgResource::EffectCalls,
+        QuotaKind::EffectCalls,
+        1,
+    )? {
+        *vm.effect_calls = vm
+            .arg_governor
+            .as_ref()
+            .expect("adaptive governor")
+            .used(crate::arg_policy::ArgResource::EffectCalls) as usize;
+        return Ok(());
+    }
     let limit = vm.config.quotas.max_effect_calls;
     *vm.effect_calls = charge_counter(*vm.effect_calls, limit, QuotaKind::EffectCalls)?;
     Ok(())
@@ -7383,6 +7544,7 @@ mod tests {
             symbols: program.runtime_symbols,
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
@@ -7431,6 +7593,7 @@ mod tests {
             symbols: program.runtime_symbols,
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push main");
@@ -7472,6 +7635,7 @@ mod tests {
             symbols: program.runtime_symbols,
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
@@ -7503,6 +7667,7 @@ mod tests {
             symbols: program.runtime_symbols,
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push main");
@@ -8491,6 +8656,7 @@ mod tests {
             symbols: program.runtime_symbols,
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         };
         let result = push_frame(&mut vm, "main", Vec::new(), None).and_then(|()| {
             let mut host = UnavailableVmHost;
@@ -8976,6 +9142,7 @@ mod tests {
             symbols: program.runtime_symbols,
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         };
         let result = push_frame(&mut vm, entry_token.entry(), Vec::new(), None).and_then(|()| {
             let mut bridge = PrometheusVmHost { host, capabilities };
@@ -9032,6 +9199,7 @@ mod tests {
             symbols: RuntimeSymbolTable::new(),
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         }
     }
 
@@ -9320,6 +9488,7 @@ mod tests {
             symbols: program.runtime_symbols,
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         };
         push_frame(&mut vm, entry, args, None)?;
         let mut host = UnavailableVmHost;
@@ -11411,6 +11580,7 @@ mod tests {
             symbols: program.runtime_symbols,
             prng_state: 0,
             peak_frames: 0,
+            arg_governor: None,
         };
         push_frame(&mut vm, entry_token.entry(), Vec::new(), None).expect("push main frame");
         let mut bridge = PrometheusVmHost { host, capabilities };
@@ -12066,6 +12236,7 @@ mod tests {
                 peak_frames: 0,
                 symbols: program.runtime_symbols,
                 prng_state: 0,
+                arg_governor: None,
             };
             let capabilities = prom_cap::CapabilityManifest::for_application_profile(
                 prom_cap::ApplicationCapabilityProfile::CliReadOnly,
@@ -12264,6 +12435,7 @@ mod tests {
                 symbols: program.runtime_symbols,
                 prng_state: 0,
                 peak_frames: 0,
+                arg_governor: None,
             };
             let result = push_frame(&mut vm, "main", Vec::new(), None).and_then(|()| {
                 let (functions, mut state) = split_vm(&mut vm);

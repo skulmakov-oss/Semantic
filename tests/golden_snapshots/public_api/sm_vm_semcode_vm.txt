@@ -124,6 +124,8 @@ pub fn run_verified_entry_semcode_collecting_hello_observations( token: &Verifie
 pub fn run_verified_entry_semcode_with_config( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_function_semcode_with_args( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, ) -> Result<Value, RuntimeError> {
 pub fn run_verified_function_semcode_with_args_and_config( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, config: ExecutionConfig, ) -> Result<Value, RuntimeError> {
+pub fn run_verified_function_semcode_with_args_and_policy( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, policy: crate::arg_policy::ArgPolicy, ) -> Result<Value, RuntimeError> {
+pub fn run_verified_function_semcode_with_args_and_policy_events( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, policy: crate::arg_policy::ArgPolicy, ) -> Result<(Value, Vec<crate::arg_policy::AdaptiveEvent>), RuntimeError> {
 #[cfg(feature = "vm-profile")]
 pub fn run_verified_entry_semcode_with_profile( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<VmOpcodeProfile, RuntimeError> {
 pub fn run_semcode_with_entry_and_config( bytes: &[u8], entry: &str, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
