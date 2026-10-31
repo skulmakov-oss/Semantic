@@ -8,10 +8,13 @@ Baseline: 4207f72551190662c14961deb083bdf3bf33d3d2
 
 cargo metadata --no-deps plus the package manifests confirm these production
 edges. In this document A -> B means package A depends on package B. Features
-are listed separately and are not additional packages.
+are listed separately and are not additional packages. The logical alias
+`legacy-language-core` below means the compatibility-core package named in the
+current `crates/sm-front/Cargo.toml` and `crates/sm-sema/Cargo.toml`; the
+manifests remain the authoritative package-name source.
 
-    sm-front -> ton618-core, sm-profile, sm-diagnostic
-    sm-sema -> ton618-core, sm-front, sm-profile, sm-diagnostic
+    sm-front -> legacy-language-core, sm-profile, sm-diagnostic
+    sm-sema -> legacy-language-core, sm-front, sm-profile, sm-diagnostic
     sm-format -> (none)
     sm-ir -> sm-front, sm-profile, sm-format
     sm-emit -> sm-format, sm-ir
