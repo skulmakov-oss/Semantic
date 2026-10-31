@@ -39,6 +39,9 @@ adt0 += adt_descriptor("Result", (("Ok", 1), ("Err", 1)))
 assert len(adt0) == 55
 artifact = b"SEMCOD26" + adt0 + section
 assert len(artifact) == 312
+assert hashlib.sha256(artifact).hexdigest() == (
+    "064c8e8482af430f88b74ed61b3930434cacf2bb7742f64429d017fe9279e360"
+)
 (TARGET / "q3_10_evr0_section.bin").write_bytes(section)
 (TARGET / "q3_10_evr0_structural_only.smc").write_bytes(artifact)
 print("EVR0 fixture OK; section 249 bytes, canonical ADT0 55 bytes, artifact 312 bytes")

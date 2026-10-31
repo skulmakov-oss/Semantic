@@ -89,6 +89,20 @@ impl<'a> Reader<'a> {
             message,
         }
     }
+    fn fail_at(&self, position: usize, message: &'static str) -> Evr0Error {
+        Evr0Error {
+            kind: Evr0ErrorKind::Invalid,
+            offset: self.base + position,
+            message,
+        }
+    }
+    fn limit_at(&self, position: usize, message: &'static str) -> Evr0Error {
+        Evr0Error {
+            kind: Evr0ErrorKind::ResourceLimit,
+            offset: self.base + position,
+            message,
+        }
+    }
     fn take(&mut self, length: usize) -> Result<&'a [u8], Evr0Error> {
         let end = self
             .pos
@@ -127,7 +141,12 @@ impl<'a> Reader<'a> {
         if value.chars().any(char::is_control) {
             return Err(self.fail("EVR0 control character in text field"));
         }
-        Ok(value.to_owned())
+        let mut owned = String::new();
+        owned
+            .try_reserve_exact(length)
+            .map_err(|_| self.limit("EVR0 text reservation failed"))?;
+        owned.push_str(value);
+        Ok(owned)
     }
     fn zeros(&mut self) -> Result<(), Evr0Error> {
         if self.take(3)? != [0, 0, 0] {
@@ -203,20 +222,25 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
     let epoch = r.u16()?;
     let policy_namespace = r.text()?;
     let issuer_namespace = r.text()?;
+    let counts_start = r.pos;
     let counts = [
         r.u32()? as usize,
         r.u32()? as usize,
         r.u32()? as usize,
         r.u32()? as usize,
     ];
-    for (count, limit) in counts.iter().zip([
-        MAX_EVR0_PROPOSITIONS,
-        MAX_EVR0_PROOFS,
-        MAX_EVR0_WITNESSES,
-        MAX_EVR0_PARENTS,
-    ]) {
+    for (index, (count, limit)) in counts
+        .iter()
+        .zip([
+            MAX_EVR0_PROPOSITIONS,
+            MAX_EVR0_PROOFS,
+            MAX_EVR0_WITNESSES,
+            MAX_EVR0_PARENTS,
+        ])
+        .enumerate()
+    {
         if *count > limit {
-            return Err(r.limit("EVR0 table count exceeds limit"));
+            return Err(r.limit_at(counts_start + index * 4, "EVR0 table count exceeds limit"));
         }
     }
     // Reject impossible counts before allocating ANY vector.
@@ -240,7 +264,13 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
         core::mem::size_of::<Witness>(),
         core::mem::size_of::<u32>(),
     ];
-    let mut allocation = payload_len;
+    // Depth tracking is allocated separately; include it in the same budget.
+    let depth_bytes = counts[1]
+        .checked_mul(core::mem::size_of::<usize>())
+        .ok_or_else(|| r.limit("EVR0 depth tracking size overflow"))?;
+    let mut allocation = payload_len
+        .checked_add(depth_bytes)
+        .ok_or_else(|| r.limit("EVR0 depth allocation budget overflow"))?;
     for (count, size) in counts.iter().zip(sizes) {
         allocation = allocation
             .checked_add(
@@ -260,8 +290,14 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
         return Err(r.limit("EVR0 work budget exceeded"));
     }
 
+    // Resource limits bound requests but cannot guarantee that the host has
+    // memory. Fallible reservations report a resource rejection when possible.
     let mut propositions = Vec::new();
+    propositions
+        .try_reserve_exact(counts[0])
+        .map_err(|_| r.limit("EVR0 proposition reservation failed"))?;
     for _ in 0..counts[0] {
+        let record_start = r.pos;
         let item = Proposition {
             kind: r.text()?,
             ast_owner_id: r.u32()?,
@@ -272,14 +308,18 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
             .last()
             .is_some_and(|last| tuple_order(last, &item) != core::cmp::Ordering::Less)
         {
-            return Err(r.fail("EVR0 proposition table not strictly ordered"));
+            return Err(r.fail_at(record_start, "EVR0 proposition table not strictly ordered"));
         }
         propositions.push(item);
     }
     let mut proofs = Vec::new();
+    proofs
+        .try_reserve_exact(counts[1])
+        .map_err(|_| r.limit("EVR0 proof reservation failed"))?;
     let mut witness_cursor = 0usize;
     let mut parent_cursor = 0usize;
     for id in 0..counts[1] {
+        let record_start = r.pos;
         let item = Proof {
             proof_id: r.u32()?,
             proposition_index: r.u32()?,
@@ -293,12 +333,15 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
         };
         r.zeros()?;
         if item.proof_id as usize != id || item.proposition_index as usize >= counts[0] {
-            return Err(r.fail("EVR0 proof identity or order invalid"));
+            return Err(r.fail_at(record_start, "EVR0 proof identity or order invalid"));
         }
         if item.witness_first as usize != witness_cursor
             || item.parent_first as usize != parent_cursor
         {
-            return Err(r.fail("EVR0 witness or parent ranges are not contiguous"));
+            return Err(r.fail_at(
+                record_start,
+                "EVR0 witness or parent ranges are not contiguous",
+            ));
         }
         witness_cursor = witness_cursor
             .checked_add(item.witness_count as usize)
@@ -307,13 +350,13 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
             .checked_add(item.parent_count as usize)
             .ok_or_else(|| r.limit("EVR0 parent range overflow"))?;
         if witness_cursor > counts[2] || parent_cursor > counts[3] {
-            return Err(r.fail("EVR0 proof range exceeds table"));
+            return Err(r.fail_at(record_start, "EVR0 proof range exceeds table"));
         }
         let shape = match item.rule_id.as_str() {
             "POS-WITNESS-1" | "NEG-WITNESS-1" => (1, 0, 0),
             "JOIN-SAME-P-1" => (0, 2, 0),
             "OP-T-ONLY-1" => (0, 1, 1),
-            _ => return Err(r.fail("EVR0 unknown proof rule")),
+            _ => return Err(r.fail_at(record_start, "EVR0 unknown proof rule")),
         };
         if (
             item.witness_count,
@@ -321,7 +364,7 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
             item.authorized_operation,
         ) != shape
         {
-            return Err(r.fail("EVR0 invalid proof rule shape"));
+            return Err(r.fail_at(record_start, "EVR0 invalid proof rule shape"));
         }
         proofs.push(item);
     }
@@ -329,7 +372,11 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
         return Err(r.fail("EVR0 witness or parent table not fully owned"));
     }
     let mut witnesses = Vec::new();
+    witnesses
+        .try_reserve_exact(counts[2])
+        .map_err(|_| r.limit("EVR0 witness reservation failed"))?;
     for id in 0..counts[2] {
+        let record_start = r.pos;
         let item = Witness {
             witness_id: r.u32()?,
             proposition_index: r.u32()?,
@@ -347,11 +394,18 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
             || item.polarity > 1
             || item.source_start > item.source_end
         {
-            return Err(r.fail("EVR0 witness identity, polarity or source span invalid"));
+            return Err(r.fail_at(
+                record_start,
+                "EVR0 witness identity, polarity or source span invalid",
+            ));
         }
         witnesses.push(item);
     }
+    let parent_table_start = r.pos;
     let mut parents = Vec::new();
+    parents
+        .try_reserve_exact(counts[3])
+        .map_err(|_| r.limit("EVR0 parent reservation failed"))?;
     for _ in 0..counts[3] {
         parents.push(r.u32()?);
     }
@@ -360,19 +414,23 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
     }
 
     // Deterministic single forward pass: every parent must precede its child.
-    let mut depth = vec![0usize; proofs.len()];
+    let mut depth = Vec::new();
+    depth
+        .try_reserve_exact(proofs.len())
+        .map_err(|_| r.limit("EVR0 depth reservation failed"))?;
+    depth.resize(proofs.len(), 0usize);
     for proof in &proofs {
         let id = proof.proof_id as usize;
         let mut max_parent_depth = 0usize;
         let begin = proof.parent_first as usize;
         let end = begin + proof.parent_count as usize; // already checked <= counts[3]
         let mut previous = None;
-        for &parent_id in &parents[begin..end] {
+        for (index, &parent_id) in parents[begin..end].iter().enumerate() {
             let parent = parent_id as usize;
             if parent >= id || previous.is_some_and(|p| p >= parent_id) {
                 return Err(Evr0Error {
                     kind: Evr0ErrorKind::Invalid,
-                    offset: header_end,
+                    offset: r.base + parent_table_start + (begin + index) * 4,
                     message: "EVR0 invalid or noncanonical parent reference",
                 });
             }
@@ -381,7 +439,7 @@ pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEv
             {
                 return Err(Evr0Error {
                     kind: Evr0ErrorKind::Invalid,
-                    offset: header_end,
+                    offset: r.base + parent_table_start + (begin + index) * 4,
                     message: "EVR0 parent identity or authority mismatch",
                 });
             }

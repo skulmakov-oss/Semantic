@@ -50,3 +50,14 @@ This document is the explicit R4 scope contract; production qualification remain
 - Full fixture: 312 bytes (8-byte header, 55-byte canonical built-in ADT0 and 249-byte EVR0); SHA-256 `064c8e8482af430f88b74ed61b3930434cacf2bb7742f64429d017fe9279e360`.
 - Local focused suites: EVR0 6/6, public API 89/89, legacy guards 10/10, sm-format 85/85, sm-verify 223/223 = 413 passed, 0 failed (before final branch SHA).
 - Full workspace, no_std, Harness, hosted CI and R3 independent adversarial qualification remain separately reportable; passing a focused suite does not imply final ABI/issuer approval.
+
+## External review follow-up / CI dependency (2026-10-31)
+
+- Confirmed by source and regression: `decode_semcode_envelope` delegates to canonical `decode_semcode`. New tests cover a rev27 artifact with actual function envelopes after `EVR0`; no independent or degraded envelope parser is permitted.
+- Count overflow reports the absolute offset of its offending `u32le`; proof and witness record rejection reports the record beginning; canonical-parent failures report the specific parent-reference location. All offsets are byte positions in the whole artifact.
+- Tables and graph-depth storage use bounded, fallible exact-capacity reservations; strings use a bounded fallible reservation. Resource ceilings do **not** guarantee physical memory availability or prevent host-level allocation failure.
+- Independent golden generator checks both section and full artifact SHA-256 digests, rather than only the raw section.
+- Regression tests exercise canonical and inverted/duplicate two-parent `JOIN-SAME-P-1`, duplicate/descending propositions, control characters, exact offsets, all truncated prefixes, and single-byte mutations. Focused EVR0 suite is now 11 tests.
+- Original hosted CI on B2-1 HEAD `1a3f80382a5a23b23eace6f16f747bc2f9e3261d` failed only `test-std` via `ssf09_editor_baseline::every_producer_code_is_catalogued_and_explainable`: `V0033` lacked a canonical catalog entry. Other relevant jobs (trusted scope, legacy boundary, public API, 7hell, CodeQL and Clippy) passed on that head.
+- Catalog parity is proposed separately in **Draft PR #2067** with four lines in two files. The relevant `ssf09_editor_baseline` test passes in that proposal. However, #2067 currently fails the immutable base Harness with `outside-scope`; it must **not** be merged until a legitimate owner-controlled trusted authority transition is provided. The B2-1 reviewer must not interpret this proposal as an installed fix.
+- No issuer, source-proof semantics, execution authority, Cargo/Harness changes or normative ABI freeze is granted by this review response.
