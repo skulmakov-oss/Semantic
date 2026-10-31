@@ -257,3 +257,194 @@ fn every_truncated_prefix_and_single_byte_mutation_is_panic_free() {
         }
     }
 }
+
+#[test]
+fn envelope_decode_uses_canonical_evr0_parser() {
+    // Regression: the VM obtains its envelope from this public entry point.
+    // With EVR0 followed by function envelopes it must skip EVR0 canonically.
+    let canonical = decode_semcode(FIXTURE).expect("canonical structural parse");
+    let (header, funcs) = sm_format::semcode_decode::decode_semcode_envelope(FIXTURE)
+        .expect("envelope delegates to canonical EVR0 decoder");
+    assert_eq!(header, canonical.header);
+    assert_eq!(funcs.len(), canonical.functions.len());
+}
+
+#[test]
+fn count_and_record_errors_report_exact_field_offsets() {
+    let mut count = valid();
+    write_u32(&mut count, 76, 65_537);
+    assert!(matches!(
+        decode_semcode(&count),
+        Err(DecodeError::ResourceLimit { offset, .. })
+            if offset == PAYLOAD_AT + 76
+    ));
+
+    let mut proof = valid();
+    write_u32(&mut proof, 110, 1);
+    assert!(matches!(
+        decode_semcode(&proof),
+        Err(DecodeError::InvalidEvidenceSection { offset, .. })
+            if offset == PAYLOAD_AT + 110
+    ));
+
+    let mut witness = valid();
+    write_u32(&mut witness, 157, 1);
+    assert!(matches!(
+        decode_semcode(&witness),
+        Err(DecodeError::InvalidEvidenceSection { offset, .. })
+            if offset == PAYLOAD_AT + 157
+    ));
+}
+
+#[test]
+fn control_characters_and_duplicate_or_descending_propositions_reject() {
+    for byte in [b'\n', b'\0'] {
+        let mut bad = valid();
+        bad[PAYLOAD_AT + 72] = byte; // policy namespace's sole character
+        assert!(matches!(
+            decode_semcode(&bad),
+            Err(DecodeError::InvalidEvidenceSection { msg, .. })
+                if msg.contains("control character")
+        ));
+    }
+
+    // Insert a second 18-byte proposition immediately after the first one,
+    // keeping all following records and table offsets otherwise intact.
+    let first = FIXTURE[PAYLOAD_AT + 92..PAYLOAD_AT + 110].to_vec();
+    let mut duplicated = valid();
+    duplicated.splice(PAYLOAD_AT + 110..PAYLOAD_AT + 110, first);
+    write_u32(&mut duplicated, 76, 2);
+    duplicated[SECTION_AT + 4..SECTION_AT + 8].copy_from_slice(&259u32.to_le_bytes());
+    assert!(matches!(
+        decode_semcode(&duplicated),
+        Err(DecodeError::InvalidEvidenceSection { offset, msg })
+            if offset == PAYLOAD_AT + 110 && msg.contains("strictly ordered")
+    ));
+
+    // The second proposition has the same kind and smaller owner ID (0 < 1).
+    let mut descending = duplicated;
+    write_u32(&mut descending, 110 + 6, 0);
+    assert!(matches!(
+        decode_semcode(&descending),
+        Err(DecodeError::InvalidEvidenceSection { offset, msg })
+            if offset == PAYLOAD_AT + 110 && msg.contains("strictly ordered")
+    ));
+}
+
+/// Three structurally valid proofs for one proposition: POS, NEG, then
+/// JOIN-SAME-P-1 with strictly ordered two earlier parents. This is never
+/// semantic or issuer authentication, merely a canonical wire fixture.
+fn two_parent_join_fixture() -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&1u16.to_le_bytes()); // schema
+    payload.extend_from_slice(&0u16.to_le_bytes()); // flags
+    payload.extend_from_slice(&[0u8; 64]); // source_set + compiler_contract
+    payload.extend_from_slice(&0u16.to_le_bytes()); // epoch
+    text(&mut payload, "p");
+    text(&mut payload, "i");
+    for count in [1, 3, 2, 2] {
+        u32le(&mut payload, count);
+    }
+    text(&mut payload, "type");
+    for id in [1, 2, 3] {
+        u32le(&mut payload, id);
+    }
+    // proof_id, rule, witness_first, witness_count, parent_first,
+    // parent_count, authorized_operation
+    for (id, rule, wf, wc, pf, pc, operation) in [
+        (0, "POS-WITNESS-1", 0, 1, 0, 0, 0),
+        (1, "NEG-WITNESS-1", 1, 1, 0, 0, 0),
+        (2, "JOIN-SAME-P-1", 2, 0, 0, 2, 0),
+    ] {
+        u32le(&mut payload, id);
+        u32le(&mut payload, 0); // proposition index
+        text(&mut payload, rule);
+        u32le(&mut payload, 0); // authority context
+        for count in [wf, wc, pf, pc] {
+            u32le(&mut payload, count);
+        }
+        payload.push(operation);
+        payload.extend_from_slice(&[0u8; 3]);
+    }
+    for (id, polarity) in [(0, 1u8), (1, 0u8)] {
+        u32le(&mut payload, id);
+        u32le(&mut payload, 0);
+        payload.push(polarity);
+        payload.extend_from_slice(&[0u8; 3]);
+        payload.extend_from_slice(&[0u8; 32]);
+        u32le(&mut payload, 0);
+        u32le(&mut payload, 2);
+        payload.extend_from_slice(&[0u8; 32]);
+    }
+    u32le(&mut payload, 0);
+    u32le(&mut payload, 1);
+    let mut out = b"SEMCOD26".to_vec();
+    out.extend_from_slice(
+        &sm_format::semcode_format::AdtDescriptorTable::with_builtins(vec![])
+            .expect("canonical builtins")
+            .encode_section(),
+    );
+    out.extend_from_slice(b"EVR0");
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(&payload);
+    out
+}
+
+#[test]
+fn two_parent_join_enforces_strictly_increasing_parent_ids() {
+    let canonical = two_parent_join_fixture();
+    let decoded = decode_semcode(&canonical).expect("canonical two-parent JOIN");
+    let evidence = decoded.evr0.expect("EVR0 structural only");
+    assert_eq!(evidence.proofs.len(), 3);
+    assert_eq!(evidence.parents, vec![0, 1]);
+    assert!(
+        verify_semcode_token(&canonical).is_err(),
+        "cannot mint issuer"
+    );
+
+    // Mutate only the final parent table. The proofs and their ranges remain
+    // canonical; rejection must come from the ordered-parent graph check.
+    let parent_bytes_start = canonical.len() - 8;
+    for invalid_parents in [[1u32, 0u32], [0u32, 0u32]] {
+        let mut bad = canonical.clone();
+        bad[parent_bytes_start..parent_bytes_start + 4]
+            .copy_from_slice(&invalid_parents[0].to_le_bytes());
+        bad[parent_bytes_start + 4..].copy_from_slice(&invalid_parents[1].to_le_bytes());
+        assert!(matches!(
+            decode_semcode(&bad),
+            Err(DecodeError::InvalidEvidenceSection { offset, msg })
+                if offset >= parent_bytes_start &&
+                    offset < parent_bytes_start + 8 &&
+                    msg.contains("noncanonical parent reference")
+        ));
+    }
+}
+
+#[test]
+fn envelope_with_real_function_after_evr0_is_not_misparsed_as_function_name() {
+    let compiled = sm_emit::compile_program_to_semcode("fn main() { return; }")
+        .expect("baseline compiler must produce canonical function envelope");
+    let legacy = decode_semcode(&compiled).expect("baseline compiler artifact decodes");
+    assert!(
+        !legacy.functions.is_empty(),
+        "fixture must contain a real function"
+    );
+    let functions_start = legacy
+        .adt_descriptors
+        .as_ref()
+        .map_or(8usize, |adt| 8 + adt.encode_section().len());
+    let mut rev27 = FIXTURE.to_vec();
+    rev27.extend_from_slice(&compiled[functions_start..]);
+    let full =
+        decode_semcode(&rev27).expect("EVR0 followed by canonical function envelopes must decode");
+    let (header, functions) = sm_format::semcode_decode::decode_semcode_envelope(&rev27)
+        .expect("envelope must delegate to canonical section-aware decoder");
+    assert_eq!(header, full.header);
+    assert_eq!(functions.len(), full.functions.len());
+    assert!(!functions.is_empty());
+    assert!(verify_semcode_token(&rev27).is_err(), "issuer not present");
+    assert!(
+        sm_vm::run_semcode(&rev27).is_err(),
+        "raw execution must refuse rev27"
+    );
+}
