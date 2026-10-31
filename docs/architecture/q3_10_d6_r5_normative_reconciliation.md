@@ -18,7 +18,7 @@ execution authority.
 | D6d capabilities | Preserve existing capabilities; no new opcode/runtime effect | Header inherits existing envelope; VM rejects rev27 | No proof-bearing runtime operation exists | VERIFIED |
 | D6e schema | Canonical proposition/proof/witness/parent tables | evr0 decoder bounds-checks tables and ordering | Structural claims are not semantic proofs | VERIFIED structural / PROPOSED semantic |
 | D6f limits | 4 MiB payload; 4096-byte field; 65536 propositions/proofs; 262144 witnesses/parents; depth 256 | Decoder constants and checked cursor/count validation implement structural limits | Allocation/work budgets are not physical-memory guarantees | VERIFIED structural / OWNER DECISION REQUIRED budget policy |
-| D6g diagnostics | Stable categories, deterministic offsets, public mapping | Decoder has structural/resource errors; verifier/VM map rev27 to unsupported admission | V0033/V0034 catalog/API snapshot alignment remains open | PROPOSED / OWNER DECISION REQUIRED |
+| D6g diagnostics | Stable categories, deterministic offsets, public mapping | V0033 is registered as InvalidEvidenceSection; V0034 is registered as EvidenceIssuerUnavailable; catalog and regression mappings are present | Future semantic-admission taxonomy, precedence and new public codes remain open | VERIFIED structural / UNRESOLVED semantic admission |
 | D6h issuer | EVR0 metadata never mints trust | No issuer constructor or VerifiedEvidence token exists | B2-2 needs a trusted gateway and authenticated context | VERIFIED boundary / BLOCKED implementation |
 | D6i admission | Rev27 fail-closed until gateway qualification | sm-verify and sm-vm reject rev27; no CLI promotion path | Future gateway must not weaken these paths | VERIFIED fail-closed |
 | D6j compatibility | V0-V25 retain interpretation; no downgrade | Legacy gates remain separate; rev27 is not an upgrade path | Legacy regression proof remains required after gateway work | VERIFIED |
@@ -44,15 +44,16 @@ availability.
 Current source takes precedence over stale documents:
 
 - decoder failures retain deterministic structural class and absolute offset;
-- verifier maps revision-27 structural artifacts to unsupported admission;
+- V0033 maps to InvalidEvidenceSection in sm-verify and the canonical catalog;
+- V0034 maps to EvidenceIssuerUnavailable in sm-verify and the canonical catalog;
+- the EVR0 regression asserts V0034 for the current issuer-unavailable path;
 - VM refuses revision 27;
-- smc explain and public API snapshots must not claim semantic admission until
-  V0033/V0034 mapping is explicitly qualified.
+- smc explain and the public API inventory preserve the registered structural
+  diagnostics; registration does not qualify semantic admission.
 
-Proposed precedence for B2-2 is malformed framing/length, then unsupported
-revision/policy, then context/issuer mismatch, then semantic rule failure, then
-operation denial. This remains a proposal until the public diagnostic contract
-is approved.
+For B2-2, precedence among semantic context/issuer failures, semantic rule
+failures and operation denial remains unresolved. No new public code is
+introduced by D6-R5.1.
 
 ## D6i transition
 
@@ -72,7 +73,8 @@ or legacy-to-rev27 promotion.
 | Current rev27 fail-closed verifier/VM behavior | VERIFIED existing fact |
 | Structural table and limit interpretation | VERIFIED implementation; semantic authority absent |
 | Aggregate allocation/work budget semantics | OWNER DECISION REQUIRED |
-| Final V0033/V0034 public mapping | OWNER DECISION REQUIRED |
+| V0033/V0034 structural registration and catalog mapping | VERIFIED existing fact |
+| Future semantic-admission taxonomy and precedence | OWNER DECISION REQUIRED |
 | Trusted issuer context and gateway ownership | OWNER DECISION REQUIRED |
 | sm-admission Cargo transition | BLOCKED by current dependency/governance envelope |
 | VM consumption of evidence token | OUT OF SCOPE; separate authorization required |

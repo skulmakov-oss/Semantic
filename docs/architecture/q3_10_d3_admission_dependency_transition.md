@@ -6,34 +6,44 @@ Baseline: 4207f72551190662c14961deb083bdf3bf33d3d2
 
 ## Observed graph
 
-cargo metadata --no-deps confirms that sm-format owns wire decoding, sm-verify
-owns bytecode admission, sm-vm owns execution, sm-front and sm-sema own source
-analysis, and smc-cli coordinates compiler-side operations.
+cargo metadata --no-deps plus the package manifests confirm these production
+edges. In this document A -> B means package A depends on package B. Features
+are listed separately and are not additional packages.
+
+    sm-front -> ton618-core, sm-profile, sm-diagnostic
+    sm-sema -> ton618-core, sm-front, sm-profile, sm-diagnostic
+    sm-format -> (none)
+    sm-ir -> sm-front, sm-profile, sm-format
+    sm-emit -> sm-format, sm-ir
+    sm-verify -> sm-runtime-core, sm-format, sm-diagnostic
+
+sm-verify -> sm-ir exists only under sm-verify dev-dependencies for tests; it
+is not a production dependency. Existing feature wiring for std/alloc and
+profile features remains owned by each manifest.
 
 Required negative edges:
 
-    sm-verify -X-> sm-front
-    sm-verify -X-> sm-sema
-    sm-verify -X-> sm-admission
+    sm-verify must not depend on sm-front
+    sm-verify must not depend on sm-sema
+    sm-verify must not depend on sm-admission
 
 No semantic typechecking rules may be duplicated in the gateway and no
 alternative bytecode verifier may be introduced.
 
 ## Proposed minimal graph
 
-    sm-front ---> sm-sema
-        \           |
-         \          v
-          ---> sm-admission <--- sm-format
-                        |
-                        +---> sm-verify
-                        +---> sm-ir
-                        +---> sm-emit
+    sm-admission -> sm-front
+    sm-admission -> sm-sema
+    sm-admission -> sm-format
+    sm-admission -> sm-ir
+    sm-admission -> sm-emit
+    sm-admission -> sm-verify
 
-The arrows describe allowed use by a future gateway. sm-admission would
+This is a proposed graph, not a compiled workspace graph. sm-admission would
 coordinate existing certified owners: front/sema for source observations,
 format for structural data, verify for bytecode admission, and ir/emit for
-deterministic reproduction.
+deterministic reproduction. No existing owner may depend back on
+sm-admission.
 
 ## Minimum future Cargo transition
 
@@ -64,10 +74,13 @@ Harness weakening is acceptable.
 
 ## Qualification before transition
 
-The future patch must prove that cargo metadata has no forbidden reverse edge
-or cycle, downstream Rust cannot construct the opaque token, source A plus
-artifact B is rejected, structural rev27 decode remains untrusted without the
-gateway context, legacy V0-V25 behavior is unchanged, and no opcode,
-capability, VM privilege or verifier bypass is introduced.
+The future patch must add sm-admission to a temporary or task-authorized
+workspace, then run cargo metadata with dependency resolution and inspect the
+resolved production graph. cargo metadata --no-deps for the current graph is
+not proof that the future graph is cycle-free. The patch must also prove that
+downstream Rust cannot construct the opaque token, source A plus artifact B
+is rejected, structural rev27 decode remains untrusted without gateway
+context, legacy V0-V25 behavior is unchanged, and no opcode, capability, VM
+privilege or verifier bypass is introduced.
 
 This document does not authorize creating sm-admission or editing Cargo files.
