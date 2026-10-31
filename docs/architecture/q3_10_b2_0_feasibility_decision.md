@@ -14,8 +14,8 @@ References: `docs/architecture/q3_10_b1_r3_issuer_semantic_decision.md`,
 - At this baseline `sm-verify` depends on `sm-format`, `sm-runtime-core`,
   and `sm-diagnostic`; it does **not** depend on `sm-front` or `sm-sema`.
   The dependency boundary forbids pulling source analysis into `sm-verify`.
-- `sm-sema` depends on `sm-front`, `sm-profile`, `ton618-core`, and
-  `sm-diagnostic`; it cannot directly instantiate a private field of
+- `sm-sema` depends on `sm-front`, `sm-profile`, the quad-logic core,
+  and `sm-diagnostic`; it cannot directly instantiate a private field of
   a type declared in `sm-verify`.
 - `smc-cli` already depends on `sm-sema` and `sm-verify`. It can
   orchestrate validated calls without a new crate dependency, but it
