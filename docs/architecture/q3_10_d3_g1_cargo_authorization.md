@@ -238,3 +238,190 @@ This G1 artifact is a governance transition proposal only. It creates no
 production authority, no dependency edge, no verifier exception and no runtime
 capability. D3-G2 may begin only after the owner and trusted base-side
 governance explicitly admit the narrow envelope described above.
+
+## 11. D3-G1-R1 authority state machine
+
+The trusted checker derives its migration mode from the **base** task type,
+not from the candidate YAML. In trusted mode it reads the envelope and checker
+from the immutable base commit, fetches the candidate only as Git objects, and
+evaluates the complete base-to-head path set. The candidate cannot execute its
+own checker or authorize its own envelope.
+
+| State | Trusted base task type | Candidate change | Current trusted result | Classification |
+|---|---|---|---|---|
+| S0 Foundation | `foundation_delivery` | ordinary documentation | admitted when base allow/deny matches | VERIFIED |
+| S0 -> S1 bootstrap attempt | `foundation_delivery` | `.harness/current.task.yaml` changed to `governance_migration` | `envelope-immutable` | BLOCKED |
+| S0 -> S1 Cargo attempt | `foundation_delivery` | `Cargo.toml`, lockfile or crate manifest | forbidden/outside scope | BLOCKED |
+| S1 Governance bootstrap | `governance_migration` already landed in trusted base | envelope-only control-plane change | potentially admitted if transition invariants hold | OWNER DECISION REQUIRED |
+| S1 -> S2 scoped envelope | `governance_migration` | one further envelope-only transition | only control-plane paths may change; Cargo payload cannot be in the same transition | PROPOSED / OWNER DECISION REQUIRED |
+| S2 scoped Cargo authorization | trusted base contains a narrowly scoped non-migration envelope | D3-G2 Cargo foundation paths | path-admissible only if exact allow/deny rules permit | PROPOSED; content review still required |
+| S3 D3-G2 implementation | scoped ordinary task | only authorized Cargo and foundation tests | depends on S2 trusted base | NOT RUN |
+| S4 restoration | trusted base contains migration authority | envelope-only restoration to Foundation | possible only as a trusted migration transition | PROPOSED / OWNER DECISION REQUIRED |
+
+### Bootstrap conclusion
+
+There is no ordinary green PR sequence from the current S0 to S1. The base
+checker computes `$migration` from the trusted base task type. With the current
+`foundation_delivery` base, a changed envelope is rejected before candidate
+authorization is considered. A candidate cannot change its own base-side task
+type. Therefore S0 -> S1 is **BLOCKED: TRUSTED BOOTSTRAP GAP**.
+
+The earlier generic sequence `S0 -> S1 -> S2 -> S3 -> S4` is not an executable
+ordinary PR plan until an owner-controlled trusted base transition establishes
+S1. The current PR #2069 is an ordinary documentation payload and does not
+establish that transition.
+
+## 12. Isolated checker evidence
+
+The repository fixture `tests/harness_scope_enforcement.ps1` was executed one
+case at a time against the checker logic. Each result below is the fixture's
+actual result and expected result:
+
+| Scenario | Result | Meaning |
+|---|---|---|
+| S0 envelope mutation (`N3`) | FAIL as expected | Foundation cannot self-authorize Cargo scope |
+| Checker replacement (`N5`) | FAIL as expected | Candidate cannot replace trusted checker |
+| Migration payload plus non-envelope file (`N6`) | FAIL as expected | Governance transition is envelope-only |
+| Permitted migration envelope (`P2`) | PASS as expected | Existing checker can validate a migration envelope when the trusted base is migration-capable |
+| Repeated permitted migration envelope (`P3`) | PASS as expected | Deterministic repeat result |
+| Merge gate weakening (`N7`) | FAIL as expected | Protected merge invariant |
+| Release/tag weakening (`N8`) | FAIL as expected | Protected release invariant |
+| Control-plane expansion (`transition-control-plane`) | FAIL as expected | Migration cannot authorize arbitrary control-plane scope |
+| Replacement object Cargo path (`replacement-object`) | FAIL as expected | Forbidden path remains denied |
+
+The existing `landed-transition` fixture returned FAIL with
+`envelope-immutable` because the live landed base envelope is Foundation, not
+`governance_migration`; its fixture expectation is stale relative to the
+current base and is not used as positive evidence.
+
+An attempted direct local trusted invocation for PR #2069 with
+`-BaseSha bbf9ff41... -HeadSha 194e5c0...` returned
+`checker-provenance executable-must-equal-base-blob`. The Windows checkout's
+working copy of the checker is not byte-identical to the immutable base blob,
+so this local command is classified **BLOCKED**, not PASS. Hosted
+`trusted-scope` for the actual documentation-only PR was successful; that does
+not prove a hypothetical Cargo transition.
+
+The trusted workflow itself confirms the relevant authority model: it checks
+out the event base, fetches the event head as objects, verifies immutable
+identities, and executes the checker from the base checkout. Candidate workflow
+or Harness files cannot replace that authority.
+
+## 13. Owner-controlled intervention alternatives
+
+| Alternative | Required action | Trusted-scope behavior | Auditability | Branch-rule bypass |
+|---|---|---|---|---|
+| A. Narrow governance bootstrap transition | Owner-controlled migration-capable base commit or separately admitted governance PR | Can establish S1, but only through the base-side migration profile | High if one-purpose and reverted/restored | No, if ordinary rules admit it |
+| B. Separately reviewed governance base transition | Owner reviews and lands a dedicated envelope transition, then opens D3-G2 from that trusted base | S2 can be evaluated from the landed base | Highest; separates governance from implementation | No, if ruleset accepts it |
+| C. One-time administrative merge exception | Owner/admin bypasses the blocked bootstrap check | Would bypass trusted-scope rather than prove it | Lower and requires explicit incident/audit record | Yes; not authorized here |
+
+Alternative C is explicitly not used. No `--admin`, ruleset change, bypass actor,
+direct protected push or workflow modification is authorized. A or B is the
+smallest supported direction; the current repository does not itself prove
+which owner-controlled route is available.
+
+## 14. Exact D3-G2 envelope and enforceability
+
+The proposed D3-G2 candidate envelope is illustrative and must not be landed
+without a trusted base transition:
+
+```yaml
+task:
+  id: Q3.10-D3-G2
+  type: foundation_delivery
+  mode: active
+scope:
+  allowed_paths:
+    - Cargo.toml
+    - Cargo.lock
+    - crates/sm-admission/Cargo.toml
+    - crates/sm-admission/src/lib.rs
+    - tests/dependency_boundaries.rs
+    - tests/sm_admission/**
+  forbidden_paths:
+    - .harness/**
+    - .github/**
+    - scripts/**
+    - crates/*/Cargo.toml
+    - crates/*/Cargo.lock
+    - bootstrap/**
+    - reference/**
+    - releases/**
+```
+
+This exact illustration is **NOT ENFORCEABLE WITH CURRENT CHECKER/BASE**:
+
+1. The current base does not allow these paths.
+2. The current base forbids `Cargo.toml`, `Cargo.lock` and all
+   `crates/*/Cargo.toml`.
+3. Allow/deny has deny precedence; an allow entry cannot carve an exception out
+   of the forbidden manifest pattern.
+4. A governance migration candidate is restricted to control-plane paths and
+   cannot carry the Cargo payload in the same transition.
+5. Even after path admission, the checker does not inspect Cargo TOML content,
+   dependency versions, feature meaning or lockfile resolution.
+
+The proposed envelope must therefore be split into a trusted governance
+transition and a later ordinary D3-G2 base. A future content validator or
+mandatory owner review must enforce the semantic operation boundary.
+
+### Enforcement layers
+
+| Attack | Current path checker | Content validator | Owner review |
+|---|---|---|---|
+| Existing crate manifest | rejects by forbidden path | not reached | not needed if path remains denied |
+| Extra workspace member | path may be allowed by a future exact scope | required | required until validator exists |
+| External dependency | not detected by path checker | required | required |
+| Version/feature change | not detected | required | required |
+| Unauthorized lockfile resolution | path-only; exact content not checked | required | required |
+| `.github/**`, `scripts/**`, Harness | rejects by protected path | not reached | not a substitute |
+| issuer/token constructor or verifier bypass | outside path-only semantics | required semantic/security tests | required |
+
+The current checker can enforce path scope, immutable workflow/checker,
+protected invariants, and base/head identity. It cannot prove that Cargo
+content implements only one workspace member with only approved dependencies.
+
+## 15. Restoration and expiration proof
+
+The proposal's “expires after one PR” wording is procedural, not automatic.
+The current checker has no timer, PR-closure hook, or automatic restoration
+mechanism. PR closure does not mutate the trusted base envelope.
+
+The enforceable restoration invariant is instead:
+
+```text
+trusted landed base envelope = normal Foundation envelope
+AND Cargo paths are forbidden
+=> every later ordinary Cargo PR is rejected by trusted-scope
+```
+
+This can be proven only from a new trusted base commit and a fresh negative
+trusted-scope run against a Cargo-mutating candidate. Until that restored base
+exists, restoration is `BLOCKED` and requires owner action. A written promise
+or closing a Draft PR is not proof.
+
+## 16. Updated decision register
+
+| Decision | Status |
+|---|---|
+| Current S0 Foundation envelope | VERIFIED |
+| Candidate cannot self-authorize from S0 | VERIFIED by checker rule and N3/N6 |
+| Ordinary S0 -> S1 bootstrap | BLOCKED: TRUSTED BOOTSTRAP GAP |
+| Migration envelope-only validation | VERIFIED by P2/P3 fixtures |
+| D3-G2 exact path allowlist | PROPOSED |
+| D3-G2 exact envelope under current base | NOT ENFORCEABLE |
+| Cargo TOML/content semantic restrictions | OWNER DECISION REQUIRED / validator required |
+| Trusted base-side governance transition | OWNER DECISION REQUIRED |
+| Automatic expiry on PR closure | NOT VERIFIED; not implemented |
+| Restoration proof under normal Foundation base | BLOCKED until restored trusted base exists |
+| Administrative bypass | NOT AUTHORIZED |
+| Issuer, rev27 execution, VerifiedEvidence | OUT OF SCOPE / NOT AUTHORIZED |
+
+## 17. R1 conclusion
+
+Q3.10 D3-G1-R1 does not establish a green ordinary PR path from S0 to S1.
+It establishes the exact trusted bootstrap gap and separates path admission from
+Cargo-content authorization. The minimum next owner decision is to choose a
+supported owner-controlled governance-base transition (A or B above), with an
+explicit trusted base commit and restoration plan. Until then D3-G2 remains
+blocked and no Cargo authorization is active.
