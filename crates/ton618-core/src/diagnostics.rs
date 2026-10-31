@@ -113,6 +113,8 @@ pub fn diagnostic_catalog() -> &'static [(&'static str, &'static str)] {
         ("V0030", "Verifier rejection: ADT variant name mismatch (AdtVariantNameMismatch)."),
         ("V0031", "Verifier rejection: ADT payload arity mismatch (AdtPayloadArityMismatch)."),
         ("V0032", "Verifier rejection: ADT payload index out of range (AdtPayloadIndexOutOfRange)."),
+        ("V0033", "Verifier rejection: invalid EVR0 evidence section (InvalidEvidenceSection)."),
+        ("V0034", "Verifier rejection: trusted EVR0 issuer unavailable (EvidenceIssuerUnavailable)."),
         (
             "W0240",
             "Dead law branch detected: When condition is always false.",
