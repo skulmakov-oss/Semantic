@@ -299,6 +299,7 @@ impl ArtifactIdentity {
                 Ok(DecodedSemCode {
                     header,
                     adt_descriptors,
+                    evidence: _,
                     functions,
                 }) => {
                     let mut cap_flags = Vec::new();

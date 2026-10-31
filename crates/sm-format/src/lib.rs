@@ -4,6 +4,9 @@
 mod local_format;
 
 #[cfg(feature = "std")]
+mod evr0;
+
+#[cfg(feature = "std")]
 pub mod semcode_decode;
 
 #[cfg(feature = "std")]

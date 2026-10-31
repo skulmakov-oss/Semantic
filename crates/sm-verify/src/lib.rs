@@ -755,6 +755,7 @@ pub fn verify_semcode_token_with_quotas_and_limits(
     let sm_format::semcode_decode::DecodedSemCode {
         header,
         adt_descriptors,
+        evidence: _,
         functions: decoded_functions,
     } = match sm_format::semcode_decode::decode_semcode(bytes) {
         Ok(v) => v,
@@ -822,6 +823,14 @@ pub fn verify_semcode_token_with_quotas_and_limits(
                     Some(offset),
                     msg,
                 ),
+                sm_format::semcode_decode::DecodeError::InvalidEvidenceSection { offset, msg } => {
+                    diag(
+                        VerificationCode::UnsupportedVersion,
+                        None,
+                        Some(offset),
+                        format!("untrusted EVR0 structural failure: {msg}"),
+                    )
+                }
                 sm_format::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
                     VerificationCode::ResourceLimitExceeded,
                     None,
@@ -833,6 +842,17 @@ pub fn verify_semcode_token_with_quotas_and_limits(
             return Err(RejectReport { diagnostics });
         }
     };
+
+    // B2-1 decoder-positive is NOT verifier/issuer admission.
+    if header.rev >= sm_format::semcode_format::SEMCODE_EVR0_MIN_REVISION {
+        diagnostics.push(diag(
+            VerificationCode::UnsupportedVersion,
+            None,
+            Some(0),
+            "EVR0 proof-bearing revision has no qualified trusted issuer",
+        ));
+        return Err(RejectReport { diagnostics });
+    }
 
     let mut functions = Vec::new();
     let mut pending_functions = Vec::new();

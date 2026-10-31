@@ -1,15 +1,20 @@
 # EVR0 Proof Section v0 (Candidate)
 
-Status: **PROPOSED — not implemented and not normative**
+Status: **PROPOSED for semantic/issuer authority; see the limited B2-1 structural contract**.
 
-This document is the Q3.10-B1 contract candidate. It does not add a header,
-capability, opcode, section or verifier rule to the current implementation.
+The narrower structural-only B2-1 format contract is now owned by
+[`evr0_b2_1_structural_v1.md`](evr0_b2_1_structural_v1.md): it allows
+untrusted EVR0 decoding but **never** makes revision 27 verifier-admitted
+or executable. The semantic proof rules, issuer authority and operation
+bindings below remain proposals. Nothing in this document alone grants
+a runtime capability.
 
 ## 1. Integration boundary
 
-The candidate introduces a new header family, provisionally named `SEMCOD26`,
-with revision `27`. These names and numbers are reserved only as a proposal;
-the owner must approve the revision allocation before B2.
+The B2-1 structural contract reserves the new header family `SEMCOD26`,
+revision `27`, with mandatory EVR0 decoding. The semantic/issuer admission
+rules in this document are still only candidates and must receive separate
+owner approval before B2-2/B2-3.
 
 For the proposed revision, the artifact layout is:
 

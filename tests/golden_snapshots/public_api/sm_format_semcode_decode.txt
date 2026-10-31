@@ -1,4 +1,5 @@
 source: crates/sm-format/src/semcode_decode.rs
+pub use crate::evr0::DecodedEvidenceSection;
 pub const MAX_FUNCTIONS: usize = 1024;
 pub const MAX_STRING_LEN: usize = 1024;
 pub const MAX_STRINGS_PER_FUNCTION: usize = 256;
@@ -16,6 +17,7 @@ InvalidOwnershipSection { offset: usize, msg: &'static str },
 InvalidSignatureSection { offset: usize, msg: &'static str },
 InvalidAdtDescriptorSection { offset: usize, msg: &'static str },
 ResourceLimit { offset: usize, msg: String },
+InvalidEvidenceSection { offset: usize, msg: &'static str },
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedDebugSymbol {
 pub pc: usize,
@@ -61,6 +63,7 @@ pub code_slice: &'a [u8],
 pub struct DecodedSemCode<'a> {
 pub header: SemcodeHeaderSpec,
 pub adt_descriptors: Option<AdtDescriptorTable>,
+pub evidence: Option<DecodedEvidenceSection>,
 pub functions: Vec<DecodedFunctionEnvelope<'a>>,
 pub fn decode_semcode_envelope<'a>( bytes: &'a [u8], ) -> Result<(SemcodeHeaderSpec, Vec<DecodedFunctionEnvelope<'a>>), DecodeError> {
 pub fn decode_semcode(bytes: &[u8]) -> Result<DecodedSemCode<'_>, DecodeError> {

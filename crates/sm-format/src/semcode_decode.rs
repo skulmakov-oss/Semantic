@@ -1,3 +1,4 @@
+pub use crate::evr0::DecodedEvidenceSection;
 use crate::local_format::*;
 
 pub const MAX_FUNCTIONS: usize = 1024;
@@ -46,6 +47,11 @@ pub enum DecodeError {
     ResourceLimit {
         offset: usize,
         msg: String,
+    },
+    /// Structurally invalid untrusted EVR0 data (not issuer authorization).
+    InvalidEvidenceSection {
+        offset: usize,
+        msg: &'static str,
     },
 }
 
@@ -175,6 +181,8 @@ struct StringTableDebugOwnershipParse {
 pub struct DecodedSemCode<'a> {
     pub header: SemcodeHeaderSpec,
     pub adt_descriptors: Option<AdtDescriptorTable>,
+    /// Untrusted metadata. Not a semantic proof or execution permission.
+    pub evidence: Option<DecodedEvidenceSection>,
     pub functions: Vec<DecodedFunctionEnvelope<'a>>,
 }
 
@@ -213,6 +221,19 @@ pub fn decode_semcode(bytes: &[u8]) -> Result<DecodedSemCode<'_>, DecodeError> {
     } else {
         None
     };
+    // EVR0 exists by *header revision*, never tag-sniffing on legacy bytes.
+    let evidence = if header.rev >= SEMCODE_EVR0_MIN_REVISION {
+        Some(crate::evr0::decode(bytes, &mut cursor)?)
+    } else {
+        None
+    };
+    if evidence.is_some() && bytes.get(cursor..cursor.saturating_add(4)) == Some(b"EVR0".as_slice())
+    {
+        return Err(DecodeError::InvalidEvidenceSection {
+            offset: cursor,
+            msg: "duplicate EVR0 section",
+        });
+    }
     let mut functions = Vec::new();
 
     while cursor < bytes.len() {
@@ -290,6 +311,7 @@ pub fn decode_semcode(bytes: &[u8]) -> Result<DecodedSemCode<'_>, DecodeError> {
     Ok(DecodedSemCode {
         header,
         adt_descriptors,
+        evidence,
         functions,
     })
 }

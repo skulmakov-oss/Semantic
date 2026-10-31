@@ -1387,36 +1387,47 @@ fn decode_and_map_errors(
     ),
     RuntimeError,
 > {
-    sm_format::semcode_decode::decode_semcode_envelope(bytes).map_err(|e| match e {
-        sm_format::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
-        sm_format::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
-            RuntimeError::UnsupportedBytecodeVersion { found, supported }
-        }
-        sm_format::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidSignatureSection { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidAdtDescriptorSection { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
-            RuntimeError::BadFormat(msg)
-        }
-    })
+    let result =
+        sm_format::semcode_decode::decode_semcode_envelope(bytes).map_err(|e| match e {
+            sm_format::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
+            sm_format::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
+                RuntimeError::UnsupportedBytecodeVersion { found, supported }
+            }
+            sm_format::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidSignatureSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidAdtDescriptorSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidEvidenceSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
+                RuntimeError::BadFormat(msg)
+            }
+        })?;
+    if result.0.rev >= sm_format::semcode_format::SEMCODE_EVR0_MIN_REVISION {
+        return Err(RuntimeError::UnsupportedBytecodeVersion {
+            found: "SEMCOD26 (untrusted EVR0)".to_string(),
+            supported: "legacy admitted SemCode revisions".to_string(),
+        });
+    }
+    Ok(result)
 }
 
 fn parse_semcode(bytes: &[u8]) -> Result<VmProgramView, RuntimeError> {

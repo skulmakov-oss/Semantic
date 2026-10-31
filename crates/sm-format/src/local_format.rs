@@ -24,6 +24,8 @@ pub const MAGIC22: [u8; 8] = *b"SEMCOD22";
 pub const MAGIC23: [u8; 8] = *b"SEMCOD23";
 pub const MAGIC24: [u8; 8] = *b"SEMCOD24";
 pub const MAGIC25: [u8; 8] = *b"SEMCOD25";
+/// B2-1 structural EVR0 format, NOT trusted execution authority.
+pub const MAGIC26: [u8; 8] = *b"SEMCOD26";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -564,12 +566,21 @@ pub const HEADER_V25: SemcodeHeaderSpec = SemcodeHeaderSpec {
     capabilities: HEADER_V24.capabilities | CAP_BYTES_ENDIAN,
 };
 
+/// Q3.10 B2-1: mandatory EVR0 after ADT0. No new capability, opcode or issuer.
+pub const HEADER_V26: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC26,
+    epoch: 0,
+    rev: 27,
+    capabilities: HEADER_V25.capabilities,
+};
+pub const SEMCODE_EVR0_MIN_REVISION: u16 = HEADER_V26.rev;
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
         HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20, HEADER_V21,
-        HEADER_V22, HEADER_V23, HEADER_V24, HEADER_V25,
+        HEADER_V22, HEADER_V23, HEADER_V24, HEADER_V25, HEADER_V26,
     ]
 }
 
