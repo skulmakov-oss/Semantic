@@ -298,7 +298,7 @@ fn count_and_record_errors_report_exact_field_offsets() {
 
 #[test]
 fn control_characters_and_duplicate_or_descending_propositions_reject() {
-    for byte in [b'\n', b'\0'] {
+    for byte in *b"\n\0" {
         let mut bad = valid();
         bad[PAYLOAD_AT + 72] = byte; // policy namespace's sole character
         assert!(matches!(
