@@ -1,3 +1,4 @@
+use crate::evr0::{decode_evr0_section, DecodedEvr0, Evr0ErrorKind};
 use crate::local_format::*;
 
 pub const MAX_FUNCTIONS: usize = 1024;
@@ -40,6 +41,11 @@ pub enum DecodeError {
     /// SSF-09 D2-2: the mandatory `ADT0` section of a revision-23+ artifact is
     /// missing, malformed, or not a strictly valid canonical descriptor table.
     InvalidAdtDescriptorSection {
+        offset: usize,
+        msg: &'static str,
+    },
+    /// Q3.10 B2-1: malformed mandatory EVR0, never an issuer token.
+    InvalidEvidenceSection {
         offset: usize,
         msg: &'static str,
     },
@@ -175,6 +181,8 @@ struct StringTableDebugOwnershipParse {
 pub struct DecodedSemCode<'a> {
     pub header: SemcodeHeaderSpec,
     pub adt_descriptors: Option<AdtDescriptorTable>,
+    /// Untrusted structural EVR0 only; no semantic or issuer authority.
+    pub evr0: Option<DecodedEvr0>,
     pub functions: Vec<DecodedFunctionEnvelope<'a>>,
 }
 
@@ -210,6 +218,23 @@ pub fn decode_semcode(bytes: &[u8]) -> Result<DecodedSemCode<'_>, DecodeError> {
     // first function envelope, exactly as before.
     let adt_descriptors = if header.rev >= SEMCODE_ADT_DESCRIPTOR_MIN_REVISION {
         Some(decode_adt_descriptor_section(bytes, &mut cursor)?)
+    } else {
+        None
+    };
+    // Revision-derived, never tag-sniffed. Older revisions do not gain EVR0.
+    let evr0 = if header.rev >= SEMCODE_EVR0_MIN_REVISION {
+        Some(
+            decode_evr0_section(bytes, &mut cursor).map_err(|err| match err.kind {
+                Evr0ErrorKind::Invalid => DecodeError::InvalidEvidenceSection {
+                    offset: err.offset,
+                    msg: err.message,
+                },
+                Evr0ErrorKind::ResourceLimit => DecodeError::ResourceLimit {
+                    offset: err.offset,
+                    msg: err.message.to_owned(),
+                },
+            })?,
+        )
     } else {
         None
     };
@@ -290,6 +315,7 @@ pub fn decode_semcode(bytes: &[u8]) -> Result<DecodedSemCode<'_>, DecodeError> {
     Ok(DecodedSemCode {
         header,
         adt_descriptors,
+        evr0,
         functions,
     })
 }

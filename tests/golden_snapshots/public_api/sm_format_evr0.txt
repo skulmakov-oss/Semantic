@@ -1,0 +1,57 @@
+source: crates/sm-format/src/evr0.rs
+pub const MAX_EVR0_PAYLOAD: usize = 4 * 1024 * 1024;
+pub const MAX_EVR0_STRING_BYTES: usize = 4096;
+pub const MAX_EVR0_PROPOSITIONS: usize = 65_536;
+pub const MAX_EVR0_PROOFS: usize = 65_536;
+pub const MAX_EVR0_WITNESSES: usize = 262_144;
+pub const MAX_EVR0_PARENTS: usize = 262_144;
+pub const MAX_EVR0_DEPTH: usize = 256;
+pub const MAX_EVR0_LOGICAL_ALLOC: usize = 16 * 1024 * 1024;
+pub const MAX_EVR0_WORK_UNITS: usize = 8 * 1024 * 1024;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Evr0ErrorKind {
+Invalid,
+ResourceLimit,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evr0Error {
+pub kind: Evr0ErrorKind,
+pub offset: usize,
+pub message: &'static str,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Proposition {
+pub kind: String,
+pub ast_owner_id: u32,
+pub semantic_scope_id: u32,
+pub type_obligation_id: u32,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Proof {
+pub proof_id: u32,
+pub proposition_index: u32,
+pub rule_id: String,
+pub authority_context: u32,
+pub witness_first: u32,
+pub witness_count: u32,
+pub parent_first: u32,
+pub parent_count: u32,
+pub authorized_operation: u8,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Witness {
+pub witness_id: u32,
+pub proposition_index: u32,
+pub polarity: u8,
+pub file_digest: [u8; 32],
+pub source_start: u32,
+pub source_end: u32,
+pub origin_digest: [u8; 32],
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedEvr0 {
+pub source_set: [u8; 32],
+pub compiler_contract: [u8; 32],
+pub epoch: u16,
+pub policy_namespace: String,
+pub issuer_namespace: String,
+pub propositions: Vec<Proposition>,
+pub proofs: Vec<Proof>,
+pub witnesses: Vec<Witness>,
+pub parents: Vec<u32>,
+pub fn decode_evr0_section(bytes: &[u8], cursor: &mut usize) -> Result<DecodedEvr0, Evr0Error> {

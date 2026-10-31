@@ -7,6 +7,9 @@ mod local_format;
 pub mod semcode_decode;
 
 #[cfg(feature = "std")]
+pub mod evr0;
+
+#[cfg(feature = "std")]
 pub mod semcode_format {
     pub use crate::local_format::*;
 }

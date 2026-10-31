@@ -93,6 +93,10 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/sm_format_semcode_decode.txt",
     ),
     (
+        "crates/sm-format/src/evr0.rs",
+        "tests/golden_snapshots/public_api/sm_format_evr0.txt",
+    ),
+    (
         "crates/sm-ir/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_ir_lib.txt",
     ),
@@ -4447,6 +4451,8 @@ fn verification_code_contract_name(code: sm_verify::VerificationCode) -> &'stati
         VerificationCode::AdtVariantNameMismatch => "AdtVariantNameMismatch",
         VerificationCode::AdtPayloadArityMismatch => "AdtPayloadArityMismatch",
         VerificationCode::AdtPayloadIndexOutOfRange => "AdtPayloadIndexOutOfRange",
+        VerificationCode::InvalidEvidenceSection => "InvalidEvidenceSection",
+        VerificationCode::EvidenceIssuerUnavailable => "EvidenceIssuerUnavailable",
     }
 }
 
@@ -4487,6 +4493,8 @@ fn verification_code_variants_match_public_contract() {
         VerificationCode::AdtVariantNameMismatch,
         VerificationCode::AdtPayloadArityMismatch,
         VerificationCode::AdtPayloadIndexOutOfRange,
+        VerificationCode::InvalidEvidenceSection,
+        VerificationCode::EvidenceIssuerUnavailable,
     ];
 
     for variant in variants {
@@ -5838,7 +5846,7 @@ fn supported_headers_match_canonical_contract() {
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
         HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19, HEADER_V20, HEADER_V21,
-        HEADER_V22, HEADER_V23, HEADER_V24, HEADER_V25,
+        HEADER_V22, HEADER_V23, HEADER_V24, HEADER_V25, HEADER_V26,
     ];
 
     let actual = supported_headers();

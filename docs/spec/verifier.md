@@ -673,3 +673,24 @@ Required follow-up:
 1. update this specification
 2. update verifier tests
 3. update compatibility or golden tests if public behavior changed
+
+## Q3.10 B2-1 (structural evidence only)
+
+The `SEMCOD26` header (epoch 0, revision 27) carries mandatory `ADT0 | EVR0`.
+`sm-format` may decode the exact EVR0 framing and tables but **does not**
+authenticate the source-set digest, compiler contract, issuer namespace,
+authority indices, rule observations or parent semantics.
+
+Canonical verifier admission MUST reject structurally well-formed rev27 before
+minting `VerifiedSemCode`; the proposed `VerifiedEvidence` handle has no
+production issuer or constructor in this checkpoint. Older revisions retain
+their existing admission rules and never acquire EVR0 authority.
+
+The append-only verifier diagnostic tokens introduced for this bounded stage:
+- `V0033` = `InvalidEvidenceSection` (structural rejection at absolute artifact offset).
+- `V0034` = `EvidenceIssuerUnavailable` (valid structure but no trusted issuer).
+
+The raw/diagnostic VM execution path also rejects rev27 explicitly; no VM
+opcode or capability changes. The proposed four EVR0 proof-rule shapes are
+structurally checked but MUST NOT be interpreted as proof validity, authority,
+or permission to execute an operation.

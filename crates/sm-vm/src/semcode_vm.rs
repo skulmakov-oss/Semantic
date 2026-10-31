@@ -1387,36 +1387,47 @@ fn decode_and_map_errors(
     ),
     RuntimeError,
 > {
-    sm_format::semcode_decode::decode_semcode_envelope(bytes).map_err(|e| match e {
-        sm_format::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
-        sm_format::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
-            RuntimeError::UnsupportedBytecodeVersion { found, supported }
-        }
-        sm_format::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidSignatureSection { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::InvalidAdtDescriptorSection { msg, .. } => {
-            RuntimeError::BadFormat(msg.to_string())
-        }
-        sm_format::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
-            RuntimeError::BadFormat(msg)
-        }
-    })
+    let (header, functions) =
+        sm_format::semcode_decode::decode_semcode_envelope(bytes).map_err(|e| match e {
+            sm_format::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
+            sm_format::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
+                RuntimeError::UnsupportedBytecodeVersion { found, supported }
+            }
+            sm_format::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidSignatureSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidAdtDescriptorSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::InvalidEvidenceSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_format::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
+                RuntimeError::BadFormat(msg)
+            }
+        })?;
+    // Raw/diagnostic paths must not execute structurally parsed rev27.
+    if header.rev >= sm_format::semcode_format::SEMCODE_EVR0_MIN_REVISION {
+        return Err(RuntimeError::BadFormat(
+            "rev27 EVR0 is structural-only and not executable".to_string(),
+        ));
+    }
+    Ok((header, functions))
 }
 
 fn parse_semcode(bytes: &[u8]) -> Result<VmProgramView, RuntimeError> {
