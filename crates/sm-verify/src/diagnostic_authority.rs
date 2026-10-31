@@ -22,7 +22,7 @@ use std::format;
 use std::vec::Vec;
 
 /// Every verification code, in token order (`V0001` first).
-pub const ALL_VERIFICATION_CODES: [VerificationCode; 32] = [
+pub const ALL_VERIFICATION_CODES: [VerificationCode; 34] = [
     VerificationCode::BadHeader,
     VerificationCode::UnsupportedVersion,
     VerificationCode::TruncatedFunction,
@@ -55,6 +55,8 @@ pub const ALL_VERIFICATION_CODES: [VerificationCode; 32] = [
     VerificationCode::AdtVariantNameMismatch,
     VerificationCode::AdtPayloadArityMismatch,
     VerificationCode::AdtPayloadIndexOutOfRange,
+    VerificationCode::InvalidEvidenceSection,
+    VerificationCode::EvidenceIssuerUnavailable,
 ];
 
 impl VerificationCode {
@@ -93,6 +95,8 @@ impl VerificationCode {
             VerificationCode::AdtVariantNameMismatch => "V0030",
             VerificationCode::AdtPayloadArityMismatch => "V0031",
             VerificationCode::AdtPayloadIndexOutOfRange => "V0032",
+            VerificationCode::InvalidEvidenceSection => "V0033",
+            VerificationCode::EvidenceIssuerUnavailable => "V0034",
         }
     }
 

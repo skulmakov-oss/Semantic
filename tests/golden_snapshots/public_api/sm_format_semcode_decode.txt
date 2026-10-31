@@ -15,6 +15,7 @@ InvalidDebugSection { offset: usize, msg: &'static str },
 InvalidOwnershipSection { offset: usize, msg: &'static str },
 InvalidSignatureSection { offset: usize, msg: &'static str },
 InvalidAdtDescriptorSection { offset: usize, msg: &'static str },
+InvalidEvidenceSection { offset: usize, msg: &'static str },
 ResourceLimit { offset: usize, msg: String },
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedDebugSymbol {
@@ -61,6 +62,7 @@ pub code_slice: &'a [u8],
 pub struct DecodedSemCode<'a> {
 pub header: SemcodeHeaderSpec,
 pub adt_descriptors: Option<AdtDescriptorTable>,
+pub evr0: Option<DecodedEvr0>,
 pub functions: Vec<DecodedFunctionEnvelope<'a>>,
 pub fn decode_semcode_envelope<'a>( bytes: &'a [u8], ) -> Result<(SemcodeHeaderSpec, Vec<DecodedFunctionEnvelope<'a>>), DecodeError> {
 pub fn decode_semcode(bytes: &[u8]) -> Result<DecodedSemCode<'_>, DecodeError> {

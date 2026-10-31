@@ -228,6 +228,10 @@ pub enum VerificationCode {
     /// artifact is missing, malformed, or not a strictly valid canonical
     /// descriptor table (rejected at decode, before any function is read).
     InvalidAdtDescriptorSection,
+    /// Q3.10 B2-1: malformed structurally-only evidence section.
+    InvalidEvidenceSection,
+    /// Q3.10 B2-1: structural decoding does not authorize a trusted issuer.
+    EvidenceIssuerUnavailable,
     /// SSF-09 D2-2: a descriptor-dependent ADT opcode (`MAKE_ADT`, `ADT_TAG`,
     /// `ADT_GET`) appears under a header revision that cannot carry the
     /// `ADT0` descriptor table. No table is ever inferred for such artifacts.
@@ -755,6 +759,7 @@ pub fn verify_semcode_token_with_quotas_and_limits(
     let sm_format::semcode_decode::DecodedSemCode {
         header,
         adt_descriptors,
+        evr0,
         functions: decoded_functions,
     } = match sm_format::semcode_decode::decode_semcode(bytes) {
         Ok(v) => v,
@@ -822,6 +827,14 @@ pub fn verify_semcode_token_with_quotas_and_limits(
                     Some(offset),
                     msg,
                 ),
+                sm_format::semcode_decode::DecodeError::InvalidEvidenceSection { offset, msg } => {
+                    diag(
+                        VerificationCode::InvalidEvidenceSection,
+                        None,
+                        Some(offset),
+                        msg,
+                    )
+                }
                 sm_format::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
                     VerificationCode::ResourceLimitExceeded,
                     None,
@@ -833,6 +846,19 @@ pub fn verify_semcode_token_with_quotas_and_limits(
             return Err(RejectReport { diagnostics });
         }
     };
+
+    // Structural EVR0 decoding does not authenticate source semantics,
+    // issuer, compiler provenance or authorization. Never mint VerifiedSemCode.
+    if evr0.is_some() {
+        return Err(RejectReport {
+            diagnostics: vec![diag(
+                VerificationCode::EvidenceIssuerUnavailable,
+                None,
+                Some(0),
+                "rev27 EVR0 is structural-only; a qualified evidence issuer is unavailable",
+            )],
+        });
+    }
 
     let mut functions = Vec::new();
     let mut pending_functions = Vec::new();

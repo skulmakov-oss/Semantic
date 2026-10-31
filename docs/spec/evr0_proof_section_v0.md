@@ -478,3 +478,24 @@ The B2 test set must include:
 10. Correct bytes presented without a trusted issuer context.
 
 These are test designs, not evidence of executed qualification.
+
+## B2-1 implementation-note appendix (non-authoritative until qualification)
+
+The 249-byte section above can be embedded in a **structurally decodable**
+rev27 SemCode artifact only after the mandatory canonical `ADT0` table:
+`Option(None/0, Some/1)` and `Result(Ok/1, Err/1)`. An empty
+`ADT0` section is rejected by the existing strict decoder. The B2-1 golden
+vector therefore has layout `SEMCOD26[8] | ADT0[55] | EVR0[249]`,
+**312 bytes**, with no function envelopes (structural inspection only).
+SHA-256 of this complete candidate vector:
+`064c8e8482af430f88b74ed61b3930434cacf2bb7742f64429d017fe9279e360`.
+
+The reproducible generator and fixed binary fixtures live in
+`tests/vectors/q3_10_evr0_generate.py`,
+`tests/vectors/q3_10_evr0_section.bin` and
+`tests/vectors/q3_10_evr0_structural_only.smc`.
+Only the raw section has the original 249-byte digest specified above.
+These fixtures do not validate the toy compiler contract, proposition
+origin, source semantics or issuer. Neither verifier nor VM may consume
+this revision as an execution authority. The independent ABI freeze,
+evaluator and issuer remain **not qualified** in B2-1.
