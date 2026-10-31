@@ -22,16 +22,48 @@ proof kinds.
 6. Bind source-set, compiler-contract, rule-registry, issuer namespace, epoch,
    session and EvidenceOnly operation.
 7. Generate expected EVR0 from those observations.
-8. Recompile the exact source with fixed canonical options.
-9. Require byte-for-byte equality with submitted SemCode, including metadata and
-   function envelopes.
-10. Run structural decode and canonical verifier admission under an explicitly
-    qualified revision-27 policy.
-11. Only a separately authorized B2-3 stage may issue an opaque
+8. Invoke a separately qualified canonical revision-27 producer using the same
+   immutable source, fixed profile/options and independently checked semantic
+   observations.
+9. Require the producer to emit canonical ADT0, EVR0 and function envelopes
+   without copying submitted claims.
+10. Recompile/reconstruct the exact source artifact with fixed canonical
+    options and require byte-for-byte equality with submitted SemCode,
+    including metadata and function envelopes.
+11. Bind the authenticated issuer context and run structural decode plus
+    canonical verifier admission under an explicitly qualified revision-27
+    policy.
+12. Only a separately authorized B2-3 stage may issue an opaque
     VerifiedEvidence token.
 
 The verifier must not accept a caller digest, issuer label, semantic boolean,
 callback or preconstructed token as a substitute.
+
+## Qualified canonical revision-27 producer prerequisite
+
+The current producer path in sm-ir/src/legacy_lowering.rs still selects earlier
+headers, including MAGIC25, and does not automatically emit revision 27.
+Therefore B2-2 cannot claim exact reproduction until this prerequisite is
+independently qualified.
+
+The future producer must:
+
+1. accept a trusted immutable source snapshot;
+2. use fixed compiler, profile and options identities;
+3. derive EVR0 from independently checked semantics;
+4. encode canonical EVR0 without copying submitted claims;
+5. emit complete canonical ADT0, EVR0 and function envelopes;
+6. produce deterministic bytes for identical approved inputs;
+7. support exact full-artifact comparison;
+8. preserve all legacy producer behavior;
+9. avoid alternate verification logic or public admission shortcuts.
+
+Likely owners are sm-ir/sm-emit for production and sm-format for the wire
+contract. Required vectors include canonical rev27 artifacts, legacy artifacts,
+metadata-only mutations, function-envelope mutations, deterministic repeats
+and malformed EVR0. Qualification requires exact bytes, structural decode,
+canonical verifier admission and legacy regression coverage. No revision-27
+producer implementation is part of this checkpoint.
 
 ## Trust objects
 
@@ -48,6 +80,16 @@ If later authorized, the token must bind artifact bytes, source identity,
 compiler/profile/options identity, proposition identity, operation, epoch and
 session. It must not be serializable, forgeable by downstream Rust or
 reconstructed from a digest or integer.
+
+The authenticated issuer-context interface remains OWNER DECISION REQUIRED.
+Its future implementation must establish authority internally, bind session
+and epoch, compiler contract and rule registry, source-set and artifact
+identity, and restrict this first operation to EvidenceOnly. It must not
+accept a caller boolean, callback, digest or label as proof, and it must not
+provide a serialization path that upgrades untrusted bytes into authority.
+The gateway-to-verifier call boundary is therefore only a future qualified
+interface; ordinary revision-27 verification remains fail-closed until it is
+approved and qualified.
 
 ## Chicken-and-egg resolution
 
@@ -92,9 +134,11 @@ without inventing a public code.
 1. Governance/dependency transition and acyclic sm-admission graph.
 2. Gateway source capture and immutable identity.
 3. Independent RustLike typecheck observation and proposition reconstruction.
-4. Canonical reproduction and byte-equality binding.
-5. Revision-27 verifier admission policy.
-6. Opaque token issuance and red-team qualification.
+4. Qualified canonical revision-27 producer.
+5. Canonical reproduction and byte-equality binding.
+6. Authenticated issuer-context binding.
+7. Revision-27 verifier admission policy.
+8. Opaque token issuance and red-team qualification.
 
 No patch may skip from structural EVR0 decoding directly to trusted token
 issuance.
@@ -103,6 +147,7 @@ issuance.
 
 - no approved sm-admission Cargo transition;
 - no final authenticated issuer-context interface;
-- no final D6g public diagnostic catalog;
+- no final semantic-admission D6g diagnostic taxonomy or precedence;
+- no qualified canonical revision-27 producer;
 - no qualified revision-27 semantic verifier policy;
 - no authorization for opaque-token issuance or VM consumption.
