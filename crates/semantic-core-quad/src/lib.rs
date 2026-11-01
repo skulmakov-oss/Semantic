@@ -127,6 +127,29 @@ impl QuadState {
     }
 }
 
+/// The control-flow decision for a direct Quad condition.
+///
+/// This is deliberately separate from truth-table and knowledge-lattice
+/// operations: unresolved states trap instead of being projected to `bool`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuadControlDecision {
+    BranchN,
+    BranchF,
+    BranchT,
+    BranchS,
+}
+
+impl QuadState {
+    pub const fn control_decision(self) -> QuadControlDecision {
+        match self {
+            Self::N => QuadControlDecision::BranchN,
+            Self::F => QuadControlDecision::BranchF,
+            Self::T => QuadControlDecision::BranchT,
+            Self::S => QuadControlDecision::BranchS,
+        }
+    }
+}
+
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
@@ -1371,6 +1394,25 @@ impl<const N: usize> QuadTileBank<N> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn direct_control_decision_preserves_all_four_states() {
+        assert_eq!(
+            QuadState::N.control_decision(),
+            QuadControlDecision::BranchN
+        );
+        assert_eq!(
+            QuadState::F.control_decision(),
+            QuadControlDecision::BranchF
+        );
+        assert_eq!(
+            QuadState::T.control_decision(),
+            QuadControlDecision::BranchT
+        );
+        assert_eq!(
+            QuadState::S.control_decision(),
+            QuadControlDecision::BranchS
+        );
+    }
     use super::*;
     extern crate alloc;
     use alloc::format;
