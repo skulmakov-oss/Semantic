@@ -267,8 +267,8 @@ fn sm_admission_is_a_zero_dependency_workspace_foundation() {
         .expect("failed to execute cargo metadata");
     assert!(output.status.success(), "cargo metadata execution failed");
 
-    let json: Value = serde_json::from_slice(&output.stdout)
-        .expect("cargo metadata output is not valid json");
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("cargo metadata output is not valid json");
     let package = json["packages"]
         .as_array()
         .and_then(|packages| packages.iter().find(|p| p["name"] == "sm-admission"))
@@ -280,7 +280,9 @@ fn sm_admission_is_a_zero_dependency_workspace_foundation() {
         "sm-admission must be a workspace member"
     );
     assert!(
-        package["dependencies"].as_array().is_some_and(|deps| deps.is_empty()),
+        package["dependencies"]
+            .as_array()
+            .is_some_and(|deps| deps.is_empty()),
         "sm-admission foundation must have no dependencies"
     );
 }
