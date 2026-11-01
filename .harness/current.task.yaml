@@ -1,32 +1,35 @@
 task:
-  id: Q3.10-D3-G2-ADMISSION-WORKSPACE-BOOTSTRAP
-  title: "Scoped D3-G2 admission workspace foundation"
+  id: SHF-FOUNDATION-DELIVERY-STABLE
+  title: "Stable Foundation Engineering Authorization Boundary"
   type: foundation_delivery
   target: >-
-    Prepare a bounded, explicitly owner-authorized D3-G2 workspace foundation
-    for sm-admission. This is a temporary proposal, not a permanent Foundation
-    authority. Implementation Independence. Specification Unity. Deterministic
-    Proof. The trusted PR base envelope and checker remain the authority for
-    candidate admission; ordinary work cannot modify that authority.
+    Enable bounded, explicitly owner-authorized Foundation compiler, language,
+    verifier, SemCode, runtime, and builtin engineering within one permanent
+    technical surface. Implementation Independence. Specification Unity.
+    Deterministic Proof. The trusted PR base envelope and checker remain the
+    authority for candidate admission; ordinary work cannot modify that authority.
   mode: active
   supersedes: FOUNDATION-GOVERNANCE-MIGRATION
   issues: [1910]
   must_remain_open: [1910]
   base_sha: db86eb7897367d880d303e8f803a06e5219b3cd2
   authorized_by: >-
-    Preparation artifact only. No production bootstrap, trusted-base transition,
-    Cargo authorization, merge or owner approval is established by this file.
-    A separate owner decision must name the exact trusted base, candidate SHA,
-    scope, expiry and restoration evidence before any live transition.
+    Repository owner GO (2026-10-09, "Semantic Upstream Phase U0c") installs
+    this permanent Foundation boundary after U0a (#2020) and U0b (#2021).
+    Each concrete task still requires explicit OWNER GO, bounded scope,
+    implementation/tests/specification evidence, qualification, one primary PR,
+    and separate OWNER MERGE GO. Stored base_sha values record this transition;
+    live PR base/head identities come from immutable trusted GitHub event data.
 
 intent:
   summary: >-
-    Proposed temporary D3-G2 path scope only. It does not approve new opcodes,
-    SemCode revisions, public contract changes, release claims, self-hosting
-    completion, issuer activation or revision-27 execution. Those require
-    separate technical justification, deterministic qualification and explicit
-    owner approval. This proposal does not itself authorize a merge or protected
-    main change.
+    Ordinary Foundation work proceeds inside this stable boundary without
+    recurring Harness changes, under stage-specific OWNER GO and normative
+    contracts. File permission does not approve new opcodes, SemCode revisions,
+    public contract changes, release claims, or self-hosting completion; those
+    require explicit technical justification and deterministic qualification.
+    U0c itself changes only this envelope and proves hosted base-side admission.
+    No technical implementation, release/tag work, or merge is authorized by U0c.
   decision_record: docs/agents/WORKFLOW.md
 
 governance_constraints:
@@ -37,18 +40,23 @@ governance_constraints:
   semcode_changes: true
   builtin_changes: true
   workflow_changes: false
-  dependency_changes: true
+  dependency_changes: false
   release_tag_changes: false
   merge_without_owner_go: false
 
 scope:
   allowed_paths:
-    - Cargo.toml
-    - Cargo.lock
-    - crates/sm-admission/Cargo.toml
-    - crates/sm-admission/src/lib.rs
-    - tests/dependency_boundaries.rs
-    - tests/sm_admission/**
+    - crates/sm-*/**
+    - crates/smc-cli/**
+    - crates/semantic-core-quad/**
+    - tests/**
+    - docs/spec/**
+    - docs/architecture/**
+    - README.md
+    - CONTRIBUTING.md
+    - crates/prom-abi/src/lib.rs
+    - crates/prom-cap/src/lib.rs
+    - crates/prom-audit/src/lib.rs
 
   forbidden_paths:
     - .harness/current.task.yaml
@@ -59,6 +67,10 @@ scope:
     - CONSTRAINTS.md
     - tests/harness_scope_enforcement.ps1
     - docs/agents/WORKFLOW.md
+    - Cargo.toml
+    - Cargo.lock
+    - crates/*/Cargo.toml
+    - crates/*/Cargo.lock
     - apps/**
     - examples/**
     - reports/**
@@ -80,7 +92,7 @@ authorization:
   documentation_correction: true
   test_addition: true
   workflow_changes: false
-  dependency_changes: true
+  dependency_changes: false
   github_issue_lifecycle: false
   git_commit_push_pr: true
   merge_after_review_and_checks: false
