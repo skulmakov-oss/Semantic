@@ -21,6 +21,7 @@ members = [
     "crates/sm-format",
     "crates/sm-emit",
     "crates/sm-verify",
+    "crates/sm-admission",
     "crates/sm-runtime-core",
     "crates/sm-vm",
     "crates/smc-cli",

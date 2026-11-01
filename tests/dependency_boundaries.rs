@@ -260,6 +260,32 @@ fn assert_root_manifest_sm_diagnostic_isolation(root_manifest: &str) {
 }
 
 #[test]
+fn sm_admission_is_a_zero_dependency_workspace_foundation() {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .output()
+        .expect("failed to execute cargo metadata");
+    assert!(output.status.success(), "cargo metadata execution failed");
+
+    let json: Value = serde_json::from_slice(&output.stdout)
+        .expect("cargo metadata output is not valid json");
+    let package = json["packages"]
+        .as_array()
+        .and_then(|packages| packages.iter().find(|p| p["name"] == "sm-admission"))
+        .expect("sm-admission package missing from metadata");
+    assert!(
+        json["workspace_members"]
+            .as_array()
+            .is_some_and(|members| members.iter().any(|id| id == &package["id"])),
+        "sm-admission must be a workspace member"
+    );
+    assert!(
+        package["dependencies"].as_array().is_some_and(|deps| deps.is_empty()),
+        "sm-admission foundation must have no dependencies"
+    );
+}
+
+#[test]
 fn sm_diagnostic_has_zero_dependencies_and_only_authorized_consumers() {
     // Layer A: Authoritative semantic dependency graph inspection via Cargo metadata
     assert_cargo_metadata_isolation();
