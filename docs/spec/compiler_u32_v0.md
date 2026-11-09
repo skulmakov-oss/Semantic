@@ -213,3 +213,28 @@ Implemented and qualified on `main` (#2008, PR #2009); not part of `v1.2.0`.
   plus header selection, the `SEMCOD22` relabel attack, unknown and truncated instructions,
   frozen opcode bytes, byte-identical recompilation and unchanged `i32`/equality/`match`.
 - The SHF-1 §9.4 lexer probe is not run by this change; it is the separate SHF-1C checkpoint.
+
+## 14. R0 conversion non-goals
+
+Owner decision (2026-11-08) for the current release slice (R0). These are exclusions, not new
+semantics: §1–§13 are unchanged, and each item below records behaviour current `main` already
+has. Every listed program is rejected at compile time and emits no SemCode at `O0` or `O1`.
+
+| ID | Excluded in R0 | Current rejection |
+|---|---|---|
+| D-I2U | `i32 -> u32` conversion (binding, return, argument) | typecheck |
+| D-U2I | `u32 -> i32` conversion (binding, return, argument) | typecheck |
+| D-CSYN | `as` cast syntax, for every source and target family | parser |
+| D-F64 | `u32 <-> f64` conversion | typecheck |
+| D-FX | `u32 <-> fx` conversion | typecheck |
+
+Mixed-family operators (§6) and out-of-range `u32` literals (parser) stay rejected as before.
+Diagnostic wording is not part of this exclusion.
+
+A future checked conversion, rounding rule or bit reinterpretation needs its own Conversion RFC
+with explicit owner GO, its own error/trap and rounding design and, if required, its own SemCode
+revision. It must not be inferred from this section, and it must not adopt modulo wrapping for
+`u32` arithmetic, which stays checked (§3.1).
+
+Qualification: `tests/u32_r0_conversion_non_goals.rs` pins each exclusion, its rejection stage
+and the absence of SemCode at `O0` and `O1`, and re-asserts the checked semantics of §3.
