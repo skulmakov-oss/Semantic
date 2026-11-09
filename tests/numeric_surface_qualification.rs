@@ -88,7 +88,8 @@ fn numeric_surface_qualification_pack_is_covered_by_smoke_and_execution_checks()
         ),
         (
             "examples/qualification/numeric_surface/negative_bool_arithmetic/src/main.sm",
-            "f64 arithmetic requires f64 operands, got I32 and Bool",
+            // RFC-A v2: accurate mixed-family wording (no f64-only claim).
+            "arithmetic operands must belong to the same admitted family; got I32 and Bool (implicit conversions are not supported)",
         ),
     ];
 

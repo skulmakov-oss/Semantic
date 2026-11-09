@@ -109,7 +109,8 @@ fn assert_invalid_numeric_compile_path_does_not_verify(rel: &str) {
                     || err.contains("type mismatch")
                     || err.contains("fx coercion")
                     || err.contains("operator type mismatch")
-                    || err.contains("f64 arithmetic requires f64 operands")
+                    // RFC-A v2: mixed-family fallback wording.
+                    || err.contains("arithmetic operands must belong to the same admitted family")
                     || err.contains("cannot compare")
                     || err.contains("while condition must be bool")
                     || err.contains("if condition must be bool"),
