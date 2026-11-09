@@ -88,15 +88,15 @@ Programs must not depend on `NaN` bit-pattern stability.
 
 Neither performs a host effect or consults VM quota state.
 
-`sqrt` and `abs` are reserved function names: a top-level program function
-sharing either name is rejected deterministically at typecheck time
-(`function name '...' is reserved for the std.math standard library
-surface`, mirroring how host-boundary builtins like `stdout_write` are
-already reserved). Without this, a user-defined `fn sqrt(...)` would
-typecheck but be silently shadowed at runtime by the builtin, since VM call
-dispatch intercepts these names by bare string match before function-frame
-dispatch — promoting these names to a compatibility promise requires ruling
-that failure mode out, not just documenting the intended behavior.
+`sqrt` and `abs`, like every other math name, are user-shadowable, not
+reserved: a top-level program function sharing either name is admitted, and
+every phase resolves a call to it user-first (the frontend function table
+before `builtin_sig`, the verifier's known-function check before any builtin
+capability check, and VM `Call` dispatch to a program function before any
+builtin fallback). The builtin is evaluated only when the program defines no
+function of that name, so a user-defined `fn sqrt(...)` is never silently
+replaced by the builtin. The semantics above describe the builtin only; they
+promise nothing about a same-named user function.
 
 `sin`, `cos`, `tan`, and `pow` remain Deferred (see "Deferred families"
 below): their bit-exact output depends on the underlying platform/libm
