@@ -17,8 +17,9 @@ use sm_runtime_core::{
 };
 use sm_verify::RejectReport;
 use sm_verify::{
-    verify_semcode_token, verify_semcode_token_with_quotas, EntryResolutionError,
-    VerifiedEntrySemCode,
+    analyze_host_math_free_draft1, verify_semcode_token, verify_semcode_token_with_quotas,
+    EntryResolutionError, HostMathAnalysis, HostMathAnalysisLimits, HostMathVerdict,
+    VerifiedEntrySemCode, HOST_MATH_FREE_DRAFT1_PROFILE,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -1155,6 +1156,124 @@ pub fn run_verified_function_semcode_with_args_and_config(
     let mut host = UnavailableVmHost;
     let mut observation = HelloObservationRuntime::discard();
     exec_loop(&mut vm, &mut host, &mut observation)
+}
+
+/// Explicit selection of the `HOST_MATH_FREE@draft1` strict profile by trusted
+/// Rust host code (S15-A layer 3a).
+///
+/// A grant is a selection, not an admission certificate: it says nothing about
+/// any artifact and authorizes nothing by itself. It cannot be produced from
+/// SemCode, has no `Default`, and is only meaningful as an argument to the
+/// `run_host_math_free_*` functions, which always analyse the entry they run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostMathFreeGrant {
+    _private: (),
+}
+
+impl HostMathFreeGrant {
+    /// Select `HOST_MATH_FREE@draft1`.
+    pub fn draft1() -> Self {
+        Self { _private: () }
+    }
+
+    /// The selected profile identity.
+    pub fn profile(&self) -> &'static str {
+        HOST_MATH_FREE_DRAFT1_PROFILE
+    }
+}
+
+/// Why a strict invocation produced no value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StrictRunError {
+    /// The mathematical analysis of the entry was not `Admit`. No VM state was
+    /// created and no guest instruction ran. The reason is in
+    /// [`StrictExecutionOutcome::analysis`]; no diagnostic code is allocated.
+    AdmissionRefused,
+    /// The analysis admitted the entry and the unchanged LOCAL execution path
+    /// then failed with this error.
+    Runtime(RuntimeError),
+}
+
+/// The record of one strict API invocation: the analysis of the entry it was
+/// given and the result of executing that same entry (or the refusal).
+///
+/// `HostMathVerdict::Admit` in a `HostMathAnalysis` is a mathematical result
+/// only; this type is the only record that a strict invocation happened, and
+/// only the `run_host_math_free_*` functions create it. Type privacy does not
+/// stop a host from associating a retained outcome with a different, later
+/// execution; recording the outcome with its run is the host's obligation.
+#[derive(Debug)]
+pub struct StrictExecutionOutcome<T> {
+    analysis: HostMathAnalysis,
+    result: Result<T, StrictRunError>,
+}
+
+impl<T> StrictExecutionOutcome<T> {
+    /// The analysis this invocation performed on its entry.
+    pub fn analysis(&self) -> &HostMathAnalysis {
+        &self.analysis
+    }
+
+    pub fn result(&self) -> &Result<T, StrictRunError> {
+        &self.result
+    }
+
+    pub fn into_result(self) -> Result<T, StrictRunError> {
+        self.result
+    }
+
+    /// `true` iff the entry was admitted and handed to the LOCAL execution
+    /// path; `false` means no VM state was created.
+    pub fn execution_attempted(&self) -> bool {
+        !matches!(self.result, Err(StrictRunError::AdmissionRefused))
+    }
+}
+
+/// The single strict gate: analyse `entry`, and only on `Admit` pass the same
+/// borrowed `entry` to `execute`. Nothing in `execute` (VM preparation, frame
+/// push, argument validation, the dispatch loop) runs on a refusal.
+fn run_host_math_free<T>(
+    entry: &VerifiedEntrySemCode<'_, '_>,
+    _grant: &HostMathFreeGrant,
+    limits: &HostMathAnalysisLimits,
+    execute: impl FnOnce(&VerifiedEntrySemCode<'_, '_>) -> Result<T, RuntimeError>,
+) -> StrictExecutionOutcome<T> {
+    let analysis = analyze_host_math_free_draft1(entry, limits);
+    let result = match analysis.verdict() {
+        HostMathVerdict::Admit => execute(entry).map_err(StrictRunError::Runtime),
+        HostMathVerdict::Refuse => Err(StrictRunError::AdmissionRefused),
+    };
+    StrictExecutionOutcome { analysis, result }
+}
+
+/// Strict sibling of [`run_verified_entry_semcode_with_config`]: analyses
+/// `entry` against `HOST_MATH_FREE@draft1` and executes it, unchanged, only if
+/// the analysis admits it. Refusal happens before any VM state exists.
+pub fn run_host_math_free_entry_semcode_with_config(
+    entry: &VerifiedEntrySemCode<'_, '_>,
+    grant: &HostMathFreeGrant,
+    limits: &HostMathAnalysisLimits,
+    config: ExecutionConfig,
+) -> StrictExecutionOutcome<()> {
+    run_host_math_free(entry, grant, limits, |entry| {
+        run_verified_entry_semcode_with_config(entry, config)
+    })
+}
+
+/// Strict sibling of [`run_verified_function_semcode_with_args_and_config`].
+/// Admission comes first: a refused entry never validates or reads `args`;
+/// an admitted one validates them exactly as the LOCAL path does.
+pub fn run_host_math_free_function_semcode_with_args_and_config(
+    entry: &VerifiedEntrySemCode<'_, '_>,
+    grant: &HostMathFreeGrant,
+    limits: &HostMathAnalysisLimits,
+    args: Vec<Value>,
+    config: ExecutionConfig,
+) -> StrictExecutionOutcome<Value> {
+    run_host_math_free(entry, grant, limits, move |entry| {
+        run_verified_function_semcode_with_args_and_config(entry, args, config)
+    })
 }
 
 /// Explicit ARG v3 invocation. The policy is validated before bytecode
@@ -13592,5 +13711,106 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+/// S15-C2 unit-level evidence for the strict gate itself: the execution path
+/// is observed through the `execute` closure, so no production hook exists.
+#[cfg(test)]
+mod s15c2_strict_gate_tests {
+    use super::*;
+    use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
+    use std::cell::Cell;
+
+    /// `main: LoadF64 r0; [Call sqrt(r0);] Ret`
+    fn artifact(hazard: bool) -> Vec<u8> {
+        let mut instrs = vec![IrInstr::LoadF64 { dst: 0, val: 2.0 }];
+        if hazard {
+            instrs.push(IrInstr::Call {
+                dst: None,
+                name: "sqrt".to_string(),
+                args: vec![0],
+            });
+        }
+        instrs.push(IrInstr::Ret { src: None });
+        let main = IrFunction {
+            name: "main".to_string(),
+            instrs,
+            ownership_events: Vec::new(),
+            params: Vec::new(),
+        };
+        emit_ir_to_semcode(&[main], false).expect("IR emits")
+    }
+
+    /// Runs the gate with an observing executor; returns the outcome and how
+    /// many times the executor ran (it asserts it got the analysed token).
+    fn gate(
+        bytes: &[u8],
+        limits: HostMathAnalysisLimits,
+        exec_result: Result<u8, RuntimeError>,
+    ) -> (StrictExecutionOutcome<u8>, u32) {
+        let token = verify_semcode_token(bytes).expect("verifies");
+        let entry = token.require_entry("main").expect("entry");
+        let runs = Cell::new(0u32);
+        let outcome = run_host_math_free(&entry, &HostMathFreeGrant::draft1(), &limits, |e| {
+            runs.set(runs.get() + 1);
+            assert!(
+                std::ptr::eq(e, &entry),
+                "execution receives the analysed token"
+            );
+            exec_result
+        });
+        assert_eq!(outcome.analysis().entry(), entry.entry());
+        assert_eq!(outcome.analysis().artifact_hash(), entry.artifact_hash());
+        (outcome, runs.get())
+    }
+
+    #[test]
+    fn s15c2_refusal_never_invokes_the_execution_path() {
+        let (outcome, runs) = gate(
+            &artifact(true),
+            HostMathAnalysisLimits::draft1_default(),
+            Ok(7),
+        );
+        assert_eq!(runs, 0);
+        assert_eq!(outcome.analysis().verdict(), HostMathVerdict::Refuse);
+        assert_eq!(outcome.result(), &Err(StrictRunError::AdmissionRefused));
+        assert!(!outcome.execution_attempted());
+    }
+
+    #[test]
+    fn s15c2_indeterminate_never_invokes_the_execution_path() {
+        let tiny = HostMathAnalysisLimits::new(1).expect("valid");
+        let (outcome, runs) = gate(&artifact(false), tiny, Ok(7));
+        assert_eq!(runs, 0);
+        assert!(outcome.analysis().may().is_empty());
+        assert!(!outcome.analysis().indeterminate().is_empty());
+        assert_eq!(outcome.into_result(), Err(StrictRunError::AdmissionRefused));
+    }
+
+    #[test]
+    fn s15c2_admit_invokes_the_execution_path_once_with_the_analysed_entry() {
+        let (outcome, runs) = gate(
+            &artifact(false),
+            HostMathAnalysisLimits::draft1_default(),
+            Ok(7),
+        );
+        assert_eq!(runs, 1);
+        assert_eq!(outcome.analysis().verdict(), HostMathVerdict::Admit);
+        assert!(outcome.execution_attempted());
+        assert_eq!(outcome.into_result(), Ok(7));
+    }
+
+    #[test]
+    fn s15c2_runtime_failure_after_admission_stays_a_runtime_error() {
+        let trap = RuntimeError::Trap(RuntimeTrap::DivisionByZero);
+        let (outcome, runs) = gate(
+            &artifact(false),
+            HostMathAnalysisLimits::draft1_default(),
+            Err(trap.clone()),
+        );
+        assert_eq!(runs, 1);
+        assert!(outcome.execution_attempted());
+        assert_eq!(outcome.into_result(), Err(StrictRunError::Runtime(trap)));
     }
 }
