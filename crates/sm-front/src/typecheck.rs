@@ -49,6 +49,28 @@ fn fx_measured_arithmetic_gap_message() -> &'static str {
     "unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"
 }
 
+/// Diagnostic for the final fallback of the `+ - * / %` typing arm.
+///
+/// Every admitted pair (text, `u32`/`u32`, `i32`/`i32`, measured, `fx`/`fx`,
+/// `f64`/`f64`, including the specific `operator % unsupported for F64/Fx`
+/// errors) returns before this fallback, so an f64-specific claim is never
+/// accurate here and none is made:
+/// - different families: incompatible, no implicit conversion;
+/// - any other same family (e.g. `Bool op Bool`): arithmetic unsupported.
+fn arithmetic_gap_message(lt: &Type, rt: &Type) -> String {
+    if lt != rt {
+        format!(
+            "arithmetic operands must belong to the same admitted family; got {:?} and {:?} (implicit conversions are not supported)",
+            lt, rt
+        )
+    } else {
+        format!(
+            "arithmetic is not supported for {:?} operands (got {:?} and {:?})",
+            lt, lt, rt
+        )
+    }
+}
+
 fn iterable_for_gap_message() -> &'static str {
     "iterable 'for x in collection' currently requires built-in Sequence(type), i32 range, or a direct record `Iterable` impl shaped as `fn next(self: Self, index: i32) -> Option(Item)`"
 }
@@ -4204,10 +4226,7 @@ fn infer_expr_type(
                         Err(FrontendError {
                             detail: None,
                             pos: 0,
-                            message: format!(
-                                "f64 arithmetic requires f64 operands, got {:?} and {:?}",
-                                lt, rt
-                            ),
+                            message: arithmetic_gap_message(&lt, &rt),
                         })
                     }
                 }
@@ -7690,7 +7709,148 @@ mod tests {
 
         let err =
             typecheck_source(src).expect_err("compound assignment operator mismatch must reject");
-        assert!(err.message.contains("f64 arithmetic requires f64 operands"));
+        // RFC-A v2: exact text; the fallback never claims an f64-only rule.
+        assert_eq!(
+            err.message,
+            "arithmetic operands must belong to the same admitted family; got F64 and Bool (implicit conversions are not supported)"
+        );
+    }
+
+    fn rfc_a_err(body: &str) -> String {
+        let src = format!("fn main() {{ {body} return; }}");
+        typecheck_source(&src)
+            .expect_err("RFC-A case must still reject")
+            .message
+    }
+
+    fn rfc_a_mixed(l: &str, r: &str) -> String {
+        format!(
+            "arithmetic operands must belong to the same admitted family; got {l} and {r} (implicit conversions are not supported)"
+        )
+    }
+
+    #[test]
+    fn rfc_a_v2_mixed_families_report_incompatibility_without_f64_claim() {
+        for op in ["+", "-", "*", "/", "%"] {
+            for (decl, lhs, rhs, l, r) in [
+                ("let a: i32 = 1; let c: u32 = 1u32;", "a", "c", "I32", "U32"),
+                ("let a: i32 = 1; let c: u32 = 1u32;", "c", "a", "U32", "I32"),
+                ("let a: i32 = 1; let c: f64 = 1.0;", "a", "c", "I32", "F64"),
+                ("let a: i32 = 1; let c: f64 = 1.0;", "c", "a", "F64", "I32"),
+                (
+                    "let a: i32 = 1; let c: bool = true;",
+                    "a",
+                    "c",
+                    "I32",
+                    "Bool",
+                ),
+                (
+                    "let a: f64 = 1.0; let c: bool = true;",
+                    "a",
+                    "c",
+                    "F64",
+                    "Bool",
+                ),
+                (
+                    "let a: f64 = 1.0; let c: u32 = 1u32;",
+                    "a",
+                    "c",
+                    "F64",
+                    "U32",
+                ),
+                (
+                    "let a: u32 = 1u32; let c: f64 = 1.0;",
+                    "a",
+                    "c",
+                    "U32",
+                    "F64",
+                ),
+                (
+                    "let a: fx = 1.0fx; let c: f64 = 1.0;",
+                    "a",
+                    "c",
+                    "Fx",
+                    "F64",
+                ),
+                (
+                    "let a: bool = true; let c: u32 = 1u32;",
+                    "a",
+                    "c",
+                    "Bool",
+                    "U32",
+                ),
+            ] {
+                let msg = rfc_a_err(&format!("{decl} let x = {lhs} {op} {rhs};"));
+                assert_eq!(msg, rfc_a_mixed(l, r), "{l} {op} {r}");
+                assert!(!msg.contains("f64 arithmetic"), "{l} {op} {r}");
+            }
+        }
+        for (body, l, r) in [
+            ("let mut a: i32 = 1; a += 1u32;", "I32", "U32"),
+            ("let mut a: u32 = 1u32; a -= 1;", "U32", "I32"),
+            ("let mut a: f64 = 1.0; a *= 2;", "F64", "I32"),
+            ("let mut a: i32 = 1; a /= true;", "I32", "Bool"),
+            ("let mut a: f64 = 1.0; a %= true;", "F64", "Bool"),
+        ] {
+            assert_eq!(rfc_a_err(body), rfc_a_mixed(l, r), "{body}");
+        }
+    }
+
+    #[test]
+    fn rfc_a_v2_other_same_family_reports_unsupported_family() {
+        for op in ["+", "-", "*", "/", "%"] {
+            let msg = rfc_a_err(&format!("let x = true {op} false;"));
+            assert_eq!(
+                msg, "arithmetic is not supported for Bool operands (got Bool and Bool)",
+                "bool {op} bool"
+            );
+        }
+        let msg = rfc_a_err("let mut b: bool = true; b += false;");
+        assert_eq!(
+            msg,
+            "arithmetic is not supported for Bool operands (got Bool and Bool)"
+        );
+    }
+
+    #[test]
+    fn rfc_a_v2_specific_paths_are_unchanged() {
+        // F64 / Fx keep their own specific % errors (not the fallback).
+        assert_eq!(
+            rfc_a_err("let a: f64 = 3.0; let b: f64 = a % 2.0;"),
+            "operator % unsupported for F64"
+        );
+        assert_eq!(
+            rfc_a_err("let a: fx = 3.0fx; let b: fx = a % a;"),
+            "operator % unsupported for Fx"
+        );
+        assert_eq!(
+            rfc_a_err("let a: text = \"x\"; let b = a + 1;"),
+            "text concatenation currently admits only text + text operands"
+        );
+        assert_eq!(
+            rfc_a_err("let a: text = \"x\"; let b = a - a;"),
+            "text concatenation currently admits only text + text operands"
+        );
+    }
+
+    #[test]
+    fn rfc_a_v2_admitted_programs_still_typecheck() {
+        // Includes the SHF-3A2 checked u32 surface admitted on main.
+        for body in [
+            "let a: u32 = 3u32; let b: u32 = a + 2u32 - 1u32 * 3u32 / 1u32 % 5u32;",
+            "let mut a: u32 = 1u32; a += 2u32; a %= 2u32;",
+            "let a: u32 = 3u32; let b: bool = a == 2u32; let c: bool = a < 2u32;",
+            "let t: text = to_text(3u32);",
+            "let a: i32 = 7; let b: i32 = a + 2 - 1 * 3 / 1 % 5;",
+            "let a: f64 = 1.5; let b: f64 = a + 2.0 - 1.0 * 3.0 / 2.0;",
+            "let a: fx = 1.5fx; let b: fx = a + a - a * a / a;",
+            "let a: text = \"x\"; let b: text = a + a;",
+            "let mut a: i32 = 1; a += 2; a %= 2;",
+            "let mut a: f64 = 1.0; a += 2.0; a /= 2.0;",
+        ] {
+            let src = format!("fn main() {{ {body} return; }}");
+            typecheck_source(&src).unwrap_or_else(|e| panic!("{body}: {}", e.message));
+        }
     }
 
     #[test]
