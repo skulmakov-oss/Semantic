@@ -107,3 +107,59 @@ pub fn verify_semcode_token_with_quotas( bytes: &[u8], quotas: RuntimeQuotas, ) 
 pub fn verify_semcode_token_with_quotas_and_limits( bytes: &[u8], quotas: RuntimeQuotas, limits: VerificationLimits, ) -> Result<VerifiedSemCode<'_>, RejectReport> {
 #[cfg(feature = "std")]
 pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
+#[cfg(feature = "std")]
+pub const HOST_MATH_FREE_DRAFT1_PROFILE: &str = "HOST_MATH_FREE@draft1";
+#[cfg(feature = "std")]
+pub const HOST_MATH_ANALYSER_IDENTITY: &str = "sm-verify/host-math-analysis/c1";
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostMathAnalysisLimits {
+pub const MAX_WORK_UNITS_CEILING: u64 = 1 << 24;
+pub const DRAFT1_DEFAULT_WORK_UNITS: u64 = 1 << 20;
+pub fn new(max_work_units: u64) -> Result<Self, HostMathLimitsError> {
+pub const fn draft1_default() -> Self {
+pub fn max_work_units(&self) -> u64 {
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostMathLimitsError {
+ZeroWorkUnits,
+AboveCeiling { requested: u64, ceiling: u64 },
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostMathVerdict {
+Admit,
+Refuse,
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HostMathBuiltin {
+Abs,
+Cos,
+Pow,
+Sin,
+Sqrt,
+Tan,
+pub fn name(self) -> &'static str {
+#[cfg(feature = "std")]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HostMathIndeterminate {
+CallableEntryParameter { index: usize },
+EntrySignatureUnavailable,
+ClosureOriginUnknown,
+ResolutionMismatch,
+AnalysisLimit,
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostMathAnalysis {
+pub fn profile(&self) -> &'static str {
+pub fn analyser(&self) -> &'static str {
+pub fn artifact_hash(&self) -> [u8; 32] {
+pub fn entry(&self) -> &str {
+pub fn limits(&self) -> HostMathAnalysisLimits {
+pub fn verdict(&self) -> HostMathVerdict {
+pub fn may(&self) -> &[HostMathBuiltin] {
+pub fn indeterminate(&self) -> &[HostMathIndeterminate] {
+pub fn hazards_unknown(&self) -> bool {
+pub fn work_units_used(&self) -> u64 {
+#[cfg(feature = "std")]
+pub fn analyze_host_math_free_draft1( entry: &VerifiedEntrySemCode<'_, '_>, limits: &HostMathAnalysisLimits, ) -> HostMathAnalysis {

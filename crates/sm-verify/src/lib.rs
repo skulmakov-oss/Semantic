@@ -23,6 +23,8 @@ pub mod diagnostic_authority;
 pub mod hello_pending_admission;
 #[cfg(feature = "std")]
 pub mod hello_real_semcode_admission;
+#[cfg(feature = "std")]
+mod host_math_analysis;
 
 /// #1756 Codex review round 18: a `System`-delegating global allocator
 /// that also counts allocation calls per THREAD, used only by `cfg(test)`
@@ -970,7 +972,12 @@ pub fn verify_semcode_token_with_quotas_and_limits(
         .collect();
     for function in &pending_functions {
         for (offset, callee, allows_builtin, argc) in &function.call_targets {
-            if known_functions.contains(callee.as_str()) {
+            let resolution = resolve_call_target(
+                known_functions.contains(callee.as_str()),
+                callee,
+                *allows_builtin,
+            );
+            if resolution == CallTargetResolution::ProgramFunction {
                 // #1773 (FA-09-005): arity enforcement. Family/runtime-type
                 // enforcement is the VM's responsibility before `push_frame`
                 // (see `validate_call_arguments` in sm-vm) - sm-verify
@@ -998,21 +1005,22 @@ pub fn verify_semcode_token_with_quotas_and_limits(
                 continue;
             }
 
-            if *allows_builtin {
-                if let Some(required_capabilities) = builtin_call_required_capabilities(callee) {
-                    if header.capabilities & required_capabilities != required_capabilities {
-                        diagnostics.push(diag(
-                            VerificationCode::CapabilityViolation,
-                            Some(function.verified.name.clone()),
-                            Some(*offset),
-                            format!(
-                                "builtin call target '{}' requires capability bits 0x{required_capabilities:08x}",
-                                callee
-                            ),
-                        ));
-                    }
-                    continue;
+            if let CallTargetResolution::Builtin {
+                required_capabilities,
+            } = resolution
+            {
+                if header.capabilities & required_capabilities != required_capabilities {
+                    diagnostics.push(diag(
+                        VerificationCode::CapabilityViolation,
+                        Some(function.verified.name.clone()),
+                        Some(*offset),
+                        format!(
+                            "builtin call target '{}' requires capability bits 0x{required_capabilities:08x}",
+                            callee
+                        ),
+                    ));
                 }
+                continue;
             }
 
             diagnostics.push(diag(
@@ -1047,6 +1055,201 @@ pub fn verify_semcode_token_with_quotas_and_limits(
 #[cfg(feature = "std")]
 pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
     verify_semcode_token(bytes).map(|token| token.program.clone())
+}
+
+/// Profile identifier reported by every [`HostMathAnalysis`]
+/// (`docs/spec/portable_math_profile_draft_v0.md` §2).
+#[cfg(feature = "std")]
+pub const HOST_MATH_FREE_DRAFT1_PROFILE: &str = "HOST_MATH_FREE@draft1";
+
+/// Analyser identity and version reported by every [`HostMathAnalysis`]
+/// (spec §11 "admission analyser identity and version").
+#[cfg(feature = "std")]
+pub const HOST_MATH_ANALYSER_IDENTITY: &str = "sm-verify/host-math-analysis/c1";
+
+/// Deterministic work bound for [`analyze_host_math_free_draft1`] (spec §4.1
+/// rule 6). One unit is one byte of the instruction stream of a function in
+/// `Reach(A, e)` (charged before that function is decoded) or one reachable
+/// call-like site; debug, string-table and other metadata bytes and
+/// functions outside `Reach(A, e)` are never counted.
+/// A bound above [`HostMathAnalysisLimits::MAX_WORK_UNITS_CEILING`] or of
+/// zero is refused, so a caller cannot ask for an unbounded analysis.
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostMathAnalysisLimits {
+    max_work_units: u64,
+}
+
+#[cfg(feature = "std")]
+impl HostMathAnalysisLimits {
+    /// Fixed hard ceiling on any requested work bound.
+    pub const MAX_WORK_UNITS_CEILING: u64 = 1 << 24;
+    /// Work bound of [`HostMathAnalysisLimits::draft1_default`].
+    pub const DRAFT1_DEFAULT_WORK_UNITS: u64 = 1 << 20;
+
+    pub fn new(max_work_units: u64) -> Result<Self, HostMathLimitsError> {
+        if max_work_units == 0 {
+            return Err(HostMathLimitsError::ZeroWorkUnits);
+        }
+        if max_work_units > Self::MAX_WORK_UNITS_CEILING {
+            return Err(HostMathLimitsError::AboveCeiling {
+                requested: max_work_units,
+                ceiling: Self::MAX_WORK_UNITS_CEILING,
+            });
+        }
+        Ok(Self { max_work_units })
+    }
+
+    pub const fn draft1_default() -> Self {
+        Self {
+            max_work_units: Self::DRAFT1_DEFAULT_WORK_UNITS,
+        }
+    }
+
+    pub fn max_work_units(&self) -> u64 {
+        self.max_work_units
+    }
+}
+
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostMathLimitsError {
+    ZeroWorkUnits,
+    AboveCeiling { requested: u64, ceiling: u64 },
+}
+
+/// The mathematical safety verdict of spec step 3b. `Admit` means only that
+/// the analysis found `May = {}` and `Indet = {}`; it authorizes nothing and
+/// no execution API accepts it.
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostMathVerdict {
+    Admit,
+    Refuse,
+}
+
+/// A member of the prohibited set `D` of draft1, as a resolved builtin
+/// identity (never a user function of the same name). Ordered by name.
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HostMathBuiltin {
+    Abs,
+    Cos,
+    Pow,
+    Sin,
+    Sqrt,
+    Tan,
+}
+
+#[cfg(feature = "std")]
+impl HostMathBuiltin {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Abs => "abs",
+            Self::Cos => "cos",
+            Self::Pow => "pow",
+            Self::Sin => "sin",
+            Self::Sqrt => "sqrt",
+            Self::Tan => "tan",
+        }
+    }
+}
+
+/// An `INDETERMINATE` reason of spec §4.1 rule 6 / §5. These are analysis
+/// facts, not diagnostic codes: the admission diagnostic name and number
+/// are not allocated (spec §5 Q3, S15-B).
+#[cfg(feature = "std")]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HostMathIndeterminate {
+    /// The entry signature declares parameter `index` with a family that can
+    /// carry a callable (`Closure`, `Tuple`, `Record`, `Adt`, `Sequence`, `Map`).
+    CallableEntryParameter { index: usize },
+    /// The entry has no canonical signature, so its parameter families are
+    /// unknown.
+    EntrySignatureUnavailable,
+    /// A reachable `ClosureCall` exists but no reachable `MakeClosure` in
+    /// `Reach(A, e)` creates any closure: its callable comes from outside the
+    /// closed world.
+    ClosureOriginUnknown,
+    /// A reachable call target did not resolve under the verifier's rule, or
+    /// the analysis could not re-derive a verified function's control flow.
+    ResolutionMismatch,
+    /// The work bound of [`HostMathAnalysisLimits`] was exhausted.
+    AnalysisLimit,
+}
+
+/// Result of [`analyze_host_math_free_draft1`]. It has no public
+/// constructor, and it is data only: no API takes it as authority to run.
+/// No witness path is derived in this version (spec §5 Q4 allows none).
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostMathAnalysis {
+    artifact_hash: [u8; 32],
+    entry: String,
+    limits: HostMathAnalysisLimits,
+    verdict: HostMathVerdict,
+    may: Vec<HostMathBuiltin>,
+    indeterminate: Vec<HostMathIndeterminate>,
+    work_units_used: u64,
+}
+
+#[cfg(feature = "std")]
+impl HostMathAnalysis {
+    pub fn profile(&self) -> &'static str {
+        HOST_MATH_FREE_DRAFT1_PROFILE
+    }
+
+    pub fn analyser(&self) -> &'static str {
+        HOST_MATH_ANALYSER_IDENTITY
+    }
+
+    pub fn artifact_hash(&self) -> [u8; 32] {
+        self.artifact_hash
+    }
+
+    pub fn entry(&self) -> &str {
+        &self.entry
+    }
+
+    pub fn limits(&self) -> HostMathAnalysisLimits {
+        self.limits
+    }
+
+    pub fn verdict(&self) -> HostMathVerdict {
+        self.verdict
+    }
+
+    /// `May(A, e)`, sorted and duplicate-free.
+    pub fn may(&self) -> &[HostMathBuiltin] {
+        &self.may
+    }
+
+    /// `Indet(A, e)`, sorted and duplicate-free.
+    pub fn indeterminate(&self) -> &[HostMathIndeterminate] {
+        &self.indeterminate
+    }
+
+    /// True when `Hazards(A, e)` is `UNKNOWN` (`Indet` is non-empty).
+    pub fn hazards_unknown(&self) -> bool {
+        !self.indeterminate.is_empty()
+    }
+
+    pub fn work_units_used(&self) -> u64 {
+        self.work_units_used
+    }
+}
+
+/// Executable Host Math Analysis (spec step 3b) of `HOST_MATH_FREE@draft1`
+/// for one verified entry. It reuses the verifier's decoder, successor rule,
+/// reachable-offset computation and call resolution; it reads no debug data,
+/// string literals or runtime arguments, and selects no profile.
+#[cfg(feature = "std")]
+pub fn analyze_host_math_free_draft1(
+    entry: &VerifiedEntrySemCode<'_, '_>,
+    limits: &HostMathAnalysisLimits,
+) -> HostMathAnalysis {
+    host_math_analysis::analyze(entry, limits)
 }
 
 /// Returns true if `code[start..]` decodes as a complete, well-formed
@@ -1666,19 +1869,13 @@ fn verify_function_code(
         }
         let next_offset = cursor - instr_start;
         let jump_target = jump_targets.get(jump_targets_before).copied();
-        let successors = match (opcode, jump_target) {
-            (Opcode::Ret, _) => InstructionSuccessors::None,
-            (Opcode::Jmp, Some(target)) => InstructionSuccessors::One(target),
-            (Opcode::JmpIf, Some(target)) => InstructionSuccessors::Two(target, next_offset),
-            (Opcode::Jmp | Opcode::JmpIf, None) => {
-                return Err(reject_one(
-                    name,
-                    VerificationCode::InvalidJumpTarget,
-                    offset,
-                    "jump instruction has no decoded target",
-                ));
-            }
-            _ => InstructionSuccessors::One(next_offset),
+        let Some(successors) = instruction_successors_of(opcode, jump_target, next_offset) else {
+            return Err(reject_one(
+                name,
+                VerificationCode::InvalidJumpTarget,
+                offset,
+                "jump instruction has no decoded target",
+            ));
         };
         instruction_successors.push(successors);
         let min_rev = opcode.minimum_semcode_revision();
@@ -1899,6 +2096,8 @@ fn verify_function_code(
         },
         call_targets,
         has_ownership_section,
+        #[cfg(test)]
+        reachable_offsets,
     })
 }
 
@@ -1907,6 +2106,54 @@ enum InstructionSuccessors {
     None,
     One(usize),
     Two(usize, usize),
+}
+
+/// The verifier's control-flow successor rule (spec F9), shared by
+/// `verify_function_code` and the S15-C1 host-math analysis so both derive
+/// `Reach(f)` from one rule: `Ret` has none, `Jmp` its target, `JmpIf` its
+/// target and the next instruction, every other opcode the next instruction.
+/// `None` means a jump decoded without a target.
+#[cfg(feature = "std")]
+fn instruction_successors_of(
+    opcode: Opcode,
+    jump_target: Option<usize>,
+    next_offset: usize,
+) -> Option<InstructionSuccessors> {
+    match (opcode, jump_target) {
+        (Opcode::Ret, _) => Some(InstructionSuccessors::None),
+        (Opcode::Jmp, Some(target)) => Some(InstructionSuccessors::One(target)),
+        (Opcode::JmpIf, Some(target)) => Some(InstructionSuccessors::Two(target, next_offset)),
+        (Opcode::Jmp | Opcode::JmpIf, None) => None,
+        _ => Some(InstructionSuccessors::One(next_offset)),
+    }
+}
+
+/// How a callee name resolves (spec F4): a program function first, then -
+/// only for a real `Call` - a builtin known to the verifier, else nothing.
+/// Shared by the verifier's call-target pass and the S15-C1 analysis.
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallTargetResolution {
+    ProgramFunction,
+    Builtin { required_capabilities: u32 },
+    Unresolved,
+}
+
+#[cfg(feature = "std")]
+fn resolve_call_target(
+    is_program_function: bool,
+    callee: &str,
+    allows_builtin: bool,
+) -> CallTargetResolution {
+    if is_program_function {
+        return CallTargetResolution::ProgramFunction;
+    }
+    match builtin_call_required_capabilities(callee) {
+        Some(required_capabilities) if allows_builtin => CallTargetResolution::Builtin {
+            required_capabilities,
+        },
+        _ => CallTargetResolution::Unresolved,
+    }
 }
 
 /// Returns the set of reachable instruction offsets on success. #1756
@@ -4538,6 +4785,10 @@ struct PendingVerifiedFunction {
     // (offset, callee name, allows_builtin, argc for real Call sites)
     call_targets: Vec<(usize, String, bool, Option<usize>)>,
     has_ownership_section: bool,
+    // S15-C1: the verifier's own `Reach(f)`, kept only in test builds so the
+    // host-math analysis can be checked against it (decoder equivalence).
+    #[cfg(test)]
+    reachable_offsets: HashSet<usize>,
 }
 
 #[cfg(feature = "std")]
