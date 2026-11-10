@@ -124,6 +124,23 @@ pub fn run_verified_entry_semcode_collecting_hello_observations( token: &Verifie
 pub fn run_verified_entry_semcode_with_config( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_function_semcode_with_args( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, ) -> Result<Value, RuntimeError> {
 pub fn run_verified_function_semcode_with_args_and_config( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, config: ExecutionConfig, ) -> Result<Value, RuntimeError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostMathFreeGrant {
+pub fn draft1() -> Self {
+pub fn profile(&self) -> &'static str {
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StrictRunError {
+AdmissionRefused,
+Runtime(RuntimeError),
+#[derive(Debug)]
+pub struct StrictExecutionOutcome<T> {
+pub fn analysis(&self) -> &HostMathAnalysis {
+pub fn result(&self) -> &Result<T, StrictRunError> {
+pub fn into_result(self) -> Result<T, StrictRunError> {
+pub fn execution_attempted(&self) -> bool {
+pub fn run_host_math_free_entry_semcode_with_config( entry: &VerifiedEntrySemCode<'_, '_>, grant: &HostMathFreeGrant, limits: &HostMathAnalysisLimits, config: ExecutionConfig, ) -> StrictExecutionOutcome<()> {
+pub fn run_host_math_free_function_semcode_with_args_and_config( entry: &VerifiedEntrySemCode<'_, '_>, grant: &HostMathFreeGrant, limits: &HostMathAnalysisLimits, args: Vec<Value>, config: ExecutionConfig, ) -> StrictExecutionOutcome<Value> {
 pub fn run_verified_function_semcode_with_args_and_policy( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, policy: crate::arg_policy::ArgPolicy, ) -> Result<Value, RuntimeError> {
 pub fn run_verified_function_semcode_with_args_and_policy_events( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, policy: crate::arg_policy::ArgPolicy, ) -> Result<(Value, Vec<crate::arg_policy::AdaptiveEvent>), RuntimeError> {
 #[cfg(feature = "vm-profile")]
