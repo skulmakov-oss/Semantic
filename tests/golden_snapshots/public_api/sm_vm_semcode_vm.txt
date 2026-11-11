@@ -139,6 +139,26 @@ pub fn analysis(&self) -> &HostMathAnalysis {
 pub fn result(&self) -> &Result<T, StrictRunError> {
 pub fn into_result(self) -> Result<T, StrictRunError> {
 pub fn execution_attempted(&self) -> bool {
+pub fn admission_refusal(&self) -> Option<HostMathAdmissionRefusal> {
+pub const ADMISSION_DIAGNOSTIC_CODES: [&str; 1] = ["A0001"];
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostMathAdmissionRefusal {
+pub fn code(&self) -> &'static str {
+pub fn class(&self) -> &'static str {
+pub fn authority(&self) -> &'static str {
+pub fn profile(&self) -> &'static str {
+pub fn analyser(&self) -> &'static str {
+pub fn entry(&self) -> &str {
+pub fn artifact_sha256(&self) -> [u8; 32] {
+pub fn verdict(&self) -> HostMathVerdict {
+pub fn hazards(&self) -> &'static str {
+pub fn may(&self) -> &[HostMathBuiltin] {
+pub fn may_exhaustive(&self) -> bool {
+pub fn indeterminate(&self) -> &[HostMathIndeterminate] {
+pub fn limits(&self) -> HostMathAnalysisLimits {
+pub fn work_units_used(&self) -> u64 {
+pub fn execution_attempted(&self) -> bool {
+pub fn message(&self) -> &'static str {
 pub fn run_host_math_free_entry_semcode_with_config( entry: &VerifiedEntrySemCode<'_, '_>, grant: &HostMathFreeGrant, limits: &HostMathAnalysisLimits, config: ExecutionConfig, ) -> StrictExecutionOutcome<()> {
 pub fn run_host_math_free_function_semcode_with_args_and_config( entry: &VerifiedEntrySemCode<'_, '_>, grant: &HostMathFreeGrant, limits: &HostMathAnalysisLimits, args: Vec<Value>, config: ExecutionConfig, ) -> StrictExecutionOutcome<Value> {
 pub fn run_verified_function_semcode_with_args_and_policy( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, policy: crate::arg_policy::ArgPolicy, ) -> Result<Value, RuntimeError> {

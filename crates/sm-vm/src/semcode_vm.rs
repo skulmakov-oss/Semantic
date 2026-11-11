@@ -18,8 +18,8 @@ use sm_runtime_core::{
 use sm_verify::RejectReport;
 use sm_verify::{
     analyze_host_math_free_draft1, verify_semcode_token, verify_semcode_token_with_quotas,
-    EntryResolutionError, HostMathAnalysis, HostMathAnalysisLimits, HostMathVerdict,
-    VerifiedEntrySemCode, HOST_MATH_FREE_DRAFT1_PROFILE,
+    EntryResolutionError, HostMathAnalysis, HostMathAnalysisLimits, HostMathBuiltin,
+    HostMathIndeterminate, HostMathVerdict, VerifiedEntrySemCode, HOST_MATH_FREE_DRAFT1_PROFILE,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -1187,8 +1187,9 @@ impl HostMathFreeGrant {
 #[non_exhaustive]
 pub enum StrictRunError {
     /// The mathematical analysis of the entry was not `Admit`. No VM state was
-    /// created and no guest instruction ran. The reason is in
-    /// [`StrictExecutionOutcome::analysis`]; no diagnostic code is allocated.
+    /// created and no guest instruction ran. The reasons are in
+    /// [`StrictExecutionOutcome::analysis`]; the typed `A0001` record is
+    /// [`StrictExecutionOutcome::admission_refusal`].
     AdmissionRefused,
     /// The analysis admitted the entry and the unchanged LOCAL execution path
     /// then failed with this error.
@@ -1227,6 +1228,118 @@ impl<T> StrictExecutionOutcome<T> {
     /// path; `false` means no VM state was created.
     pub fn execution_attempted(&self) -> bool {
         !matches!(self.result, Err(StrictRunError::AdmissionRefused))
+    }
+
+    /// The typed `A0001` record of this invocation: `Some` iff the result is
+    /// `Err(StrictRunError::AdmissionRefused)`, `None` on success and on every
+    /// runtime failure. The outcome itself is not changed.
+    pub fn admission_refusal(&self) -> Option<HostMathAdmissionRefusal> {
+        match self.result {
+            Err(StrictRunError::AdmissionRefused) => Some(HostMathAdmissionRefusal {
+                analysis: self.analysis.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Every admission diagnostic code `sm-vm` produces, in ascending order. It is
+/// separate from the runtime codes and is never an `E`, `R`, `V` or `W` code.
+pub const ADMISSION_DIAGNOSTIC_CODES: [&str; 1] = ["A0001"];
+
+/// The `A0001` admission refusal of one strict invocation that the S3b
+/// host-math gate of `HOST_MATH_FREE@draft1` refused before any VM state
+/// existed. It is evidence of that refusal only, never a grant or token, and
+/// it is obtainable only from [`StrictExecutionOutcome::admission_refusal`]:
+/// a standalone `HostMathAnalysis` is not an admission event.
+///
+/// It reports only facts the analysis produced: no source range, program
+/// counter, path or witness exists for this refusal. `may` is a lower bound
+/// unless `may_exhaustive` is true. `entry` is artifact-controlled text and
+/// is never part of `message`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostMathAdmissionRefusal {
+    analysis: HostMathAnalysis,
+}
+
+impl HostMathAdmissionRefusal {
+    pub fn code(&self) -> &'static str {
+        ADMISSION_DIAGNOSTIC_CODES[0]
+    }
+
+    pub fn class(&self) -> &'static str {
+        "admission_refusal"
+    }
+
+    pub fn authority(&self) -> &'static str {
+        "host_math_admission"
+    }
+
+    pub fn profile(&self) -> &'static str {
+        self.analysis.profile()
+    }
+
+    pub fn analyser(&self) -> &'static str {
+        self.analysis.analyser()
+    }
+
+    /// The analysed entry name (artifact-derived, untrusted).
+    pub fn entry(&self) -> &str {
+        self.analysis.entry()
+    }
+
+    /// SHA-256 of the verified artifact.
+    pub fn artifact_sha256(&self) -> [u8; 32] {
+        self.analysis.artifact_hash()
+    }
+
+    /// Always `HostMathVerdict::Refuse`.
+    pub fn verdict(&self) -> HostMathVerdict {
+        self.analysis.verdict()
+    }
+
+    /// `"unknown"` iff `indeterminate` is non-empty, else `"known"`.
+    pub fn hazards(&self) -> &'static str {
+        if self.analysis.hazards_unknown() {
+            "unknown"
+        } else {
+            "known"
+        }
+    }
+
+    /// Reachable prohibited builtins, sorted by token and duplicate-free.
+    pub fn may(&self) -> &[HostMathBuiltin] {
+        self.analysis.may()
+    }
+
+    /// `true` iff `indeterminate` is empty; otherwise `may` is a lower bound.
+    pub fn may_exhaustive(&self) -> bool {
+        !self.analysis.hazards_unknown()
+    }
+
+    /// Every indeterminate reason, sorted and duplicate-free, with its
+    /// structured parameter index where it has one.
+    pub fn indeterminate(&self) -> &[HostMathIndeterminate] {
+        self.analysis.indeterminate()
+    }
+
+    pub fn limits(&self) -> HostMathAnalysisLimits {
+        self.analysis.limits()
+    }
+
+    pub fn work_units_used(&self) -> u64 {
+        self.analysis.work_units_used()
+    }
+
+    /// Always `false`: the refusal happened before any VM state existed.
+    pub fn execution_attempted(&self) -> bool {
+        false
+    }
+
+    /// Fixed text, independent of the artifact.
+    pub fn message(&self) -> &'static str {
+        "HOST_MATH_FREE@draft1 admission refused the entry before execution; \
+         the structured reasons are in the typed refusal record."
     }
 }
 
