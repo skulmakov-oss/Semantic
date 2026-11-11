@@ -4,8 +4,10 @@
 //! refused at S3b (`StrictRunError::AdmissionRefused`). Every case runs a real
 //! verifier-admitted artifact through the strict API. Test names carry the
 //! S15-B2 matrix id; the `b1v` comments name the S15-B1 design vectors.
-//! External (JSON) projection of the record is deferred to S15-B3 and is not
-//! tested here beyond proving that schema v1 is untouched.
+//! External (JSON) projection of the record is deferred to S15-B3. `j01` only
+//! checks that `smc check` emits no admission code; byte identity of
+//! `semantic.diagnostics` v1 rests on the unchanged `ssf09_editor_baseline`
+//! JSON goldens.
 
 use std::marker::PhantomData;
 use std::path::Path;
@@ -838,27 +840,40 @@ fn c04_maximal_parameter_index_list_is_complete() {
 }
 
 #[test]
-fn j01_schema_v1_check_output_carries_no_admission_code() {
-    // b1v-31 / INV-B2-12: `smc check` runs no strict stage and keeps schema v1.
-    let dir = std::env::temp_dir().join(format!("s15b2_j01_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("main.sm"), DIRECT_SQRT).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .args(["check", "main.sm", "--format", "json"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("\"schema\":\"semantic.diagnostics\"")
-            || stdout.contains("\"schema\": \"semantic.diagnostics\""),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("\"schema_version\":1") || stdout.contains("\"schema_version\": 1"),
-        "{stdout}"
-    );
-    assert!(!stdout.contains("A0001"), "{stdout}");
-    assert!(!stdout.contains("admission"), "{stdout}");
+fn j01_smc_check_emits_no_admission_code() {
+    // b1v-31 / INV-B2-12, narrow claim: `smc check` runs no strict stage, so
+    // neither a clean hazardous source nor a diagnostic-bearing one yields an
+    // admission code, and both stay schema v1. Byte identity of v1 output is
+    // proven by the unchanged `ssf09_editor_baseline` JSON goldens, not here.
+    let broken = "fn main() {\n    let y: i32 = sqrt(2.0);\n    return;\n}\n";
+    for (name, src, ok) in [("clean", DIRECT_SQRT, true), ("broken", broken, false)] {
+        let dir = std::env::temp_dir().join(format!("s15b2_j01_{name}_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("main.sm"), src).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_smc"))
+            .args(["check", "main.sm", "--format", "json"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(out.status.success(), ok, "{name}: {stdout}");
+        assert!(
+            stdout.contains("\"schema\":\"semantic.diagnostics\"")
+                || stdout.contains("\"schema\": \"semantic.diagnostics\""),
+            "{name}: {stdout}"
+        );
+        assert!(
+            stdout.contains("\"schema_version\":1") || stdout.contains("\"schema_version\": 1"),
+            "{name}: {stdout}"
+        );
+        if !ok {
+            assert!(
+                stdout.contains("\"code\""),
+                "{name} carries a diagnostic: {stdout}"
+            );
+        }
+        assert!(!stdout.contains("A0001"), "{name}: {stdout}");
+        assert!(!stdout.contains("admission"), "{name}: {stdout}");
+    }
 }
