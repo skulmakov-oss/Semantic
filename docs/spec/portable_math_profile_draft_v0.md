@@ -15,6 +15,10 @@ It does not change `semantic.foundation.std/0.1` (`foundation_stdlib_v0.md`),
 `semantic.compiler.u32/0.1` or any published contour. Implementing it requires a separate checkpoint
 with explicit owner GO (§16).
 
+One exception to "allocates nothing" (S15-B2): the step-3b refusal identity `A0001` and its typed
+record (§5 Q3). It allocates no other code. It implements no transport, host policy or step-3a
+gate, and it does not make the profile complete or stable.
+
 The key words MUST, MUST NOT and MAY state requirements on a future implementation and on future
 qualification evidence. They describe no current behaviour.
 
@@ -179,10 +183,55 @@ path is reported only when one was actually derived; C0 never invents one. Under
 never as empty sets: an empty set would claim an absence of hazards that was not established.
 
 **Q3 — diagnostic.** A refusal is a distinct admission-failure class, separate from verifier
-diagnostics (`V00xx`) and runtime traps (`R000x`). The symbol `E_PROFILE_HOST_MATH` is a placeholder
-used in design tables only. Its name and number are **not allocated** (OPEN, §14). The reason names
-used in design tables (`callable_entry_abi`, `closure_target`, `resolution_mismatch`,
-`unsupported_opcode`, `analysis_limit`) are provisional and not allocated either.
+diagnostics (`V00xx`) and runtime traps (`R000x`).
+
+**Allocated by S15-B2: `A0001`.** It is the one code for a step-3b refusal under
+`HOST_MATH_FREE@draft1`.
+
+- **Producer.** `sm-vm` emits it, and only for a strict invocation that the step-3b gate actually
+  refused.
+- **Typed record.** The record is `sm_vm::HostMathAdmissionRefusal`. It is obtainable only through
+  `StrictExecutionOutcome::admission_refusal`, which returns it iff the result is
+  `StrictRunError::AdmissionRefused`.
+- **Not an admission event.** A standalone analysis report is not one.
+- **No relabelling.** No verifier rejection or runtime failure is ever reported as `A0001`.
+
+**Record content.** The record carries:
+
+| field | value |
+|---|---|
+| `code` | `A0001` |
+| `class` | `admission_refusal` |
+| `authority` | `host_math_admission` |
+| `profile` | the profile identity |
+| `analyser` | the analyser identity |
+| `entry` | the entry name: untrusted, never part of the message |
+| `artifact_sha256` | the artifact SHA-256 |
+| `verdict` | `refuse` |
+| `hazards` | `known` / `unknown` |
+| `may` | the sorted set `May` |
+| `may_exhaustive` | true iff `Indet` is empty; otherwise `May` is a lower bound |
+| `indeterminate` | the sorted set `Indet`, with parameter indices as structured data |
+| `limits` | the analysis work bound and the work units used |
+| `execution_attempted` | false |
+| `message` | a fixed message |
+
+It has no source range, program counter, path or witness.
+
+**Reason tokens.** They come from explicit tables in `sm-verify`, never from `Debug`:
+
+- `HostMathBuiltin::name()` gives `abs`, `cos`, `pow`, `sin`, `sqrt`, `tan`.
+- `HostMathIndeterminate::reason_token()` gives `callable_entry_parameter`,
+  `entry_signature_unavailable`, `closure_origin_unknown`, `resolution_mismatch`, `analysis_limit`.
+
+These supersede the placeholder `E_PROFILE_HOST_MATH` and the provisional names `callable_entry_abi`
+and `closure_target`. No `unsupported_opcode` reason exists: the analysis has no such fact.
+
+**Still open (§14):**
+- the external transport of the record (no `semantic.diagnostics` change, S15-B3);
+- any step-3a code (F16);
+- reconciliation with Q3.10;
+- index-list compression.
 
 ## 6. Determinism of the verdict (Q9a, Q9b)
 
@@ -400,7 +449,8 @@ executed; none may be reported as a passing test until an implementation exists.
 
 ## 14. Open owner decisions
 
-- Q3: the name and number of the admission-failure code.
+- Q3: the external (JSON) transport of the `A0001` refusal record, index-list compression, and any
+  step-3a admission code. S15-B2 allocated `A0001` for step 3b only (§5 Q3).
 - Q5: the `sqrt` NaN policy.
 - The admission entry point and its reconciliation with Q3.10 `sm-admission`.
 - The canonical profile-request representation (F16, §9): `NOT_IMPLEMENTED`; it needs its own

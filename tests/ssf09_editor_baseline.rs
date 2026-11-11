@@ -408,6 +408,11 @@ fn every_producer_code_is_catalogued_and_explainable() {
             .iter()
             .map(|c| c.to_string()),
     );
+    codes.extend(
+        sm_vm::ADMISSION_DIAGNOSTIC_CODES
+            .iter()
+            .map(|c| c.to_string()),
+    );
     codes.push("E0009".to_string());
     // Logos grammar codes are literals at the parser's error sites.
     let parser = fs::read_to_string(
