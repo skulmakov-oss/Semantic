@@ -12,6 +12,7 @@ CLI source: `smc explain <code>` and `smc explain --list`.
 
 ## Catalog
 
+- `A0001`: Host-math admission refusal, not a verifier rejection or a runtime failure: under the strict HOST_MATH_FREE@draft1 profile the S3b mathematical admission analysis did not admit the entry, so no VM execution was attempted; the structured reasons are in the typed refusal record (sm_vm::HostMathAdmissionRefusal).
 - `E0000`: Retired generic frontend placeholder (SSF-09 #1580): no producer emits it; frontend failures carry E0001-E0009 or E0201.
 - `E0001`: Unexpected character in source input.
 - `E0002`: Expected logical operator `&&`.

@@ -410,6 +410,14 @@ Current stability expectations:
 - changing the meaning of an existing module/import/export code should update
   this document in the same change series
 
+The `A` code class (`A0001`, S15-B2) is not a source diagnostic. It is the
+`HOST_MATH_FREE@draft1` admission refusal of a strict VM invocation:
+- it is owned by `sm-vm` and specified in `portable_math_profile_draft_v0.md`
+  §5 Q3;
+- it is catalogued for `smc explain`;
+- no source stage emits it;
+- it has no `DiagnosticFamily` or `semantic.diagnostics` v1 representation.
+
 Current honest limits:
 
 - not every frontend type error has a stable numeric code yet
