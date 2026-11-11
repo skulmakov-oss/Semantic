@@ -1,48 +1,44 @@
 task:
-  id: S15-G1A-CATALOG-SCOPE-MIGRATION
-  title: "Owner-Controlled Migration Entry for Admission Catalog Scope"
-  type: governance_migration
+  id: SHF-FOUNDATION-DELIVERY-STABLE
+  title: "Stable Foundation Engineering Authorization Boundary"
+  type: foundation_delivery
   target: >-
-    S15-G1 Stage G1-A only. Hold the trusted envelope in governance_migration
-    for at most four hours and for exactly one envelope-only transition, either
-    the Stage G1-B successor (blob 055cc127697fd5802e491f594b0f8f2ac6fd5080)
-    that restores foundation_delivery and adds
-    crates/ton618-core/src/diagnostics.rs and docs/ERROR_CODES.md to the
-    Foundation allowlist, or restoration of the unchanged Foundation envelope
-    (blob a57b10e0cdaa055494ad70fb2f044175190a47a9). This envelope authorizes
-    no technical work.
+    Enable bounded, explicitly owner-authorized Foundation compiler, language,
+    verifier, SemCode, runtime, and builtin engineering within one permanent
+    technical surface. Implementation Independence. Specification Unity.
+    Deterministic Proof. The trusted PR base envelope and checker remain the
+    authority for candidate admission; ordinary work cannot modify that authority.
   mode: active
-  supersedes: SHF-FOUNDATION-DELIVERY-STABLE
+  supersedes: FOUNDATION-GOVERNANCE-MIGRATION
   issues: [1910]
   must_remain_open: [1910]
-  base_sha: b89ee10fed1335a9ffab1e40d2bf727b7e18d2e7
+  base_sha: db86eb7897367d880d303e8f803a06e5219b3cd2
   authorized_by: >-
-    Repository owner preparation decision S15-G1A-PREP (2026-11-11) approved
-    the two-stage route (OD-G1-1 A), a maximum migration window of four hours
-    (OD-G1-2) and the exact two-line Stage G1-B successor (OD-G1-3).
-    Installing this envelope requires a separate explicit OWNER EXECUTION GO
-    naming this exact blob, the trusted base
-    b89ee10fed1335a9ffab1e40d2bf727b7e18d2e7, the successor blob
-    055cc127697fd5802e491f594b0f8f2ac6fd5080 and the recovery blob
-    a57b10e0cdaa055494ad70fb2f044175190a47a9. The window runs from the merge
-    of this envelope to the merge of the successor or recovery envelope.
+    Repository owner GO (2026-10-09, "Semantic Upstream Phase U0c") installs
+    this permanent Foundation boundary after U0a (#2020) and U0b (#2021).
+    Each concrete task still requires explicit OWNER GO, bounded scope,
+    implementation/tests/specification evidence, qualification, one primary PR,
+    and separate OWNER MERGE GO. Stored base_sha values record this transition;
+    live PR base/head identities come from immutable trusted GitHub event data.
 
 intent:
   summary: >-
-    Migration window only. The admissible changes are one envelope-only PR
-    installing the pinned Stage G1-B successor or, on abort, one envelope-only
-    PR restoring the unchanged Foundation envelope. No compiler, language,
-    runtime, verifier, SemCode, workflow, dependency, release or tag work is
-    authorized while this envelope is active.
+    Ordinary Foundation work proceeds inside this stable boundary without
+    recurring Harness changes, under stage-specific OWNER GO and normative
+    contracts. File permission does not approve new opcodes, SemCode revisions,
+    public contract changes, release claims, or self-hosting completion; those
+    require explicit technical justification and deterministic qualification.
+    U0c itself changes only this envelope and proves hosted base-side admission.
+    No technical implementation, release/tag work, or merge is authorized by U0c.
   decision_record: docs/agents/WORKFLOW.md
 
 governance_constraints:
-  compiler_implementation: false
-  language_implementation: false
-  runtime_implementation: false
-  verifier_changes: false
-  semcode_changes: false
-  builtin_changes: false
+  compiler_implementation: true
+  language_implementation: true
+  runtime_implementation: true
+  verifier_changes: true
+  semcode_changes: true
+  builtin_changes: true
   workflow_changes: false
   dependency_changes: false
   release_tag_changes: false
@@ -50,9 +46,23 @@ governance_constraints:
 
 scope:
   allowed_paths:
-    - .harness/current.task.yaml
+    - crates/sm-*/**
+    - crates/smc-cli/**
+    - crates/semantic-core-quad/**
+    - tests/**
+    - docs/spec/**
+    - docs/architecture/**
+    - README.md
+    - CONTRIBUTING.md
+    - crates/prom-abi/src/lib.rs
+    - crates/prom-cap/src/lib.rs
+    - crates/prom-audit/src/lib.rs
+    - crates/ton618-core/src/diagnostics.rs
+    - docs/ERROR_CODES.md
 
   forbidden_paths:
+    - .harness/current.task.yaml
+    - .harness/**
     - .github/**
     - scripts/**
     - AGENTS.md
@@ -78,11 +88,11 @@ scope:
     - docs/roadmap/**
 
 authorization:
-  rust_implementation: false
-  language_implementation: false
-  documentation_addition: false
-  documentation_correction: false
-  test_addition: false
+  rust_implementation: true
+  language_implementation: true
+  documentation_addition: true
+  documentation_correction: true
+  test_addition: true
   workflow_changes: false
   dependency_changes: false
   github_issue_lifecycle: false
@@ -92,7 +102,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: b89ee10fed1335a9ffab1e40d2bf727b7e18d2e7
+  base_sha: db86eb7897367d880d303e8f803a06e5219b3cd2
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
