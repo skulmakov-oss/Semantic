@@ -34,7 +34,6 @@ use sm_vm::{
     run_verified_semcode, HostMathAdmissionRefusal, HostMathFreeGrant, RuntimeError,
     StrictExecutionOutcome, StrictRunError, Value, ADMISSION_DIAGNOSTIC_CODES,
 };
-use ton618_core::diagnostics::diagnostic_catalog;
 
 use HostMathBuiltin::{Abs, Cos, Pow, Sin, Sqrt, Tan};
 use HostMathIndeterminate::{
@@ -753,13 +752,9 @@ fn n06_admission_codes_are_disjoint_from_runtime_codes() {
 #[test]
 fn c01_a0001_is_catalogued_once_explainable_and_mirrored() {
     // b1v-32 / INV-B2-10.
-    let entries: Vec<_> = diagnostic_catalog()
-        .iter()
-        .filter(|(code, _)| code.starts_with('A'))
-        .collect();
-    assert_eq!(entries.len(), 1, "exactly one admission code is allocated");
-    let (code, text) = entries[0];
-    assert_eq!(*code, "A0001");
+    // The catalog is read through its `smc` surface (`CliPipeline::explain`);
+    // allocation uniqueness is checked on `smc explain --list` in c02.
+    let text = smc_cli::CliPipeline::explain("A0001").expect("A0001 is catalogued");
     for fragment in [
         "admission refusal",
         "HOST_MATH_FREE@draft1",
@@ -774,7 +769,7 @@ fn c01_a0001_is_catalogued_once_explainable_and_mirrored() {
         );
     }
     for query in ["A0001", "a0001"] {
-        assert_eq!(smc_cli::CliPipeline::explain(query), Some(*text));
+        assert_eq!(smc_cli::CliPipeline::explain(query), Some(text));
     }
     let mirror =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/ERROR_CODES.md"))
@@ -783,6 +778,12 @@ fn c01_a0001_is_catalogued_once_explainable_and_mirrored() {
     assert!(
         mirror.contains(&format!("- `A0001`: {text}\n")),
         "mirror differs"
+    );
+    let mirrored_a: Vec<_> = mirror.lines().filter(|l| l.starts_with("- `A")).collect();
+    assert_eq!(
+        mirrored_a.len(),
+        1,
+        "exactly one A code is mirrored: {mirrored_a:?}"
     );
 }
 
@@ -802,8 +803,13 @@ fn c02_smc_explain_cli_recognises_a0001() {
         .unwrap();
     let list = String::from_utf8_lossy(&list.stdout);
     let first = list.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-    assert!(list.contains("A0001"), "{list}");
-    assert!(first.contains("A0001"), "A0001 sorts first: {first}");
+    assert!(first.starts_with("A0001: "), "A0001 sorts first: {first}");
+    let allocated: Vec<_> = list.lines().filter(|l| l.starts_with('A')).collect();
+    assert_eq!(
+        allocated.len(),
+        1,
+        "exactly one admission code is allocated: {allocated:?}"
+    );
 }
 
 #[test]
