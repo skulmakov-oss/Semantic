@@ -1156,8 +1156,8 @@ impl HostMathBuiltin {
 }
 
 /// An `INDETERMINATE` reason of spec §4.1 rule 6 / §5. These are analysis
-/// facts, not diagnostic codes: the admission diagnostic name and number
-/// are not allocated (spec §5 Q3, S15-B).
+/// facts, not diagnostic codes: a refused strict invocation carries them in
+/// the single `A0001` admission refusal of `sm-vm` (spec §5 Q3, S15-B2).
 #[cfg(feature = "std")]
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1177,6 +1177,24 @@ pub enum HostMathIndeterminate {
     ResolutionMismatch,
     /// The work bound of [`HostMathAnalysisLimits`] was exhausted.
     AnalysisLimit,
+}
+
+#[cfg(feature = "std")]
+impl HostMathIndeterminate {
+    /// The stable lowercase reason token of spec §5 Q3. It comes from this
+    /// explicit table, never from `Debug` or the variant name, and a new
+    /// variant is a compile error here until it is mapped. The parameter
+    /// `index` of `CallableEntryParameter` is a separate structured field and
+    /// is not part of the token.
+    pub fn reason_token(self) -> &'static str {
+        match self {
+            Self::CallableEntryParameter { .. } => "callable_entry_parameter",
+            Self::EntrySignatureUnavailable => "entry_signature_unavailable",
+            Self::ClosureOriginUnknown => "closure_origin_unknown",
+            Self::ResolutionMismatch => "resolution_mismatch",
+            Self::AnalysisLimit => "analysis_limit",
+        }
+    }
 }
 
 /// Result of [`analyze_host_math_free_draft1`]. It has no public

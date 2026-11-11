@@ -148,6 +148,7 @@ EntrySignatureUnavailable,
 ClosureOriginUnknown,
 ResolutionMismatch,
 AnalysisLimit,
+pub fn reason_token(self) -> &'static str {
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostMathAnalysis {
