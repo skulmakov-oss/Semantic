@@ -71,6 +71,7 @@ Current accepted usage forms are:
 - `smc run <input.sm|project-root>`
 - `smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--max-calls <N>] [--metrics json] [-- <application-args...>]`
 - `smc run-smc <input.smc>`
+- `smc run-smc <input.smc> --expect-sha256 <sha256:hex> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--max-calls <N>] [--metrics json] [-- <application-args...>]`
 - `smc disasm <input.smc>`
 - `smc 7hell <input.sm> [--json]`
 - `smc look ui frame --from <snapshot> [--frame <n>] [--format text|draw-json] [--out <path>]`
@@ -294,10 +295,38 @@ Public rule:
 
 ## Application Run Execution Envelope And Metrics
 
-Status: SHF-R (#2030). Applies only to the application-mode form
-`smc run <input> --profile ... --root ...`. The one-argument
-`smc run <input>` and `smc run-smc <input.smc>` controlled-observation forms
-are unchanged and do not accept these options.
+Status: SHF-R (#2030). Applies to the application-mode forms
+`smc run <input> --profile ... --root ...` and (SHF-15/16, #1910)
+`smc run-smc <input.smc> --expect-sha256 ... --profile ... --root ...`.
+The one-argument `smc run <input>` and `smc run-smc <input.smc>`
+controlled-observation forms are unchanged and do not accept these options.
+
+### Stored-artifact application mode (`smc run-smc`)
+
+`smc run-smc <input.smc>` with any further argument executes a stored
+SemCode artifact under the same options, envelope, capability profiles,
+host and metrics as application-mode `smc run`, with these differences:
+
+- `--expect-sha256 sha256:<64 lowercase hex>` is mandatory; it is the
+  declared identity of the artifact. A missing option is a usage error, a
+  malformed value fails with
+  `--expect-sha256 must be sha256: followed by 64 lowercase hex digits`, and
+  a repeated one with `duplicate run option '--expect-sha256'`. These are
+  argument errors (no metrics line). `smc run` does not accept the option.
+- Nothing is compiled. The input file is read once; when the SHA-256 of
+  those bytes differs from the declared identity the command fails with
+  `artifact identity mismatch: expected <declared>, found <actual>` before
+  admission. A directory or unreadable input fails the same phase.
+- The same bytes are then admitted by `verify_semcode_token_with_quotas`
+  with the one effective configuration, the `main` entry is required and
+  the admitted token is executed; source text or malformed SemCode is a
+  verifier rejection.
+- In `--metrics json`, `phase_reached` starts at `"read"` instead of
+  `"compile"`, and a failure in that phase has the outcome
+  `artifact_error` (no `compile_error` outcome exists for this form).
+
+The identity check binds execution to declared bytes; it is not a
+signature or provenance proof of who produced the artifact.
 
 ### Envelope
 
@@ -376,7 +405,7 @@ The line is a JSON object serialized with `serde_json`:
 | `schema` | `"semantic.run.metrics/0.1"` |
 | `envelope` | `"verified-local"` or `"trusted-compiler"` |
 | `effective_quotas` | `max_steps`, `max_calls`, `max_frames`, `max_stack_depth`, `max_effect_calls` of the one effective configuration |
-| `phase_reached` | `"compile"` (source resolution and compilation), `"verify"`, `"entry"`, `"host_init"` or `"execute"` |
+| `phase_reached` | `"compile"` (source resolution and compilation; `smc run`), `"read"` (stored artifact read and identity check; `smc run-smc`), `"verify"`, `"entry"`, `"host_init"` or `"execute"` |
 | `execution_started` | `true` exactly when a VM was constructed for the run |
 | `outcome` | see below |
 | `counters` | `null` when execution never started; otherwise `steps`, `calls`, `peak_frames`, `effect_calls` read from the VM at termination |
@@ -390,6 +419,7 @@ Outcomes:
 |---|---|---|---|
 | `ok` | execution succeeded | measured | 0 |
 | `compile_error` | source resolution or compilation failed | `null` | non-zero |
+| `artifact_error` | `smc run-smc`: the stored artifact could not be read or does not match `--expect-sha256` | `null` | non-zero |
 | `verify_rejected` | verifier admission rejected the artifact | `null` | non-zero |
 | `entry_missing` | `main` not found in the admitted artifact | `null` | non-zero |
 | `host_init_error` | the application host could not be created (for example an invalid `--root`) | `null` | non-zero |

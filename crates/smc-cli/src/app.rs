@@ -4731,10 +4731,16 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     if args.len() == 1 {
         return cmd_run_controlled_observation(&args[0]);
     }
-    let options = parse_application_run_options(args)?;
+    let options = parse_application_run_options(args, false)?;
+    run_application_with_metrics(&options)
+}
+
+/// Shared by application-mode `smc run` and `smc run-smc`: runs once and
+/// writes the single metrics line when requested.
+fn run_application_with_metrics(options: &ApplicationRunOptions) -> Result<(), String> {
     let started = Instant::now();
-    let mut metrics = RunMetricsRecorder::new(&options);
-    let result = run_application(&options, &mut metrics);
+    let mut metrics = RunMetricsRecorder::new(options);
+    let result = run_application(options, &mut metrics);
     if options.metrics_json {
         eprintln!("{}", metrics.finish(&result, started.elapsed()));
     }
@@ -4749,14 +4755,35 @@ fn run_application(
 ) -> Result<(), String> {
     let input = options.input.as_str();
     let input_path = Path::new(input);
-    let root = if input_path.is_dir() {
-        resolve_project_root_check_entry(input_path)?
-    } else {
-        input_path.to_path_buf()
+    let bytes = match &options.expected_sha256 {
+        // Stored SemCode (`smc run-smc`): the bytes are read once, bound to the
+        // declared identity, and these same bytes are admitted and executed.
+        // Nothing is compiled.
+        Some(expected) => {
+            if input_path.is_dir() {
+                return Err(format!("run-smc input '{input}' is not a file"));
+            }
+            let bytes =
+                std::fs::read(input_path).map_err(|e| format!("failed to read '{input}': {e}"))?;
+            let actual = sm_format::sha256::sha256_prefixed_hex(&bytes);
+            if &actual != expected {
+                return Err(format!(
+                    "artifact identity mismatch: expected {expected}, found {actual}"
+                ));
+            }
+            bytes
+        }
+        None => {
+            let root = if input_path.is_dir() {
+                resolve_project_root_check_entry(input_path)?
+            } else {
+                input_path.to_path_buf()
+            };
+            let parser_profile = cli_profile();
+            let src = effective_rustlike_source(&root, &parser_profile)?;
+            compile_program_to_semcode(&src).map_err(|e| e.to_string())?
+        }
     };
-    let parser_profile = cli_profile();
-    let src = effective_rustlike_source(&root, &parser_profile)?;
-    let bytes = compile_program_to_semcode(&src).map_err(|e| e.to_string())?;
     // #1762 / SHF-R: the same ExecutionConfig governs admission, execution
     // and metrics; admission keeps VerificationLimits::default_profile().
     let config = options.execution_config;
@@ -4800,10 +4827,12 @@ fn run_application(
 }
 
 /// SHF-R (#2030): furthest phase reached by application-mode `smc run`.
-/// `Compile` covers source resolution and compilation.
+/// `Compile` covers source resolution and compilation; `Read` covers reading
+/// a stored artifact and checking its declared identity (`smc run-smc`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RunPhase {
     Compile,
+    Read,
     Verify,
     Entry,
     HostInit,
@@ -4814,6 +4843,7 @@ impl RunPhase {
     fn name(self) -> &'static str {
         match self {
             RunPhase::Compile => "compile",
+            RunPhase::Read => "read",
             RunPhase::Verify => "verify",
             RunPhase::Entry => "entry",
             RunPhase::HostInit => "host_init",
@@ -4825,6 +4855,7 @@ impl RunPhase {
     fn failure_outcome(self) -> &'static str {
         match self {
             RunPhase::Compile => "compile_error",
+            RunPhase::Read => "artifact_error",
             RunPhase::Verify => "verify_rejected",
             RunPhase::Entry => "entry_missing",
             RunPhase::HostInit => "host_init_error",
@@ -4922,7 +4953,11 @@ impl RunMetricsRecorder {
         Self {
             envelope: options.envelope,
             quotas: options.execution_config.quotas,
-            phase: RunPhase::Compile,
+            phase: if options.expected_sha256.is_some() {
+                RunPhase::Read
+            } else {
+                RunPhase::Compile
+            },
             counters: None,
             runtime_error: None,
         }
@@ -5022,6 +5057,9 @@ struct ApplicationRunOptions {
     /// The one effective configuration for admission, execution and metrics.
     execution_config: ExecutionConfig,
     metrics_json: bool,
+    /// `smc run-smc` only: the declared `sha256:<hex>` identity of the stored
+    /// artifact. `None` for `smc run`, which compiles its input.
+    expected_sha256: Option<String>,
 }
 
 /// Parses a plain ASCII decimal quota value. Returns `Ok(None)` when the
@@ -5042,7 +5080,17 @@ fn quota_range_error(flag: &str) -> String {
     format!("{flag} must be between 1 and {max}")
 }
 
-fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOptions, String> {
+fn parse_application_run_options(
+    args: &[String],
+    stored: bool,
+) -> Result<ApplicationRunOptions, String> {
+    let application_run_usage = || {
+        if stored {
+            stored_run_usage()
+        } else {
+            application_run_usage()
+        }
+    };
     if args.is_empty() {
         return Err(application_run_usage());
     }
@@ -5060,6 +5108,7 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
     let mut max_frames: Option<Option<u64>> = None;
     let mut max_calls: Option<Option<u64>> = None;
     let mut metrics_json = None;
+    let mut expected_sha256 = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -5107,6 +5156,25 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
                     ));
                 }
                 metrics_json = Some(true);
+            }
+            "--expect-sha256" if stored => {
+                if expected_sha256.is_some() {
+                    return Err("duplicate run option '--expect-sha256'".to_string());
+                }
+                index += 1;
+                let value = args.get(index).ok_or_else(application_run_usage)?;
+                let digest = value.strip_prefix("sha256:").unwrap_or("");
+                if digest.len() != 64
+                    || !digest
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                {
+                    return Err(
+                        "--expect-sha256 must be sha256: followed by 64 lowercase hex digits"
+                            .to_string(),
+                    );
+                }
+                expected_sha256 = Some(value.clone());
             }
             "--profile" => {
                 index += 1;
@@ -5216,7 +5284,16 @@ fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOption
         envelope,
         execution_config: ExecutionConfig::new(ExecutionContext::VerifiedLocal, quotas),
         metrics_json: metrics_json.unwrap_or(false),
+        expected_sha256: if stored {
+            Some(expected_sha256.ok_or_else(application_run_usage)?)
+        } else {
+            None
+        },
     })
+}
+
+fn stored_run_usage() -> String {
+    "usage: smc run-smc <input.smc>\n       smc run-smc <input.smc> --expect-sha256 <sha256:hex> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [--envelope <verified-local|trusted-compiler>] [--max-steps <N>] [--max-frames <N>] [--max-calls <N>] [--metrics json] [-- <application-args...>]".to_string()
 }
 
 fn application_run_usage() -> String {
@@ -5396,8 +5473,13 @@ fn discover_project_test_sources(project_root: &Path) -> Result<Vec<PathBuf>, St
 }
 
 fn cmd_run_smc(args: &[String]) -> Result<(), String> {
-    if args.len() != 1 {
-        return Err("usage: smc run-smc <input.smc>".to_string());
+    if args.is_empty() {
+        return Err(stored_run_usage());
+    }
+    if args.len() > 1 {
+        // Application mode: execute the stored artifact exactly as declared.
+        let options = parse_application_run_options(args, true)?;
+        return run_application_with_metrics(&options);
     }
     let input = args[0].as_str();
     reject_leading_unknown_flag(input)?;
