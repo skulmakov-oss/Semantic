@@ -664,7 +664,9 @@ fn p3_omitted_calls_preserves_default_below_steps_and_run_smc_rejects_override()
         .output()
         .expect("run-smc");
     assert_exit(&output, 1);
-    assert!(stderr_of(&output).contains("usage: smc run-smc <input.smc>"));
+    // Stored application mode (SHF-15/16) only admits overrides together with
+    // --envelope trusted-compiler; the override is still rejected.
+    assert!(stderr_of(&output).contains("--max-calls requires --envelope trusted-compiler"));
 }
 
 #[test]
@@ -1028,4 +1030,302 @@ fn option_in_the_input_position_is_an_argument_error_without_metrics() {
     assert_exit(&output, 1);
     assert!(stderr_of(&output).contains("unknown flag '--foo'"));
     assert!(metrics_lines(&output).is_empty());
+}
+
+// ---------- SHF-15/16: stored-artifact application mode of `smc run-smc` ----------
+
+fn compile_to(dir: &Path, program: &Path, name: &str) -> (PathBuf, String) {
+    let out = dir.join(name);
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("compile")
+        .arg(program)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("smc compile");
+    assert_exit(&output, 0);
+    let bytes = std::fs::read(&out).expect("read artifact");
+    (out, sm_format::sha256::sha256_prefixed_hex(&bytes))
+}
+
+fn smc_run_stored(
+    dir: &Path,
+    artifact: &Path,
+    expected: &str,
+    profile: &str,
+    extra: &[&str],
+    app_args: &[&str],
+) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_smc"));
+    command
+        .arg("run-smc")
+        .arg(artifact)
+        .args(["--expect-sha256", expected, "--profile", profile, "--root"])
+        .arg(dir)
+        .args(extra)
+        .current_dir(dir);
+    if !app_args.is_empty() {
+        command.arg("--").args(app_args);
+    }
+    command.output().expect("run-smc")
+}
+
+const TRUSTED: [&str; 8] = [
+    "--envelope",
+    "trusted-compiler",
+    "--max-steps",
+    "150000000",
+    "--max-calls",
+    "2000000",
+    "--max-frames",
+    "256",
+];
+
+fn with_metrics(extra: &[&'static str]) -> Vec<&'static str> {
+    let mut v = extra.to_vec();
+    v.extend(["--metrics", "json"]);
+    v
+}
+
+#[test]
+fn stored_run_executes_the_declared_artifact_like_the_source_run() {
+    let dir = mk_temp_dir();
+    let program = write_program(&dir, "calls.sm", &calls_program(3, 5));
+    let (artifact, hash) = compile_to(&dir, &program, "calls.smc");
+    let extra = with_metrics(&TRUSTED);
+    let stored = smc_run_stored(&dir, &artifact, &hash, "pure", &extra, &[]);
+    assert_exit(&stored, 0);
+    let source = smc_run(&dir, &program, "pure", &extra, &[]);
+    assert_exit(&source, 0);
+    let stored_m = without_nondeterministic(metrics(&stored));
+    assert_eq!(stored_m["outcome"], "ok");
+    assert_eq!(stored_m["phase_reached"], "execute");
+    assert_eq!(stored_m["envelope"], "trusted-compiler");
+    assert_eq!(
+        stored_m["effective_quotas"],
+        serde_json::json!({
+            "max_steps": 150000000, "max_calls": 2000000, "max_frames": 256,
+            "max_stack_depth": 256, "max_effect_calls": 1024
+        })
+    );
+    assert_eq!(stored_m["counters"]["calls"], 3 * 129 + 5);
+    // same SemCode, same effective configuration: identical deterministic metrics
+    assert_eq!(stored_m, without_nondeterministic(metrics(&source)));
+    // and identical on a repeat
+    let again = smc_run_stored(&dir, &artifact, &hash, "pure", &extra, &[]);
+    assert_eq!(stored_m, without_nondeterministic(metrics(&again)));
+}
+
+#[test]
+fn stored_run_rejects_an_identity_mismatch_before_admission() {
+    let dir = mk_temp_dir();
+    let program = write_program(&dir, "ok.sm", PURE_OK);
+    let (artifact, hash) = compile_to(&dir, &program, "ok.smc");
+    let other = format!("sha256:{}", "0".repeat(64));
+    let output = smc_run_stored(&dir, &artifact, &other, "pure", &["--metrics", "json"], &[]);
+    assert_exit(&output, 1);
+    let m = metrics(&output);
+    assert_eq!(m["outcome"], "artifact_error");
+    assert_eq!(m["phase_reached"], "read");
+    assert_eq!(m["execution_started"], false);
+    assert!(m["counters"].is_null());
+    let error = m["error"].as_str().unwrap();
+    assert!(error.contains("artifact identity mismatch"));
+    assert!(error.contains(&hash));
+    // one changed byte with the original identity is also a mismatch
+    let mut bytes = std::fs::read(&artifact).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    std::fs::write(&artifact, &bytes).unwrap();
+    let output = smc_run_stored(&dir, &artifact, &hash, "pure", &["--metrics", "json"], &[]);
+    assert_exit(&output, 1);
+    assert_eq!(metrics(&output)["outcome"], "artifact_error");
+}
+
+#[test]
+fn stored_run_admits_through_the_verifier_and_never_compiles() {
+    let dir = mk_temp_dir();
+    // malformed SemCode with its correct identity: rejected by admission
+    let junk = dir.join("junk.smc");
+    std::fs::write(&junk, b"SEMCODE?not really").unwrap();
+    let junk_hash = sm_format::sha256::sha256_prefixed_hex(b"SEMCODE?not really");
+    let output = smc_run_stored(&dir, &junk, &junk_hash, "pure", &["--metrics", "json"], &[]);
+    assert_exit(&output, 1);
+    let m = metrics(&output);
+    assert_eq!(m["outcome"], "verify_rejected");
+    assert!(m["counters"].is_null());
+    // Semantic source is not compiled by run-smc: it is rejected as SemCode
+    let program = write_program(&dir, "ok.sm", PURE_OK);
+    let source_hash = sm_format::sha256::sha256_prefixed_hex(PURE_OK.as_bytes());
+    let output = smc_run_stored(
+        &dir,
+        &program,
+        &source_hash,
+        "pure",
+        &["--metrics", "json"],
+        &[],
+    );
+    assert_exit(&output, 1);
+    assert_eq!(metrics(&output)["outcome"], "verify_rejected");
+    // a directory is not a stored artifact
+    let output = smc_run_stored(
+        &dir,
+        &dir,
+        &source_hash,
+        "pure",
+        &["--metrics", "json"],
+        &[],
+    );
+    assert_exit(&output, 1);
+    assert_eq!(metrics(&output)["outcome"], "artifact_error");
+}
+
+#[test]
+fn stored_run_applies_the_declared_quotas_and_profile() {
+    let dir = mk_temp_dir();
+    let program = write_program(&dir, "calls.sm", &calls_program(1, 0));
+    let (artifact, hash) = compile_to(&dir, &program, "calls.smc");
+    // 129 calls under a 128-call budget: quota_exceeded with counters
+    let output = smc_run_stored(
+        &dir,
+        &artifact,
+        &hash,
+        "pure",
+        &[
+            "--envelope",
+            "trusted-compiler",
+            "--max-calls",
+            "128",
+            "--metrics",
+            "json",
+        ],
+        &[],
+    );
+    assert_exit(&output, 1);
+    let m = metrics(&output);
+    assert_eq!(m["outcome"], "quota_exceeded");
+    assert_eq!(m["quota_exceeded"]["kind"], "Calls");
+    assert_eq!(m["quota_exceeded"]["limit"], 128);
+    assert!(m["counters"].is_object());
+    // the envelope never grants capabilities: args_read is denied under pure
+    let args = write_program(
+        &dir,
+        "args.sm",
+        "fn main() {\n    let x: text = args_read(0u32);\n    return;\n}\n",
+    );
+    let (artifact, hash) = compile_to(&dir, &args, "args.smc");
+    let output = smc_run_stored(
+        &dir,
+        &artifact,
+        &hash,
+        "pure",
+        &with_metrics(&TRUSTED),
+        &["x"],
+    );
+    assert_exit(&output, 1);
+    assert_eq!(metrics(&output)["outcome"], "capability_denied");
+    assert!(stderr_of(&output).contains("decision=deny"));
+    // an invalid root fails host initialisation without executing
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("run-smc")
+        .arg(&artifact)
+        .args(["--expect-sha256", &hash, "--profile", "pure", "--root"])
+        .arg(dir.join("missing-root"))
+        .args(["--metrics", "json"])
+        .output()
+        .expect("run-smc");
+    assert_exit(&output, 1);
+    let m = metrics(&output);
+    assert_eq!(m["outcome"], "host_init_error");
+    assert!(m["counters"].is_null());
+}
+
+#[test]
+fn stored_run_argument_errors_fail_before_reading_without_metrics() {
+    let dir = mk_temp_dir();
+    let missing = dir.join("missing.smc");
+    let good = format!("sha256:{}", "a".repeat(64));
+    let cases: Vec<(Vec<String>, &str)> = vec![
+        // the declared identity is mandatory in application mode
+        (
+            vec![
+                "--profile".into(),
+                "pure".into(),
+                "--root".into(),
+                ".".into(),
+                "--metrics".into(),
+                "json".into(),
+            ],
+            "usage: smc run-smc <input.smc>",
+        ),
+        (
+            vec![
+                "--expect-sha256".into(),
+                "a".repeat(64),
+                "--profile".into(),
+                "pure".into(),
+                "--root".into(),
+                ".".into(),
+            ],
+            "--expect-sha256 must be sha256: followed by 64 lowercase hex digits",
+        ),
+        (
+            vec![
+                "--expect-sha256".into(),
+                format!("sha256:{}", "A".repeat(64)),
+                "--profile".into(),
+                "pure".into(),
+                "--root".into(),
+                ".".into(),
+            ],
+            "--expect-sha256 must be sha256: followed by 64 lowercase hex digits",
+        ),
+        (
+            vec![
+                "--expect-sha256".into(),
+                good.clone(),
+                "--expect-sha256".into(),
+                good.clone(),
+                "--profile".into(),
+                "pure".into(),
+                "--root".into(),
+                ".".into(),
+            ],
+            "duplicate run option '--expect-sha256'",
+        ),
+        (
+            vec![
+                "--expect-sha256".into(),
+                good.clone(),
+                "--profile".into(),
+                "pure".into(),
+                "--root".into(),
+                ".".into(),
+                "--max-steps".into(),
+                "5".into(),
+            ],
+            "--max-steps requires --envelope trusted-compiler",
+        ),
+    ];
+    for (args, message) in cases {
+        let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+            .arg("run-smc")
+            .arg(&missing)
+            .args(&args)
+            .current_dir(&dir)
+            .output()
+            .expect("run-smc");
+        assert_exit(&output, 1);
+        assert!(
+            stderr_of(&output).contains(message),
+            "{args:?}: {}",
+            stderr_of(&output)
+        );
+        assert!(metrics_lines(&output).is_empty());
+    }
+    // `smc run` does not accept --expect-sha256
+    let program = write_program(&dir, "ok.sm", PURE_OK);
+    let output = smc_run(&dir, &program, "pure", &["--expect-sha256", &good], &[]);
+    assert_exit(&output, 1);
+    assert!(stderr_of(&output).contains("unknown run option '--expect-sha256'"));
 }
