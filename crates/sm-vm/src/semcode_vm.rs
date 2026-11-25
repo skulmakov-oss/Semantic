@@ -1897,6 +1897,7 @@ fn scan_function_bytecode(
                 pc: cur - f.instr_start,
                 opcode: None,
                 u16s: Vec::new(),
+                writes_dst: true,
             });
         }
         let opcode = Opcode::from_byte(read_u8(&f.code, &mut cur).map_err(map_format_err)?)
@@ -2070,7 +2071,10 @@ fn scan_function_bytecode(
                 let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
             }
             Opcode::ClosureCall => {
-                let _ = read_u8(&f.code, &mut cur).map_err(map_format_err)?;
+                let has_dst = read_u8(&f.code, &mut cur).map_err(map_format_err)? != 0;
+                if let Some(last) = operands.as_deref_mut().and_then(|ops| ops.last_mut()) {
+                    last.writes_dst = has_dst;
+                }
                 let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
@@ -2133,7 +2137,10 @@ fn scan_function_bytecode(
                 jumps.push(addr);
             }
             Opcode::Call => {
-                let _ = read_u8(&f.code, &mut cur).map_err(map_format_err)?;
+                let has_dst = read_u8(&f.code, &mut cur).map_err(map_format_err)? != 0;
+                if let Some(last) = operands.as_deref_mut().and_then(|ops| ops.last_mut()) {
+                    last.writes_dst = has_dst;
+                }
                 let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let _ = read_u16_operand(&f.code, &mut cur, &mut operands)?;
                 let argc = read_u16_operand(&f.code, &mut cur, &mut operands)? as usize;
@@ -2233,6 +2240,9 @@ struct InstrOperands {
     pc: usize,
     opcode: Option<Opcode>,
     u16s: Vec<u16>,
+    /// False only for a `CALL` / `CLOSURE_CALL` whose `has_dst` flag is 0: its
+    /// encoded `dst` field is not written, so liveness must not count it as a def.
+    writes_dst: bool,
 }
 
 fn read_u16_operand(
@@ -4211,6 +4221,12 @@ impl ConsumptionPlan {
 }
 
 /// SHF-P2: Instruction register destination and source operand classification for liveness analysis.
+/// `instruction_defs_uses` for a scanned instruction: a call without a destination defines nothing.
+fn operand_defs_uses(opcode: Opcode, ins: &InstrOperands) -> (Option<u16>, Vec<u16>) {
+    let (def, uses) = instruction_defs_uses(opcode, &ins.u16s);
+    (def.filter(|_| ins.writes_dst), uses)
+}
+
 fn instruction_defs_uses(opcode: Opcode, u16s: &[u16]) -> (Option<u16>, Vec<u16>) {
     match opcode {
         // Loads with literal or empty map: dst = u16s[0], uses = []
@@ -4625,7 +4641,7 @@ fn compute_register_liveness(f: &FunctionBytecode) -> HashMap<usize, Vec<u16>> {
     let mut instr_uses = Vec::with_capacity(n);
     for ins in &instrs {
         let (d, u) = if let Some(op) = ins.opcode {
-            instruction_defs_uses(op, &ins.u16s)
+            operand_defs_uses(op, ins)
         } else {
             (None, Vec::new())
         };
@@ -4759,7 +4775,7 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             }
             // If r_src is defined by something else or if a barrier occurs, stop
             let (d, _) = if let Some(op) = prev_ins.opcode {
-                instruction_defs_uses(op, &prev_ins.u16s)
+                operand_defs_uses(op, prev_ins)
             } else {
                 (None, Vec::new())
             };
@@ -4876,7 +4892,7 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
                 let mut redefined_before_i = false;
                 for mid_ins in &instrs[(def_idx + 1)..i] {
                     let (d, _) = if let Some(op) = mid_ins.opcode {
-                        instruction_defs_uses(op, &mid_ins.u16s)
+                        operand_defs_uses(op, mid_ins)
                     } else {
                         (None, Vec::new())
                     };
@@ -4901,7 +4917,7 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             let mut def_safe = true;
             for scan_ins in instrs.iter().skip(def_idx + 1) {
                 let (scan_d, scan_u) = if let Some(op) = scan_ins.opcode {
-                    instruction_defs_uses(op, &scan_ins.u16s)
+                    operand_defs_uses(op, scan_ins)
                 } else {
                     (None, Vec::new())
                 };
@@ -5039,7 +5055,7 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             for (b_idx, b) in blocks.iter().enumerate() {
                 for ins in &instrs[b.start..b.end] {
                     let (d, u) = if let Some(op) = ins.opcode {
-                        instruction_defs_uses(op, &ins.u16s)
+                        operand_defs_uses(op, ins)
                     } else {
                         (None, Vec::new())
                     };
@@ -5086,7 +5102,7 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
             let mut live_at_si = block_out[si_block].clone();
             for idx in (si + 1..blocks[si_block].end).rev() {
                 let (d, u) = if let Some(op) = instrs[idx].opcode {
-                    instruction_defs_uses(op, &instrs[idx].u16s)
+                    operand_defs_uses(op, &instrs[idx])
                 } else {
                     (None, Vec::new())
                 };
@@ -5108,7 +5124,7 @@ fn plan_record_field_consumption(f: &FunctionBytecode) -> HashMap<usize, FieldMo
                     // reads field_idx or uses reg in an unproven way, even if another branch redefined it!
                     for scan_ins in instrs.iter().skip(si + 1) {
                         let (_, scan_u) = if let Some(op) = scan_ins.opcode {
-                            instruction_defs_uses(op, &scan_ins.u16s)
+                            operand_defs_uses(op, scan_ins)
                         } else {
                             (None, Vec::new())
                         };
@@ -9951,6 +9967,44 @@ mod tests {
             ownership_events: Vec::new(),
             params,
         }
+    }
+
+    /// A `CALL`/`CLOSURE_CALL` without a destination (`has_dst = 0`) does not
+    /// write its encoded `dst` field. The SHF-P2 / E1 backward liveness must
+    /// not treat that field as a definition: otherwise a register that is
+    /// still live across the call (here `r0`, read again after the call) is
+    /// judged dead at its last use before the call and cleared, and the
+    /// verified program fails at run time with "read uninitialized reg r0".
+    /// The verifier models the flag correctly and admits the program; the
+    /// VM must run it to completion.
+    #[test]
+    fn call_without_destination_does_not_kill_a_live_register() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("helper", None, vec![]),
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::Assert { cond: 0 },
+                    IrInstr::Call {
+                        dst: None,
+                        name: "helper".to_string(),
+                        args: vec![],
+                    },
+                    IrInstr::Assert { cond: 0 },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+                params: vec![],
+            },
+        ]);
+        verify_semcode_token(&bytes).expect("the verifier admits: r0 is defined on every path");
+        run_semcode_with_entry_and_config(
+            &bytes,
+            "main",
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        )
+        .expect("a CALL without a destination must not clear a live register");
     }
 
     /// B12.1 + B13 cross-layer defense, updated for #1756 (FA-07-016): a
