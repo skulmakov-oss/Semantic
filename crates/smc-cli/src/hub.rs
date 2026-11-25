@@ -200,8 +200,10 @@ fn validate_output_path(path: &Path) -> Result<(), String> {
 /// project directory before the adapter's own check ever runs. A
 /// directory that does not exist yet is not a violation.
 fn check_dir_is_not_a_symlink(dir: &Path) -> Result<(), String> {
-    let mut probe = PathBuf::new();
-    for component in dir.components() {
+    // Start below a verified OS-owned alias (macOS /tmp, /var, /etc); every
+    // remaining component is still checked. See platform_paths.
+    let (mut probe, skip) = crate::platform_paths::symlink_walk_start(dir);
+    for component in dir.components().skip(skip) {
         probe.push(component);
         match fs::symlink_metadata(&probe) {
             Ok(meta) if meta.file_type().is_symlink() => {
@@ -1382,6 +1384,22 @@ mod tests {
                 .is_some_and(|stem| !stem.is_empty() && stem.chars().all(|c| c.is_ascii_hexdigit())),
             "marker filename must be a plain hex stem + .json, got {file_name:?}"
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn check_dir_is_not_a_symlink_accepts_os_owned_alias_and_rejects_links_below_it() {
+        use std::os::unix::fs::symlink;
+        let dir =
+            std::path::Path::new("/tmp").join(format!("smc_hub_os_alias_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("real")).unwrap();
+        assert!(check_dir_is_not_a_symlink(&dir.join(".semantic/hub")).is_ok());
+        assert!(check_dir_is_not_a_symlink(&dir.join("real")).is_ok());
+        let _ = std::fs::remove_file(dir.join("link"));
+        symlink(dir.join("real"), dir.join("link")).unwrap();
+        let err = check_dir_is_not_a_symlink(&dir.join("link/.semantic/hub")).unwrap_err();
+        assert!(err.starts_with("ScopedStorageViolation"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
