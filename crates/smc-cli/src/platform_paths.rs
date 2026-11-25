@@ -137,7 +137,7 @@ mod tests {
             "/tm/a.sm",
             "/TMP/a.sm",
             "/private/tmp/a.sm",
-            "/Users/tmp/a.sm",
+            "/opt/tmp/a.sm",
             "tmp/a.sm",
             "/../tmp/a.sm",
             "/",
@@ -239,9 +239,6 @@ mod tests {
             assert_eq!(prefix, Path::new("/private").join(name));
             assert_eq!(consumed, 2);
         }
-        assert_eq!(
-            symlink_walk_start(Path::new("/Users/x")),
-            (PathBuf::new(), 0)
-        );
+        assert_eq!(symlink_walk_start(Path::new("/opt/x")), (PathBuf::new(), 0));
     }
 }
