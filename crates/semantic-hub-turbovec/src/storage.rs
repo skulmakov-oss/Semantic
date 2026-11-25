@@ -152,8 +152,10 @@ impl ScopedStorage {
     /// is not a violation -- it will be a real directory once
     /// `create_dir_all` runs.
     fn check_root_is_not_a_symlink(&self) -> Result<(), ScopedStorageError> {
-        let mut probe = PathBuf::new();
-        for component in self.root.components() {
+        // Start below a verified OS-owned alias (macOS /tmp, /var, /etc);
+        // every remaining component is still checked. See os_alias_walk_start.
+        let (mut probe, skip) = os_alias_walk_start(&self.root);
+        for component in self.root.components().skip(skip) {
             probe.push(component);
             match std::fs::symlink_metadata(&probe) {
                 Ok(meta) if meta.file_type().is_symlink() => {
@@ -270,6 +272,163 @@ impl ScopedStorage {
                     .count()
             })
             .unwrap_or(0)
+    }
+}
+
+/// Where a component-by-component symlink walk starts: the verified physical
+/// prefix of a macOS OS-owned alias and the number of leading components it
+/// replaces, or `(PathBuf::new(), 0)`.
+///
+/// On macOS `/tmp`, `/var` and `/etc` are OS-owned symlinks to
+/// `/private/*` and the per-user temp directory (`/var/folders/...`) is
+/// always reached through one, so a root under it was always
+/// `RootIsSymlink`. Only exactly those names, only as the first component of
+/// an absolute path, and only after verifying that the alias is a uid-0
+/// symlink with literal target `private/<name>` and that `/private` and
+/// `/private/<name>` are real uid-0 directories. Nothing is canonicalized and
+/// every later component is still checked. This is the twin of
+/// `smc_cli::platform_paths` (the crates share no dependency); keep them
+/// identical.
+fn os_alias_walk_start(path: &Path) -> (PathBuf, usize) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(start) = verified_os_alias_start(Path::new("/"), path, 0) {
+            return start;
+        }
+    }
+    let _ = path;
+    (PathBuf::new(), 0)
+}
+
+#[cfg(unix)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const OS_OWNED_ALIASES: [&str; 3] = ["tmp", "var", "etc"];
+
+#[cfg(unix)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn verified_os_alias_start(
+    fs_root: &Path,
+    path: &Path,
+    owner_uid: u32,
+) -> Option<(PathBuf, usize)> {
+    use std::os::unix::fs::MetadataExt;
+    use std::path::Component;
+
+    let mut components = path.components();
+    if components.next() != Some(Component::RootDir) {
+        return None;
+    }
+    let name = match components.next() {
+        Some(Component::Normal(name)) => name.to_str()?,
+        _ => return None,
+    };
+    if !OS_OWNED_ALIASES.contains(&name) {
+        return None;
+    }
+    let alias = fs_root.join(name);
+    let alias_meta = std::fs::symlink_metadata(&alias).ok()?;
+    if !alias_meta.file_type().is_symlink() || alias_meta.uid() != owner_uid {
+        return None;
+    }
+    if std::fs::read_link(&alias).ok()? != Path::new("private").join(name) {
+        return None;
+    }
+    let private = fs_root.join("private");
+    let private_meta = std::fs::symlink_metadata(&private).ok()?;
+    if !private_meta.file_type().is_dir() || private_meta.uid() != owner_uid {
+        return None;
+    }
+    let physical = private.join(name);
+    let physical_meta = std::fs::symlink_metadata(&physical).ok()?;
+    if !physical_meta.file_type().is_dir() || physical_meta.uid() != owner_uid {
+        return None;
+    }
+    Some((physical, 2))
+}
+
+#[cfg(all(test, unix))]
+mod os_alias_tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, MetadataExt};
+
+    fn fixture_root(label: &str) -> (PathBuf, u32) {
+        let root = std::env::temp_dir().join(format!(
+            "hub_turbovec_os_alias_{label}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        for name in OS_OWNED_ALIASES {
+            std::fs::create_dir_all(root.join("private").join(name)).unwrap();
+            symlink(Path::new("private").join(name), root.join(name)).unwrap();
+        }
+        let uid = std::fs::metadata(&root).unwrap().uid();
+        (root, uid)
+    }
+
+    #[test]
+    fn exact_alias_accepted_and_lookalikes_rejected() {
+        let (root, uid) = fixture_root("names");
+        assert_eq!(
+            verified_os_alias_start(&root, Path::new("/var/folders/x"), uid),
+            Some((root.join("private/var"), 2))
+        );
+        for path in [
+            "/varx/a",
+            "/private/var/a",
+            "var/a",
+            "/Users/var/a",
+            "/../var/a",
+        ] {
+            assert_eq!(
+                verified_os_alias_start(&root, Path::new(path), uid),
+                None,
+                "{path}"
+            );
+        }
+        assert_eq!(
+            verified_os_alias_start(&root, Path::new("/var/a"), uid.wrapping_add(1)),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn retargeted_or_substituted_alias_is_rejected() {
+        let (root, uid) = fixture_root("retarget");
+        std::fs::create_dir_all(root.join("elsewhere")).unwrap();
+        std::fs::remove_file(root.join("tmp")).unwrap();
+        symlink("elsewhere", root.join("tmp")).unwrap();
+        assert_eq!(
+            verified_os_alias_start(&root, Path::new("/tmp/a"), uid),
+            None
+        );
+        std::fs::remove_dir_all(root.join("private/var")).unwrap();
+        symlink(root.join("elsewhere"), root.join("private/var")).unwrap();
+        assert_eq!(
+            verified_os_alias_start(&root, Path::new("/var/a"), uid),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn scoped_root_under_tmpdir_is_admitted_but_links_below_it_are_not() {
+        let base = std::env::temp_dir().join(format!("hub_tv_alias_root_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("real")).unwrap();
+        assert!(
+            ScopedStorage::new(base.join("real/.semantic/hub/vector.turbovec"))
+                .ensure_root_checked()
+                .is_ok()
+        );
+        symlink(base.join("real"), base.join("link")).unwrap();
+        assert_eq!(
+            ScopedStorage::new(base.join("link/.semantic/hub/vector.turbovec"))
+                .ensure_root_checked(),
+            Err(ScopedStorageError::RootIsSymlink)
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 
