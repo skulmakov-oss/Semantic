@@ -6,7 +6,7 @@ task:
     SEMANTIC-CROSS-PLATFORM-HARDENING-GO-05 only. Hold the trusted envelope in
     governance_migration for exactly one control-plane payload, the new
     workflow .github/workflows/native-matrix.yml, followed by exactly one
-    envelope-only transition: either the successor (blob 14b1955b80099b614490f39e1705d0dc31bcc4cc) that
+    envelope-only transition: either the successor (blob 0de4a0786bdd4603a00db447ebfab2fe8b83840d) that
     restores the unchanged Foundation envelope plus
     crates/semantic-hub-turbovec/src/storage.rs and
     crates/prom-ui-backend-native/tests/native_backend_winit_event_loop_creation_contract.rs
@@ -16,13 +16,13 @@ task:
   supersedes: SHF-FOUNDATION-DELIVERY-STABLE
   issues: [1910]
   must_remain_open: [1910]
-  base_sha: 30b45572780812b42603976a9520d7ece6acdea0
+  base_sha: dd8682d5a37a8ed9a9a0dfdac251ddce90eec133
   authorized_by: >-
     Repository owner authorization SEMANTIC-CROSS-PLATFORM-HARDENING-GO-05
     (2026-11-25) permits preparation only. Installing this envelope requires a
     separate explicit OWNER EXECUTION GO naming this exact blob, the trusted
-    base 30b45572780812b42603976a9520d7ece6acdea0, the successor blob
-    14b1955b80099b614490f39e1705d0dc31bcc4cc and the recovery blob 055cc127697fd5802e491f594b0f8f2ac6fd5080.
+    base dd8682d5a37a8ed9a9a0dfdac251ddce90eec133, the successor blob
+    0de4a0786bdd4603a00db447ebfab2fe8b83840d and the recovery blob 055cc127697fd5802e491f594b0f8f2ac6fd5080.
 
 intent:
   summary: >-
@@ -89,7 +89,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: 30b45572780812b42603976a9520d7ece6acdea0
+  base_sha: dd8682d5a37a8ed9a9a0dfdac251ddce90eec133
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
