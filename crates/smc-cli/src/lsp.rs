@@ -750,7 +750,17 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
 
 /// The `file:` URI of an absolute path, percent-encoding every byte outside
 /// the RFC 3986 unreserved set and `/`.
+///
+/// On Windows, an existing drive-letter path spelled with an 8.3 short name
+/// (a component containing `~`) is first expanded to its long spelling, so the
+/// short and long spellings of one file map to one URI. This is path identity
+/// only, never authorization, and it never resolves links: see
+/// [`windows_long_spelling`].
 pub fn path_to_uri(path: &Path) -> String {
+    #[cfg(windows)]
+    let long = windows_long_spelling(path);
+    #[cfg(windows)]
+    let path = long.as_deref().unwrap_or(path);
     let mut text = path.to_string_lossy().replace('\\', "/");
     if cfg!(windows) {
         if let Some(rest) = text.strip_prefix("//?/") {
@@ -772,6 +782,55 @@ pub fn path_to_uri(path: &Path) -> String {
         }
     }
     out
+}
+
+/// The long spelling of an existing absolute drive-letter path that contains
+/// an 8.3 short-name component, or `None` to keep the path exactly as given.
+///
+/// Expansion uses `canonicalize`, which would also resolve symlinks and
+/// junctions; it is therefore applied only when no component of the path is a
+/// symlink or reparse point, so the result differs from the input only by
+/// short-name expansion (and the on-disk case of expanded components). The
+/// caller's drive-letter spelling is kept. UNC, verbatim, relative,
+/// non-existent and link-bearing paths are returned unchanged (`None`).
+#[cfg(windows)]
+fn windows_long_spelling(path: &Path) -> Option<PathBuf> {
+    use std::path::{Component, Prefix};
+
+    let mut components = path.components();
+    let drive = match components.next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(letter) => letter,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if !matches!(components.next(), Some(Component::RootDir)) {
+        return None;
+    }
+    if !path
+        .components()
+        .any(|c| matches!(c, Component::Normal(name) if name.to_string_lossy().contains('~')))
+    {
+        return None;
+    }
+    let mut probe = PathBuf::new();
+    for component in path.components() {
+        probe.push(component.as_os_str());
+        if matches!(component, Component::Normal(_))
+            && crate::package_manifest::path_is_reparse(&probe).ok()?
+        {
+            return None;
+        }
+    }
+    let canonical = std::fs::canonicalize(path).ok()?;
+    let text = canonical.to_str()?;
+    let rest = text.strip_prefix(r"\\?\")?;
+    let bytes = rest.as_bytes();
+    if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || &bytes[1..3] != br":\" {
+        return None;
+    }
+    Some(PathBuf::from(format!("{}{}", drive as char, &rest[1..])))
 }
 
 fn percent_decode(text: &str) -> Option<String> {
@@ -863,6 +922,113 @@ mod tests {
         let canonical = file.canonicalize().unwrap();
         assert_eq!(path_to_uri(&file), path_to_uri(&canonical));
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    /// The 8.3 short spelling of an existing path, as reported by the OS
+    /// (`cmd` %~s expansion). Returns the input unchanged when the
+    /// volume does not generate short names.
+    #[cfg(windows)]
+    fn short_spelling(path: &Path) -> PathBuf {
+        use std::os::windows::process::CommandExt;
+        let out = std::process::Command::new("cmd")
+            .raw_arg(format!(
+                "/d /c for %I in (\"{}\") do @echo %~sI",
+                path.display()
+            ))
+            .output()
+            .expect("cmd short path");
+        PathBuf::from(String::from_utf8_lossy(&out.stdout).trim())
+    }
+
+    #[cfg(windows)]
+    fn has_short_component(path: &Path) -> bool {
+        path.components()
+            .any(|c| c.as_os_str().to_string_lossy().contains('~'))
+    }
+
+    /// An 8.3 short spelling and the long spelling of the same existing file
+    /// must map to one URI (identity only; no authorization is involved).
+    #[test]
+    #[cfg(windows)]
+    fn windows_short_and_long_spelling_produce_identical_uri() {
+        let dir = mk_temp_dir("lsp_short_name_long_directory_component");
+        let file = dir.join("module_with_long_name.sm");
+        std::fs::write(&file, "mod test;").unwrap();
+        let short = short_spelling(&file);
+        if !has_short_component(&short) {
+            // Reported by the qualification as SKIPPED, never as a pass.
+            eprintln!("SKIPPED-8DOT3-UNAVAILABLE: {}", short.display());
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        assert_ne!(short, file, "fixture must use a different spelling");
+        assert_eq!(path_to_uri(&short), path_to_uri(&file));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Non-ASCII components keep their percent-encoding after expansion.
+    #[test]
+    #[cfg(windows)]
+    fn windows_short_spelling_of_non_ascii_path_keeps_percent_encoding() {
+        let dir = mk_temp_dir("lsp_short_name_non_ascii_каталог_long");
+        let file = dir.join("модуль.sm");
+        std::fs::write(&file, "mod test;").unwrap();
+        let short = short_spelling(&file);
+        if !has_short_component(&short) {
+            eprintln!("SKIPPED-8DOT3-UNAVAILABLE: {}", short.display());
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let uri = path_to_uri(&short);
+        assert_eq!(uri, path_to_uri(&file));
+        assert!(
+            uri.contains("%D0%BC%D0%BE%D0%B4%D1%83%D0%BB%D1%8C.sm"),
+            "{uri}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A path through a junction is never resolved to its target: URI
+    /// identity must not follow links.
+    #[test]
+    #[cfg(windows)]
+    fn windows_junction_component_is_not_resolved_in_uri() {
+        use std::os::windows::process::CommandExt;
+        let dir = mk_temp_dir("lsp_junction_identity");
+        let target = dir.join("real_target_directory");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("m.sm"), "mod test;").unwrap();
+        let link = dir.join("JUNCTI~9");
+        let status = std::process::Command::new("cmd")
+            .raw_arg(format!(
+                "/d /c mklink /J \"{}\" \"{}\" >NUL",
+                link.display(),
+                target.display()
+            ))
+            .status()
+            .expect("mklink");
+        assert!(status.success(), "junction fixture");
+        let through_link = link.join("m.sm");
+        let uri = path_to_uri(&through_link);
+        assert!(uri.contains("/JUNCTI~9/m.sm"), "{uri}");
+        assert!(!uri.contains("real_target_directory"), "{uri}");
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Non-existent, UNC and drive-relative spellings are left exactly as before.
+    #[test]
+    #[cfg(windows)]
+    fn windows_uri_unchanged_for_nonexistent_unc_and_relative_paths() {
+        assert_eq!(
+            path_to_uri(Path::new(r"C:\NONEXI~1\unsaved.sm")),
+            "file:///C:/NONEXI~1/unsaved.sm"
+        );
+        assert_eq!(
+            path_to_uri(Path::new(r"\\server\share\PROGRA~1\m.sm")),
+            "file:////server/share/PROGRA~1/m.sm"
+        );
+        assert_eq!(path_to_uri(Path::new(r"REL~1\m.sm")), "file:///REL~1/m.sm");
     }
 
     #[test]
