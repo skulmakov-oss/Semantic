@@ -37,6 +37,7 @@ mod language_surface;
 pub mod lsp;
 #[cfg(feature = "std")]
 mod package_manifest;
+mod platform_paths;
 #[cfg(feature = "std")]
 mod schema_versioning;
 #[cfg(feature = "std")]
