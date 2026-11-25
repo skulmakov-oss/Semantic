@@ -754,8 +754,8 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
 /// On Windows, an existing drive-letter path spelled with an 8.3 short name
 /// (a component containing `~`) is first expanded to its long spelling, so the
 /// short and long spellings of one file map to one URI. This is path identity
-/// only, never authorization, and it never resolves links: see
-/// [`windows_long_spelling`].
+/// only, never authorization; links present when the path is checked are not
+/// resolved (see [`windows_long_spelling`] for the concurrent-swap caveat).
 pub fn path_to_uri(path: &Path) -> String {
     #[cfg(windows)]
     let long = windows_long_spelling(path);
@@ -787,12 +787,16 @@ pub fn path_to_uri(path: &Path) -> String {
 /// The long spelling of an existing absolute drive-letter path that contains
 /// an 8.3 short-name component, or `None` to keep the path exactly as given.
 ///
-/// Expansion uses `canonicalize`, which would also resolve symlinks and
-/// junctions; it is therefore applied only when no component of the path is a
-/// symlink or reparse point, so the result differs from the input only by
-/// short-name expansion (and the on-disk case of expanded components). The
-/// caller's drive-letter spelling is kept. UNC, verbatim, relative,
-/// non-existent and link-bearing paths are returned unchanged (`None`).
+/// Expansion uses `canonicalize`, which also resolves symlinks and junctions.
+/// It is therefore applied only when no component of the path is a symlink
+/// or reparse point at the time of the check, so the result normally differs
+/// from the input only by short-name expansion (and the on-disk case of
+/// expanded components). The check and `canonicalize` are separate path
+/// lookups: a component replaced by a junction concurrently, between the two,
+/// can still be followed. This function only chooses a URI spelling (identity);
+/// no admission or authorization decision uses it. The caller's drive-letter
+/// spelling is kept. UNC, verbatim, relative, non-existent and link-bearing
+/// paths are returned unchanged (`None`).
 #[cfg(windows)]
 fn windows_long_spelling(path: &Path) -> Option<PathBuf> {
     use std::path::{Component, Prefix};
