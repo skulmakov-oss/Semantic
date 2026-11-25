@@ -13611,6 +13611,111 @@ mod tests {
         }
 
         #[test]
+        fn record_snapshot_read_after_call_without_destination_blocks_field_move() {
+            // A snapshot register (r0 = LOAD_VAR s) is read for field 0 after the
+            // move site. A builtin CALL without destination sits between the move
+            // site and the store; its encoded dst field is r0. It writes nothing, so
+            // it must not end r0's lifetime for the E2 forward scan: field 0 of s
+            // must not be moved, and execution must match the unplanned VM.
+            // Without the operand_defs_uses fix the E1 clearing empties r0 at the
+            // call and the planned run diverges (read uninitialized reg r0).
+            use IrInstr as I;
+            let instrs = vec![
+                I::MakeSequence {
+                    dst: 10,
+                    items: vec![],
+                },
+                I::LoadI32 { dst: 11, val: 1 },
+                I::MakeRecord {
+                    dst: 12,
+                    name: "Lx".to_string(),
+                    items: vec![10, 11],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 12,
+                    activation_site: None,
+                    write_site: None,
+                },
+                I::LoadVar {
+                    dst: 1,
+                    name: "s".to_string(),
+                },
+                I::LoadVar {
+                    dst: 0,
+                    name: "s".to_string(),
+                },
+                I::RecordGet {
+                    dst: 2,
+                    src: 1,
+                    record_name: "Lx".to_string(),
+                    index: 0,
+                },
+                I::Call {
+                    dst: None,
+                    name: "bytes_empty".to_string(),
+                    args: vec![],
+                },
+                I::LoadI32 { dst: 3, val: 7 },
+                I::SequencePush {
+                    dst: 4,
+                    seq: 2,
+                    val: 3,
+                },
+                I::RecordGet {
+                    dst: 5,
+                    src: 1,
+                    record_name: "Lx".to_string(),
+                    index: 1,
+                },
+                I::MakeRecord {
+                    dst: 6,
+                    name: "Lx".to_string(),
+                    items: vec![4, 5],
+                    write_site: None,
+                },
+                I::StoreVar {
+                    name: "s".to_string(),
+                    src: 6,
+                    activation_site: None,
+                    write_site: None,
+                },
+                // The snapshot still holds the original, empty sequence.
+                I::RecordGet {
+                    dst: 7,
+                    src: 0,
+                    record_name: "Lx".to_string(),
+                    index: 0,
+                },
+                I::SequenceLen { dst: 8, src: 7 },
+                I::LoadI32 { dst: 9, val: 0 },
+                I::CmpEq {
+                    dst: 13,
+                    lhs: 8,
+                    rhs: 9,
+                },
+                I::Assert { cond: 13 },
+                I::Ret { src: None },
+            ];
+            let bytes = ir_main(instrs).expect("emit");
+            let program = parse_semcode(&bytes).expect("parse");
+            let plan = ConsumptionPlan::build(&program.functions);
+            // Field 1 may still be moved (only field 0 is observed through r0).
+            let moves_field_0 = plan
+                .field_moves
+                .get("main")
+                .is_some_and(|sites| sites.values().any(|s| s.field_idx == 0));
+            assert!(
+                !moves_field_0,
+                "the snapshot r0 reads field 0 after the move site: field 0 must not be moved"
+            );
+            let planned = run_with(&bytes, config(100), true);
+            assert_eq!(planned, run_with(&bytes, config(100), false));
+            assert_eq!(planned.0, Ok(()));
+        }
+
+        #[test]
         fn false_positive_reaching_definition_premature_break_regression() {
             // Regression test for Argon review finding:
             // earliest_idx defines r7 from local s.
