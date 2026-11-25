@@ -10007,6 +10007,91 @@ mod tests {
         .expect("a CALL without a destination must not clear a live register");
     }
 
+    /// The same as `call_without_destination_does_not_kill_a_live_register`
+    /// for `CLOSURE_CALL`, whose `has_dst = 0` form also leaves `dst` unwritten.
+    #[test]
+    fn closure_call_without_destination_does_not_kill_a_live_register() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("closure_target", None, vec![CallableValueFamily::I32]),
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::LoadI32 { dst: 3, val: 5 },
+                    IrInstr::MakeClosure {
+                        dst: 1,
+                        name: "closure_target".to_string(),
+                        captures: vec![],
+                    },
+                    IrInstr::Assert { cond: 0 },
+                    IrInstr::ClosureCall {
+                        dst: None,
+                        closure: 1,
+                        arg: 3,
+                    },
+                    IrInstr::Assert { cond: 0 },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+                params: vec![],
+            },
+        ]);
+        verify_semcode_token(&bytes).expect("the verifier admits: r0 is defined on every path");
+        run_semcode_with_entry_and_config(
+            &bytes,
+            "main",
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        )
+        .expect("a CLOSURE_CALL without a destination must not clear a live register");
+    }
+
+    /// A builtin `CALL` without a destination returns to the same frame (no
+    /// frame push), so the post-instruction dead-operand clearing runs right
+    /// after it; it must not clear a register that is still live.
+    #[test]
+    fn builtin_call_without_destination_does_not_kill_a_live_register() {
+        let bytes = build_register_init_test_program(vec![IrFunction {
+            name: "main".to_string(),
+            instrs: vec![
+                IrInstr::LoadBool { dst: 0, val: true },
+                IrInstr::Assert { cond: 0 },
+                IrInstr::Call {
+                    dst: None,
+                    name: "bytes_empty".to_string(),
+                    args: vec![],
+                },
+                IrInstr::Assert { cond: 0 },
+                IrInstr::Ret { src: None },
+            ],
+            ownership_events: Vec::new(),
+            params: vec![],
+        }]);
+        verify_semcode_token(&bytes).expect("the verifier admits: r0 is defined on every path");
+        run_semcode_with_entry_and_config(
+            &bytes,
+            "main",
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        )
+        .expect("a builtin CALL without a destination must not clear a live register");
+    }
+
+    /// Control: only the destination flag decides whether a call defines its
+    /// `dst`; a call with a destination is still a definition for liveness.
+    #[test]
+    fn call_defines_its_destination_only_when_the_flag_is_set() {
+        let call = |writes_dst| InstrOperands {
+            pc: 0,
+            opcode: Some(Opcode::Call),
+            u16s: vec![4, 0, 1, 7],
+            writes_dst,
+        };
+        for op in [Opcode::Call, Opcode::ClosureCall] {
+            assert_eq!(operand_defs_uses(op, &call(true)).0, Some(4));
+            assert_eq!(operand_defs_uses(op, &call(false)).0, None);
+        }
+        assert_eq!(operand_defs_uses(Opcode::Call, &call(false)).1, vec![7]);
+    }
+
     /// B12.1 + B13 cross-layer defense, updated for #1756 (FA-07-016): a
     /// zero-arg entry reading `r0` with no preceding definition is now
     /// rejected by the verifier itself (`prove_definite_register_assignment`
