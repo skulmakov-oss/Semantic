@@ -115,6 +115,52 @@ fn lexical_absolute(path: &Path) -> Result<PathBuf, String> {
     Ok(normalized)
 }
 
+/// `path` (already lexically absolute) with its deepest existing ancestor
+/// resolved by the filesystem and the not-yet-existing remainder appended
+/// unchanged. Existence is probed without following links, so a dangling
+/// link is resolved (and fails) rather than skipped as "not yet created".
+fn resolve_through_existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
+    let mut existing = path.to_path_buf();
+    let mut tail = Vec::new();
+    while fs::symlink_metadata(&existing).is_err() {
+        match existing.file_name() {
+            Some(name) => {
+                tail.push(name.to_os_string());
+                existing.pop();
+            }
+            None => return Ok(path.to_path_buf()),
+        }
+    }
+    let mut resolved = fs::canonicalize(&existing)?;
+    for name in tail.iter().rev() {
+        resolved.push(name);
+    }
+    Ok(resolved)
+}
+
+/// Component-wise prefix test that also treats two names as equal when they
+/// match under Unicode case mapping (upper or lower). Case-insensitive
+/// filesystems (NTFS, default APFS, casefolded ext4) resolve a case variant
+/// of a not-yet-created directory to the same location, so the Hub data root
+/// must not be reachable through one. On a case-sensitive filesystem this
+/// rejects a few additional --out paths, never fewer.
+fn starts_with_ignoring_case(path: &Path, prefix: &Path) -> bool {
+    let mut components = path.components();
+    prefix.components().all(|want| {
+        components.next().is_some_and(|got| {
+            let (got, want) = (got.as_os_str(), want.as_os_str());
+            got == want
+                || match (got.to_str(), want.to_str()) {
+                    (Some(got), Some(want)) => {
+                        got.to_uppercase() == want.to_uppercase()
+                            || got.to_lowercase() == want.to_lowercase()
+                    }
+                    _ => false,
+                }
+        })
+    })
+}
+
 /// Reject a caller-selected output file that aliases Hub-owned state.
 /// `--out` is written only after execution, so allowing it to target
 /// `.semantic/hub/audit.log`, a pending marker, or a TurboVec artifact
@@ -128,7 +174,7 @@ fn validate_output_path(path: &Path) -> Result<(), String> {
             path.display()
         ));
     }
-    if output.starts_with(&hub_root) {
+    if starts_with_ignoring_case(&output, &hub_root) {
         return Err(format!(
             "ScopedStorageViolation: --out path '{}' is inside Hub-owned data root '{}'",
             path.display(),
@@ -136,51 +182,31 @@ fn validate_output_path(path: &Path) -> Result<(), String> {
         ));
     }
 
-    // Catch an existing symlink/alias whose lexical spelling is outside
-    // the root but whose resolved target is inside it.
-    if hub_root.exists() {
-        let resolved_root = fs::canonicalize(&hub_root).map_err(|e| {
-            format!(
-                "InternalHubFault: cannot resolve Hub-owned data root '{}': {e}",
-                hub_root.display()
-            )
-        })?;
-        let resolved_output = if output.exists() {
-            Some(fs::canonicalize(&output).map_err(|e| {
-                format!(
-                    "InvalidArguments: cannot resolve --out path '{}': {e}",
-                    path.display()
-                )
-            })?)
-        } else {
-            output
-                .parent()
-                .filter(|parent| parent.exists())
-                .map(|parent| {
-                    let file_name = output.file_name().ok_or_else(|| {
-                        format!(
-                            "InvalidArguments: --out path '{}' does not name a file",
-                            path.display()
-                        )
-                    })?;
-                    fs::canonicalize(parent)
-                        .map(|resolved| resolved.join(file_name))
-                        .map_err(|e| {
-                            format!(
-                                "InvalidArguments: cannot resolve --out parent '{}': {e}",
-                                parent.display()
-                            )
-                        })
-                })
-                .transpose()?
-        };
-        if resolved_output.is_some_and(|resolved| resolved.starts_with(&resolved_root)) {
-            return Err(format!(
-                "ScopedStorageViolation: --out path '{}' resolves inside Hub-owned data root '{}'",
-                path.display(),
-                hub_data_root().display()
-            ));
-        }
+    // Catch a link/alias whose lexical spelling is outside the root but whose
+    // resolved location is inside it. Both sides are resolved through their
+    // deepest existing ancestor, so this also holds before the Hub root (or
+    // the --out parent) has been created: a fresh project reached through a
+    // user symlink, a Windows junction or a macOS OS alias (/var ->
+    // /private/var) must not let --out land in Hub-owned state that the
+    // command itself creates.
+    let resolved_root = resolve_through_existing_ancestor(&hub_root).map_err(|e| {
+        format!(
+            "InternalHubFault: cannot resolve Hub-owned data root '{}': {e}",
+            hub_root.display()
+        )
+    })?;
+    let resolved_output = resolve_through_existing_ancestor(&output).map_err(|e| {
+        format!(
+            "InvalidArguments: cannot resolve --out path '{}': {e}",
+            path.display()
+        )
+    })?;
+    if starts_with_ignoring_case(&resolved_output, &resolved_root) {
+        return Err(format!(
+            "ScopedStorageViolation: --out path '{}' resolves inside Hub-owned data root '{}'",
+            path.display(),
+            hub_data_root().display()
+        ));
     }
     Ok(())
 }
@@ -1382,6 +1408,82 @@ mod tests {
                 .is_some_and(|stem| !stem.is_empty() && stem.chars().all(|c| c.is_ascii_hexdigit())),
             "marker filename must be a plain hex stem + .json, got {file_name:?}"
         );
+    }
+
+    /// Case-insensitive filesystems (NTFS, default APFS) resolve a case
+    /// variant of the not-yet-created Hub root to the same directory; such an
+    /// --out spelling must be rejected too, including Unicode letters whose
+    /// case mapping is ASCII (U+017F LATIN SMALL LETTER LONG S -> 'S').
+    #[test]
+    fn validate_output_path_rejects_case_variants_of_not_yet_created_hub_root() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(
+            !cwd.join(HUB_DATA_DIR).exists(),
+            "fixture requires that the test working directory has no Hub root"
+        );
+        for variant in [
+            ".SEMANTIC/HUB",
+            ".Semantic/hub",
+            ".semantic/HUB",
+            ".\u{17f}emantic/hub",
+        ] {
+            let out = cwd.join(variant).join("audit.log");
+            let err = validate_output_path(&out).unwrap_err();
+            assert!(
+                err.starts_with("ScopedStorageViolation"),
+                "{variant}: {err}"
+            );
+        }
+        // Control: a similarly named but different directory stays allowed.
+        assert!(validate_output_path(&cwd.join(".semantics/hub/audit.log")).is_ok());
+    }
+
+    /// The Hub root is relative to the process working directory. When it
+    /// does not exist yet, an --out path that spells the working directory
+    /// through a link (a user symlink, a Windows junction, or a macOS OS alias
+    /// such as /var -> /private/var) must still be recognized as inside it.
+    fn assert_out_through_cwd_alias_is_rejected(cwd_alias: &Path) {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(
+            !cwd.join(HUB_DATA_DIR).exists(),
+            "fixture requires that the test working directory has no Hub root"
+        );
+        let out = cwd_alias.join(HUB_DATA_DIR).join("audit.log");
+        let err = validate_output_path(&out).unwrap_err();
+        assert!(err.starts_with("ScopedStorageViolation"), "{err}");
+        // Control: a sibling file outside the Hub root stays allowed.
+        assert!(validate_output_path(&cwd_alias.join("hub-result.json")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_output_path_rejects_symlinked_spelling_of_not_yet_created_hub_root() {
+        let link =
+            std::env::temp_dir().join(format!("smc_hub_out_cwd_link_{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(std::env::current_dir().unwrap(), &link).unwrap();
+        assert_out_through_cwd_alias_is_rejected(&link);
+        let _ = std::fs::remove_file(&link);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validate_output_path_rejects_junction_spelling_of_not_yet_created_hub_root() {
+        use std::os::windows::process::CommandExt;
+        let link =
+            std::env::temp_dir().join(format!("smc_hub_out_cwd_junction_{}", std::process::id()));
+        let _ = std::fs::remove_dir(&link);
+        let status = std::process::Command::new("cmd")
+            .raw_arg(format!(
+                "/d /c mklink /J \"{}\" \"{}\" >NUL",
+                link.display(),
+                std::env::current_dir().unwrap().display()
+            ))
+            .status()
+            .expect("mklink");
+        assert!(status.success(), "junction fixture");
+        assert_out_through_cwd_alias_is_rejected(&link);
+        let _ = std::fs::remove_dir(&link);
     }
 
     #[test]
