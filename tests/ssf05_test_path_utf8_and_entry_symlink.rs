@@ -61,6 +61,27 @@ fn valid_utf8_test_paths_execute_in_normalized_lexical_order() {
     std::fs::remove_dir_all(root).expect("remove project");
 }
 
+/// Write a fixture whose file name is not valid UTF-8. Returns `false` only on
+/// macOS when the filesystem itself refuses such names (APFS/HFS+: `EILSEQ`,
+/// os error 92): no such test source can exist there, so the rejection under
+/// test is unreachable and the test reports `UNSUPPORTED-FS-NON-UTF8`
+/// (counted as unsupported, never as a pass). Every other platform, and every
+/// other error, keeps the full assertion.
+#[cfg(unix)]
+fn create_non_utf8_fixture(path: &std::path::Path, contents: &str) -> bool {
+    match std::fs::write(path, contents) {
+        Ok(()) => true,
+        Err(error) if cfg!(target_os = "macos") && error.raw_os_error() == Some(92) => {
+            eprintln!(
+                "UNSUPPORTED-FS-NON-UTF8: filesystem refuses non-UTF-8 name {:?}: {error}",
+                path
+            );
+            false
+        }
+        Err(error) => panic!("write non-utf8 fixture {:?}: {error}", path),
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn non_utf8_test_source_paths_reject_deterministically() {
@@ -73,16 +94,15 @@ fn non_utf8_test_source_paths_reject_deterministically() {
     // of rejecting them, leaving filesystem enumeration order to decide the outcome.
     let invalid_a = OsStr::from_bytes(&[0xffu8, b'a', b'.', b's', b'm']);
     let invalid_b = OsStr::from_bytes(&[0xfeu8, b'b', b'.', b's', b'm']);
-    std::fs::write(
-        root.join("tests").join(invalid_a),
-        "fn main() { assert(true); return; }\n",
-    )
-    .expect("write non-utf8 test a");
-    std::fs::write(
-        root.join("tests").join(invalid_b),
-        "fn main() { assert(true); return; }\n",
-    )
-    .expect("write non-utf8 test b");
+    for invalid in [invalid_a, invalid_b] {
+        if !create_non_utf8_fixture(
+            &root.join("tests").join(invalid),
+            "fn main() { assert(true); return; }\n",
+        ) {
+            std::fs::remove_dir_all(root).expect("remove project");
+            return;
+        }
+    }
     let root_arg = root.to_string_lossy().replace('\\', "/");
 
     let first = smc(&["test", &root_arg]);
