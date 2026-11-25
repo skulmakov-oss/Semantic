@@ -115,6 +115,29 @@ fn lexical_absolute(path: &Path) -> Result<PathBuf, String> {
     Ok(normalized)
 }
 
+/// `path` (already lexically absolute) with its deepest existing ancestor
+/// resolved by the filesystem and the not-yet-existing remainder appended
+/// unchanged. Existence is probed without following links, so a dangling
+/// link is resolved (and fails) rather than skipped as "not yet created".
+fn resolve_through_existing_ancestor(path: &Path) -> std::io::Result<PathBuf> {
+    let mut existing = path.to_path_buf();
+    let mut tail = Vec::new();
+    while fs::symlink_metadata(&existing).is_err() {
+        match existing.file_name() {
+            Some(name) => {
+                tail.push(name.to_os_string());
+                existing.pop();
+            }
+            None => return Ok(path.to_path_buf()),
+        }
+    }
+    let mut resolved = fs::canonicalize(&existing)?;
+    for name in tail.iter().rev() {
+        resolved.push(name);
+    }
+    Ok(resolved)
+}
+
 /// Reject a caller-selected output file that aliases Hub-owned state.
 /// `--out` is written only after execution, so allowing it to target
 /// `.semantic/hub/audit.log`, a pending marker, or a TurboVec artifact
@@ -136,51 +159,31 @@ fn validate_output_path(path: &Path) -> Result<(), String> {
         ));
     }
 
-    // Catch an existing symlink/alias whose lexical spelling is outside
-    // the root but whose resolved target is inside it.
-    if hub_root.exists() {
-        let resolved_root = fs::canonicalize(&hub_root).map_err(|e| {
-            format!(
-                "InternalHubFault: cannot resolve Hub-owned data root '{}': {e}",
-                hub_root.display()
-            )
-        })?;
-        let resolved_output = if output.exists() {
-            Some(fs::canonicalize(&output).map_err(|e| {
-                format!(
-                    "InvalidArguments: cannot resolve --out path '{}': {e}",
-                    path.display()
-                )
-            })?)
-        } else {
-            output
-                .parent()
-                .filter(|parent| parent.exists())
-                .map(|parent| {
-                    let file_name = output.file_name().ok_or_else(|| {
-                        format!(
-                            "InvalidArguments: --out path '{}' does not name a file",
-                            path.display()
-                        )
-                    })?;
-                    fs::canonicalize(parent)
-                        .map(|resolved| resolved.join(file_name))
-                        .map_err(|e| {
-                            format!(
-                                "InvalidArguments: cannot resolve --out parent '{}': {e}",
-                                parent.display()
-                            )
-                        })
-                })
-                .transpose()?
-        };
-        if resolved_output.is_some_and(|resolved| resolved.starts_with(&resolved_root)) {
-            return Err(format!(
-                "ScopedStorageViolation: --out path '{}' resolves inside Hub-owned data root '{}'",
-                path.display(),
-                hub_data_root().display()
-            ));
-        }
+    // Catch a link/alias whose lexical spelling is outside the root but whose
+    // resolved location is inside it. Both sides are resolved through their
+    // deepest existing ancestor, so this also holds before the Hub root (or
+    // the --out parent) has been created: a fresh project reached through a
+    // user symlink, a Windows junction or a macOS OS alias (/var ->
+    // /private/var) must not let --out land in Hub-owned state that the
+    // command itself creates.
+    let resolved_root = resolve_through_existing_ancestor(&hub_root).map_err(|e| {
+        format!(
+            "InternalHubFault: cannot resolve Hub-owned data root '{}': {e}",
+            hub_root.display()
+        )
+    })?;
+    let resolved_output = resolve_through_existing_ancestor(&output).map_err(|e| {
+        format!(
+            "InvalidArguments: cannot resolve --out path '{}': {e}",
+            path.display()
+        )
+    })?;
+    if resolved_output.starts_with(&resolved_root) {
+        return Err(format!(
+            "ScopedStorageViolation: --out path '{}' resolves inside Hub-owned data root '{}'",
+            path.display(),
+            hub_data_root().display()
+        ));
     }
     Ok(())
 }
