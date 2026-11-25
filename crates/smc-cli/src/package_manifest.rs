@@ -3432,6 +3432,27 @@ module_root src
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Write a fixture whose file name is not valid UTF-8. Returns `false` only
+    /// on macOS when the filesystem itself refuses such names (APFS/HFS+:
+    /// `EILSEQ`, os error 92): no such source can exist there, so the
+    /// rejection under test is unreachable and the test reports
+    /// `UNSUPPORTED-FS-NON-UTF8` (counted as unsupported, never as a pass).
+    /// Every other platform, and every other error, keeps the full assertion.
+    #[cfg(unix)]
+    fn create_non_utf8_fixture(path: &Path, contents: &str) -> bool {
+        match std::fs::write(path, contents) {
+            Ok(()) => true,
+            Err(error) if cfg!(target_os = "macos") && error.raw_os_error() == Some(92) => {
+                eprintln!(
+                    "UNSUPPORTED-FS-NON-UTF8: filesystem refuses non-UTF-8 name {:?}: {error}",
+                    path
+                );
+                false
+            }
+            Err(error) => panic!("write non-utf8 fixture {:?}: {error}", path),
+        }
+    }
+
     // A lossy relative-path conversion would let two distinct non-UTF-8 filenames
     // collapse onto the same fingerprint key, so renaming between them while keeping
     // file bytes unchanged would leave the content fingerprint unchanged too --
@@ -3454,8 +3475,10 @@ module_root src
         )
         .expect("write manifest");
         let invalid_name = OsStr::from_bytes(&[0xffu8, b'.', b's', b'm']);
-        std::fs::write(module_root.join(invalid_name), "fn main() { return; }\n")
-            .expect("write non-utf8 module");
+        if !create_non_utf8_fixture(&module_root.join(invalid_name), "fn main() { return; }\n") {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
 
         let err = package_content_fingerprint(&module_root, &manifest)
             .expect_err("non-UTF-8 module path must reject");
