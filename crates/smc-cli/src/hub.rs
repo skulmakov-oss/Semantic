@@ -1384,6 +1384,54 @@ mod tests {
         );
     }
 
+    /// The Hub root is relative to the process working directory. When it
+    /// does not exist yet, an --out path that spells the working directory
+    /// through a link (a user symlink, a Windows junction, or a macOS OS alias
+    /// such as /var -> /private/var) must still be recognized as inside it.
+    fn assert_out_through_cwd_alias_is_rejected(cwd_alias: &Path) {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(
+            !cwd.join(HUB_DATA_DIR).exists(),
+            "fixture requires that the test working directory has no Hub root"
+        );
+        let out = cwd_alias.join(HUB_DATA_DIR).join("audit.log");
+        let err = validate_output_path(&out).unwrap_err();
+        assert!(err.starts_with("ScopedStorageViolation"), "{err}");
+        // Control: a sibling file outside the Hub root stays allowed.
+        assert!(validate_output_path(&cwd_alias.join("hub-result.json")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_output_path_rejects_symlinked_spelling_of_not_yet_created_hub_root() {
+        let link =
+            std::env::temp_dir().join(format!("smc_hub_out_cwd_link_{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(std::env::current_dir().unwrap(), &link).unwrap();
+        assert_out_through_cwd_alias_is_rejected(&link);
+        let _ = std::fs::remove_file(&link);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validate_output_path_rejects_junction_spelling_of_not_yet_created_hub_root() {
+        use std::os::windows::process::CommandExt;
+        let link =
+            std::env::temp_dir().join(format!("smc_hub_out_cwd_junction_{}", std::process::id()));
+        let _ = std::fs::remove_dir(&link);
+        let status = std::process::Command::new("cmd")
+            .raw_arg(format!(
+                "/d /c mklink /J \"{}\" \"{}\" >NUL",
+                link.display(),
+                std::env::current_dir().unwrap().display()
+            ))
+            .status()
+            .expect("mklink");
+        assert!(status.success(), "junction fixture");
+        assert_out_through_cwd_alias_is_rejected(&link);
+        let _ = std::fs::remove_dir(&link);
+    }
+
     #[test]
     fn check_dir_is_not_a_symlink_accepts_a_real_or_not_yet_created_directory() {
         let dir = temp_hub_dir("symlink-check-real");
