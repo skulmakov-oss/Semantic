@@ -376,7 +376,7 @@ mod os_alias_tests {
             "/varx/a",
             "/private/var/a",
             "var/a",
-            "/Users/var/a",
+            "/opt/var/a",
             "/../var/a",
         ] {
             assert_eq!(
