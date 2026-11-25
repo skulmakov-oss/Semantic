@@ -74,7 +74,7 @@ Explore [canonical examples](examples/canonical/), the [example index](docs/exam
 | Execution | `sm-runtime-core`, `sm-vm` | Runtime vocabulary, quotas, deterministic verified execution |
 | CLI | `smc-cli` | Public commands and authorized host I/O |
 | Host boundary | `prom-*` | ABI, capability policy, gates, sessions, state, rules, audit |
-| Bootstrap compiler | [Semantic-Language](https://github.com/skulmakov-oss/Semantic-Language) | Future Semantic compiler source and bootstrap qualification |
+| Bootstrap compiler | [Semantic-Language](https://github.com/skulmakov-oss/Semantic-Language) | Compiler source `S` written in Semantic and bootstrap qualification |
 
 Language semantics, SemCode, verifier, VM, and PROMETHEUS authority remain in this repository. Semantic-Language consumes those contracts; it is not a second specification or a verifier/VM rewrite. The current executable source profile is called Rust-like in the specifications; Logos is a separate experimental declarative inspection profile, without that execution authority.
 
@@ -84,7 +84,7 @@ The legacy perimeter (`crates/ton618-core`, `src/bin/ton618_core.rs`, `ton618_le
 
 ## Current status
 
-Status snapshot: **2026-10-09**. Implementation, qualification, and publication are separate states; see the [public status model](docs/roadmap/public_status_model.md).
+Status snapshot: **2026-10-09**; self-hosting status updated **2026-11-25**. Implementation, qualification, and publication are separate states; see the [public status model](docs/roadmap/public_status_model.md).
 
 ### Implemented and qualified
 
@@ -96,11 +96,18 @@ Current `main` is development beyond the published release. Landing or passing t
 
 ### In progress
 
-The [Self-Hosting Foundation program (#1910)](https://github.com/skulmakov-oss/Semantic/issues/1910) is underway at the language-foundation stage. Its completed checkpoints and next implementation task are listed below. **The compiler written in Semantic has not started; Semantic is not self-hosted, and no C1/C2 fixed point has been qualified.**
+The [Self-Hosting Foundation program (#1910)](https://github.com/skulmakov-oss/Semantic/issues/1910) reached its self-hosting milestone on 2026-11-25. Under [Bootstrap Contract v4](https://github.com/skulmakov-oss/Semantic-Language/blob/main/docs/BOOTSTRAP_CONTRACT.md):
+
+- The compiler written in Semantic ([Semantic-Language](https://github.com/skulmakov-oss/Semantic-Language)) reaches a byte-identical fixed point: `C1 = C0(S)`, `C2 = C1(S)` and `C3 = C2(S)` are identical (339,746 bytes, SHA-256 `2bfd56e161c40c8f746b6fd6530560f55aa026df29e50a81b99ea5ee3da4e939`).
+- Every generation is admitted by `sm-verify` before it runs, and the stored compiler executes on `smc run-smc --expect-sha256` at `825deca4`.
+- **The Bootstrap Seal is validated, not independently reproduced or accepted.**
+- The verifier and VM remain Rust components.
+- SHF-17 (cross-platform qualification) is open.
+- The self-hosted compiler covers the bootstrap subset, not the full language.
 
 ### Planned
 
-Remaining compiler foundations include Bytes implementation, endian helpers and binary I/O, bit operations, compiler collections, executable generics, arenas/typed IDs, modules, diagnostics, and a Semantic-owned SemCode encoder. Lexer, parser, semantic analysis, lowering, emission, and bootstrap proof follow those prerequisites. See the [bootstrap roadmap](https://github.com/skulmakov-oss/Semantic-Language/blob/main/docs/ROADMAP.md).
+Remaining self-hosting work: independent reproduction and owner acceptance of the Bootstrap Seal, SHF-17 cross-platform qualification, and language coverage beyond the bootstrap subset. Open upstream foundation items remain tracked in [#1910](https://github.com/skulmakov-oss/Semantic/issues/1910). See the [bootstrap roadmap](https://github.com/skulmakov-oss/Semantic-Language/blob/main/docs/ROADMAP.md).
 
 Native UI, Workbench, and Semantic Studio are [retired from the active roadmap](docs/roadmap/ui_workbench_studio_retirement.md). Their historical implementation does not imply current qualification or planned promotion.
 
@@ -125,18 +132,19 @@ C1.smc == C2.smc   (frozen comparison rule: byte-equality-v1)
 
 Both C1 and C2 require verifier admission. Admitted C1 runs on the existing VM to produce C2; C2 is admitted and compared. The Bootstrap Seal additionally requires recorded provenance and independent reproduction. Fixed-point equality never bypasses verification, and Rust may continue to own verifier, VM, and host mechanics after the first self-hosting proof.
 
-The [C0 reference manifest](https://github.com/skulmakov-oss/Semantic-Language/blob/main/reference/semantic-reference.toml) still pins `89641da8237f4fcefb50cf1958a50e4d4003aea7`; new upstream SHF work does not silently repin C0 or inherit its qualification. The Stable Foundation report's release-candidate name **C1** is unrelated to the future bootstrap artifact **C1.smc**.
+The [C0 reference manifest](https://github.com/skulmakov-oss/Semantic-Language/blob/main/reference/semantic-reference.toml) pins `1d1e76c7509a03baa0133abaaa5819f5d32582b2`; new upstream SHF work does not silently repin C0 or inherit its qualification. The Stable Foundation report's release-candidate name **C1** is unrelated to the future bootstrap artifact **C1.smc**.
 
 | Checkpoint | Verified state | Evidence |
 | --- | --- | --- |
-| SHF-0 bootstrap protocol | Qualified / complete in Semantic-Language; compiler implementation not started | [Contract](https://github.com/skulmakov-oss/Semantic-Language/blob/main/bootstrap/contract.toml), [#11](https://github.com/skulmakov-oss/Semantic-Language/issues/11) |
+| SHF-0 bootstrap protocol | Qualified / complete in Semantic-Language (Bootstrap Contract v4 in force) | [Contract](https://github.com/skulmakov-oss/Semantic-Language/blob/main/bootstrap/contract.toml), [#11](https://github.com/skulmakov-oss/Semantic-Language/issues/11) |
 | SHF-1A / SHF-1B text contract and primitives | Complete; implementation and qualification landed on main | [Text contract](docs/spec/compiler_text_v0.md), [PR #2005](https://github.com/skulmakov-oss/Semantic/pull/2005) |
 | SHF-3A arithmetic / ordering | Complete; implementation and qualification landed on main; SHF-3B bit operations deferred | [u32 contract](docs/spec/compiler_u32_v0.md), [PR #2009](https://github.com/skulmakov-oss/Semantic/pull/2009) |
 | SHF-1C lexer probe / SHF-1 completion | Qualified and landed; a byte-scanning probe, not the SHF-10 compiler lexer | [Text qualification](docs/spec/compiler_text_v0.md#94-lexer-probe), [PR #2011](https://github.com/skulmakov-oss/Semantic/pull/2011), [#2010](https://github.com/skulmakov-oss/Semantic/issues/2010) |
 | SHF-2A1 Bytes contract | Complete and normative on main; contract only | [Bytes contract](docs/spec/compiler_bytes_v0.md), [PR #2013](https://github.com/skulmakov-oss/Semantic/pull/2013), [closeout #2014](https://github.com/skulmakov-oss/Semantic/pull/2014) |
 | SHF-2A2 Bytes implementation | Open next implementation task; not implemented on this main snapshot | [#2015](https://github.com/skulmakov-oss/Semantic/issues/2015) |
 | SHF-2B / SHF-2C, SHF-3B, SHF-9 / SHF-10 | Deferred / not started | [Bytes non-goals](docs/spec/compiler_bytes_v0.md#9-non-goals-and-deferred-capabilities), [#1910](https://github.com/skulmakov-oss/Semantic/issues/1910) |
-| SHF-11 through SHF-17 | Planned; no compiler implementation, bootstrap generations, or fixed-point proof yet | [Bootstrap roadmap](https://github.com/skulmakov-oss/Semantic-Language/blob/main/docs/ROADMAP.md) |
+| SHF-10 through SHF-16 (compiler, C0 builds C1, fixed point) | Implemented in Semantic-Language; `C1 = C2 = C3` byte-identical under Bootstrap Contract v4; Seal validated, not reproduced or accepted | [Semantic-Language README](https://github.com/skulmakov-oss/Semantic-Language#readme), [Bootstrap roadmap](https://github.com/skulmakov-oss/Semantic-Language/blob/main/docs/ROADMAP.md) |
+| SHF-17 cross-platform qualification | Open | [Bootstrap roadmap](https://github.com/skulmakov-oss/Semantic-Language/blob/main/docs/ROADMAP.md) |
 
 The text and u32 documents retain some pre-merge probe wording; the merged PR and closed checkpoint establish its landed state. Semantic-Language's overview also retains an older SHF-1 status. Upstream completion does not promote its frozen bootstrap subset: **BSF-101 remains CANDIDATE** in the bootstrap contract.
 
