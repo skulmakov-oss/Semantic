@@ -1,69 +1,56 @@
 task:
-  id: SHF-FOUNDATION-DELIVERY-STABLE
-  title: "Stable Foundation Engineering Authorization Boundary"
-  type: foundation_delivery
+  id: GO05-NATIVE-MATRIX-MIGRATION
+  title: "Owner-Controlled Migration Entry for the Native Qualification Workflow"
+  type: governance_migration
   target: >-
-    Enable bounded, explicitly owner-authorized Foundation compiler, language,
-    verifier, SemCode, runtime, and builtin engineering within one permanent
-    technical surface. Implementation Independence. Specification Unity.
-    Deterministic Proof. The trusted PR base envelope and checker remain the
-    authority for candidate admission; ordinary work cannot modify that authority.
+    SEMANTIC-CROSS-PLATFORM-HARDENING-GO-05 only. Hold the trusted envelope in
+    governance_migration for exactly one control-plane payload, the new
+    workflow .github/workflows/native-matrix.yml, followed by exactly one
+    envelope-only transition: either the successor (blob 0de4a0786bdd4603a00db447ebfab2fe8b83840d) that
+    restores the unchanged Foundation envelope plus
+    crates/semantic-hub-turbovec/src/storage.rs and
+    crates/prom-ui-backend-native/tests/native_backend_winit_event_loop_creation_contract.rs
+    on the Foundation allowlist, or restoration of the unchanged Foundation
+    envelope (blob 055cc127697fd5802e491f594b0f8f2ac6fd5080). This envelope authorizes no technical work.
   mode: active
-  supersedes: FOUNDATION-GOVERNANCE-MIGRATION
+  supersedes: SHF-FOUNDATION-DELIVERY-STABLE
   issues: [1910]
   must_remain_open: [1910]
-  base_sha: db86eb7897367d880d303e8f803a06e5219b3cd2
+  base_sha: dd8682d5a37a8ed9a9a0dfdac251ddce90eec133
   authorized_by: >-
-    Repository owner GO (2026-10-09, "Semantic Upstream Phase U0c") installs
-    this permanent Foundation boundary after U0a (#2020) and U0b (#2021).
-    Each concrete task still requires explicit OWNER GO, bounded scope,
-    implementation/tests/specification evidence, qualification, one primary PR,
-    and separate OWNER MERGE GO. Stored base_sha values record this transition;
-    live PR base/head identities come from immutable trusted GitHub event data.
+    Repository owner authorization SEMANTIC-CROSS-PLATFORM-HARDENING-GO-05
+    (2026-11-25) permits preparation only. Installing this envelope requires a
+    separate explicit OWNER EXECUTION GO naming this exact blob, the trusted
+    base dd8682d5a37a8ed9a9a0dfdac251ddce90eec133, the successor blob
+    0de4a0786bdd4603a00db447ebfab2fe8b83840d and the recovery blob 055cc127697fd5802e491f594b0f8f2ac6fd5080.
 
 intent:
   summary: >-
-    Ordinary Foundation work proceeds inside this stable boundary without
-    recurring Harness changes, under stage-specific OWNER GO and normative
-    contracts. File permission does not approve new opcodes, SemCode revisions,
-    public contract changes, release claims, or self-hosting completion; those
-    require explicit technical justification and deterministic qualification.
-    U0c itself changes only this envelope and proves hosted base-side admission.
-    No technical implementation, release/tag work, or merge is authorized by U0c.
+    Migration window only. The admissible changes are one control-plane PR
+    adding .github/workflows/native-matrix.yml and then one envelope-only PR
+    installing the pinned successor or, on abort, restoring the unchanged
+    Foundation envelope. No compiler, language, runtime, verifier, SemCode,
+    dependency, release or tag work is authorized while this envelope is active.
   decision_record: docs/agents/WORKFLOW.md
 
 governance_constraints:
-  compiler_implementation: true
-  language_implementation: true
-  runtime_implementation: true
-  verifier_changes: true
-  semcode_changes: true
-  builtin_changes: true
-  workflow_changes: false
+  compiler_implementation: false
+  language_implementation: false
+  runtime_implementation: false
+  verifier_changes: false
+  semcode_changes: false
+  builtin_changes: false
+  workflow_changes: true
   dependency_changes: false
   release_tag_changes: false
   merge_without_owner_go: false
 
 scope:
   allowed_paths:
-    - crates/sm-*/**
-    - crates/smc-cli/**
-    - crates/semantic-core-quad/**
-    - tests/**
-    - docs/spec/**
-    - docs/architecture/**
-    - README.md
-    - CONTRIBUTING.md
-    - crates/prom-abi/src/lib.rs
-    - crates/prom-cap/src/lib.rs
-    - crates/prom-audit/src/lib.rs
-    - crates/ton618-core/src/diagnostics.rs
-    - docs/ERROR_CODES.md
+    - .harness/current.task.yaml
+    - .github/workflows/native-matrix.yml
 
   forbidden_paths:
-    - .harness/current.task.yaml
-    - .harness/**
-    - .github/**
     - scripts/**
     - AGENTS.md
     - CONSTRAINTS.md
@@ -88,12 +75,12 @@ scope:
     - docs/roadmap/**
 
 authorization:
-  rust_implementation: true
-  language_implementation: true
-  documentation_addition: true
-  documentation_correction: true
-  test_addition: true
-  workflow_changes: false
+  rust_implementation: false
+  language_implementation: false
+  documentation_addition: false
+  documentation_correction: false
+  test_addition: false
+  workflow_changes: true
   dependency_changes: false
   github_issue_lifecycle: false
   git_commit_push_pr: true
@@ -102,7 +89,7 @@ authorization:
 
 constraints:
   base_branch: main
-  base_sha: db86eb7897367d880d303e8f803a06e5219b3cd2
+  base_sha: dd8682d5a37a8ed9a9a0dfdac251ddce90eec133
   c1_sha: 89641da8237f4fcefb50cf1958a50e4d4003aea7
   release_tag: v1.2.0
   release_assets_immutable: true
