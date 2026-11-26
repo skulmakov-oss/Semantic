@@ -59,6 +59,8 @@ scope:
     - crates/prom-audit/src/lib.rs
     - crates/ton618-core/src/diagnostics.rs
     - docs/ERROR_CODES.md
+    - crates/semantic-hub-turbovec/src/storage.rs
+    - crates/prom-ui-backend-native/tests/native_backend_winit_event_loop_creation_contract.rs
 
   forbidden_paths:
     - .harness/current.task.yaml

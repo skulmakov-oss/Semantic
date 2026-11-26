@@ -2259,8 +2259,10 @@ fn reject_nested_manifests_under(
 }
 
 pub(crate) fn reject_reparse_path(path: &Path) -> Result<(), String> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
+    // Start below a verified OS-owned alias (macOS /tmp, /var, /etc); every
+    // remaining component is still checked. See platform_paths.
+    let (mut current, skip) = crate::platform_paths::symlink_walk_start(path);
+    for component in path.components().skip(skip) {
         current.push(component.as_os_str());
         if current.exists() && path_is_reparse(&current)? {
             return Err(format!(
@@ -3432,6 +3434,44 @@ module_root src
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn reject_reparse_path_accepts_os_owned_aliases_and_rejects_links_below_them() {
+        use std::os::unix::fs::symlink;
+        assert!(reject_reparse_path(Path::new("/tmp")).is_ok());
+        assert!(reject_reparse_path(&std::env::temp_dir()).is_ok());
+        let dir = Path::new("/tmp").join(format!("smc_pm_os_alias_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("real")).unwrap();
+        std::fs::write(dir.join("real/m.sm"), "fn main() { return; }\n").unwrap();
+        let _ = std::fs::remove_file(dir.join("link"));
+        symlink(dir.join("real"), dir.join("link")).unwrap();
+        assert!(reject_reparse_path(&dir.join("real/m.sm")).is_ok());
+        let err = reject_reparse_path(&dir.join("link/m.sm")).unwrap_err();
+        assert!(err.contains("contains symlink or reparse point"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Write a fixture whose file name is not valid UTF-8. Returns `false` only
+    /// on macOS when the filesystem itself refuses such names (APFS/HFS+:
+    /// `EILSEQ`, os error 92): no such source can exist there, so the
+    /// rejection under test is unreachable and the test reports
+    /// `UNSUPPORTED-FS-NON-UTF8` (counted as unsupported, never as a pass).
+    /// Every other platform, and every other error, keeps the full assertion.
+    #[cfg(unix)]
+    fn create_non_utf8_fixture(path: &Path, contents: &str) -> bool {
+        match std::fs::write(path, contents) {
+            Ok(()) => true,
+            Err(error) if cfg!(target_os = "macos") && error.raw_os_error() == Some(92) => {
+                eprintln!(
+                    "UNSUPPORTED-FS-NON-UTF8: filesystem refuses non-UTF-8 name {:?}: {error}",
+                    path
+                );
+                false
+            }
+            Err(error) => panic!("write non-utf8 fixture {:?}: {error}", path),
+        }
+    }
+
     // A lossy relative-path conversion would let two distinct non-UTF-8 filenames
     // collapse onto the same fingerprint key, so renaming between them while keeping
     // file bytes unchanged would leave the content fingerprint unchanged too --
@@ -3454,8 +3494,10 @@ module_root src
         )
         .expect("write manifest");
         let invalid_name = OsStr::from_bytes(&[0xffu8, b'.', b's', b'm']);
-        std::fs::write(module_root.join(invalid_name), "fn main() { return; }\n")
-            .expect("write non-utf8 module");
+        if !create_non_utf8_fixture(&module_root.join(invalid_name), "fn main() { return; }\n") {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
 
         let err = package_content_fingerprint(&module_root, &manifest)
             .expect_err("non-UTF-8 module path must reject");
