@@ -1,0 +1,94 @@
+name: Native Matrix
+
+# Native build and full workspace tests on the four qualified targets.
+# Owned by the upstream runtime/compiler repository: it guards the compiler,
+# VM, verifier, CLI path/admission boundaries and their dependencies.
+# Every job runs natively (no cross-compilation, no emulation) and fails on any
+# failing test; nothing is continue-on-error.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/sm-*/**"
+      - "crates/smc-cli/**"
+      - "crates/semantic-core-quad/**"
+      - "crates/semantic-hub*/**"
+      - "crates/prom-*/**"
+      - "crates/ton618-core/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/native-matrix.yml"
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/native-matrix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-matrix-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native:
+    name: native (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: macos-arm64, runner: macos-15, arch: arm64, triple: aarch64-apple-darwin }
+          - { label: ubuntu-x86_64, runner: ubuntu-24.04, arch: x86_64, triple: x86_64-unknown-linux-gnu }
+          - { label: ubuntu-arm64, runner: ubuntu-24.04-arm, arch: aarch64, triple: aarch64-unknown-linux-gnu }
+          - { label: windows-x86_64, runner: windows-2025, arch: x86_64, triple: x86_64-pc-windows-msvc }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install system BLAS (Linux; required by the turbovec Hub dependency)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: "1.97.1"
+      - name: Verify native architecture (no emulation)
+        run: |
+          host=$(rustc -vV | sed -n 's/^host: //p' | tr -d '\r')
+          echo "uname: $(uname -a)"; echo "rust host: $host"; echo "image: ${ImageOS:-} ${ImageVersion:-}"
+          test "$host" = "${{ matrix.triple }}"
+          case "$(uname -s)" in
+            Darwin)
+              test "$(uname -m)" = arm64
+              test "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 0 ;;
+            Linux) test "$(uname -m)" = "${{ matrix.arch }}" ;;
+          esac
+      - name: Build
+        run: cargo build --locked --workspace --all-targets
+      - name: Workspace tests (all targets, no fail-fast)
+        run: cargo test --locked --workspace --all-targets --no-fail-fast -- --show-output 2>&1 | tee workspace-tests.log; test "${PIPESTATUS[0]}" -eq 0
+      - name: Doctests
+        run: cargo test --locked --workspace --doc
+      - name: Report unsupported and skipped cases
+        if: always()
+        run: |
+          echo "unsupported (filesystem refuses non-UTF-8 names): $(grep -c 'UNSUPPORTED-FS-NON-UTF8' workspace-tests.log || true)"
+          echo "skipped (8.3 short names unavailable): $(grep -c 'SKIPPED-8DOT3-UNAVAILABLE' workspace-tests.log || true)"
+          grep -E '^test result:' workspace-tests.log | awk '{p+=$4; f+=$6; i+=$8} END {print "passed=" p " failed=" f " ignored=" i}'
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: native-matrix-${{ matrix.label }}
+          path: workspace-tests.log
