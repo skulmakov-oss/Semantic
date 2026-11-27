@@ -94,6 +94,13 @@ Status snapshot: **2026-10-09**; self-hosting status updated **2026-11-25**. Imp
 
 Current `main` is development beyond the published release. Landing or passing tests does not promote a feature to published stable.
 
+**Latest prerelease:** [v1.3.0-rc.2](https://github.com/skulmakov-oss/Semantic-Dist/releases/tag/v1.3.0-rc.2) (2026-11-26) is an unsigned Windows x64 developer preview. It is published from [Semantic-Dist](https://github.com/skulmakov-oss/Semantic-Dist) and was built in CI from commit `98f9db19`, which is tagged `v1.3.0-rc.2` in this repository. It is a prerelease, not a stable promotion. The self-hosting Bootstrap Seal stays `validated`; it has not been independently reproduced or accepted.
+- **Built from source:** the qualified native test matrix at that commit passes with 0 failures on macOS arm64, Linux x86_64, Linux arm64 and Windows x64 ([Native Matrix run](https://github.com/skulmakov-oss/Semantic/actions/runs/45747674708)).
+  - 14 tests are `#[ignore]` on every target (manual GUI checks and a benchmark).
+  - On macOS, 2 file-system cases are reported as unsupported, because APFS rejects non-UTF-8 file names.
+- **Prebuilt binaries:** Windows x64 only.
+- **Limitations:** listed in the release notes.
+
 ### In progress
 
 The [Self-Hosting Foundation program (#1910)](https://github.com/skulmakov-oss/Semantic/issues/1910) reached its self-hosting milestone on 2026-11-25. Under [Bootstrap Contract v4](https://github.com/skulmakov-oss/Semantic-Language/blob/main/docs/BOOTSTRAP_CONTRACT.md):
