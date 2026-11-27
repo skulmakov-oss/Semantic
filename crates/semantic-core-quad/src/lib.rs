@@ -110,6 +110,25 @@ impl QuadState {
         self.bits() == Self::S.bits()
     }
 
+    /// Returns `true` when the lane carries any evidence: `N` -> false, `F`/`T`/`S` -> true.
+    ///
+    /// Raw-plane formula: `truth_plane | falsity_plane`. Exact-state equivalent:
+    /// `F | T | S`. This is the specification's "known / non-null" notion; it is
+    /// deliberately distinct from the legacy [`QuadState::is_known`], which is
+    /// `F | T` only (see [`QuadState::is_determinate`]).
+    pub const fn has_evidence(self) -> bool {
+        self.true_plane() | self.false_plane()
+    }
+
+    /// Returns `true` when exactly one plane is set: `F`/`T` -> true, `N`/`S` -> false.
+    ///
+    /// Raw-plane formula: `truth_plane ^ falsity_plane`. Exact-state equivalent:
+    /// `F | T`. `S` has evidence but is not determinate. The legacy
+    /// [`QuadState::is_known`] returns the same value and is unchanged.
+    pub const fn is_determinate(self) -> bool {
+        self.true_plane() ^ self.false_plane()
+    }
+
     pub const fn inverse(self) -> Self {
         Self::from_bits_unchecked(((self.bits() & 0b01) << 1) | ((self.bits() & 0b10) >> 1))
     }
@@ -278,6 +297,23 @@ impl QuadroReg32 {
             lane += 1;
         }
         QuadMask32::new_unchecked(raw)
+    }
+
+    /// Dense lane mask of lanes that carry any evidence (`F`, `T` or `S`).
+    ///
+    /// Computed from the raw planes as `mask_true() | mask_false()`; only the 32
+    /// valid lane bits can be set. Exact-state equivalent: `masks().f | t | s`.
+    pub fn mask_has_evidence(self) -> QuadMask32 {
+        self.mask_true().or(self.mask_false())
+    }
+
+    /// Dense lane mask of determinate lanes (`F` or `T`).
+    ///
+    /// Computed from the raw planes as `mask_true() ^ mask_false()`; only the 32
+    /// valid lane bits can be set. Equal to the legacy [`QuadroReg32::mask_known`],
+    /// which is unchanged.
+    pub fn mask_determinate(self) -> QuadMask32 {
+        self.mask_true().xor(self.mask_false())
     }
 
     /// Sets the state of lanes specified by a dense logical lane mask.
@@ -803,6 +839,18 @@ impl QuadTile128 {
 
     pub const fn false_mask(self) -> QuadMask128 {
         QuadMask128(self.f)
+    }
+
+    /// Lane mask of lanes that carry any evidence (`F`, `T` or `S`): `truth | falsity`.
+    pub const fn has_evidence_mask(self) -> QuadMask128 {
+        QuadMask128(self.t | self.f)
+    }
+
+    /// Lane mask of determinate lanes (`F` or `T`): `truth ^ falsity`.
+    ///
+    /// Equal to the legacy [`QuadTile128::known_mask`], which is unchanged.
+    pub const fn determinate_mask(self) -> QuadMask128 {
+        QuadMask128(self.t ^ self.f)
     }
 
     pub fn set_by_mask(&mut self, mask: QuadMask128, state: QuadState) {
