@@ -98,16 +98,43 @@ impl QuadState {
         (self.bits() & 0b01) != 0
     }
 
+    /// Exact state `N` (no evidence): both raw planes clear.
     pub const fn is_null(self) -> bool {
         self.bits() == Self::N.bits()
     }
 
+    /// Legacy name: `true` for exact `F` or `T` only, i.e. *determinate*.
+    ///
+    /// `S` is **not** "known" here, although it carries evidence. This differs from
+    /// the Quad Logic Frame wording "Known / Non-null" (any state other than `N`).
+    /// The meaning is frozen: the core executor's `QIsKnown` instruction and the legacy deltas rely on it.
+    /// See `docs/architecture/core_quad_known_semantics.md`.
     pub const fn is_known(self) -> bool {
         self.bits() == Self::F.bits() || self.bits() == Self::T.bits()
     }
 
+    /// Exact state `S`: both raw planes set (truth and falsity evidence together).
     pub const fn is_conflict(self) -> bool {
         self.bits() == Self::S.bits()
+    }
+
+    /// Returns `true` when the lane carries any evidence: `N` -> false, `F`/`T`/`S` -> true.
+    ///
+    /// Raw-plane formula: `truth_plane | falsity_plane`. Exact-state equivalent:
+    /// `F | T | S`. This is the specification's "known / non-null" notion; it is
+    /// deliberately distinct from the legacy [`QuadState::is_known`], which is
+    /// `F | T` only (see [`QuadState::is_determinate`]).
+    pub const fn has_evidence(self) -> bool {
+        self.true_plane() | self.false_plane()
+    }
+
+    /// Returns `true` when exactly one plane is set: `F`/`T` -> true, `N`/`S` -> false.
+    ///
+    /// Raw-plane formula: `truth_plane ^ falsity_plane`. Exact-state equivalent:
+    /// `F | T`. `S` has evidence but is not determinate. The legacy
+    /// [`QuadState::is_known`] returns the same value and is unchanged.
+    pub const fn is_determinate(self) -> bool {
+        self.true_plane() ^ self.false_plane()
     }
 
     pub const fn inverse(self) -> Self {
@@ -244,18 +271,24 @@ impl QuadroReg32 {
         }
     }
 
+    /// Legacy name: dense mask of lanes in exact `F` or `T` (determinate lanes).
+    /// Lanes in `S` are excluded. Meaning frozen; see [`QuadState::is_known`].
     pub fn mask_known(self) -> QuadMask32 {
         self.masks().known()
     }
 
+    /// Dense mask of lanes in exact `N`.
     pub fn mask_null(self) -> QuadMask32 {
         self.masks().null()
     }
 
+    /// Dense mask of lanes in exact `S`.
     pub fn mask_conflict(self) -> QuadMask32 {
         self.masks().conflict()
     }
 
+    /// Raw truth plane as a dense lane mask: lanes in `T` **or** `S`.
+    /// This is not the exact-`T` mask; use `masks().t` for that.
     pub fn mask_true(self) -> QuadMask32 {
         let mut raw = 0u64;
         let mut lane = 0usize;
@@ -268,6 +301,8 @@ impl QuadroReg32 {
         QuadMask32::new_unchecked(raw)
     }
 
+    /// Raw falsity plane as a dense lane mask: lanes in `F` **or** `S`.
+    /// This is not the exact-`F` mask; use `masks().f` for that.
     pub fn mask_false(self) -> QuadMask32 {
         let mut raw = 0u64;
         let mut lane = 0usize;
@@ -278,6 +313,23 @@ impl QuadroReg32 {
             lane += 1;
         }
         QuadMask32::new_unchecked(raw)
+    }
+
+    /// Dense lane mask of lanes that carry any evidence (`F`, `T` or `S`).
+    ///
+    /// Computed from the raw planes as `mask_true() | mask_false()`; only the 32
+    /// valid lane bits can be set. Exact-state equivalent: `masks().f | t | s`.
+    pub fn mask_has_evidence(self) -> QuadMask32 {
+        self.mask_true().or(self.mask_false())
+    }
+
+    /// Dense lane mask of determinate lanes (`F` or `T`).
+    ///
+    /// Computed from the raw planes as `mask_true() ^ mask_false()`; only the 32
+    /// valid lane bits can be set. Equal to the legacy [`QuadroReg32::mask_known`],
+    /// which is unchanged.
+    pub fn mask_determinate(self) -> QuadMask32 {
+        self.mask_true().xor(self.mask_false())
     }
 
     /// Sets the state of lanes specified by a dense logical lane mask.
@@ -658,6 +710,10 @@ impl Iterator for QuadMask32Iter {
     }
 }
 
+/// Exact-state lane masks: each valid lane is set in exactly one of `n`, `f`, `t`, `s`.
+///
+/// Unlike the raw planes ([`QuadroReg32::mask_true`] / [`QuadroReg32::mask_false`]),
+/// `t` here means exactly `T` and `f` exactly `F`.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct QuadMasks32 {
@@ -668,6 +724,7 @@ pub struct QuadMasks32 {
 }
 
 impl QuadMasks32 {
+    /// Legacy name: exact `F` or `T` lanes (determinate). `S` is excluded.
     pub const fn known(self) -> QuadMask32 {
         self.t.or(self.f)
     }
@@ -785,24 +842,41 @@ impl QuadTile128 {
         }
     }
 
+    /// Legacy name: lanes in exact `F` or `T` (`truth ^ falsity`). `S` is excluded.
     pub const fn known_mask(self) -> QuadMask128 {
         QuadMask128(self.t ^ self.f)
     }
 
+    /// Lanes in exact `S` (`truth & falsity`).
     pub const fn conflict_mask(self) -> QuadMask128 {
         QuadMask128(self.t & self.f)
     }
 
+    /// Lanes in exact `N` (neither plane set).
     pub const fn null_mask(self) -> QuadMask128 {
         QuadMask128(!(self.t | self.f))
     }
 
+    /// Raw truth plane: lanes in `T` **or** `S` (not the exact-`T` mask).
     pub const fn true_mask(self) -> QuadMask128 {
         QuadMask128(self.t)
     }
 
+    /// Raw falsity plane: lanes in `F` **or** `S` (not the exact-`F` mask).
     pub const fn false_mask(self) -> QuadMask128 {
         QuadMask128(self.f)
+    }
+
+    /// Lane mask of lanes that carry any evidence (`F`, `T` or `S`): `truth | falsity`.
+    pub const fn has_evidence_mask(self) -> QuadMask128 {
+        QuadMask128(self.t | self.f)
+    }
+
+    /// Lane mask of determinate lanes (`F` or `T`): `truth ^ falsity`.
+    ///
+    /// Equal to the legacy [`QuadTile128::known_mask`], which is unchanged.
+    pub const fn determinate_mask(self) -> QuadMask128 {
+        QuadMask128(self.t ^ self.f)
     }
 
     pub fn set_by_mask(&mut self, mask: QuadMask128, state: QuadState) {
@@ -1029,6 +1103,13 @@ pub struct ExactStateDelta32 {
 /// * `entered_true` / `left_true`: truth-plane membership, not exact T
 /// * `entered_false` / `left_false`: falsity-plane membership, not exact F
 /// * `entered_super` / `left_super`: entry into and exit from exact S
+/// * `became_known` / `became_unknown`: entry into and exit from exact `F` or `T`
+///   (determinate). `N -> S` and `S -> N` produce neither event.
+/// * `changed`: any change of the truth or falsity plane.
+///
+/// Cross-crate note: the legacy TON618 compatibility crate's `StateDelta::entered_true` uses *exact*
+/// `T`, unlike the truth-plane meaning here. The two same-named fields are not
+/// interchangeable. See `docs/architecture/core_quad_known_semantics.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StateDelta32 {
     pub entered_true: QuadMask32,
@@ -1072,6 +1153,9 @@ impl StateDelta32 {
     }
 }
 
+/// 128-lane form of [`StateDelta32`] with the same legacy field meanings:
+/// truth/falsity-plane `entered_*`/`left_*`, exact-`S` super/conflict events,
+/// determinate `became_known`/`became_unknown`, and plane-level `changed`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StateDelta128 {
     pub entered_true: QuadMask128,
