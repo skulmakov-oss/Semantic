@@ -1199,6 +1199,73 @@ impl StateDelta128 {
     }
 }
 
+/// Changes in evidence *presence* per lane (RFC-01): a lane gains evidence when it
+/// leaves `N` and loses evidence when it enters `N`; it becomes determinate when it
+/// enters `F` or `T` from `N` or `S`, and loses determinacy on the way back.
+///
+/// These are not events about individual truth or falsity bits: `T -> S` adds falsity
+/// evidence but is neither `gained_evidence` nor `lost_evidence`. Per-plane bit changes
+/// are reported by [`PlaneDelta32`]; exact state entry/exit by [`ExactStateDelta32`].
+/// The legacy [`StateDelta32`] is unchanged.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct EvidenceDelta32 {
+    /// Lanes that moved from `N` to `F`, `T` or `S`.
+    pub gained_evidence: QuadMask32,
+    /// Lanes that moved from `F`, `T` or `S` to `N`.
+    pub lost_evidence: QuadMask32,
+    /// Lanes that moved from `N` or `S` to `F` or `T`.
+    pub became_determinate: QuadMask32,
+    /// Lanes that moved from `F` or `T` to `N` or `S`.
+    pub lost_determinacy: QuadMask32,
+}
+
+impl EvidenceDelta32 {
+    /// Computes evidence-presence events from the raw truth/falsity planes.
+    pub fn from_regs(prev: QuadroReg32, current: QuadroReg32) -> Self {
+        let prev_evidence = prev.mask_true().or(prev.mask_false());
+        let curr_evidence = current.mask_true().or(current.mask_false());
+        let prev_determinate = prev.mask_true().xor(prev.mask_false());
+        let curr_determinate = current.mask_true().xor(current.mask_false());
+
+        Self {
+            gained_evidence: curr_evidence.and(prev_evidence.not_valid()),
+            lost_evidence: prev_evidence.and(curr_evidence.not_valid()),
+            became_determinate: curr_determinate.and(prev_determinate.not_valid()),
+            lost_determinacy: prev_determinate.and(curr_determinate.not_valid()),
+        }
+    }
+}
+
+/// 128-lane form of [`EvidenceDelta32`] with identical per-lane meaning.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct EvidenceDelta128 {
+    /// Lanes that moved from `N` to `F`, `T` or `S`.
+    pub gained_evidence: QuadMask128,
+    /// Lanes that moved from `F`, `T` or `S` to `N`.
+    pub lost_evidence: QuadMask128,
+    /// Lanes that moved from `N` or `S` to `F` or `T`.
+    pub became_determinate: QuadMask128,
+    /// Lanes that moved from `F` or `T` to `N` or `S`.
+    pub lost_determinacy: QuadMask128,
+}
+
+impl EvidenceDelta128 {
+    /// Computes evidence-presence events from the raw truth/falsity planes.
+    pub fn from_tiles(prev: QuadTile128, current: QuadTile128) -> Self {
+        let prev_evidence = prev.true_mask().or(prev.false_mask());
+        let curr_evidence = current.true_mask().or(current.false_mask());
+        let prev_determinate = prev.true_mask().xor(prev.false_mask());
+        let curr_determinate = current.true_mask().xor(current.false_mask());
+
+        Self {
+            gained_evidence: curr_evidence.and(prev_evidence.not_valid()),
+            lost_evidence: prev_evidence.and(curr_evidence.not_valid()),
+            became_determinate: curr_determinate.and(prev_determinate.not_valid()),
+            lost_determinacy: prev_determinate.and(curr_determinate.not_valid()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QuadroBank<const N: usize> {
     regs: [QuadroReg32; N],
