@@ -928,6 +928,36 @@ impl QuadTile128 {
             a3.map_nor(b3),
         ])
     }
+
+    /// Computes truth-plane and falsity-plane membership events; 128-lane form of
+    /// [`QuadroReg32::plane_delta`].
+    pub const fn plane_delta(previous: Self, current: Self) -> PlaneDelta128 {
+        PlaneDelta128 {
+            entered_truth: QuadMask128(current.t & !previous.t),
+            left_truth: QuadMask128(previous.t & !current.t),
+            entered_falsity: QuadMask128(current.f & !previous.f),
+            left_falsity: QuadMask128(previous.f & !current.f),
+        }
+    }
+
+    /// Computes exact-state transition events for all four states (N, F, T, S); 128-lane
+    /// form of [`QuadroReg32::exact_state_delta`].
+    pub const fn exact_state_delta(previous: Self, current: Self) -> ExactStateDelta128 {
+        let (pn, cn) = (!(previous.t | previous.f), !(current.t | current.f));
+        let (pf, cf) = (previous.f & !previous.t, current.f & !current.t);
+        let (pt, ct) = (previous.t & !previous.f, current.t & !current.f);
+        let (ps, cs) = (previous.t & previous.f, current.t & current.f);
+        ExactStateDelta128 {
+            entered_neither: QuadMask128(cn & !pn),
+            left_neither: QuadMask128(pn & !cn),
+            entered_strict_false: QuadMask128(cf & !pf),
+            left_strict_false: QuadMask128(pf & !cf),
+            entered_strict_true: QuadMask128(ct & !pt),
+            left_strict_true: QuadMask128(pt & !ct),
+            entered_super: QuadMask128(cs & !ps),
+            left_super: QuadMask128(ps & !cs),
+        }
+    }
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -1018,6 +1048,40 @@ pub struct ExactStateDelta32 {
     pub entered_super: QuadMask32,
     /// Lanes that transitioned exactly out of state `S` (super).
     pub left_super: QuadMask32,
+}
+
+/// 128-lane form of [`PlaneDelta32`]: changes in truth-plane and falsity-plane membership.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct PlaneDelta128 {
+    /// Lanes that entered truth-plane membership.
+    pub entered_truth: QuadMask128,
+    /// Lanes that left truth-plane membership.
+    pub left_truth: QuadMask128,
+    /// Lanes that entered falsity-plane membership.
+    pub entered_falsity: QuadMask128,
+    /// Lanes that left falsity-plane membership.
+    pub left_falsity: QuadMask128,
+}
+
+/// 128-lane form of [`ExactStateDelta32`]: entry into and exit from each exact Quad state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct ExactStateDelta128 {
+    /// Lanes that transitioned exactly into state `N` (neither).
+    pub entered_neither: QuadMask128,
+    /// Lanes that transitioned exactly out of state `N` (neither).
+    pub left_neither: QuadMask128,
+    /// Lanes that transitioned exactly into state `F` (strict_false).
+    pub entered_strict_false: QuadMask128,
+    /// Lanes that transitioned exactly out of state `F` (strict_false).
+    pub left_strict_false: QuadMask128,
+    /// Lanes that transitioned exactly into state `T` (strict_true).
+    pub entered_strict_true: QuadMask128,
+    /// Lanes that transitioned exactly out of state `T` (strict_true).
+    pub left_strict_true: QuadMask128,
+    /// Lanes that transitioned exactly into state `S` (super).
+    pub entered_super: QuadMask128,
+    /// Lanes that transitioned exactly out of state `S` (super).
+    pub left_super: QuadMask128,
 }
 
 /// Compatibility type representing a legacy mixed compatibility structure containing:
