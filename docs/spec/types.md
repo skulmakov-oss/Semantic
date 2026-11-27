@@ -185,9 +185,36 @@ Current source-level branch vocabulary stays explicit:
 - `if q == F { ... }`
 - `match q { N => ... F => ... T => ... S => ... _ => ... }`
 
-Design notes for future quad-heavy surface syntax may use `when` or `is` as
-compact vocabulary, but the current contract still requires explicit
-comparison or `match`.
+The current Rust-like toolchain (C0) also admits `q is N`, `q is F`, `q is T` and
+`q is S`. Each is exactly the comparison `q == <state>`: it returns `bool` and
+compiles to the same SemCode. The frozen self-hosted compiler (C1, source `S`) does
+**not** admit `is`. Code meant to compile with both uses the explicit comparison.
+
+Evidence-presence and determinacy checks use existing comparisons. Each
+evaluates its operand once:
+
+| Question | Portable form (C0 and C1) | Result |
+| --- | --- | --- |
+| does `q` carry any evidence (not `N`)? | `q != N` | `bool` |
+| does `q` carry no evidence? | `q == N` | `bool` |
+| is `q` in conflict? | `q == S` | `bool` |
+| is `q` determinate (`F` or `T`)? | `let v: quad = q; v == F \|\| v == T` | `bool` |
+
+For determinacy, bind the value first when `q` is a call or another expression
+with effects. Writing `f() == F || f() == T` evaluates `f()` twice.
+
+The readable names `known(q)`, `unknown(q)` and `conflict(q)` that appear in
+design notes are **not available**: they are not builtins, not keywords and not
+reserved names. A call to them is rejected as an unknown function unless the
+program defines a function of that name. They are a proposal only. Their
+"known" would mean "has evidence" (`q != N`), which differs from the core crate's
+legacy `is_known` (exactly `F` or `T`); see `docs/spec/quad_logic_frame_v1.md`.
+
+`if q { ... }` on a `quad` is still rejected; only `bool` conditions are admitted.
+
+Design notes for future quad-heavy surface syntax may use `when` as compact
+vocabulary, but the current contract still requires explicit comparison,
+`is` (C0 only) or `match`.
 
 ### Quad equality
 
@@ -231,7 +258,8 @@ Therefore:
 | Identity predicate | `a == b` | `bool` | same value state |
 | Evidence algebra | `a && b`, `a || b`, `!a`, `a -> b` | `quad` | T/F evidence-plane operation |
 | Control-flow predicate | `a == T`, `a == S` | `bool` | explicit boolean condition |
-| Readable quad predicate | `a is S`, `known(a)`, `unknown(a)`, `conflict(a)` | `bool` | surface alias for an existing bool predicate |
+| Readable quad predicate (C0 only) | `a is S` | `bool` | exactly `a == S`; not admitted by C1 |
+| Proposed, not available | `known(a)`, `unknown(a)`, `conflict(a)` | n/a | not implemented; use `a != N`, `a == N`, `a == S` |
 | Future semantic helper | `quad_consensus(a, b)` | explicit API-defined type | policy-defined analysis |
 
 ## Standard Forms
