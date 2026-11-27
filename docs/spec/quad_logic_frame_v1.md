@@ -24,8 +24,14 @@ Quad states are strictly encoded using a 2-bit representation per semantic lane:
 ## Planes and Masks
 
 The encoding structurally separates logical information into two distinct 1-bit planes:
-- **Falsity plane** (Bit 0): Defines the absence of strict truth or presence of conflict.
-- **Truth plane** (Bit 1): Defines the presence of strict truth or conflict.
+- **Falsity plane** (Bit 0): set for `F` and `S` (falsity evidence present).
+- **Truth plane** (Bit 1): set for `T` and `S` (truth evidence present).
+
+Two representations must not be confused:
+- **Raw planes**: the two bits above. A raw truth-plane mask contains `T` **and** `S` lanes.
+- **Exact-state masks**: one-hot per lane (`N`, `F`, `T`, `S`). An exact `T` mask contains only `T` lanes.
+
+The same formula means different things on the two representations. For example, `t | f` is "has evidence" on raw planes, but "exactly `F` or `T`" on exact-state masks.
 
 ## State Predicates
 
@@ -34,7 +40,13 @@ Built-in state predicates operate by querying the presence of values within the 
 - Strict True (`T`)
 - Strict False (`F`)
 - Conflict / Super (`S`)
-- Known / Non-null (any state other than `N`)
+- Known / Non-null (any state other than `N`), also called **has evidence**: raw `truth | falsity`; exact `F | T | S`
+- **Determinate** (exactly `F` or `T`): raw `truth ^ falsity`; exact `F | T`
+
+Terminology mapping for existing APIs:
+- In this specification, "known" means **has evidence** and includes `S`.
+- In the core crates, the legacy API names `is_known`, `mask_known`, `known()` and `known_mask`, and the executor instruction `QIsKnown`, denote **determinate** (exactly `F` or `T`) and exclude `S`.
+- Those names are frozen. Readers must map them as above rather than assume the specification's meaning.
 
 ## Operation Families
 
@@ -55,6 +67,12 @@ Operations providing visibility into internal execution states or validity bound
 ### Event and delta operations
 
 Operations determining changes or state transitions between subsequent evaluation frames.
+
+Legacy delta field names are not uniform across crates:
+- In `semantic-core-quad`, `StateDelta32` / `StateDelta128` report `entered_true` / `left_true` / `entered_false` / `left_false` as **raw-plane** membership changes. `became_known` / `became_unknown` there mean entering or leaving exact `F` or `T`.
+- In `ton618-core`, `StateDelta`'s fields of the same names report **exact-state** changes.
+- The two disagree exactly on transitions into or out of `S`.
+- Explicit plane and exact-state events are provided separately: `PlaneDelta32` and `ExactStateDelta32`.
 
 ## Primitive vs Derived Operations
 
