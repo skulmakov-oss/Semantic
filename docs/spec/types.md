@@ -256,7 +256,7 @@ Therefore:
 | Family | Example | Result type | Meaning |
 | --- | --- | --- | --- |
 | Identity predicate | `a == b` | `bool` | same value state |
-| Evidence algebra | `a && b`, `a || b`, `!a`, `a -> b` | `quad` | T/F evidence-plane operation |
+| Evidence algebra | `a && b`, `a \|\| b`, `!a`, `a -> b` | `quad` | T/F evidence-plane operation |
 | Control-flow predicate | `a == T`, `a == S` | `bool` | explicit boolean condition |
 | Readable quad predicate (C0 only) | `a is S` | `bool` | exactly `a == S`; not admitted by C1 |
 | Proposed, not available | `known(a)`, `unknown(a)`, `conflict(a)` | n/a | not implemented; use `a != N`, `a == N`, `a == S` |
