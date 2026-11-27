@@ -1059,7 +1059,7 @@ pub struct ExactStateDelta32 {
 ///   (determinate). `N -> S` and `S -> N` produce neither event.
 /// * `changed`: any change of the truth or falsity plane.
 ///
-/// Cross-crate note: `ton618-core`'s legacy `StateDelta::entered_true` uses *exact*
+/// Cross-crate note: the legacy TON618 compatibility crate's `StateDelta::entered_true` uses *exact*
 /// `T`, unlike the truth-plane meaning here. The two same-named fields are not
 /// interchangeable. See `docs/architecture/core_quad_known_semantics.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

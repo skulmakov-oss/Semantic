@@ -1,6 +1,6 @@
 # Core quad: "known", raw planes and legacy delta semantics
 
-Status: compatibility documentation for `semantic-core-quad` and `ton618-core` at `main` `70df85e4` (identical to tag `v1.3.0-rc.2` for these crates). It records existing behaviour; it does not change any API or semantics. Tracking: #2103.
+Status: compatibility documentation for `semantic-core-quad` and the legacy TON618 compatibility crate at `main` `70df85e4` (identical to tag `v1.3.0-rc.2` for these crates). It records existing behaviour; it does not change any API or semantics. Tracking: #2103.
 
 ## Two representations
 - **Raw planes**: per lane a truth bit and a falsity bit (encoding `N=00 F=01 T=10 S=11`, truth = high bit). `QuadroReg32::mask_true` / `mask_false` and `QuadTile128::true_mask` / `false_mask` are raw planes: `mask_true` contains `T` **and** `S`.
@@ -29,15 +29,15 @@ The Quad Logic Frame specification uses "Known / Non-null" for "any state other 
 Exact `N`/`F`/`T`/`S` entry and exit for 32 lanes: `ExactStateDelta32`.
 
 ## Cross-crate divergence
-`ton618-core` (the compatibility-only owner) has its own `QuadroReg::calc_delta` (`crates/ton618-core/src/quadro.rs`, L178-189). Its `StateDelta.entered_true` / `left_true` / `entered_false` / `left_false` are **exact-state** (`strict_true` / `strict_false`).
+The legacy TON618 compatibility crate (the compatibility-only owner in the v1 policy) has its own `QuadroReg::calc_delta` (its `quadro.rs`, L178-189 at `70df85e4`). Its `StateDelta.entered_true` / `left_true` / `entered_false` / `left_false` are **exact-state** (`strict_true` / `strict_false`).
 
 So the same field name means:
-- exactly `T` in `ton618-core`;
+- exactly `T` in the TON618 compatibility crate;
 - truth plane (`T` or `S`) in `semantic-core-quad`.
 
 For `F -> S`:
 - `semantic-core-quad` reports `entered_true`;
-- `ton618-core` reports `left_false` and `entered_super`, but not `entered_true`.
+- the TON618 compatibility crate reports `left_false` and `entered_super`, but not `entered_true`.
 
 Neither crate is changed by this note. Code moving between the two must translate explicitly.
 
