@@ -84,7 +84,7 @@ The legacy perimeter (`crates/ton618-core`, `src/bin/ton618_core.rs`, `ton618_le
 
 ## Current status
 
-Status snapshot: **2026-10-09**; self-hosting status updated **2026-11-25**. Implementation, qualification, and publication are separate states; see the [public status model](docs/roadmap/public_status_model.md).
+Status snapshot: **2026-10-09**; self-hosting status updated **2026-11-25**; prerelease status updated **2026-11-26** (v1.3.0-rc.2, below). Implementation, qualification, and publication are separate states; see the [public status model](docs/roadmap/public_status_model.md).
 
 ### Implemented and qualified
 
