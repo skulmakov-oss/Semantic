@@ -28,6 +28,16 @@ const fn compact_lane_bits(raw: u64) -> u64 {
     (x | (x >> 16)) & LOW_HALF_32
 }
 
+/// Inverse of `compact_lane_bits`: spreads lane bits 0..=31 to raw bits 0, 2, ..., 62.
+const fn spread_lane_bits(lanes: u64) -> u64 {
+    let mut x = lanes & LOW_HALF_32;
+    x = (x | (x << 16)) & 0x0000_FFFF_0000_FFFF;
+    x = (x | (x << 8)) & 0x00FF_00FF_00FF_00FF;
+    x = (x | (x << 4)) & 0x0F0F_0F0F_0F0F_0F0F;
+    x = (x | (x << 2)) & 0x3333_3333_3333_3333;
+    (x | (x << 1)) & LSB_MASK_32
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QuadBoundsError {
     index: usize,
@@ -873,26 +883,31 @@ impl QuadTile128 {
         }
     }
 
+    /// Tile lane `32 * k + i` comes from lane `i` of `regs[k]`. Each register's falsity bits
+    /// (raw bits 0, 2, ..., 62) and truth bits (raw bits 1, 3, ..., 63) are compacted into the
+    /// corresponding 32-bit slice of the falsity and truth planes (portable bit operations).
     pub fn from_regs(regs: [QuadroReg32; 4]) -> Self {
-        let mut out = Self::new();
-        let mut lane = 0usize;
-        while lane < Self::LANES {
-            let reg_index = lane / 32;
-            let reg_lane = lane % 32;
-            out.set_unchecked(lane, regs[reg_index].get_unchecked(reg_lane));
-            lane += 1;
+        let mut t = 0u128;
+        let mut f = 0u128;
+        let mut k = 0usize;
+        while k < 4 {
+            t |= (compact_lane_bits(regs[k].0 >> 1) as u128) << (32 * k);
+            f |= (compact_lane_bits(regs[k].0) as u128) << (32 * k);
+            k += 1;
         }
-        out
+        Self { t, f }
     }
 
+    /// Inverse of [`QuadTile128::from_regs`]: each 32-bit plane slice is spread back to the
+    /// interleaved two-bit lane layout of a register.
     pub fn to_regs(self) -> [QuadroReg32; 4] {
         let mut regs = [QuadroReg32::new(); 4];
-        let mut lane = 0usize;
-        while lane < Self::LANES {
-            let reg_index = lane / 32;
-            let reg_lane = lane % 32;
-            regs[reg_index].set_unchecked(reg_lane, self.get_unchecked(lane));
-            lane += 1;
+        let mut k = 0usize;
+        while k < 4 {
+            let tk = (self.t >> (32 * k)) as u64 & LOW_HALF_32;
+            let fk = (self.f >> (32 * k)) as u64 & LOW_HALF_32;
+            regs[k] = QuadroReg32(spread_lane_bits(fk) | (spread_lane_bits(tk) << 1));
+            k += 1;
         }
         regs
     }
