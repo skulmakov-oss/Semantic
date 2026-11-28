@@ -33,10 +33,17 @@ The canonical forms are:
 
 - `if q == T { ... } else { ... }`
 - `if q == F { ... } else { ... }`
-- `if q is S { ... } else { ... }`
+- `if q == S { ... } else { ... }`
 - `match q { N => { ... } F => { ... } T => { ... } S => { ... } _ => { ... } }`
-- surface helpers such as `x is S`, `known(x)`, `unknown(x)`, and
-  `conflict(x)` lower to these same canonical bool predicates
+
+The current Rust-like toolchain (C0) also admits `q is <state>`, for example
+`if q is S { ... }`. It is exactly the comparison `q == <state>`: it returns
+`bool` and compiles to the same SemCode. The frozen self-hosted compiler (C1)
+does not admit `is`.
+
+The readable helpers `known(x)`, `unknown(x)` and `conflict(x)` are **not
+available**. They are a proposal only, and a call to one of them is rejected as
+an unknown function unless the program defines it. See `docs/spec/types.md`.
 
 `else if` remains nested `if` sugar and does not introduce a separate quad
 condition rule.
