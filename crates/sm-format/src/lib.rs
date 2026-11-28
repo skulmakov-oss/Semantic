@@ -9,6 +9,10 @@ pub mod semcode_decode;
 #[cfg(feature = "std")]
 pub mod evr0;
 
+// Candidate operand-only codec. No opcode or revision is registered.
+#[cfg(feature = "std")]
+pub mod quad_control_wire;
+
 #[cfg(feature = "std")]
 pub mod semcode_format {
     pub use crate::local_format::*;

@@ -4,6 +4,8 @@ pub mod semcode_decode;
 #[cfg(feature = "std")]
 pub mod evr0;
 #[cfg(feature = "std")]
+pub mod quad_control_wire;
+#[cfg(feature = "std")]
 pub mod semcode_format {
 pub use crate::local_format::*;
 #[cfg(feature = "std")]
