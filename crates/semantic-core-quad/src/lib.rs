@@ -11,6 +11,23 @@ use serde::{Deserialize, Serialize};
 pub const LSB_MASK_32: u64 = 0x5555_5555_5555_5555;
 pub const MSB_MASK_32: u64 = 0xAAAA_AAAA_AAAA_AAAA;
 
+/// The 32 valid lane bits of a dense lane mask.
+const LOW_HALF_32: u64 = 0x0000_0000_FFFF_FFFF;
+
+/// Gathers the even raw bits 0, 2, ..., 62 into lane bits 0..=31, keeping lane order.
+///
+/// Lane `i` stores falsity at raw bit `2i` and truth at raw bit `2i + 1`, so
+/// `compact_lane_bits(raw)` is the falsity plane and `compact_lane_bits(raw >> 1)`
+/// the truth plane. Only the low 32 bits of the result can be set.
+const fn compact_lane_bits(raw: u64) -> u64 {
+    let mut x = raw & LSB_MASK_32;
+    x = (x | (x >> 1)) & 0x3333_3333_3333_3333;
+    x = (x | (x >> 2)) & 0x0F0F_0F0F_0F0F_0F0F;
+    x = (x | (x >> 4)) & 0x00FF_00FF_00FF_00FF;
+    x = (x | (x >> 8)) & 0x0000_FFFF_0000_FFFF;
+    (x | (x >> 16)) & LOW_HALF_32
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QuadBoundsError {
     index: usize,
@@ -248,26 +265,13 @@ impl QuadroReg32 {
     }
 
     pub fn masks(self) -> QuadMasks32 {
-        let mut n = 0u64;
-        let mut f = 0u64;
-        let mut t = 0u64;
-        let mut s = 0u64;
-        let mut lane = 0usize;
-        while lane < Self::LANES {
-            let bit = 1u64 << lane;
-            match self.get_unchecked(lane) {
-                QuadState::N => n |= bit,
-                QuadState::F => f |= bit,
-                QuadState::T => t |= bit,
-                QuadState::S => s |= bit,
-            }
-            lane += 1;
-        }
+        let t = compact_lane_bits(self.0 >> 1);
+        let f = compact_lane_bits(self.0);
         QuadMasks32 {
-            n: QuadMask32::new_unchecked(n),
-            f: QuadMask32::new_unchecked(f),
-            t: QuadMask32::new_unchecked(t),
-            s: QuadMask32::new_unchecked(s),
+            n: QuadMask32::new_unchecked(!(t | f) & LOW_HALF_32),
+            f: QuadMask32::new_unchecked(f & !t),
+            t: QuadMask32::new_unchecked(t & !f),
+            s: QuadMask32::new_unchecked(t & f),
         }
     }
 
@@ -290,29 +294,13 @@ impl QuadroReg32 {
     /// Raw truth plane as a dense lane mask: lanes in `T` **or** `S`.
     /// This is not the exact-`T` mask; use `masks().t` for that.
     pub fn mask_true(self) -> QuadMask32 {
-        let mut raw = 0u64;
-        let mut lane = 0usize;
-        while lane < Self::LANES {
-            if self.get_unchecked(lane).true_plane() {
-                raw |= 1u64 << lane;
-            }
-            lane += 1;
-        }
-        QuadMask32::new_unchecked(raw)
+        QuadMask32::new_unchecked(compact_lane_bits(self.0 >> 1))
     }
 
     /// Raw falsity plane as a dense lane mask: lanes in `F` **or** `S`.
     /// This is not the exact-`F` mask; use `masks().f` for that.
     pub fn mask_false(self) -> QuadMask32 {
-        let mut raw = 0u64;
-        let mut lane = 0usize;
-        while lane < Self::LANES {
-            if self.get_unchecked(lane).false_plane() {
-                raw |= 1u64 << lane;
-            }
-            lane += 1;
-        }
-        QuadMask32::new_unchecked(raw)
+        QuadMask32::new_unchecked(compact_lane_bits(self.0))
     }
 
     /// Dense lane mask of lanes that carry any evidence (`F`, `T` or `S`).
