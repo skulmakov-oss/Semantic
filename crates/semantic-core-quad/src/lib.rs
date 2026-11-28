@@ -912,95 +912,83 @@ impl QuadTile128 {
     /// Applies the `NOT` truth map independently across four 32-lane registers.
     /// This lifts the default register map semantics to the 128-lane tile.
     /// This is a truth-table operation and is not an alias for the knowledge-lattice `inverse`.
-    /// The implementation uses four-register decomposition as the deterministic reference path.
+    /// Computed directly on the truth and falsity planes; the four-register decomposition
+    /// (`to_regs`, the 32-lane map, `from_regs`) remains the test oracle and gives identical bits.
     pub fn map_not(self) -> Self {
-        let [a0, a1, a2, a3] = self.to_regs();
-        Self::from_regs([a0.map_not(), a1.map_not(), a2.map_not(), a3.map_not()])
+        // Truth complement swaps the planes: T <-> F, while N and S are fixed points.
+        Self {
+            t: self.f,
+            f: self.t,
+        }
     }
 
     /// Applies the `XOR` truth map independently across four 32-lane registers.
     /// This lifts the default register map semantics to the 128-lane tile.
     /// This is a truth-table operation.
-    /// The implementation uses four-register decomposition as the deterministic reference path.
+    /// Computed directly on the truth and falsity planes; the four-register decomposition
+    /// (`to_regs`, the 32-lane map, `from_regs`) remains the test oracle and gives identical bits.
     pub fn map_xor(self, other: Self) -> Self {
-        let [a0, a1, a2, a3] = self.to_regs();
-        let [b0, b1, b2, b3] = other.to_regs();
-        Self::from_regs([
-            a0.map_xor(b0),
-            a1.map_xor(b1),
-            a2.map_xor(b2),
-            a3.map_xor(b3),
-        ])
+        // Raw-code XOR acts on each plane independently.
+        Self {
+            t: self.t ^ other.t,
+            f: self.f ^ other.f,
+        }
     }
 
     /// Applies the `AND` truth map independently across four 32-lane registers.
     /// This lifts the default register map semantics to the 128-lane tile.
     /// This is a truth-table operation and is not an alias for the knowledge-lattice `meet`.
-    /// The implementation uses four-register decomposition as the deterministic reference path.
+    /// Computed directly on the truth and falsity planes; the four-register decomposition
+    /// (`to_regs`, the 32-lane map, `from_regs`) remains the test oracle and gives identical bits.
     pub fn map_and(self, other: Self) -> Self {
-        let [a0, a1, a2, a3] = self.to_regs();
-        let [b0, b1, b2, b3] = other.to_regs();
-        Self::from_regs([
-            a0.map_and(b0),
-            a1.map_and(b1),
-            a2.map_and(b2),
-            a3.map_and(b3),
-        ])
+        // Truth-plane intersection, falsity-plane union.
+        Self {
+            t: self.t & other.t,
+            f: self.f | other.f,
+        }
     }
 
     /// Applies the `OR` truth map independently across four 32-lane registers.
     /// This lifts the default register map semantics to the 128-lane tile.
     /// This is a truth-table operation and is not an alias for the knowledge-lattice `join`.
-    /// The implementation uses four-register decomposition as the deterministic reference path.
+    /// Computed directly on the truth and falsity planes; the four-register decomposition
+    /// (`to_regs`, the 32-lane map, `from_regs`) remains the test oracle and gives identical bits.
     pub fn map_or(self, other: Self) -> Self {
-        let [a0, a1, a2, a3] = self.to_regs();
-        let [b0, b1, b2, b3] = other.to_regs();
-        Self::from_regs([a0.map_or(b0), a1.map_or(b1), a2.map_or(b2), a3.map_or(b3)])
+        // Truth-plane union, falsity-plane intersection.
+        Self {
+            t: self.t | other.t,
+            f: self.f & other.f,
+        }
     }
 
     /// Applies the `IMPLIES` truth map independently across four 32-lane registers.
     /// This lifts the default register map semantics to the 128-lane tile.
     /// This is a truth-table operation.
-    /// The implementation uses four-register decomposition as the deterministic reference path.
+    /// Computed directly on the truth and falsity planes; the four-register decomposition
+    /// (`to_regs`, the 32-lane map, `from_regs`) remains the test oracle and gives identical bits.
     pub fn map_implies(self, other: Self) -> Self {
-        let [a0, a1, a2, a3] = self.to_regs();
-        let [b0, b1, b2, b3] = other.to_regs();
-        Self::from_regs([
-            a0.map_implies(b0),
-            a1.map_implies(b1),
-            a2.map_implies(b2),
-            a3.map_implies(b3),
-        ])
+        // Frozen derived policy `A -> B = NOT(A) join B`.
+        self.map_not().join(other)
     }
 
     /// Applies the `NAND` truth map independently across four 32-lane registers.
     /// This lifts the default register map semantics to the 128-lane tile.
     /// This is a truth-table operation.
-    /// The implementation uses four-register decomposition as the deterministic reference path.
+    /// Computed directly on the truth and falsity planes; the four-register decomposition
+    /// (`to_regs`, the 32-lane map, `from_regs`) remains the test oracle and gives identical bits.
     pub fn map_nand(self, other: Self) -> Self {
-        let [a0, a1, a2, a3] = self.to_regs();
-        let [b0, b1, b2, b3] = other.to_regs();
-        Self::from_regs([
-            a0.map_nand(b0),
-            a1.map_nand(b1),
-            a2.map_nand(b2),
-            a3.map_nand(b3),
-        ])
+        // Derived: NOT(AND).
+        self.map_and(other).map_not()
     }
 
     /// Applies the `NOR` truth map independently across four 32-lane registers.
     /// This lifts the default register map semantics to the 128-lane tile.
     /// This is a truth-table operation.
-    /// The implementation uses four-register decomposition as the deterministic reference path.
+    /// Computed directly on the truth and falsity planes; the four-register decomposition
+    /// (`to_regs`, the 32-lane map, `from_regs`) remains the test oracle and gives identical bits.
     pub fn map_nor(self, other: Self) -> Self {
-        let [a0, a1, a2, a3] = self.to_regs();
-        let [b0, b1, b2, b3] = other.to_regs();
-        Self::from_regs([
-            a0.map_nor(b0),
-            a1.map_nor(b1),
-            a2.map_nor(b2),
-            a3.map_nor(b3),
-        ])
+        // Derived: NOT(OR).
+        self.map_or(other).map_not()
     }
 
     /// Computes truth-plane and falsity-plane membership events; 128-lane form of
